@@ -145,9 +145,9 @@ def test_sentiment_score_calculation(mock_reddit_class, mock_env):
     mock_reddit.subreddit.return_value = mock_subreddit
     mock_reddit_class.return_value = mock_reddit
 
-    # Test
+    # Test - specify single subreddit to get exactly 3 posts
     scraper = RedditScraper()
-    result = scraper.get_ticker_sentiment("TEST")
+    result = scraper.get_ticker_sentiment("TEST", subreddits=['wallstreetbets'])
 
     expected_avg = (100 + 200 + 300) / 3  # 200
     assert result['avg_score'] == expected_avg
