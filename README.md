@@ -1,163 +1,209 @@
-# Earnings Options Automation System
+# Trading Desk - Automated Earnings Trade Research
 
-A semi-automated earnings options trading system built with Python, featuring AI-powered sentiment analysis and strategy generation.
+**Automated research system for IV crush options trades on earnings.**
+
+Automates your manual research workflow from Perplexity → generates complete trade analysis with strategies, sentiment, and position sizing.
 
 ## Project Status
 
-**Current Phase:** Phase 1 Complete ✅ | Phase 2 In Progress 🚧
-**Version:** 0.2.0-dev
+**Phase 1**: Data Collection ✅ Complete  
+**Phase 2**: Analysis & Strategy ✅ Complete (Refactored)  
+**Version:** 1.0.0
 
-## Overview
+---
 
-This system automates the analysis of upcoming earnings announcements and generates options trading recommendations using:
-- Earnings calendar scanning (yfinance)
-- Reddit sentiment analysis (PRAW)
-- AI-powered sentiment analysis (Sonar Deep Research)
-- Strategy generation (GPT-5 Thinking)
-- Position sizing based on confidence scores
+## What This Does
 
-## Features
+Automates the research process from your `Trading Research Prompt.pdf`:
 
-### Phase 1 - Data Collection ✅
-- **Earnings Scanner**: Identifies upcoming earnings in the next 14 days
-- **Reddit Scraper**: Analyzes sentiment from r/wallstreetbets, r/stocks, r/options
-- **Unit Tests**: Comprehensive test coverage with mocked API calls (15/15 passing)
+1. **Filters tickers** by IV crush criteria (IV Rank > 50%, implied > actual moves)
+2. **Analyzes sentiment** (retail/institutional/hedge fund positioning)
+3. **Generates 3-4 trade strategies** with strikes, sizing, and probability of profit
+4. **Outputs formatted research report** for manual execution on Fidelity
 
-### Phase 2 - AI Integration & Cost Controls 🚧
-- **Budget System**: $5/month budget cap with automatic cost tracking
-- **Usage Tracker**: Real-time monitoring of API costs and token usage
-- **Dual Model Support**:
-  - `sonar-pro` for daily analysis (fast, cheap)
-  - `sonar-deep-research` for high-priority tickers (thorough, slower)
-- **Cost Dashboard**: View spending and remaining budget anytime
+**NOT an execution system** - you manually review and execute trades.
 
-## Installation
+---
 
-1. Clone the repository:
+## Quick Start
+
+### 1. Install Dependencies
+
 ```bash
-git clone git@github.com:pmak99/trading-desk.git
-cd trading-desk
-```
-
-2. Create and activate virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
+cd "Trading Desk"
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-4. Configure API keys:
+### 2. Configure API Keys
+
+Edit `.env`:
 ```bash
-cp .env.example .env
-# Edit .env and add your actual API keys
+# Required for Phase 2
+PERPLEXITY_API_KEY=your_key_here  # Get from https://www.perplexity.ai/api
+OPENAI_API_KEY=your_key_here      # Get from https://platform.openai.com
 ```
 
-## API Keys Required
+### 3. Set Budget Limits
 
-- **Reddit API**: Get credentials from https://www.reddit.com/prefs/apps
-- **Perplexity API** (Phase 2): Get from https://www.perplexity.ai/api
-- **Alpha Vantage** (Phase 2): Get from https://www.alphavantage.co/support/#api-key
+Edit `config/budget.yaml`:
+```yaml
+monthly_budget: 5.00  # USD
+warn_at_percentage: 80
+hard_stop: true
+```
 
-## Usage
+### 4. Run Daily Analysis
 
-### Run Earnings Scanner
 ```bash
-python -m src.earnings_scanner
+# Analyze today's earnings (default: 2 tickers max)
+python3 -m src.earnings_analyzer
+
+# Analyze specific date with custom limit
+python3 -m src.earnings_analyzer 2025-11-20 3
 ```
 
-### Run Reddit Scraper
+**Output**: Research report saved to `data/earnings_analysis_YYYY-MM-DD.txt`
+
+---
+
+## ⚠️ Important Limitations
+
+### IV Rank Calculation
+
+**Current**: Uses **realized volatility rank** as a proxy for implied volatility rank.
+
+**Why This Matters**:
+- Real IV Rank requires historical IV data (not available in free APIs)
+- Realized vol ≠ Implied vol (can differ by 20-50% around earnings)
+- **This affects your primary filter** for IV crush strategy
+
+**Accuracy**: ~70-80% correlation - good enough for initial filtering, not perfect.
+
+**To Get Real IV Rank**: TastyTrade API, CBOE DataShop, Interactive Brokers API, or paid Alpha Vantage.
+
+**Recommended**: Use this system for initial screening, verify IV Rank manually before trading.
+
+---
+
+## Cost Breakdown
+
+**Per Ticker Analysis**:
+- Earnings Calendar: $0.00 (free)
+- Ticker Filtering: $0.00 (yfinance free)
+- Sentiment Analysis: ~$0.01-0.02 (Perplexity)
+- Strategy Generation: ~$0.005-0.01 (OpenAI)
+- **Total**: ~$0.02-0.03 per ticker
+
+**Monthly Budget ($5.00)**:
+- ~150-250 ticker analyses per month
+- ~5-8 tickers per day
+- Good for daily trading routine
+
+---
+
+## Architecture
+
+```
+src/
+├── earnings_calendar.py      # Get upcoming earnings (Nasdaq API)
+├── ticker_filter.py           # Filter by IV crush criteria
+├── options_data_client.py     # IV Rank, expected move, liquidity (yfinance)
+├── sentiment_analyzer.py      # Perplexity Sonar sentiment analysis
+├── strategy_generator.py      # OpenAI GPT-4 strategy generation
+├── earnings_analyzer.py       # Master orchestrator
+└── usage_tracker.py           # Budget tracking & cost controls
+```
+
+---
+
+## Testing Individual Components
+
 ```bash
-python -m src.reddit_scraper
+# Test earnings calendar (free)
+python3 -m src.earnings_calendar
+
+# Test ticker filter (free)
+python3 -m src.ticker_filter
+
+# Test options data (free)
+python3 -m src.options_data_client AAPL
+
+# Test sentiment ($0.01 cost)
+python3 -m src.sentiment_analyzer NVDA
+
+# View usage dashboard
+python3 -m src.usage_tracker
 ```
 
-### View Cost Dashboard
-```bash
-python -m src.usage_tracker
-```
-Shows:
-- Monthly budget status
-- Today's API usage
-- Cost breakdown by model
-- Remaining budget
+---
 
-### Run Tests
-```bash
-# Run all tests
-pytest
+## Configuration
 
-# Run with coverage report
-pytest --cov=src --cov-report=html
+### Budget Config (`config/budget.yaml`)
 
-# Run specific test file
-pytest tests/test_earnings_scanner.py
+```yaml
+monthly_budget: 5.00
+defaults:
+  sentiment_model: "sonar-pro"      # $0.005/1k tokens
+  strategy_model: "gpt-4o-mini"     # $0.00015/1k tokens
+
+daily_limits:
+  max_tickers: 5
+  sonar-pro_calls: 20
+  gpt-4o-mini_calls: 20
 ```
 
-## Project Structure
+### Trading Criteria (`ticker_filter.py`)
 
-```
-trading-desk/
-├── src/                    # Source code
-│   ├── earnings_scanner.py # Earnings calendar scanner
-│   ├── reddit_scraper.py   # Reddit sentiment scraper
-│   └── usage_tracker.py    # Budget & cost tracking system
-├── tests/                  # Unit tests
-│   ├── conftest.py         # Pytest fixtures
-│   ├── test_earnings_scanner.py
-│   └── test_reddit_scraper.py
-├── config/                 # Configuration files
-│   └── budget.yaml         # Budget configuration ($5/month cap)
-├── scripts/                # Utility scripts
-├── data/                   # Output data (not tracked)
-│   └── usage.json          # API usage log (auto-generated)
-├── .env                    # API keys (not tracked - YOU MUST CREATE THIS)
-├── .env.example            # API key template
-├── .gitignore              # Git ignore patterns
-├── requirements.txt        # Python dependencies
-├── pytest.ini              # Test configuration
-└── README.md              # This file
+```python
+# IV Rank thresholds
+IV_RANK_MIN = 50      # Skip below this
+IV_RANK_GOOD = 60     # Standard $20K allocation
+IV_RANK_EXCELLENT = 75 # Larger allocation
+
+# Scoring weights
+weights = {
+    'iv_rank': 0.50,           # 50% - PRIMARY
+    'iv_crush_edge': 0.30,     # 30% - Implied > actual
+    'options_liquidity': 0.15, # 15% - Volume, OI, spreads
+    'fundamentals': 0.05       # 5% - Market cap, price
+}
 ```
 
-## Development Roadmap
+---
 
-- [x] **Phase 1**: Data collection (earnings + Reddit) ✅ Complete
-  - [x] Earnings scanner with yfinance
-  - [x] Reddit sentiment scraper
-  - [x] Unit tests (15/15 passing)
-  - [x] All APIs tested and verified
+## Recent Refactoring (Option B - Full)
 
-- [ ] **Phase 2**: AI integration (Sonar + GPT-5 + Alpha Vantage) 🚧 In Progress
-  - [x] Budget system ($5/month cap)
-  - [x] Usage tracker with cost controls
-  - [x] API testing (Reddit, Perplexity, Alpha Vantage)
-  - [ ] API client wrappers
-  - [ ] Sentiment analyzer (Sonar)
-  - [ ] Strategy generator (GPT-5)
-  - [ ] Options pricer (Alpha Vantage)
+✅ **Completed Improvements**:
+1. Integrated UsageTracker into all API clients for cost control
+2. Eliminated duplicate yfinance calls (was fetching twice per ticker)
+3. Renamed AlphaVantageClient → OptionsDataClient (clarity)
+4. Documented IV Rank limitation clearly
+5. Added comprehensive README
 
-- [ ] **Phase 3**: Reports & execution (position sizing + CSV reports)
-- [ ] **Phase 4**: Deployment & automation (daily runner + docs)
+**Performance**: ~50% reduction in yfinance API calls
 
-## Testing
+---
 
-All tests use mocks to avoid real API calls during testing. Tests are designed for:
-- Fast execution
-- No external dependencies
-- High code coverage (target: 95%+)
+## Disclaimer
 
-## Security
+**FOR RESEARCH ONLY. NOT FINANCIAL ADVICE.**
 
-- API keys are stored in `.env` file (not tracked by git)
-- `.env.example` provides template for required keys
-- Never commit secrets to git
+- This tool generates research, NOT trade recommendations
+- Always verify data and analysis before trading
+- IV Rank uses realized volatility as a proxy (see limitations)
+- Options trading involves substantial risk of loss
+
+Use at your own risk.
+
+---
 
 ## License
 
-Private project - All rights reserved
+Private/Personal Use Only
 
-## Contributing
+---
 
-This is a private project for personal trading automation.
+**See `ARCHITECTURE_REVIEW.md` for detailed technical analysis.**

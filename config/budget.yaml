@@ -24,10 +24,16 @@ models:
     use_case: "manual_only"  # AVOID - too expensive, use only on explicit user request
     warning: "VERY EXPENSIVE - $0.75+ per call, even timeouts are charged!"
 
-  gpt-5-thinking:
-    cost_per_1k_tokens: 0.015  # $15 per 1M tokens (estimate)
+  # GPT models via Perplexity API (uses same PERPLEXITY_API_KEY)
+  gpt-4o:
+    cost_per_1k_tokens: 0.001  # $1 per 1M tokens via Perplexity
     timeout: 30  # seconds
-    use_case: "daily"
+    use_case: "daily"  # Good for strategy generation
+
+  gpt-4o-mini:
+    cost_per_1k_tokens: 0.0002  # $0.20 per 1M tokens via Perplexity
+    timeout: 30  # seconds
+    use_case: "daily"  # Cheaper alternative
 
 # Daily limits
 daily_limits:
@@ -37,12 +43,13 @@ daily_limits:
   # Per-model daily limits
   sonar-pro_calls: 20  # Primary model for daily analysis (cheap!)
   sonar-deep-research_calls: 0  # DISABLED - too expensive, use manual_trigger only
-  gpt-5-thinking_calls: 10  # Strategy generation
+  gpt-4o_calls: 10  # Strategy generation
+  gpt-4o-mini_calls: 20  # Cheaper alternative for strategy generation
 
 # Default model preferences
 defaults:
-  sentiment_model: "sonar-pro"  # Fast, cheap
-  strategy_model: "gpt-5-thinking"  # Good balance
+  sentiment_model: "sonar-pro"  # Fast, cheap ($0.005/1k tokens)
+  strategy_model: "sonar-pro"  # Same model for strategies ($0.005/1k tokens)
 
   # When to use deep research (DISABLED by default - too expensive!)
   # Only use when user explicitly requests it for critical decisions

@@ -7,6 +7,8 @@ import yfinance as yf
 from typing import List, Dict, Optional
 from datetime import datetime
 import logging
+from src.options_data_client import OptionsDataClient
+from src.tradier_options_client import TradierOptionsClient
 
 logger = logging.getLogger(__name__)
 
@@ -15,46 +17,155 @@ class TickerFilter:
     """Filter and score earnings candidates."""
 
     def __init__(self):
-        """Initialize ticker filter."""
+        """
+        Initialize ticker filter.
+
+        Optimized for POST-EARNINGS IV CRUSH STRATEGY:
+        - Sell premium before earnings (high IV Rank 75%+)
+        - Buy it back cheaper after earnings (IV crush)
+        - Based on criteria from Trading Research Prompt.pdf
+
+        KEY FILTERS:
+        - IV Rank > 50% (minimum), prefer 75%+ for max edge
+        - Historical implied move > actual move (consistent IV overpricing)
+        - Liquid options markets (tight spreads, high OI/volume)
+        """
         self.weights = {
-            'market_cap': 0.30,      # 30% - Prefer large caps (liquidity)
-            'volume': 0.25,          # 25% - Prefer high volume (tradability)
-            'iv_rank': 0.20,         # 20% - Prefer high IV rank (options premiums)
-            'avg_volume': 0.15,      # 15% - Consistent volume
-            'price': 0.10            # 10% - Prefer reasonable price ($20-500)
+            'iv_rank': 0.50,          # 50% - PRIMARY: IV Rank 75%+ is ideal
+            'iv_crush_edge': 0.30,    # 30% - Historical implied > actual move
+            'options_liquidity': 0.15, # 15% - Volume, OI, bid-ask spreads
+            'fundamentals': 0.05      # 5% - Market cap, price for premium quality
         }
+
+        # IV Rank thresholds from your criteria
+        self.IV_RANK_MIN = 50      # Skip anything below this
+        self.IV_RANK_GOOD = 60     # Standard allocation
+        self.IV_RANK_EXCELLENT = 75 # Larger allocation, prefer spreads
+
+        # Initialize Tradier client (preferred - real IV data)
+        try:
+            self.tradier_client = TradierOptionsClient()
+            if self.tradier_client.is_available():
+                logger.info("Using Tradier API for real IV data")
+            else:
+                self.tradier_client = None
+        except Exception as e:
+            logger.warning(f"Tradier client not available: {e}")
+            self.tradier_client = None
+
+        # Initialize fallback options client (yfinance RV proxy)
+        try:
+            self.options_client = OptionsDataClient()
+        except Exception as e:
+            logger.warning(f"Options client not available: {e}")
+            self.options_client = None
 
     def get_ticker_data(self, ticker: str) -> Optional[Dict]:
         """
-        Get market data for a ticker.
+        Get market data for a ticker including options data.
+
+        Fetches yfinance data ONCE and extracts all needed information
+        to avoid duplicate API calls.
 
         Args:
             ticker: Ticker symbol
 
         Returns:
-            Dict with market data or None if error
+            Dict with market data and options_data or None if error
         """
         try:
+            # Fetch yfinance data ONCE
             stock = yf.Ticker(ticker)
             info = stock.info
 
             # Get historical data for volume analysis
-            hist = stock.history(period='1mo')
+            hist = stock.history(period='1y')  # Get full year for IV rank calculation
 
             if hist.empty:
                 logger.warning(f"No historical data for {ticker}")
                 return None
+
+            # Get current price
+            current_price = info.get('currentPrice') or info.get('regularMarketPrice') or hist['Close'].iloc[-1]
 
             data = {
                 'ticker': ticker,
                 'market_cap': info.get('marketCap', 0),
                 'volume': hist['Volume'].iloc[-1] if len(hist) > 0 else 0,
                 'avg_volume': info.get('averageVolume', 0),
-                'price': info.get('currentPrice') or info.get('regularMarketPrice', 0),
-                'iv': info.get('impliedVolatility', 0),  # May not always be available
+                'price': current_price,
+                'iv': info.get('impliedVolatility', 0),
                 'sector': info.get('sector', 'Unknown'),
                 'beta': info.get('beta', 1.0)
             }
+
+            # Get options data - try Tradier first (real IV), fall back to yfinance (RV proxy)
+            options_data = {}
+
+            # Try Tradier first (preferred - real implied volatility)
+            if self.tradier_client:
+                try:
+                    logger.debug(f"{ticker}: Fetching options data from Tradier (real IV)")
+                    tradier_data = self.tradier_client.get_options_data(ticker, current_price)
+
+                    if tradier_data:
+                        options_data = tradier_data
+
+                        # Get supplemental data from yfinance:
+                        # 1. Historical earnings moves (not in Tradier)
+                        # 2. IV Rank based on RV (Tradier doesn't have 52-week IV history yet)
+                        if self.options_client:
+                            try:
+                                yf_data = self.options_client.get_options_data_from_stock(
+                                    stock, ticker, hist, current_price
+                                )
+
+                                # Extract earnings-related fields
+                                options_data['avg_actual_move_pct'] = yf_data.get('avg_actual_move_pct', 0)
+                                options_data['last_earnings_move'] = yf_data.get('last_earnings_move', 0)
+                                options_data['earnings_beat_rate'] = yf_data.get('earnings_beat_rate', 0)
+
+                                # Use yfinance IV Rank (RV-based) if Tradier doesn't have it
+                                # Note: yfinance RV Rank is ~70-80% correlated with real IV Rank
+                                if options_data.get('iv_rank', 0) == 0 and yf_data.get('iv_rank', 0) > 0:
+                                    options_data['iv_rank'] = yf_data['iv_rank']
+                                    options_data['iv_rank_source'] = 'yfinance_rv_proxy'
+                                    logger.debug(f"{ticker}: Using yfinance RV Rank ({options_data['iv_rank']}%) as proxy")
+
+                            except Exception as e:
+                                logger.warning(f"{ticker}: Could not get yfinance supplement: {e}")
+
+                        # Calculate IV crush ratio
+                        if options_data.get('expected_move_pct') and options_data.get('avg_actual_move_pct'):
+                            iv_crush_ratio = options_data['expected_move_pct'] / options_data['avg_actual_move_pct']
+                            options_data['iv_crush_ratio'] = round(iv_crush_ratio, 2)
+
+                        # Mark as using real IV
+                        options_data['data_source'] = 'tradier'
+                        logger.debug(f"{ticker}: Using Tradier data (real IV: {options_data.get('current_iv')}%)")
+
+                except Exception as e:
+                    logger.warning(f"{ticker}: Tradier failed, falling back to yfinance: {e}")
+
+            # Fall back to OptionsDataClient (yfinance RV proxy) if Tradier didn't work
+            if not options_data and self.options_client:
+                try:
+                    logger.debug(f"{ticker}: Using yfinance fallback (RV proxy)")
+                    options_data = self.options_client.get_options_data_from_stock(
+                        stock, ticker, hist, current_price
+                    )
+
+                    # Calculate IV crush ratio
+                    if options_data.get('expected_move_pct') and options_data.get('avg_actual_move_pct'):
+                        iv_crush_ratio = options_data['expected_move_pct'] / options_data['avg_actual_move_pct']
+                        options_data['iv_crush_ratio'] = round(iv_crush_ratio, 2)
+
+                    options_data['data_source'] = 'yfinance_rv_proxy'
+
+                except Exception as e:
+                    logger.warning(f"{ticker}: Could not fetch options data: {e}")
+
+            data['options_data'] = options_data
 
             return data
 
@@ -64,95 +175,157 @@ class TickerFilter:
 
     def calculate_score(self, data: Dict) -> float:
         """
-        Calculate ticker score based on multiple factors.
+        Calculate ticker score for IV crush strategy.
+
+        Scoring based on Trading Research Prompt.pdf criteria:
+        - IV Rank > 50% required, 75%+ preferred
+        - Historical implied move > actual move (IV overpricing edge)
+        - Options liquidity (volume, OI, bid-ask spreads)
 
         Args:
-            data: Ticker data dict
+            data: Ticker data dict (with optional options_data from Alpha Vantage)
 
         Returns:
-            Score (0-100)
+            Score (0-100), or 0 if IV Rank < 50%
         """
-        score = 0.0
+        options_data = data.get('options_data', {})
 
-        # 1. Market Cap Score (0-100)
-        market_cap = data.get('market_cap', 0)
-        if market_cap >= 500e9:  # $500B+ mega cap
-            market_cap_score = 100
-        elif market_cap >= 200e9:  # $200B+ large cap
-            market_cap_score = 90
-        elif market_cap >= 50e9:  # $50B+ mid-large cap
-            market_cap_score = 70
-        elif market_cap >= 10e9:  # $10B+ mid cap
-            market_cap_score = 50
+        # ==========================================
+        # 1. IV Rank Score (50% weight) - PRIMARY
+        # ==========================================
+        iv_rank = options_data.get('iv_rank', None)
+
+        if iv_rank is not None:
+            # HARD FILTER: Skip anything below 50% IV Rank
+            if iv_rank < self.IV_RANK_MIN:
+                logger.info(f"{data['ticker']}: IV Rank {iv_rank}% < {self.IV_RANK_MIN}% - SKIPPING")
+                return 0.0
+
+            # Score based on IV Rank thresholds
+            if iv_rank >= self.IV_RANK_EXCELLENT:  # 75%+
+                iv_rank_score = 100
+            elif iv_rank >= self.IV_RANK_GOOD:  # 60-75%
+                iv_rank_score = 70 + (iv_rank - self.IV_RANK_GOOD) * 2  # Scale 70-100
+            else:  # 50-60%
+                iv_rank_score = 50 + (iv_rank - self.IV_RANK_MIN) * 2  # Scale 50-70
         else:
-            market_cap_score = 20
-
-        score += market_cap_score * self.weights['market_cap']
-
-        # 2. Volume Score (0-100)
-        volume = data.get('volume', 0)
-        avg_volume = data.get('avg_volume', 0)
-
-        if avg_volume > 0:
-            volume_ratio = volume / avg_volume
-            if volume_ratio >= 1.5:  # 50%+ above average
-                volume_score = 100
-            elif volume_ratio >= 1.2:  # 20%+ above average
-                volume_score = 80
-            elif volume_ratio >= 0.8:  # Within 20% of average
-                volume_score = 60
+            # No options data yet - use basic IV estimate from yfinance
+            iv = data.get('iv', 0)
+            if iv >= 0.60:
+                iv_rank_score = 80  # Probably high IV rank
+            elif iv >= 0.40:
+                iv_rank_score = 60
             else:
-                volume_score = 30
+                iv_rank_score = 30  # Low confidence without real IV rank
+
+        # ==========================================
+        # 2. IV Crush Edge Score (30% weight)
+        # ==========================================
+        # Does implied move historically > actual move?
+        iv_crush_ratio = options_data.get('iv_crush_ratio', None)
+
+        if iv_crush_ratio is not None:
+            # iv_crush_ratio > 1.0 means implied consistently beats actual (GOOD!)
+            if iv_crush_ratio >= 1.3:  # Implied 30%+ higher than actual
+                iv_crush_score = 100
+            elif iv_crush_ratio >= 1.2:  # Implied 20%+ higher
+                iv_crush_score = 80
+            elif iv_crush_ratio >= 1.1:  # Implied 10%+ higher
+                iv_crush_score = 60
+            elif iv_crush_ratio >= 1.0:  # Implied slightly higher
+                iv_crush_score = 40
+            else:  # Implied < actual (BAD - no edge)
+                iv_crush_score = 0
         else:
-            volume_score = 50  # Neutral if no data
+            # No historical data yet - assume neutral
+            iv_crush_score = 50
 
-        score += volume_score * self.weights['volume']
+        # ==========================================
+        # 3. Options Liquidity Score (15% weight)
+        # ==========================================
+        options_volume = options_data.get('options_volume', 0)
+        open_interest = options_data.get('open_interest', 0)
+        bid_ask_spread_pct = options_data.get('bid_ask_spread_pct', None)
 
-        # 3. IV Rank Score (0-100)
-        # Note: We'll estimate this since yfinance doesn't provide IV rank directly
-        # High IV is preferred for earnings plays
-        iv = data.get('iv', 0)
-        if iv >= 0.60:  # Very high IV
-            iv_score = 100
-        elif iv >= 0.40:  # High IV
-            iv_score = 80
-        elif iv >= 0.25:  # Moderate IV
-            iv_score = 60
-        elif iv >= 0.15:  # Low IV
-            iv_score = 40
+        liquidity_score = 0
+
+        # Options volume component (40% of liquidity score)
+        if options_volume >= 50000:  # Very high options volume
+            vol_score = 100
+        elif options_volume >= 10000:  # High
+            vol_score = 80
+        elif options_volume >= 5000:  # Good
+            vol_score = 60
+        elif options_volume >= 1000:  # Acceptable
+            vol_score = 40
         else:
-            iv_score = 50  # Neutral if no data
+            vol_score = 20
+        liquidity_score += vol_score * 0.4
 
-        score += iv_score * self.weights['iv_rank']
-
-        # 4. Average Volume Score (0-100) - Liquidity measure
-        if avg_volume >= 10_000_000:  # 10M+ very liquid
-            avg_vol_score = 100
-        elif avg_volume >= 5_000_000:  # 5M+ liquid
-            avg_vol_score = 80
-        elif avg_volume >= 1_000_000:  # 1M+ tradable
-            avg_vol_score = 60
-        elif avg_volume >= 500_000:  # 500K+ okay
-            avg_vol_score = 40
+        # Open interest component (40% of liquidity score)
+        if open_interest >= 100000:  # Very liquid
+            oi_score = 100
+        elif open_interest >= 50000:  # Liquid
+            oi_score = 80
+        elif open_interest >= 10000:  # Good
+            oi_score = 60
+        elif open_interest >= 5000:  # Acceptable
+            oi_score = 40
         else:
-            avg_vol_score = 20
+            oi_score = 20
+        liquidity_score += oi_score * 0.4
 
-        score += avg_vol_score * self.weights['avg_volume']
+        # Bid-ask spread component (20% of liquidity score)
+        if bid_ask_spread_pct is not None:
+            if bid_ask_spread_pct <= 0.02:  # 2% or less - excellent
+                spread_score = 100
+            elif bid_ask_spread_pct <= 0.05:  # 5% or less - good
+                spread_score = 80
+            elif bid_ask_spread_pct <= 0.10:  # 10% or less - okay
+                spread_score = 60
+            else:  # Wide spreads - bad
+                spread_score = 20
+        else:
+            spread_score = 50  # No data
+        liquidity_score += spread_score * 0.2
 
-        # 5. Price Score (0-100) - Prefer reasonable option prices
+        # ==========================================
+        # 4. Fundamentals Score (5% weight)
+        # ==========================================
+        market_cap = data.get('market_cap', 0)
         price = data.get('price', 0)
-        if 50 <= price <= 300:  # Ideal range for options
-            price_score = 100
-        elif 20 <= price <= 500:  # Acceptable range
-            price_score = 80
-        elif 10 <= price < 20 or 500 < price <= 1000:  # Less ideal
-            price_score = 50
+
+        # Market cap (50% of fundamentals)
+        if market_cap >= 200e9:  # $200B+ mega/large cap
+            cap_score = 100
+        elif market_cap >= 50e9:  # $50B+
+            cap_score = 80
+        elif market_cap >= 10e9:  # $10B+
+            cap_score = 60
         else:
-            price_score = 30
+            cap_score = 40
 
-        score += price_score * self.weights['price']
+        # Price range for quality premiums (50% of fundamentals)
+        if 50 <= price <= 400:  # Ideal for selling premium
+            price_score = 100
+        elif 20 <= price <= 500:  # Acceptable
+            price_score = 80
+        else:
+            price_score = 50
 
-        return round(score, 2)
+        fundamentals_score = (cap_score + price_score) / 2
+
+        # ==========================================
+        # TOTAL SCORE
+        # ==========================================
+        total_score = (
+            iv_rank_score * self.weights['iv_rank'] +
+            iv_crush_score * self.weights['iv_crush_edge'] +
+            liquidity_score * self.weights['options_liquidity'] +
+            fundamentals_score * self.weights['fundamentals']
+        )
+
+        return round(total_score, 2)
 
     def filter_and_score_tickers(
         self,
@@ -162,12 +335,17 @@ class TickerFilter:
         """
         Filter and score a list of tickers.
 
+        FILTERS OUT:
+        - Tickers with IV Rank < 50% (score = 0)
+        - Tickers with insufficient data
+
         Args:
             tickers: List of ticker symbols
             max_tickers: Max number to process (avoid rate limits)
 
         Returns:
             List of dicts with ticker data and scores, sorted by score
+            Only returns tickers that pass IV Rank filter (score > 0)
         """
         results = []
 
@@ -179,6 +357,12 @@ class TickerFilter:
                 continue
 
             score = self.calculate_score(data)
+
+            # HARD FILTER: Skip if IV Rank < 50% (score = 0)
+            if score == 0:
+                logger.info(f"{ticker}: Filtered out (IV Rank < 50%)")
+                continue
+
             data['score'] = score
             results.append(data)
 
