@@ -1,0 +1,9 @@
+# Phase 1 Dependencies
+yfinance==0.2.32
+requests==2.31.0
+praw==7.7.1
+pyyaml==6.0.1
+python-dotenv==1.0.0
+pytest==7.4.3
+pytest-cov==4.1.0
+pandas==2.1.3
