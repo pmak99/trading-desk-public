@@ -19,9 +19,10 @@ models:
     use_case: "daily"  # Daily routine analysis
 
   sonar-deep-research:
-    cost_per_1k_tokens: 0.025  # $25 per 1M tokens (estimate)
-    timeout: 120  # seconds - very slow
-    use_case: "special"  # High-priority only
+    cost_per_1k_tokens: 0.025  # $25 per 1M tokens - ACTUAL: ~$0.75/call!
+    timeout: 120  # seconds - very slow, often times out
+    use_case: "manual_only"  # AVOID - too expensive, use only on explicit user request
+    warning: "VERY EXPENSIVE - $0.75+ per call, even timeouts are charged!"
 
   gpt-5-thinking:
     cost_per_1k_tokens: 0.015  # $15 per 1M tokens (estimate)
@@ -34,20 +35,20 @@ daily_limits:
   max_api_calls: 20  # Total API calls per day
 
   # Per-model daily limits
-  sonar-pro_calls: 15  # Most daily analysis
-  sonar-deep-research_calls: 2  # Only for special cases
-  gpt-5-thinking_calls: 5  # Strategy generation
+  sonar-pro_calls: 20  # Primary model for daily analysis (cheap!)
+  sonar-deep-research_calls: 0  # DISABLED - too expensive, use manual_trigger only
+  gpt-5-thinking_calls: 10  # Strategy generation
 
 # Default model preferences
 defaults:
   sentiment_model: "sonar-pro"  # Fast, cheap
   strategy_model: "gpt-5-thinking"  # Good balance
 
-  # When to use deep research (optional)
+  # When to use deep research (DISABLED by default - too expensive!)
+  # Only use when user explicitly requests it for critical decisions
   use_deep_research_when:
-    - earnings_in_days: 3  # Earnings within 3 days
-    - reddit_sentiment_abs: 0.8  # Very bullish/bearish (|score| > 0.8)
-    - manual_trigger: true  # User manually requests it
+    manual_trigger_only: true  # Only on explicit user request
+    cost_warning: "⚠️ Deep research costs ~$0.75 per call - confirm before using!"
 
 # Alpha Vantage (free tier)
 alpha_vantage:
