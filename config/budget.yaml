@@ -1,0 +1,61 @@
+# Budget Configuration for API Usage
+# Edit these values to control costs
+
+# Monthly budget limit (USD)
+monthly_budget: 5.00
+
+# Warn when reaching this percentage of budget
+warn_at_percentage: 80  # Warn at $4.00
+
+# Stop all API calls when budget exceeded
+hard_stop: true
+
+# Model selection and costs
+models:
+  # Perplexity models
+  sonar-pro:
+    cost_per_1k_tokens: 0.005  # $5 per 1M tokens
+    timeout: 20  # seconds
+    use_case: "daily"  # Daily routine analysis
+
+  sonar-deep-research:
+    cost_per_1k_tokens: 0.025  # $25 per 1M tokens (estimate)
+    timeout: 120  # seconds - very slow
+    use_case: "special"  # High-priority only
+
+  gpt-5-thinking:
+    cost_per_1k_tokens: 0.015  # $15 per 1M tokens (estimate)
+    timeout: 30  # seconds
+    use_case: "daily"
+
+# Daily limits
+daily_limits:
+  max_tickers: 5  # Maximum tickers to analyze per day
+  max_api_calls: 20  # Total API calls per day
+
+  # Per-model daily limits
+  sonar-pro_calls: 15  # Most daily analysis
+  sonar-deep-research_calls: 2  # Only for special cases
+  gpt-5-thinking_calls: 5  # Strategy generation
+
+# Default model preferences
+defaults:
+  sentiment_model: "sonar-pro"  # Fast, cheap
+  strategy_model: "gpt-5-thinking"  # Good balance
+
+  # When to use deep research (optional)
+  use_deep_research_when:
+    - earnings_in_days: 3  # Earnings within 3 days
+    - reddit_sentiment_abs: 0.8  # Very bullish/bearish (|score| > 0.8)
+    - manual_trigger: true  # User manually requests it
+
+# Alpha Vantage (free tier)
+alpha_vantage:
+  calls_per_day: 25  # Free tier limit
+  cost_per_call: 0.00  # Free
+
+# Logging
+logging:
+  enabled: true
+  log_file: "data/usage.json"
+  log_level: "INFO"

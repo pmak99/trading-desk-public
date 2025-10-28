@@ -4,8 +4,8 @@ A semi-automated earnings options trading system built with Python, featuring AI
 
 ## Project Status
 
-**Current Phase:** Phase 1 - Data Collection Layer
-**Version:** 0.1.0-dev
+**Current Phase:** Phase 1 Complete ✅ | Phase 2 In Progress 🚧
+**Version:** 0.2.0-dev
 
 ## Overview
 
@@ -16,11 +16,20 @@ This system automates the analysis of upcoming earnings announcements and genera
 - Strategy generation (GPT-5 Thinking)
 - Position sizing based on confidence scores
 
-## Phase 1 Features
+## Features
 
+### Phase 1 - Data Collection ✅
 - **Earnings Scanner**: Identifies upcoming earnings in the next 14 days
 - **Reddit Scraper**: Analyzes sentiment from r/wallstreetbets, r/stocks, r/options
-- **Unit Tests**: Comprehensive test coverage with mocked API calls
+- **Unit Tests**: Comprehensive test coverage with mocked API calls (15/15 passing)
+
+### Phase 2 - AI Integration & Cost Controls 🚧
+- **Budget System**: $5/month budget cap with automatic cost tracking
+- **Usage Tracker**: Real-time monitoring of API costs and token usage
+- **Dual Model Support**:
+  - `sonar-pro` for daily analysis (fast, cheap)
+  - `sonar-deep-research` for high-priority tickers (thorough, slower)
+- **Cost Dashboard**: View spending and remaining budget anytime
 
 ## Installation
 
@@ -65,6 +74,16 @@ python -m src.earnings_scanner
 python -m src.reddit_scraper
 ```
 
+### View Cost Dashboard
+```bash
+python -m src.usage_tracker
+```
+Shows:
+- Monthly budget status
+- Today's API usage
+- Cost breakdown by model
+- Remaining budget
+
 ### Run Tests
 ```bash
 # Run all tests
@@ -83,14 +102,18 @@ pytest tests/test_earnings_scanner.py
 trading-desk/
 ├── src/                    # Source code
 │   ├── earnings_scanner.py # Earnings calendar scanner
-│   └── reddit_scraper.py   # Reddit sentiment scraper
+│   ├── reddit_scraper.py   # Reddit sentiment scraper
+│   └── usage_tracker.py    # Budget & cost tracking system
 ├── tests/                  # Unit tests
 │   ├── conftest.py         # Pytest fixtures
 │   ├── test_earnings_scanner.py
 │   └── test_reddit_scraper.py
 ├── config/                 # Configuration files
+│   └── budget.yaml         # Budget configuration ($5/month cap)
 ├── scripts/                # Utility scripts
 ├── data/                   # Output data (not tracked)
+│   └── usage.json          # API usage log (auto-generated)
+├── .env                    # API keys (not tracked - YOU MUST CREATE THIS)
 ├── .env.example            # API key template
 ├── .gitignore              # Git ignore patterns
 ├── requirements.txt        # Python dependencies
@@ -100,8 +123,21 @@ trading-desk/
 
 ## Development Roadmap
 
-- [x] **Phase 1**: Data collection (earnings + Reddit)
-- [ ] **Phase 2**: AI integration (Sonar + GPT-5 + Alpha Vantage)
+- [x] **Phase 1**: Data collection (earnings + Reddit) ✅ Complete
+  - [x] Earnings scanner with yfinance
+  - [x] Reddit sentiment scraper
+  - [x] Unit tests (15/15 passing)
+  - [x] All APIs tested and verified
+
+- [ ] **Phase 2**: AI integration (Sonar + GPT-5 + Alpha Vantage) 🚧 In Progress
+  - [x] Budget system ($5/month cap)
+  - [x] Usage tracker with cost controls
+  - [x] API testing (Reddit, Perplexity, Alpha Vantage)
+  - [ ] API client wrappers
+  - [ ] Sentiment analyzer (Sonar)
+  - [ ] Strategy generator (GPT-5)
+  - [ ] Options pricer (Alpha Vantage)
+
 - [ ] **Phase 3**: Reports & execution (position sizing + CSV reports)
 - [ ] **Phase 4**: Deployment & automation (daily runner + docs)
 
