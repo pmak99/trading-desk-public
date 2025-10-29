@@ -13,7 +13,7 @@ Output: Complete research report for manual trade execution on Fidelity
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 import sys
 from multiprocessing import Pool, cpu_count
@@ -132,14 +132,47 @@ class EarningsAnalyzer:
         """
         import yfinance as yf
 
-        if earnings_date is None:
+        # Validate earnings_date format
+        if earnings_date is not None:
+            try:
+                # Validate format YYYY-MM-DD
+                parsed_date = datetime.strptime(earnings_date, '%Y-%m-%d')
+
+                # Warn if date is in the past
+                if parsed_date.date() < datetime.now().date():
+                    logger.warning(f"Earnings date {earnings_date} is in the past")
+
+                # Warn if date is too far in future (>90 days)
+                days_out = (parsed_date - datetime.now()).days
+                if days_out > 90:
+                    logger.warning(f"Earnings date {earnings_date} is {days_out} days out - options may not exist")
+
+            except ValueError as e:
+                logger.error(f"Invalid earnings date format: {earnings_date}. Expected YYYY-MM-DD")
+                raise ValueError(f"Invalid earnings date format: {earnings_date}. Expected YYYY-MM-DD") from e
+        else:
             # Default to next trading day
             earnings_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            logger.info(f"No earnings date provided, using next trading day: {earnings_date}")
 
         logger.info(f"Analyzing {len(tickers)} specific tickers for {earnings_date}")
 
+        # Validate Tradier client is available
+        if not self.ticker_filter.tradier_client or not self.ticker_filter.tradier_client.is_available():
+            logger.error("Tradier client not available - cannot analyze in ticker list mode")
+            logger.error("Set TRADIER_ACCESS_TOKEN in .env to use ticker list mode")
+            return {
+                'date': earnings_date,
+                'analyzed_count': 0,
+                'failed_count': len(tickers),
+                'ticker_analyses': [],
+                'failed_analyses': [{'ticker': t, 'error': 'Tradier API not available'} for t in tickers]
+            }
+
         # Get basic ticker data from yfinance
         tickers_data = []
+        failed_tickers = []
+
         for ticker in tickers:
             try:
                 stock = yf.Ticker(ticker)
@@ -159,6 +192,13 @@ class EarningsAnalyzer:
                     current_price=ticker_data['price'],
                     earnings_date=earnings_date
                 )
+
+                # Validate options data
+                if not options_data or not options_data.get('current_iv'):
+                    logger.warning(f"{ticker}: No valid options data - skipping")
+                    failed_tickers.append(ticker)
+                    continue
+
                 ticker_data['options_data'] = options_data
 
                 # Calculate score
@@ -168,17 +208,18 @@ class EarningsAnalyzer:
                 logger.info(f"{ticker}: IV={options_data.get('current_iv', 0):.2f}%, Score={ticker_data['score']:.1f}")
 
             except Exception as e:
-                logger.error(f"{ticker}: Failed to fetch data: {e}")
+                logger.warning(f"{ticker}: Failed to fetch data: {e}")
+                failed_tickers.append(ticker)
                 continue
 
         if not tickers_data:
-            logger.warning("No valid tickers to analyze")
+            logger.warning(f"No valid tickers to analyze. Failed: {', '.join(failed_tickers) if failed_tickers else 'none'}")
             return {
                 'date': earnings_date,
                 'analyzed_count': 0,
-                'failed_count': 0,
+                'failed_count': len(failed_tickers),
                 'ticker_analyses': [],
-                'failed_analyses': []
+                'failed_analyses': [{'ticker': t, 'error': 'Data fetch failed'} for t in failed_tickers]
             }
 
         # Prepare for parallel analysis

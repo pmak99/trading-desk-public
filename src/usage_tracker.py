@@ -301,7 +301,7 @@ class UsageTracker:
         success: bool = True
     ):
         """
-        Log an API call (thread-safe AND process-safe).
+        Log an API call (thread-safe AND process-safe with atomic read-modify-write).
 
         Args:
             model: Model name
@@ -311,66 +311,87 @@ class UsageTracker:
             success: Whether call was successful
         """
         with self._lock:
-            # Reload from disk to get latest data from other processes
-            # This prevents race condition where Process A's updates
-            # get overwritten by Process B's stale in-memory data
-            self.usage_data = self._load_usage()
+            # Atomic read-modify-write: hold exclusive file lock for entire operation
+            # This prevents race conditions where multiple processes read stale data
+            with open(self.usage_file, 'r+') as f:
+                # Acquire exclusive lock (blocks other readers and writers)
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    # Read current data
+                    f.seek(0)
+                    try:
+                        self.usage_data = json.load(f)
+                    except json.JSONDecodeError:
+                        logger.warning("Invalid usage file, creating new one")
+                        self.usage_data = self._create_empty_usage()
 
-            today = self._current_date()
-            provider = self._get_model_provider(model)
+                    # Check if month reset needed
+                    if self.usage_data.get('month') != self._current_month():
+                        logger.info(f"New month detected. Resetting usage data.")
+                        self.usage_data = self._create_empty_usage()
 
-            # Update total cost
-            if success:
-                self.usage_data['total_cost'] += cost
-                self.usage_data['total_calls'] += 1
+                    # Update in-memory data
+                    today = self._current_date()
+                    provider = self._get_model_provider(model)
 
-                # Track Perplexity separately (for $4.98 hard limit)
-                if provider == 'perplexity':
-                    if 'perplexity_cost' not in self.usage_data:
-                        self.usage_data['perplexity_cost'] = 0.0
-                    self.usage_data['perplexity_cost'] += cost
+                    # Update total cost
+                    if success:
+                        self.usage_data['total_cost'] += cost
+                        self.usage_data['total_calls'] += 1
 
-                # Track by provider
-                if 'provider_usage' not in self.usage_data:
-                    self.usage_data['provider_usage'] = {}
-                if provider not in self.usage_data['provider_usage']:
-                    self.usage_data['provider_usage'][provider] = {'calls': 0, 'cost': 0.0}
-                self.usage_data['provider_usage'][provider]['calls'] += 1
-                self.usage_data['provider_usage'][provider]['cost'] += cost
+                        # Track Perplexity separately (for $4.98 hard limit)
+                        if provider == 'perplexity':
+                            if 'perplexity_cost' not in self.usage_data:
+                                self.usage_data['perplexity_cost'] = 0.0
+                            self.usage_data['perplexity_cost'] += cost
 
-            # Update daily usage
-            if today not in self.usage_data['daily_usage']:
-                self.usage_data['daily_usage'][today] = {'calls': 0, 'cost': 0.0, 'model_calls': {}}
+                        # Track by provider
+                        if 'provider_usage' not in self.usage_data:
+                            self.usage_data['provider_usage'] = {}
+                        if provider not in self.usage_data['provider_usage']:
+                            self.usage_data['provider_usage'][provider] = {'calls': 0, 'cost': 0.0}
+                        self.usage_data['provider_usage'][provider]['calls'] += 1
+                        self.usage_data['provider_usage'][provider]['cost'] += cost
 
-            self.usage_data['daily_usage'][today]['calls'] += 1
-            self.usage_data['daily_usage'][today]['cost'] += cost
+                    # Update daily usage
+                    if today not in self.usage_data['daily_usage']:
+                        self.usage_data['daily_usage'][today] = {'calls': 0, 'cost': 0.0, 'model_calls': {}}
 
-            # Update per-model daily calls
-            if model not in self.usage_data['daily_usage'][today]['model_calls']:
-                self.usage_data['daily_usage'][today]['model_calls'][model] = 0
-            self.usage_data['daily_usage'][today]['model_calls'][model] += 1
+                    self.usage_data['daily_usage'][today]['calls'] += 1
+                    self.usage_data['daily_usage'][today]['cost'] += cost
 
-            # Update model usage
-            if model not in self.usage_data['model_usage']:
-                self.usage_data['model_usage'][model] = {'calls': 0, 'tokens': 0, 'cost': 0.0}
+                    # Update per-model daily calls
+                    if model not in self.usage_data['daily_usage'][today]['model_calls']:
+                        self.usage_data['daily_usage'][today]['model_calls'][model] = 0
+                    self.usage_data['daily_usage'][today]['model_calls'][model] += 1
 
-            self.usage_data['model_usage'][model]['calls'] += 1
-            self.usage_data['model_usage'][model]['tokens'] += tokens_used
-            self.usage_data['model_usage'][model]['cost'] += cost
+                    # Update model usage
+                    if model not in self.usage_data['model_usage']:
+                        self.usage_data['model_usage'][model] = {'calls': 0, 'tokens': 0, 'cost': 0.0}
 
-            # Log call details
-            call_record = {
-                'timestamp': datetime.now().isoformat(),
-                'model': model,
-                'tokens': tokens_used,
-                'cost': cost,
-                'ticker': ticker,
-                'success': success
-            }
-            self.usage_data['calls'].append(call_record)
+                    self.usage_data['model_usage'][model]['calls'] += 1
+                    self.usage_data['model_usage'][model]['tokens'] += tokens_used
+                    self.usage_data['model_usage'][model]['cost'] += cost
 
-            # Save to file
-            self._save_usage()
+                    # Log call details
+                    call_record = {
+                        'timestamp': datetime.now().isoformat(),
+                        'model': model,
+                        'tokens': tokens_used,
+                        'cost': cost,
+                        'ticker': ticker,
+                        'success': success
+                    }
+                    self.usage_data['calls'].append(call_record)
+
+                    # Write back atomically (still holding exclusive lock)
+                    f.seek(0)
+                    f.truncate()
+                    json.dump(self.usage_data, f, indent=2, default=str)
+
+                finally:
+                    # Release lock
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
             if success:
                 logger.info(

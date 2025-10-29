@@ -31,7 +31,7 @@ class TickerFilter:
         - Liquid options markets (tight spreads, high OI/volume)
         """
         self.weights = {
-            'iv_rank': 0.50,          # 50% - PRIMARY: IV Rank 75%+ is ideal
+            'iv_score': 0.50,         # 50% - PRIMARY: IV % 60%+ required, 80%+ ideal
             'iv_crush_edge': 0.30,    # 30% - Historical implied > actual move
             'options_liquidity': 0.15, # 15% - Volume, OI, bid-ask spreads
             'fundamentals': 0.05      # 5% - Market cap, price for premium quality
@@ -135,9 +135,11 @@ class TickerFilter:
                             except Exception as e:
                                 logger.warning(f"{ticker}: Could not get yfinance supplement: {e}")
 
-                        # Calculate IV crush ratio
-                        if options_data.get('expected_move_pct') and options_data.get('avg_actual_move_pct'):
-                            iv_crush_ratio = options_data['expected_move_pct'] / options_data['avg_actual_move_pct']
+                        # Calculate IV crush ratio (check for division by zero)
+                        expected = options_data.get('expected_move_pct', 0)
+                        actual = options_data.get('avg_actual_move_pct', 0)
+                        if expected > 0 and actual > 0:
+                            iv_crush_ratio = expected / actual
                             options_data['iv_crush_ratio'] = round(iv_crush_ratio, 2)
 
                         # Mark as using real IV
@@ -155,9 +157,11 @@ class TickerFilter:
                         stock, ticker, hist, current_price
                     )
 
-                    # Calculate IV crush ratio
-                    if options_data.get('expected_move_pct') and options_data.get('avg_actual_move_pct'):
-                        iv_crush_ratio = options_data['expected_move_pct'] / options_data['avg_actual_move_pct']
+                    # Calculate IV crush ratio (check for division by zero)
+                    expected = options_data.get('expected_move_pct', 0)
+                    actual = options_data.get('avg_actual_move_pct', 0)
+                    if expected > 0 and actual > 0:
+                        iv_crush_ratio = expected / actual
                         options_data['iv_crush_ratio'] = round(iv_crush_ratio, 2)
 
                     options_data['data_source'] = 'yfinance_rv_proxy'
@@ -339,7 +343,7 @@ class TickerFilter:
         # TOTAL SCORE
         # ==========================================
         total_score = (
-            iv_score * self.weights['iv_rank'] +
+            iv_score * self.weights['iv_score'] +
             iv_crush_score * self.weights['iv_crush_edge'] +
             liquidity_score * self.weights['options_liquidity'] +
             fundamentals_score * self.weights['fundamentals']
