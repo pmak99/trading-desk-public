@@ -25,7 +25,7 @@
         ┌──────────────────────────────────────┐
         │   2. TICKER FILTER                   │
         │   (ticker_filter.py)                 │
-        │   - IV Rank > 50%                    │
+        │   - Actual IV % ≥ 40% (from Tradier) │
         │   - IV crush edge (implied > actual) │
         │   - Options liquidity check          │
         └──────────────────────────────────────┘
@@ -33,7 +33,7 @@
                               ▼
         ┌──────────────────────────────────────┐
         │   3. DATA COLLECTION                 │
-        │   ├─ Tradier: Real IV Rank (ORATS)  │
+        │   ├─ Tradier: Real IV % (ORATS)      │
         │   │  (tradier_options_client.py)     │
         │   ├─ Reddit: Retail sentiment        │
         │   │  (reddit_scraper.py)             │

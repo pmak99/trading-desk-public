@@ -14,7 +14,7 @@ Scans earnings calendar → filters by IV metrics → analyzes sentiment → sug
 ## What It Does
 
 1. **Scans earnings calendar** - Nasdaq API for upcoming earnings
-2. **Filters tickers** - Real IV Rank, expected move, liquidity (Tradier API)
+2. **Filters tickers** - Actual IV % (40%+ min), expected move, liquidity (Tradier API)
 3. **Analyzes sentiment** - AI analysis with Reddit data (r/wallstreetbets, r/stocks, r/options)
 4. **Generates strategies** - 3-4 option strategies with sizing for $20K risk budget
 
@@ -106,9 +106,10 @@ python3 -m src.usage_tracker
 
 ## Key Features
 
-### Real IV Rank via Tradier
+### Real IV Data via Tradier
 - Professional-grade options data (same as $99/month services)
-- Real implied volatility from ORATS
+- **Actual implied volatility %** from ORATS (not proxies)
+- Filters: 40%+ IV minimum, 60%+ good, 80%+ excellent
 - Accurate Greeks and expected move calculations
 - Free with Tradier brokerage account
 
@@ -178,13 +179,16 @@ models:
 ### Trading Criteria (`ticker_filter.py`)
 
 ```python
-IV_RANK_MIN = 50       # Minimum IV Rank to consider
-IV_RANK_GOOD = 60      # Standard allocation
-IV_RANK_EXCELLENT = 75 # Larger position size
+MIN_IV_PERCENT = 40    # Minimum actual IV % (hard filter)
+
+# IV % scoring thresholds
+# 40-60%: Medium volatility (score 50-70)
+# 60-80%: High volatility (score 70-100)
+# 80%+:   Excellent for IV crush (score 100)
 
 # Scoring weights
 weights = {
-    'iv_rank': 0.50,           # 50% - PRIMARY
+    'iv_score': 0.50,          # 50% - PRIMARY (actual IV %)
     'iv_crush_edge': 0.30,     # 30% - Implied > actual
     'options_liquidity': 0.15, # 15% - Volume, OI
     'fundamentals': 0.05       # 5% - Market cap

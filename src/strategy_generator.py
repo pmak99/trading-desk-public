@@ -318,7 +318,7 @@ Keep response under 800 words total. Be specific with numbers."""
                     value = text[start:].strip()
 
             return value if value else "N/A"
-        except:
+        except Exception:
             return "N/A"
 
     def _get_empty_result(self, ticker: str) -> Dict:

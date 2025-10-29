@@ -276,6 +276,10 @@ class EarningsAnalyzer:
             # Options data
             if options:
                 report_lines.append(f"\nOPTIONS METRICS:")
+                # Show actual IV % prominently (primary filter metric)
+                current_iv = options.get('current_iv', None)
+                if current_iv is not None and current_iv > 0:
+                    report_lines.append(f"  Current IV: {current_iv}% {'(HIGH - Good for IV crush)' if current_iv >= 60 else ''}")
                 report_lines.append(f"  IV Rank: {options.get('iv_rank', 'N/A')}%")
                 report_lines.append(f"  Expected Move: {options.get('expected_move_pct', 'N/A')}%")
                 report_lines.append(f"  Avg Actual Move: {options.get('avg_actual_move_pct', 'N/A')}%")
