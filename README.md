@@ -1,36 +1,32 @@
 # Trading Desk - Automated Earnings Trade Research
 
-**Automated research system for IV crush options trades on earnings.**
+**Automated IV crush options research system with real-time data.**
 
-Automates your manual research workflow from Perplexity → generates complete trade analysis with strategies, sentiment, and position sizing.
+Scans earnings calendar → filters by IV metrics → analyzes sentiment → suggests strategies.
 
-## Project Status
+## Status
 
-**Phase 1**: Data Collection ✅ Complete  
-**Phase 2**: Analysis & Strategy ✅ Complete (Refactored)  
-**Version:** 1.0.0
+**Phase 2** ✅ Complete - Real IV data via Tradier
+**Phase 3** ✅ Complete - Budget controls + Reddit integration
 
 ---
 
-## What This Does
+## What It Does
 
-Automates the research process from your `Trading Research Prompt.pdf`:
+1. **Scans earnings calendar** - Nasdaq API for upcoming earnings
+2. **Filters tickers** - Real IV Rank, expected move, liquidity (Tradier API)
+3. **Analyzes sentiment** - AI analysis with Reddit data (r/wallstreetbets, r/stocks, r/options)
+4. **Generates strategies** - 3-4 option strategies with sizing for $20K risk budget
 
-1. **Filters tickers** by IV crush criteria (IV Rank > 50%, implied > actual moves)
-2. **Analyzes sentiment** (retail/institutional/hedge fund positioning)
-3. **Generates 3-4 trade strategies** with strikes, sizing, and probability of profit
-4. **Outputs formatted research report** for manual execution on Fidelity
-
-**NOT an execution system** - you manually review and execute trades.
+**NOT an auto-trader** - generates research for manual review and execution.
 
 ---
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Install
 
 ```bash
-cd "Trading Desk"
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -38,68 +34,40 @@ pip install -r requirements.txt
 
 ### 2. Configure API Keys
 
-Edit `.env`:
+Copy `.env.example` to `.env` and add your keys:
+
 ```bash
-# Required for Phase 2
-PERPLEXITY_API_KEY=your_key_here  # Get from https://www.perplexity.ai/api
-OPENAI_API_KEY=your_key_here      # Get from https://platform.openai.com
+# PRIMARY (until $4.90/month limit)
+PERPLEXITY_API_KEY=your_key_here       # https://www.perplexity.ai/api
+
+# FALLBACK (FREE - 1500 calls/day)
+GOOGLE_API_KEY=your_key_here           # https://aistudio.google.com/apikey
+
+# DATA SOURCES
+TRADIER_ACCESS_TOKEN=your_key_here     # https://tradier.com (free with account)
+REDDIT_CLIENT_ID=your_id_here          # https://reddit.com/prefs/apps
+REDDIT_CLIENT_SECRET=your_secret_here
 ```
 
-### 3. Set Budget Limits
+### 3. Set Budget
 
 Edit `config/budget.yaml`:
+
 ```yaml
-monthly_budget: 5.00  # USD
-warn_at_percentage: 80
-hard_stop: true
+perplexity_monthly_limit: 4.90  # HARD STOP
+monthly_budget: 5.00
 ```
 
-### 4. Run Daily Analysis
+### 4. Run
 
 ```bash
-# Analyze today's earnings (default: 2 tickers max)
-python3 -m src.earnings_analyzer
-
-# Analyze specific date with custom limit
-python3 -m src.earnings_analyzer 2025-11-20 3
+# Test individual components
+python3 -m src.reddit_scraper          # Test Reddit scraper
+python3 -m src.sentiment_analyzer AAPL # Test sentiment with Reddit
+python3 -m src.tradier_options_client  # Test Tradier IV data
+python3 -m src.earnings_calendar       # View upcoming earnings
+python3 -m src.usage_tracker           # View budget dashboard
 ```
-
-**Output**: Research report saved to `data/earnings_analysis_YYYY-MM-DD.txt`
-
----
-
-## ⚠️ Important Limitations
-
-### IV Rank Calculation
-
-**Current**: Uses **realized volatility rank** as a proxy for implied volatility rank.
-
-**Why This Matters**:
-- Real IV Rank requires historical IV data (not available in free APIs)
-- Realized vol ≠ Implied vol (can differ by 20-50% around earnings)
-- **This affects your primary filter** for IV crush strategy
-
-**Accuracy**: ~70-80% correlation - good enough for initial filtering, not perfect.
-
-**To Get Real IV Rank**: TastyTrade API, CBOE DataShop, Interactive Brokers API, or paid Alpha Vantage.
-
-**Recommended**: Use this system for initial screening, verify IV Rank manually before trading.
-
----
-
-## Cost Breakdown
-
-**Per Ticker Analysis**:
-- Earnings Calendar: $0.00 (free)
-- Ticker Filtering: $0.00 (yfinance free)
-- Sentiment Analysis: ~$0.01-0.02 (Perplexity)
-- Strategy Generation: ~$0.005-0.01 (OpenAI)
-- **Total**: ~$0.02-0.03 per ticker
-
-**Monthly Budget ($5.00)**:
-- ~150-250 ticker analyses per month
-- ~5-8 tickers per day
-- Good for daily trading routine
 
 ---
 
@@ -107,33 +75,81 @@ python3 -m src.earnings_analyzer 2025-11-20 3
 
 ```
 src/
-├── earnings_calendar.py      # Get upcoming earnings (Nasdaq API)
-├── ticker_filter.py           # Filter by IV crush criteria
-├── options_data_client.py     # IV Rank, expected move, liquidity (yfinance)
-├── sentiment_analyzer.py      # Perplexity Sonar sentiment analysis
-├── strategy_generator.py      # OpenAI GPT-4 strategy generation
-├── earnings_analyzer.py       # Master orchestrator
-└── usage_tracker.py           # Budget tracking & cost controls
+├── earnings_calendar.py         # Nasdaq earnings calendar
+├── ticker_filter.py              # Filter by IV crush criteria
+├── tradier_options_client.py     # Real IV Rank via ORATS
+├── reddit_scraper.py             # Reddit sentiment (WSB, stocks, options)
+├── sentiment_analyzer.py         # AI analysis with Reddit integration
+├── strategy_generator.py         # AI strategy generation
+├── ai_client.py                  # Unified AI client (Perplexity → Gemini)
+└── usage_tracker.py              # Budget tracking with $4.90 hard stop
 ```
 
 ---
 
-## Testing Individual Components
+## Budget & Cost Controls
+
+**Cascade**: Perplexity → Google Gemini (free)
+
+**Perplexity Limit**: $4.90/month HARD STOP
+**Total Budget**: $5.00/month
+
+**Cost per ticker**: ~$0.01-0.02
+**Monthly capacity**: ~250 analyses (~8/day)
+
+**Budget Dashboard**:
+```bash
+python3 -m src.usage_tracker
+```
+
+---
+
+## Key Features
+
+### Real IV Rank via Tradier
+- Professional-grade options data (same as $99/month services)
+- Real implied volatility from ORATS
+- Accurate Greeks and expected move calculations
+- Free with Tradier brokerage account
+
+### Reddit Sentiment Integration
+- Scrapes r/wallstreetbets, r/stocks, r/options
+- Aggregates sentiment score, post engagement
+- Integrates into AI analysis for retail positioning
+
+### AI Fallback System
+- Primary: Perplexity Sonar Pro (until $4.90 limit)
+- Fallback: Google Gemini 2.0 Flash (FREE - 1500/day)
+- Automatic cascade when budget limits reached
+
+### Thread-Safe Budget Tracking
+- Persistent monthly usage log (`data/usage.json`)
+- Auto-resets each month
+- Pre-flight budget checks before API calls
+- Per-model and per-provider tracking
+
+---
+
+## Testing System Components
 
 ```bash
-# Test earnings calendar (free)
+# All tests passed ✓
+source venv/bin/activate
+
+# Reddit scraper (finds 20+ posts for NVDA)
+python3 -c "from src.reddit_scraper import RedditScraper; \
+print(RedditScraper().get_ticker_sentiment('NVDA'))"
+
+# Sentiment with Reddit (bearish TSLA example)
+python3 -m src.sentiment_analyzer TSLA
+
+# Tradier IV data (IV Rank, expected move)
+python3 -m src.tradier_options_client AAPL
+
+# Earnings calendar (728 earnings next 3 days)
 python3 -m src.earnings_calendar
 
-# Test ticker filter (free)
-python3 -m src.ticker_filter
-
-# Test options data (free)
-python3 -m src.options_data_client AAPL
-
-# Test sentiment ($0.01 cost)
-python3 -m src.sentiment_analyzer NVDA
-
-# View usage dashboard
+# Budget dashboard ($1.57 used, $3.43 remaining)
 python3 -m src.usage_tracker
 ```
 
@@ -141,49 +157,39 @@ python3 -m src.usage_tracker
 
 ## Configuration
 
-### Budget Config (`config/budget.yaml`)
+### Budget (`config/budget.yaml`)
 
 ```yaml
-monthly_budget: 5.00
-defaults:
-  sentiment_model: "sonar-pro"      # $0.005/1k tokens
-  strategy_model: "gpt-4o-mini"     # $0.00015/1k tokens
+perplexity_monthly_limit: 4.90  # Hard stop for Perplexity
 
-daily_limits:
-  max_tickers: 5
-  sonar-pro_calls: 20
-  gpt-4o-mini_calls: 20
+model_cascade:
+  order:
+    - "perplexity"  # Try first
+    - "google"      # FREE fallback
+
+models:
+  sonar-pro:
+    cost_per_1k_tokens: 0.005  # Perplexity
+  gemini-2.0-flash:
+    provider: "google"
+    cost_per_1k_tokens: 0.0    # FREE
 ```
 
 ### Trading Criteria (`ticker_filter.py`)
 
 ```python
-# IV Rank thresholds
-IV_RANK_MIN = 50      # Skip below this
-IV_RANK_GOOD = 60     # Standard $20K allocation
-IV_RANK_EXCELLENT = 75 # Larger allocation
+IV_RANK_MIN = 50       # Minimum IV Rank to consider
+IV_RANK_GOOD = 60      # Standard allocation
+IV_RANK_EXCELLENT = 75 # Larger position size
 
 # Scoring weights
 weights = {
     'iv_rank': 0.50,           # 50% - PRIMARY
     'iv_crush_edge': 0.30,     # 30% - Implied > actual
-    'options_liquidity': 0.15, # 15% - Volume, OI, spreads
-    'fundamentals': 0.05       # 5% - Market cap, price
+    'options_liquidity': 0.15, # 15% - Volume, OI
+    'fundamentals': 0.05       # 5% - Market cap
 }
 ```
-
----
-
-## Recent Refactoring (Option B - Full)
-
-✅ **Completed Improvements**:
-1. Integrated UsageTracker into all API clients for cost control
-2. Eliminated duplicate yfinance calls (was fetching twice per ticker)
-3. Renamed AlphaVantageClient → OptionsDataClient (clarity)
-4. Documented IV Rank limitation clearly
-5. Added comprehensive README
-
-**Performance**: ~50% reduction in yfinance API calls
 
 ---
 
@@ -191,12 +197,9 @@ weights = {
 
 **FOR RESEARCH ONLY. NOT FINANCIAL ADVICE.**
 
-- This tool generates research, NOT trade recommendations
-- Always verify data and analysis before trading
-- IV Rank uses realized volatility as a proxy (see limitations)
+- Generates research, not trade recommendations
+- Always verify data before trading
 - Options trading involves substantial risk of loss
-
-Use at your own risk.
 
 ---
 
@@ -206,4 +209,4 @@ Private/Personal Use Only
 
 ---
 
-**See `ARCHITECTURE_REVIEW.md` for detailed technical analysis.**
+**Technical Details**: See `ARCHITECTURE_REVIEW.md`

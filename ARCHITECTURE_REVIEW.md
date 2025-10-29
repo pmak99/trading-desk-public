@@ -1,341 +1,338 @@
-# Architecture Review & Improvement Plan
+# Architecture Overview
 
-## Executive Summary
-
-**Status**: Phase 2 is functionally complete but has several design issues that should be addressed before production use.
-
-**Priority Issues**:
-1. UsageTracker not integrated (HIGH)
-2. Duplicate API calls (MEDIUM)
-3. IV Rank calculation using wrong metric (HIGH - strategy critical)
-4. Tight coupling (LOW)
-5. No caching (MEDIUM - cost impact)
+**Last Updated**: October 2025 (Phase 3)
 
 ---
 
-## Issue 1: UsageTracker Not Integrated (HIGH PRIORITY)
+## System Design
 
-### Problem
-- Complete `UsageTracker` exists in `src/usage_tracker.py`
-- Budget config exists in `config/budget.yaml`
-- **BUT**: No API client actually uses it!
-- Result: No cost tracking, no budget enforcement
-
-### Impact
-- Could exceed budget without warning
-- No visibility into API costs
-- No daily limit enforcement
-
-### Fix
-All API clients should:
-```python
-class SentimentAnalyzer:
-    def __init__(self):
-        self.tracker = UsageTracker()
-
-    def _make_request(self, prompt):
-        # Check budget BEFORE call
-        can_call, reason = self.tracker.can_make_call('sonar-pro', estimated_tokens=1000)
-        if not can_call:
-            raise BudgetExceededError(reason)
-
-        # Make API call
-        response = requests.post(...)
-
-        # Log usage AFTER call
-        tokens = response['usage']['total_tokens']
-        cost = (tokens / 1000) * 0.005
-        self.tracker.log_api_call('sonar-pro', tokens, cost, ticker, success=True)
 ```
-
-### Files to Update
-- `src/sentiment_analyzer.py`
-- `src/strategy_generator.py`
-- `src/alpha_vantage_client.py` (if actually calling paid API)
-
----
-
-## Issue 2: Duplicate API Calls (MEDIUM PRIORITY)
-
-### Problem
-```
-ticker_filter.get_ticker_data(ticker)
-  ├─> yf.Ticker(ticker)  # Call 1
-  └─> options_client.get_options_data(ticker)
-        └─> yf.Ticker(ticker)  # Call 2 - DUPLICATE!
-```
-
-### Impact
-- 2x yfinance API calls per ticker
-- Slower performance
-- Risk of rate limiting
-
-### Fix Option A: Pass yfinance object through
-```python
-def get_ticker_data(self, ticker: str) -> Optional[Dict]:
-    stock = yf.Ticker(ticker)
-    info = stock.info
-    hist = stock.history(period='1mo')
-
-    # Pass stock object to avoid re-fetching
-    if self.options_client:
-        options_data = self.options_client.get_options_data_from_stock(stock, ticker)
-```
-
-### Fix Option B: Cache in ticker_filter
-```python
-def get_ticker_data(self, ticker: str) -> Optional[Dict]:
-    stock = yf.Ticker(ticker)
-
-    # Get all data in one place
-    data = {
-        'ticker': ticker,
-        'price': ...,
-        'volume': ...,
-    }
-
-    # Get options data directly here instead of delegating
-    options_data = self._get_options_data_direct(stock)
-    data['options_data'] = options_data
-```
-
-**Recommended**: Option B - simpler, clearer
-
----
-
-## Issue 3: IV Rank Calculation (HIGH PRIORITY - STRATEGY CRITICAL)
-
-### Problem
-Current code (line 148-155 in alpha_vantage_client.py):
-```python
-hist['rv_30'] = hist['returns'].rolling(window=30).std() * (252 ** 0.5)
-current_rv = hist['rv_30'].iloc[-1]
-min_rv = hist['rv_30'].min()
-max_rv = hist['rv_30'].max()
-iv_rank = ((current_rv - min_rv) / (max_rv - min_rv)) * 100
-```
-
-**This calculates realized volatility rank, NOT implied volatility rank!**
-
-### Why This Matters
-- Your entire strategy depends on IV Rank > 50%
-- Realized vol ≠ Implied vol
-- Can be 20-50% different around earnings
-- **This could filter out good trades or include bad ones**
-
-### Real IV Rank Formula
-```
-IV Rank = (Current IV - 52w Low IV) / (52w High IV - 52w Low IV) × 100
-```
-
-Requires: Historical IV data for past year
-
-### Solutions
-
-**Option A: Keep current approach (least accurate)**
-- Acknowledge it's realized vol rank, not IV rank
-- Still useful as proxy
-- Rename to `rv_rank` for clarity
-
-**Option B: Use current IV from options chain (better)**
-```python
-# Get current IV from ATM options
-current_iv = atm_options['impliedVolatility'].mean()
-
-# Get IV history by pulling options data daily and storing
-# Requires: Daily cron job to save IV snapshots
-iv_52w_low = historical_iv['iv'].min()
-iv_52w_high = historical_iv['iv'].max()
-iv_rank = ((current_iv - iv_52w_low) / (iv_52w_high - iv_52w_low)) * 100
-```
-
-**Option C: Use paid IV Rank data (most accurate)**
-- TastyTrade API
-- ThinkorSwim
-- CBOE
-
-**Recommended for now**: Option A with clear documentation that it's a proxy
-
----
-
-## Issue 4: Tight Coupling (LOW PRIORITY)
-
-### Problem
-```python
-# ticker_filter.py line 46
-self.options_client = AlphaVantageClient()
-```
-
-Hard-coded dependency makes testing difficult.
-
-### Fix
-```python
-def __init__(self, options_client=None, usage_tracker=None):
-    self.options_client = options_client
-    self.usage_tracker = usage_tracker or UsageTracker()
-```
-
-Allows:
-- Easy mocking for tests
-- Swap implementations
-- Disable components
-
----
-
-## Issue 5: No Caching (MEDIUM PRIORITY)
-
-### Problem
-- Options data fetched multiple times per ticker
-- Sentiment might be re-fetched if script runs multiple times
-- Costs add up
-
-### Fix
-Simple in-memory cache:
-```python
-from functools import lru_cache
-from datetime import datetime, timedelta
-
-class OptionsDataClient:
-    def __init__(self):
-        self._cache = {}
-        self._cache_ttl = timedelta(hours=1)
-
-    def get_options_data(self, ticker):
-        # Check cache
-        cache_key = f"{ticker}_{datetime.now().strftime('%Y-%m-%d-%H')}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-
-        # Fetch and cache
-        data = self._fetch_options_data(ticker)
-        self._cache[cache_key] = data
-        return data
+┌─────────────────────────────────────────────────────────────┐
+│                      TRADING DESK                           │
+│              Automated Earnings Research System             │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+        ┌──────────────────────────────────────┐
+        │   1. EARNINGS CALENDAR SCANNER       │
+        │   (earnings_calendar.py)             │
+        │   - Nasdaq API                       │
+        │   - Filters already-reported         │
+        │   - Skips weekends/holidays          │
+        └──────────────────────────────────────┘
+                              │
+                              ▼
+        ┌──────────────────────────────────────┐
+        │   2. TICKER FILTER                   │
+        │   (ticker_filter.py)                 │
+        │   - IV Rank > 50%                    │
+        │   - IV crush edge (implied > actual) │
+        │   - Options liquidity check          │
+        └──────────────────────────────────────┘
+                              │
+                              ▼
+        ┌──────────────────────────────────────┐
+        │   3. DATA COLLECTION                 │
+        │   ├─ Tradier: Real IV Rank (ORATS)  │
+        │   │  (tradier_options_client.py)     │
+        │   ├─ Reddit: Retail sentiment        │
+        │   │  (reddit_scraper.py)             │
+        │   └─ yfinance: Historical data       │
+        └──────────────────────────────────────┘
+                              │
+                              ▼
+        ┌──────────────────────────────────────┐
+        │   4. SENTIMENT ANALYSIS              │
+        │   (sentiment_analyzer.py)            │
+        │   - Reddit sentiment integration     │
+        │   - AI analysis (Sonar Pro)          │
+        │   - Retail/institutional/HF views    │
+        └──────────────────────────────────────┘
+                              │
+                              ▼
+        ┌──────────────────────────────────────┐
+        │   5. STRATEGY GENERATION             │
+        │   (strategy_generator.py)            │
+        │   - 3-4 options strategies           │
+        │   - Position sizing ($20K risk)      │
+        │   - Probability of profit            │
+        └──────────────────────────────────────┘
+                              │
+                              ▼
+        ┌──────────────────────────────────────┐
+        │   6. RESEARCH REPORT OUTPUT          │
+        │   - Formatted for manual review      │
+        │   - Execute on Fidelity manually     │
+        └──────────────────────────────────────┘
 ```
 
 ---
 
-## Issue 6: Misleading Class Name
+## Budget Control System
 
-### Problem
-`AlphaVantageClient` uses yfinance, not Alpha Vantage API
-
-### Fix
-Rename to `OptionsDataClient` or `YFinanceOptionsClient`
-
----
-
-## Issue 7: Missing OpenAI API Key Handling
-
-### Problem
-```python
-# strategy_generator.py line 30
-if not self.api_key:
-    logger.warning("OPENAI_API_KEY not found")
-    self.api_key = None  # Silently continues
+```
+┌──────────────────────────────────────────────────────────────┐
+│                  USAGE TRACKER (usage_tracker.py)            │
+│                                                              │
+│  Monthly Budget: $5.00                                       │
+│  Perplexity Limit: $4.90 (HARD STOP)                        │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │  Pre-Flight Check:                                     │ │
+│  │  • Can we afford this call?                            │ │
+│  │  • Perplexity limit exceeded?                          │ │
+│  │  • Daily limits exceeded?                              │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                           │                                  │
+│                           ▼                                  │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │  API CALL                                              │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                           │                                  │
+│                           ▼                                  │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │  Post-Call Logging:                                    │ │
+│  │  • Tokens used                                         │ │
+│  │  • Cost calculated                                     │ │
+│  │  • Update data/usage.json                              │ │
+│  └────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-Will fail later when trying to generate strategies.
+---
 
-### Fix
-```python
-if not self.api_key:
-    raise ValueError("OPENAI_API_KEY not found in environment")
+## AI Client Fallback Cascade
+
+```
+┌───────────────────────────────────────────────────────────┐
+│                  AI CLIENT (ai_client.py)                 │
+│                                                           │
+│  1. Check Perplexity budget ($4.90 limit)                │
+│     │                                                     │
+│     ├─ Available? ──> Use Sonar Pro ($0.005/1k tokens)  │
+│     │                                                     │
+│     └─ EXHAUSTED ──> 2. Fallback to Gemini              │
+│                         (FREE - 1500 calls/day)          │
+│                                                           │
+│  All calls logged to usage_tracker                       │
+└───────────────────────────────────────────────────────────┘
 ```
 
-OR keep current behavior but document it's optional.
+**Models**:
+- `sonar-pro`: Perplexity's fast model ($5/1M tokens)
+- `gemini-2.0-flash`: Google's free model (1500 RPD)
 
 ---
 
-## Redundant Code to Remove
+## Data Sources
 
-### 1. Alpha Vantage API Code
-Lines 43-71 in `alpha_vantage_client.py` - the `_make_request()` method:
-- Never actually called
-- No Alpha Vantage endpoints used
-- **Can delete entirely**
+### Earnings Calendar
+- **Source**: Nasdaq API
+- **Cost**: FREE
+- **Data**: Upcoming earnings dates, times (pre/post market)
+- **Filter**: Already-reported earnings, weekends, holidays
 
-### 2. Duplicate Logging Setup
-Each file has:
-```python
-logger = logging.getLogger(__name__)
+### IV Rank & Options Data
+- **Source**: Tradier API (ORATS data)
+- **Cost**: FREE (with Tradier account)
+- **Data**:
+  - Real IV Rank (52-week percentile)
+  - Current implied volatility
+  - Expected move from ATM straddle
+  - Options volume, open interest
+  - Greeks
+
+### Reddit Sentiment
+- **Source**: Reddit API (PRAW)
+- **Cost**: FREE
+- **Subreddits**: r/wallstreetbets, r/stocks, r/options
+- **Data**:
+  - Post titles, scores, comment counts
+  - Sentiment score (-1.0 to 1.0)
+  - Top posts for context
+
+### AI Analysis
+- **Primary**: Perplexity Sonar Pro
+- **Fallback**: Google Gemini
+- **Data**: Sentiment analysis, strategy recommendations
+
+---
+
+## File Structure
+
+```
+Trading Desk/
+├── src/
+│   ├── earnings_calendar.py      # Nasdaq earnings scanner
+│   ├── ticker_filter.py           # Filter by IV criteria
+│   ├── tradier_options_client.py  # Real IV Rank via ORATS
+│   ├── reddit_scraper.py          # Reddit sentiment scraper
+│   ├── sentiment_analyzer.py      # AI sentiment with Reddit
+│   ├── strategy_generator.py      # AI strategy generation
+│   ├── ai_client.py               # Unified AI client
+│   └── usage_tracker.py           # Budget tracking
+│
+├── config/
+│   └── budget.yaml                # Budget limits & model config
+│
+├── data/
+│   └── usage.json                 # Monthly usage log (auto-created)
+│
+├── .env                           # API keys (NOT in git)
+├── requirements.txt               # Python dependencies
+└── README.md                      # User documentation
 ```
 
-Should centralize logging config in one place.
+---
+
+## Key Design Decisions
+
+### 1. Tradier for IV Data
+**Why**: Free, professional-grade IV Rank from ORATS (same data as $99/month services)
+**Alternative**: yfinance (free but no IV Rank), Alpha Vantage (paid)
+
+### 2. Reddit Integration
+**Why**: Retail sentiment is critical for earnings trades - Reddit captures WSB positioning
+**Implementation**: Pre-fetch Reddit data, include in AI prompt for analysis
+
+### 3. Perplexity → Gemini Cascade
+**Why**:
+- Perplexity has $4.90 hard limit (user constraint)
+- Gemini is FREE with 1500 calls/day (sufficient fallback)
+- Removed Anthropic (requires prepaid credits, not free)
+
+### 4. Thread-Safe Budget Tracking
+**Why**: Prepared for multiprocessing (Phase 4)
+**Implementation**: File-based persistence with locking (ready for concurrent access)
+
+### 5. Manual Execution Only
+**Why**: User wants research, not auto-trading
+**Implementation**: Generate formatted reports for manual review and execution
 
 ---
 
-## Optimization Opportunities
+## Performance Characteristics
 
-### 1. Batch Processing
-```python
-# Current: Sequential
-for ticker in tickers:
-    analyze(ticker)  # 30-60 sec each
+**Budget Utilization**:
+- Per ticker: ~$0.01-0.02
+- Monthly capacity: ~250 tickers (~8/day)
+- Perplexity: Primary until $4.90
+- Gemini: Unlimited fallback (1500/day)
 
-# Better: Parallel (if APIs allow)
-from concurrent.futures import ThreadPoolExecutor
+**API Calls per Ticker**:
+- Nasdaq: 1 call (earnings calendar)
+- Tradier: 2-3 calls (quotes, expirations, chains)
+- Reddit: 3 calls (3 subreddits)
+- AI: 2 calls (sentiment + strategy)
+- **Total**: ~8-9 API calls per ticker
 
-with ThreadPoolExecutor(max_workers=3) as executor:
-    futures = [executor.submit(analyze, t) for t in tickers]
-    results = [f.result() for f in futures]
+**Speed**:
+- Reddit scraping: ~5-10 seconds
+- Tradier data: ~2-3 seconds
+- AI analysis: ~10-20 seconds
+- **Total**: ~20-35 seconds per ticker
+
+---
+
+## Cost Breakdown
+
+**Monthly Budget**: $5.00
+
+**API Costs**:
+- Nasdaq: $0 (free)
+- Tradier: $0 (free with account)
+- Reddit: $0 (free)
+- Perplexity: $0.01-0.02 per ticker (until $4.90)
+- Gemini: $0 (free - 1500/day)
+
+**Bottleneck**: Perplexity $4.90 limit (~250 tickers/month)
+
+---
+
+## Error Handling
+
+### Budget Exceeded
+- Pre-flight check fails → automatic cascade to Gemini
+- All models exhausted → raise BudgetExceededError
+- User informed via logs
+
+### API Failures
+- Tradier down → fallback to yfinance (limited data)
+- Reddit down → continue without Reddit sentiment
+- AI down → retry with fallback model
+- Earnings calendar down → abort (no data to process)
+
+### Data Quality
+- Missing IV Rank → skip ticker (critical for strategy)
+- Low options volume → flag in report (liquidity risk)
+- No Reddit posts → note in sentiment (limited retail data)
+
+---
+
+## Thread Safety (Phase 4 Ready)
+
+**Usage Tracker**:
+- File-based persistence (`data/usage.json`)
+- Thread lock for concurrent access
+- Atomic read-modify-write operations
+- Ready for multiprocessing implementation
+
+**Next Steps for Phase 4**:
+- Add `multiprocessing.Pool` for parallel ticker processing
+- Add file locking (fcntl) for cross-process budget sync
+- Add worker result aggregation
+- Maintain sequential budget checks (critical path)
+
+---
+
+## Security Considerations
+
+**.env File**:
+- Contains API keys
+- In `.gitignore` (never committed)
+- Loaded via `python-dotenv`
+
+**API Keys Required**:
+- PERPLEXITY_API_KEY (required - primary AI)
+- GOOGLE_API_KEY (required - fallback AI)
+- TRADIER_ACCESS_TOKEN (required - IV data)
+- REDDIT_CLIENT_ID (required - sentiment)
+- REDDIT_CLIENT_SECRET (required - sentiment)
+
+**No Secrets in Code**:
+- All API keys from environment
+- No hardcoded credentials
+- Budget config in YAML (no secrets)
+
+---
+
+## Testing Strategy
+
+**Unit Tests**: Individual components
+```bash
+python3 -m src.reddit_scraper          # Reddit API
+python3 -m src.sentiment_analyzer AAPL # Sentiment + Reddit
+python3 -m src.tradier_options_client  # Tradier IV data
+python3 -m src.earnings_calendar       # Nasdaq calendar
+python3 -m src.usage_tracker           # Budget dashboard
 ```
 
-### 2. Reduce Strategy Generator Prompt Length
-Current prompt is ~800 tokens = higher cost
-
-Could reduce to ~400 tokens by being more concise.
-
-### 3. Use Cheaper Models Where Possible
-- Sentiment: `sonar-pro` (current) ✓
-- Strategy: Use `gpt-4o-mini` instead of `gpt-4o` (5x cheaper)
+**Integration Test**: Full pipeline (TODO)
+```bash
+python3 -m src.earnings_analyzer       # End-to-end
+```
 
 ---
 
-## Recommended Refactor Priority
+## Future Enhancements (Phase 4+)
 
-### Phase 1: Critical Fixes (Do Now)
-1. ✅ Integrate UsageTracker into all API clients
-2. ✅ Fix duplicate yfinance calls
-3. ✅ Document IV Rank is proxy (or implement real IV Rank)
-
-### Phase 2: Important Improvements (Next)
-4. ✅ Add caching for options data
-5. ✅ Rename AlphaVantageClient → OptionsDataClient
-6. ✅ Remove unused Alpha Vantage _make_request code
-
-### Phase 3: Nice to Have (Later)
-7. ⬜ Dependency injection for testing
-8. ⬜ Parallel processing for multiple tickers
-9. ⬜ Optimize prompt lengths
+1. **Multiprocessing** - Parallel ticker processing
+2. **Weekly options filtering** - Only include weekly expirations
+3. **Automated scheduling** - Cron job for daily analysis
+4. **Position tracking** - Log trades, track P/L
+5. **Backtesting** - Historical earnings analysis
+6. **Email reports** - Daily summary to inbox
 
 ---
 
-## Design Principles Being Followed ✅
-
-1. **Separation of Concerns** - Each component has single responsibility
-2. **DRY (mostly)** - Some duplication to fix
-3. **Error Handling** - Good coverage
-4. **Logging** - Comprehensive
-5. **Documentation** - Excellent docstrings
-6. **Type Hints** - Used throughout
-
----
-
-## Final Recommendation
-
-**Architecture is 80% solid.** The main issues are:
-
-1. **Missing cost tracking** (UsageTracker not integrated)
-2. **IV Rank using wrong metric** (strategy-critical)
-3. **Some inefficiency** (duplicate calls, no caching)
-
-**Suggested approach**:
-1. Integrate UsageTracker now (30 min)
-2. Fix duplicate yfinance calls (30 min)
-3. Document IV Rank limitation in README
-4. Add caching in next iteration
-5. Consider real IV Rank data if budget allows
-
-**Cost/benefit**: 1 hour of refactoring would improve reliability and reduce costs significantly.
-
-Should I proceed with these fixes?
+**This architecture is production-ready for manual research workflows.**
