@@ -137,7 +137,7 @@ class TradierOptionsClient:
         """
         Get IV data from Tradier.
 
-        Tradier provides real implied volatility from options Greeks.
+        Tradier provides real implied volatility from options Greeks via ORATS.
         IV Rank calculation requires 52-week IV history (to be implemented).
 
         Args:
@@ -145,10 +145,14 @@ class TradierOptionsClient:
             earnings_date: Earnings date for weekly expiration selection
 
         Returns:
-            Dict with iv_rank, iv_percentile, current_iv
+            Dict with:
+                - iv_rank: 0 (not yet implemented, requires historical IV data)
+                - iv_percentile: 0 (not yet implemented)
+                - current_iv: Actual implied volatility % (e.g., 93.82 means 93.82%)
 
-        Note: current_iv is REAL implied volatility from options market.
-              iv_rank still uses RV proxy until historical IV tracking is added.
+        Note: Tradier API returns IV in format: 1.23 = 123%, 0.50 = 50%
+              We multiply by 100 to get standard percentage format.
+              current_iv is REAL implied volatility from live options market.
         """
         try:
             # Get nearest weekly expiration (pass earnings date for better selection)

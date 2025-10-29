@@ -136,11 +136,12 @@
 - **Source**: Tradier API (ORATS data)
 - **Cost**: FREE (with Tradier account)
 - **Data**:
-  - Real IV Rank (52-week percentile)
-  - Current implied volatility
+  - Current implied volatility % (e.g., 93.82%, 123.39%, 207.68%)
+  - Real IV Rank (52-week percentile) - *not yet implemented*
   - Expected move from ATM straddle
   - Options volume, open interest
-  - Greeks
+  - Greeks (delta, gamma, theta, vega)
+- **Note**: Tradier returns IV as 1.23 = 123%, automatically converted to percentage format
 
 ### Reddit Sentiment
 - **Source**: Reddit API (PRAW)

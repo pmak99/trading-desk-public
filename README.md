@@ -109,7 +109,9 @@ python3 -m src.usage_tracker
 ### Real IV Data via Tradier
 - Professional-grade options data (same as $99/month services)
 - **Actual implied volatility %** from ORATS (not proxies)
+- Direct from live options market (matches Robinhood, TastyTrade, etc.)
 - Filters: 40%+ IV minimum, 60%+ good, 80%+ excellent
+- Supports high IV tickers (100%+ IV for volatile earnings plays)
 - Accurate Greeks and expected move calculations
 - Free with Tradier brokerage account
 
@@ -180,11 +182,15 @@ models:
 
 ```python
 MIN_IV_PERCENT = 40    # Minimum actual IV % (hard filter)
+                       # Adjust: 30% for more results, 50-60% for only high IV plays
 
-# IV % scoring thresholds
+# IV % scoring thresholds (from Tradier ORATS data)
 # 40-60%: Medium volatility (score 50-70)
 # 60-80%: High volatility (score 70-100)
 # 80%+:   Excellent for IV crush (score 100)
+
+# Note: Tradier returns IV in format 1.23 = 123%, 0.50 = 50%
+#       We multiply by 100 to get standard percentage format
 
 # Scoring weights
 weights = {
@@ -193,6 +199,11 @@ weights = {
     'options_liquidity': 0.15, # 15% - Volume, OI
     'fundamentals': 0.05       # 5% - Market cap
 }
+```
+
+**To customize the IV threshold**, edit `src/ticker_filter.py` line 203:
+```python
+MIN_IV_PERCENT = 40  # Change to 30 (more results) or 50-60 (higher quality)
 ```
 
 ---
