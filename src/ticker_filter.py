@@ -178,45 +178,65 @@ class TickerFilter:
         Calculate ticker score for IV crush strategy.
 
         Scoring based on Trading Research Prompt.pdf criteria:
-        - IV Rank > 50% required, 75%+ preferred
+        - IV % >= 40% required (uses actual implied volatility from options)
+        - 60%+ IV is good, 80%+ is excellent for IV crush trades
         - Historical implied move > actual move (IV overpricing edge)
         - Options liquidity (volume, OI, bid-ask spreads)
 
         Args:
-            data: Ticker data dict (with optional options_data from Alpha Vantage)
+            data: Ticker data dict (with optional options_data from Tradier)
 
         Returns:
-            Score (0-100), or 0 if IV Rank < 50%
+            Score (0-100), or 0 if IV < 40%
         """
         options_data = data.get('options_data', {})
 
         # ==========================================
-        # 1. IV Rank Score (50% weight) - PRIMARY
+        # 1. IV Score (50% weight) - PRIMARY
         # ==========================================
+        # Use current_iv (actual IV %) from Tradier, fallback to iv_rank if available
+        current_iv = options_data.get('current_iv', None)
         iv_rank = options_data.get('iv_rank', None)
 
-        if iv_rank is not None:
-            # HARD FILTER: Skip anything below 50% IV Rank
+        # HARD FILTER: Use actual IV % for filtering (more reliable than IV Rank)
+        if current_iv is not None and current_iv > 0:
+            # Filter: Skip anything below 40% IV (low volatility)
+            MIN_IV_PERCENT = 40
+            if current_iv < MIN_IV_PERCENT:
+                logger.info(f"{data['ticker']}: IV {current_iv}% < {MIN_IV_PERCENT}% - SKIPPING")
+                return 0.0
+
+            # Score based on actual IV % thresholds
+            # For earnings plays: 40-60% = medium, 60-80% = good, 80%+ = excellent
+            if current_iv >= 80:  # Very high IV - excellent for IV crush
+                iv_score = 100
+            elif current_iv >= 60:  # High IV - good opportunity
+                iv_score = 70 + (current_iv - 60) * 1.5  # Scale 70-100
+            else:  # 40-60% - medium IV
+                iv_score = 50 + (current_iv - 40) * 1.0  # Scale 50-70
+
+        elif iv_rank is not None and iv_rank > 0:
+            # Fallback to IV Rank if current_iv not available
             if iv_rank < self.IV_RANK_MIN:
                 logger.info(f"{data['ticker']}: IV Rank {iv_rank}% < {self.IV_RANK_MIN}% - SKIPPING")
                 return 0.0
 
             # Score based on IV Rank thresholds
             if iv_rank >= self.IV_RANK_EXCELLENT:  # 75%+
-                iv_rank_score = 100
+                iv_score = 100
             elif iv_rank >= self.IV_RANK_GOOD:  # 60-75%
-                iv_rank_score = 70 + (iv_rank - self.IV_RANK_GOOD) * 2  # Scale 70-100
+                iv_score = 70 + (iv_rank - self.IV_RANK_GOOD) * 2  # Scale 70-100
             else:  # 50-60%
-                iv_rank_score = 50 + (iv_rank - self.IV_RANK_MIN) * 2  # Scale 50-70
+                iv_score = 50 + (iv_rank - self.IV_RANK_MIN) * 2  # Scale 50-70
         else:
             # No options data yet - use basic IV estimate from yfinance
             iv = data.get('iv', 0)
             if iv >= 0.60:
-                iv_rank_score = 80  # Probably high IV rank
+                iv_score = 80  # Probably high IV
             elif iv >= 0.40:
-                iv_rank_score = 60
+                iv_score = 60
             else:
-                iv_rank_score = 30  # Low confidence without real IV rank
+                iv_score = 30  # Low confidence without real IV data
 
         # ==========================================
         # 2. IV Crush Edge Score (30% weight)
@@ -319,7 +339,7 @@ class TickerFilter:
         # TOTAL SCORE
         # ==========================================
         total_score = (
-            iv_rank_score * self.weights['iv_rank'] +
+            iv_score * self.weights['iv_rank'] +
             iv_crush_score * self.weights['iv_crush_edge'] +
             liquidity_score * self.weights['options_liquidity'] +
             fundamentals_score * self.weights['fundamentals']
