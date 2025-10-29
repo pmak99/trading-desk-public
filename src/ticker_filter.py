@@ -178,8 +178,8 @@ class TickerFilter:
         Calculate ticker score for IV crush strategy.
 
         Scoring based on Trading Research Prompt.pdf criteria:
-        - IV % >= 40% required (uses actual implied volatility from options)
-        - 60%+ IV is good, 80%+ is excellent for IV crush trades
+        - IV % >= 60% required (uses actual implied volatility from options)
+        - 60-80% IV is good, 80-100% excellent, 100%+ premium for IV crush trades
         - Historical implied move > actual move (IV overpricing edge)
         - Options liquidity (volume, OI, bid-ask spreads)
 
@@ -187,7 +187,7 @@ class TickerFilter:
             data: Ticker data dict (with optional options_data from Tradier)
 
         Returns:
-            Score (0-100), or 0 if IV < 40%
+            Score (0-100), or 0 if IV < 60%
         """
         options_data = data.get('options_data', {})
 
@@ -200,20 +200,20 @@ class TickerFilter:
 
         # HARD FILTER: Use actual IV % for filtering (more reliable than IV Rank)
         if current_iv is not None and current_iv > 0:
-            # Filter: Skip anything below 40% IV (low volatility)
-            MIN_IV_PERCENT = 40
+            # Filter: Skip anything below 60% IV (minimum for earnings IV crush plays)
+            MIN_IV_PERCENT = 60
             if current_iv < MIN_IV_PERCENT:
                 logger.info(f"{data['ticker']}: IV {current_iv}% < {MIN_IV_PERCENT}% - SKIPPING")
                 return 0.0
 
             # Score based on actual IV % thresholds
-            # For earnings plays: 40-60% = medium, 60-80% = good, 80%+ = excellent
-            if current_iv >= 80:  # Very high IV - excellent for IV crush
+            # For earnings plays: 60-80% = good, 80-100% = excellent, 100%+ = premium
+            if current_iv >= 100:  # Premium IV - exceptional IV crush opportunity
                 iv_score = 100
-            elif current_iv >= 60:  # High IV - good opportunity
-                iv_score = 70 + (current_iv - 60) * 1.5  # Scale 70-100
-            else:  # 40-60% - medium IV
-                iv_score = 50 + (current_iv - 40) * 1.0  # Scale 50-70
+            elif current_iv >= 80:  # Excellent IV - very good opportunity
+                iv_score = 80 + (current_iv - 80) * 1.0  # Scale 80-100
+            else:  # 60-80% - good IV
+                iv_score = 60 + (current_iv - 60) * 1.0  # Scale 60-80
 
         elif iv_rank is not None and iv_rank > 0:
             # Fallback to IV Rank if current_iv not available

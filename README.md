@@ -13,8 +13,8 @@ Scans earnings calendar → filters by IV metrics → analyzes sentiment → sug
 
 ## What It Does
 
-1. **Scans earnings calendar** - Nasdaq API for upcoming earnings
-2. **Filters tickers** - Actual IV % (40%+ min), expected move, liquidity (Tradier API)
+1. **Scans earnings calendar** OR **accepts ticker list** - Nasdaq API or manual tickers
+2. **Filters tickers** - Actual IV % (60%+ min), expected move, liquidity (Tradier API)
 3. **Analyzes sentiment** - AI analysis with Reddit data (r/wallstreetbets, r/stocks, r/options)
 4. **Generates strategies** - 3-4 option strategies with sizing for $20K risk budget
 
@@ -58,10 +58,26 @@ perplexity_monthly_limit: 4.90  # HARD STOP
 monthly_budget: 5.00
 ```
 
-### 4. Run
+### 4. Run Analysis
 
+**Mode 1: Analyze Specific Tickers** (recommended)
 ```bash
-# Test individual components
+# Analyze your watchlist
+python3 -m src.earnings_analyzer --tickers "META,MSFT,GOOGL,CMG" 2025-10-29 --yes
+
+# Syntax: --tickers "TICK1,TICK2,TICK3" [EARNINGS_DATE] [--yes]
+```
+
+**Mode 2: Auto-Scan Earnings Calendar**
+```bash
+# Scan Oct 29 earnings, analyze top 10 by IV
+python3 -m src.earnings_analyzer 2025-10-29 10 --yes
+
+# Syntax: [DATE] [MAX_TICKERS] [--yes]
+```
+
+**Test Individual Components:**
+```bash
 python3 -m src.reddit_scraper          # Test Reddit scraper
 python3 -m src.sentiment_analyzer AAPL # Test sentiment with Reddit
 python3 -m src.tradier_options_client  # Test Tradier IV data
@@ -110,8 +126,9 @@ python3 -m src.usage_tracker
 - Professional-grade options data (same as $99/month services)
 - **Actual implied volatility %** from ORATS (not proxies)
 - Direct from live options market (matches Robinhood, TastyTrade, etc.)
-- Filters: 40%+ IV minimum, 60%+ good, 80%+ excellent
-- Supports high IV tickers (100%+ IV for volatile earnings plays)
+- Filters: **60%+ IV minimum** (focus on high IV crush opportunities)
+- Scoring: 60-80% good, 80-100% excellent, 100%+ premium
+- Supports high IV tickers (100-200%+ for volatile earnings plays)
 - Accurate Greeks and expected move calculations
 - Free with Tradier brokerage account
 
@@ -181,13 +198,13 @@ models:
 ### Trading Criteria (`ticker_filter.py`)
 
 ```python
-MIN_IV_PERCENT = 40    # Minimum actual IV % (hard filter)
-                       # Adjust: 30% for more results, 50-60% for only high IV plays
+MIN_IV_PERCENT = 60    # Minimum actual IV % (hard filter)
+                       # Focus on high IV crush opportunities only
 
 # IV % scoring thresholds (from Tradier ORATS data)
-# 40-60%: Medium volatility (score 50-70)
-# 60-80%: High volatility (score 70-100)
-# 80%+:   Excellent for IV crush (score 100)
+# 60-80%:   Good volatility (score 60-80)
+# 80-100%:  Excellent for IV crush (score 80-100)
+# 100%+:    Premium IV crush opportunity (score 100)
 
 # Note: Tradier returns IV in format 1.23 = 123%, 0.50 = 50%
 #       We multiply by 100 to get standard percentage format
@@ -201,9 +218,9 @@ weights = {
 }
 ```
 
-**To customize the IV threshold**, edit `src/ticker_filter.py` line 203:
+**To customize the IV threshold**, edit `src/ticker_filter.py` line 204:
 ```python
-MIN_IV_PERCENT = 40  # Change to 30 (more results) or 50-60 (higher quality)
+MIN_IV_PERCENT = 60  # Lower to 50 for more results, raise to 70+ for only premium plays
 ```
 
 ---

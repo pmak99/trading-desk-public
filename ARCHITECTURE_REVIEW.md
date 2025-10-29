@@ -25,7 +25,7 @@
         ┌──────────────────────────────────────┐
         │   2. TICKER FILTER                   │
         │   (ticker_filter.py)                 │
-        │   - Actual IV % ≥ 40% (from Tradier) │
+        │   - Actual IV % ≥ 60% (from Tradier) │
         │   - IV crush edge (implied > actual) │
         │   - Options liquidity check          │
         └──────────────────────────────────────┘

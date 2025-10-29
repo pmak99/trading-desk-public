@@ -113,6 +113,122 @@ class EarningsAnalyzer:
         # Note: Sentiment analyzer and strategy generator are initialized
         # in worker processes for thread-safe parallel processing
 
+    def analyze_specific_tickers(self, tickers: list, earnings_date: str = None) -> Dict:
+        """
+        Analyze specific tickers directly (bypass calendar scanning).
+
+        Useful when you have specific tickers in mind for earnings plays.
+
+        Args:
+            tickers: List of ticker symbols (e.g., ['META', 'MSFT', 'GOOGL'])
+            earnings_date: Expected earnings date (YYYY-MM-DD), defaults to next trading day
+
+        Returns:
+            Dict with:
+            - date: Earnings date used
+            - analyzed_count: Number of tickers analyzed
+            - ticker_analyses: List of full analyses
+            - failed_analyses: List of failed tickers
+        """
+        import yfinance as yf
+
+        if earnings_date is None:
+            # Default to next trading day
+            earnings_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+
+        logger.info(f"Analyzing {len(tickers)} specific tickers for {earnings_date}")
+
+        # Get basic ticker data from yfinance
+        tickers_data = []
+        for ticker in tickers:
+            try:
+                stock = yf.Ticker(ticker)
+                info = stock.info
+
+                ticker_data = {
+                    'ticker': ticker,
+                    'earnings_date': earnings_date,
+                    'earnings_time': 'amc',  # Default to after-market
+                    'market_cap': info.get('marketCap', 0),
+                    'price': info.get('currentPrice', info.get('regularMarketPrice', 0))
+                }
+
+                # Get options data from Tradier
+                options_data = self.ticker_filter.tradier_client.get_options_data(
+                    ticker,
+                    current_price=ticker_data['price'],
+                    earnings_date=earnings_date
+                )
+                ticker_data['options_data'] = options_data
+
+                # Calculate score
+                ticker_data['score'] = self.ticker_filter.calculate_score(ticker_data)
+
+                tickers_data.append(ticker_data)
+                logger.info(f"{ticker}: IV={options_data.get('current_iv', 0):.2f}%, Score={ticker_data['score']:.1f}")
+
+            except Exception as e:
+                logger.error(f"{ticker}: Failed to fetch data: {e}")
+                continue
+
+        if not tickers_data:
+            logger.warning("No valid tickers to analyze")
+            return {
+                'date': earnings_date,
+                'analyzed_count': 0,
+                'failed_count': 0,
+                'ticker_analyses': [],
+                'failed_analyses': []
+            }
+
+        # Prepare for parallel analysis
+        logger.info(f"Running full analysis on {len(tickers_data)} tickers...")
+
+        analysis_args = [
+            (td['ticker'], td, earnings_date)
+            for td in tickers_data
+        ]
+
+        # Use multiprocessing for parallel analysis
+        num_workers = min(cpu_count(), len(tickers_data), 4)
+        logger.info(f"Using {num_workers} parallel workers")
+
+        timeout = 120 * len(tickers_data)
+
+        try:
+            with Pool(processes=num_workers) as pool:
+                result = pool.map_async(_analyze_single_ticker, analysis_args)
+                ticker_analyses = result.get(timeout=timeout)
+        except TimeoutError:
+            logger.error(f"Pool operation timed out after {timeout}s")
+            ticker_analyses = []
+
+        # Separate successful and failed analyses
+        successful_analyses = []
+        failed_analyses = []
+
+        for analysis in ticker_analyses:
+            if analysis.get('error'):
+                failed_analyses.append(analysis)
+                logger.warning(f"❌ {analysis['ticker']}: {analysis['error']}")
+            else:
+                successful_analyses.append(analysis)
+
+        analyzed_count = len(successful_analyses)
+        failed_count = len(failed_analyses)
+
+        logger.info(f"Successfully analyzed {analyzed_count}/{len(tickers)} tickers")
+        if failed_count > 0:
+            logger.warning(f"Failed to analyze {failed_count} tickers - see warnings above for details")
+
+        return {
+            'date': earnings_date,
+            'analyzed_count': analyzed_count,
+            'failed_count': failed_count,
+            'ticker_analyses': successful_analyses,
+            'failed_analyses': failed_analyses
+        }
+
     def analyze_daily_earnings(self, target_date: str = None, max_analyze: int = 2) -> Dict:
         """
         Analyze earnings for a specific day and generate trade ideas.
@@ -249,9 +365,16 @@ class EarningsAnalyzer:
         report_lines.append("EARNINGS TRADE RESEARCH REPORT")
         report_lines.append("=" * 80)
         report_lines.append(f"\nDate: {analysis_result['date']}")
-        report_lines.append(f"Total Earnings: {analysis_result['total_earnings']} companies")
-        report_lines.append(f"Passed IV Filter: {analysis_result['filtered_count']} tickers")
-        report_lines.append(f"Fully Analyzed: {analysis_result['analyzed_count']} tickers")
+
+        # Different format for ticker list mode vs calendar mode
+        if 'total_earnings' in analysis_result:
+            # Calendar mode
+            report_lines.append(f"Total Earnings: {analysis_result['total_earnings']} companies")
+            report_lines.append(f"Passed IV Filter: {analysis_result['filtered_count']} tickers")
+            report_lines.append(f"Fully Analyzed: {analysis_result['analyzed_count']} tickers")
+        else:
+            # Ticker list mode
+            report_lines.append(f"Fully Analyzed: {analysis_result['analyzed_count']} tickers")
 
         if analysis_result.get('failed_count', 0) > 0:
             report_lines.append(f"Failed: {analysis_result['failed_count']} tickers")
@@ -352,30 +475,63 @@ if __name__ == "__main__":
 
     # Parse arguments
     skip_confirm = '--yes' in sys.argv or '-y' in sys.argv
-    args = [arg for arg in sys.argv[1:] if arg not in ['--yes', '-y']]
 
-    target_date = args[0] if len(args) > 0 else None
-    max_analyze = int(args[1]) if len(args) > 1 else 2
+    # Check for ticker list mode
+    ticker_list = None
+    if '--tickers' in sys.argv:
+        idx = sys.argv.index('--tickers')
+        if idx + 1 < len(sys.argv):
+            ticker_list = sys.argv[idx + 1].upper().replace(' ', '').split(',')
 
-    if target_date is None:
-        target_date = datetime.now().strftime('%Y-%m-%d')
-        logger.info(f"No date specified, using today: {target_date}")
+    # Remove flags from args
+    args = [arg for arg in sys.argv[1:] if arg not in ['--yes', '-y', '--tickers'] and not (ticker_list and arg.upper().replace(' ', '') == ','.join(ticker_list))]
 
-    logger.info(f"\nAnalyzing up to {max_analyze} tickers for {target_date}")
-    logger.warning(f"This will make API calls (estimated cost: ${0.05 * max_analyze:.2f})")
-    logger.info("")
-
-    if not skip_confirm:
-        confirmation = input("Continue? (y/n): ")
-        if confirmation.lower() != 'y':
-            logger.info("Aborted.")
-            exit()
-    else:
-        logger.info("Auto-confirmed with --yes flag")
-
-    # Run analysis
     analyzer = EarningsAnalyzer()
-    result = analyzer.analyze_daily_earnings(target_date, max_analyze)
+
+    # TICKER LIST MODE
+    if ticker_list:
+        earnings_date = args[0] if len(args) > 0 else None
+
+        logger.info(f"\n📋 TICKER LIST MODE")
+        logger.info(f"Tickers: {', '.join(ticker_list)}")
+        logger.info(f"Earnings Date: {earnings_date or 'next trading day (default)'}")
+        logger.warning(f"This will make API calls (estimated cost: ${0.05 * len(ticker_list):.2f})")
+        logger.info("")
+
+        if not skip_confirm:
+            confirmation = input("Continue? (y/n): ")
+            if confirmation.lower() != 'y':
+                logger.info("Aborted.")
+                exit()
+        else:
+            logger.info("Auto-confirmed with --yes flag")
+
+        # Run ticker list analysis
+        result = analyzer.analyze_specific_tickers(ticker_list, earnings_date)
+
+    # CALENDAR SCANNING MODE (default)
+    else:
+        target_date = args[0] if len(args) > 0 else None
+        max_analyze = int(args[1]) if len(args) > 1 else 2
+
+        if target_date is None:
+            target_date = datetime.now().strftime('%Y-%m-%d')
+            logger.info(f"No date specified, using today: {target_date}")
+
+        logger.info(f"\nAnalyzing up to {max_analyze} tickers for {target_date}")
+        logger.warning(f"This will make API calls (estimated cost: ${0.05 * max_analyze:.2f})")
+        logger.info("")
+
+        if not skip_confirm:
+            confirmation = input("Continue? (y/n): ")
+            if confirmation.lower() != 'y':
+                logger.info("Aborted.")
+                exit()
+        else:
+            logger.info("Auto-confirmed with --yes flag")
+
+        # Run calendar-based analysis
+        result = analyzer.analyze_daily_earnings(target_date, max_analyze)
 
     # Generate and display report
     report = analyzer.generate_report(result)
@@ -383,7 +539,7 @@ if __name__ == "__main__":
     logger.info(report)
 
     # Optionally save to file
-    output_file = f"data/earnings_analysis_{target_date}.txt"
+    output_file = f"data/earnings_analysis_{result['date']}.txt"
     with open(output_file, 'w') as f:
         f.write(report)
 
