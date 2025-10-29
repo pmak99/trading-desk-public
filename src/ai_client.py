@@ -215,11 +215,11 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    print()
-    print('='*70)
-    print('AI CLIENT - TESTING FALLBACK CASCADE')
-    print('='*70)
-    print()
+    logger.info("")
+    logger.info('='*70)
+    logger.info('AI CLIENT - TESTING FALLBACK CASCADE')
+    logger.info('='*70)
+    logger.info("")
 
     test_prompt = sys.argv[1] if len(sys.argv) > 1 else "Explain IV crush in options trading in 50 words."
 
@@ -232,17 +232,17 @@ if __name__ == "__main__":
             use_case="sentiment"
         )
 
-        print(f"Model: {result['model']} ({result['provider']})")
-        print(f"Cost: ${result['cost']:.4f}")
-        print(f"Tokens: {result['tokens_used']}")
-        print()
-        print("Response:")
-        print(result['content'])
+        logger.info(f"Model: {result['model']} ({result['provider']})")
+        logger.info(f"Cost: ${result['cost']:.4f}")
+        logger.info(f"Tokens: {result['tokens_used']}")
+        logger.info("")
+        logger.info("Response:")
+        logger.info(result['content'])
 
     except BudgetExceededError as e:
-        print(f"❌ Budget exceeded: {e}")
+        logger.info(f"❌ Budget exceeded: {e}")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        logger.info(f"❌ Error: {e}")
 
-    print()
-    print('='*70)
+    logger.info("")
+    logger.info('='*70)

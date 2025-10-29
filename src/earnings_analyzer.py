@@ -14,12 +14,12 @@ Output: Complete research report for manual trade execution on Fidelity
 
 import logging
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import sys
+from multiprocessing import Pool, cpu_count
 
 from src.earnings_calendar import EarningsCalendar
 from src.ticker_filter import TickerFilter
-from src.options_data_client import OptionsDataClient
 from src.sentiment_analyzer import SentimentAnalyzer
 from src.strategy_generator import StrategyGenerator
 
@@ -29,6 +29,71 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def _analyze_single_ticker(args: Tuple[str, Dict, str]) -> Dict:
+    """
+    Standalone function for multiprocessing - analyzes a single ticker.
+
+    Args:
+        args: Tuple of (ticker, ticker_data, earnings_date)
+
+    Returns:
+        Complete analysis dict
+    """
+    ticker, ticker_data, earnings_date = args
+
+    try:
+        # Initialize clients within worker process
+        sentiment_analyzer = SentimentAnalyzer(preferred_model="sonar-pro")
+        strategy_generator = StrategyGenerator(preferred_model="sonar-pro")
+
+        analysis = {
+            'ticker': ticker,
+            'earnings_date': earnings_date,
+            'price': ticker_data.get('price', 0),
+            'score': ticker_data.get('score', 0),
+            'options_data': ticker_data.get('options_data', {}),
+            'sentiment': {},
+            'strategies': []
+        }
+
+        # Get sentiment analysis
+        try:
+            logger.info(f"{ticker}: Fetching sentiment...")
+            sentiment = sentiment_analyzer.analyze_earnings_sentiment(ticker, earnings_date)
+            analysis['sentiment'] = sentiment
+        except Exception as e:
+            logger.error(f"{ticker}: Sentiment analysis failed: {e}")
+
+        # Generate strategies
+        if analysis['options_data'] and analysis['sentiment']:
+            try:
+                logger.info(f"{ticker}: Generating strategies...")
+                strategies = strategy_generator.generate_strategies(
+                    ticker,
+                    analysis['options_data'],
+                    analysis['sentiment'],
+                    ticker_data
+                )
+                analysis['strategies'] = strategies
+            except Exception as e:
+                logger.error(f"{ticker}: Strategy generation failed: {e}")
+
+        return analysis
+
+    except Exception as e:
+        logger.error(f"{ticker}: Full analysis failed: {e}")
+        return {
+            'ticker': ticker,
+            'earnings_date': earnings_date,
+            'price': ticker_data.get('price', 0),
+            'score': ticker_data.get('score', 0),
+            'options_data': {},
+            'sentiment': {},
+            'strategies': [],
+            'error': str(e)
+        }
 
 
 class EarningsAnalyzer:
@@ -44,30 +109,14 @@ class EarningsAnalyzer:
     """
 
     def __init__(self):
-        """Initialize all Phase 2 components."""
+        """Initialize earnings analyzer components."""
         logger.info("Initializing Earnings Analyzer...")
 
         self.earnings_calendar = EarningsCalendar()
         self.ticker_filter = TickerFilter()
 
-        # Optional components (graceful degradation if unavailable)
-        try:
-            self.options_client = OptionsDataClient()
-        except Exception as e:
-            logger.warning(f"Options client unavailable: {e}")
-            self.options_client = None
-
-        try:
-            self.sentiment_analyzer = SentimentAnalyzer(model="sonar-pro")
-        except Exception as e:
-            logger.warning(f"Sentiment analyzer unavailable: {e}")
-            self.sentiment_analyzer = None
-
-        try:
-            self.strategy_generator = StrategyGenerator(model="sonar-pro")
-        except Exception as e:
-            logger.warning(f"Strategy generator unavailable: {e}")
-            self.strategy_generator = None
+        # Note: Sentiment analyzer and strategy generator are initialized
+        # in worker processes for thread-safe parallel processing
 
     def analyze_daily_earnings(self, target_date: str = None, max_analyze: int = 2) -> Dict:
         """
@@ -126,21 +175,39 @@ class EarningsAnalyzer:
 
         logger.info(f"Filtered to {filtered_count} tickers passing IV Rank criteria")
 
-        # Step 3: Full analysis for top tickers (limited by max_analyze)
-        ticker_analyses = []
-        analyzed_count = 0
+        # Step 3: Full analysis for top tickers (parallel processing)
+        tickers_to_analyze = filtered_tickers[:max_analyze]
 
-        for ticker_data in filtered_tickers[:max_analyze]:
-            ticker = ticker_data['ticker']
-            logger.info(f"Running full analysis for {ticker}...")
+        if not tickers_to_analyze:
+            return {
+                'date': target_date,
+                'total_earnings': total_count,
+                'filtered_count': filtered_count,
+                'analyzed_count': 0,
+                'ticker_analyses': []
+            }
 
-            try:
-                analysis = self._analyze_ticker(ticker, ticker_data, target_date)
-                ticker_analyses.append(analysis)
-                analyzed_count += 1
-            except Exception as e:
-                logger.error(f"Error analyzing {ticker}: {e}")
-                continue
+        logger.info(f"Analyzing {len(tickers_to_analyze)} tickers in parallel...")
+
+        # Prepare arguments for parallel processing
+        analysis_args = [
+            (ticker_data['ticker'], ticker_data, target_date)
+            for ticker_data in tickers_to_analyze
+        ]
+
+        # Use multiprocessing for parallel analysis
+        # Limit workers to avoid overwhelming APIs
+        num_workers = min(cpu_count(), len(tickers_to_analyze), 4)
+        logger.info(f"Using {num_workers} parallel workers")
+
+        with Pool(processes=num_workers) as pool:
+            ticker_analyses = pool.map(_analyze_single_ticker, analysis_args)
+
+        # Filter out failed analyses
+        ticker_analyses = [a for a in ticker_analyses if not a.get('error')]
+        analyzed_count = len(ticker_analyses)
+
+        logger.info(f"Successfully analyzed {analyzed_count}/{len(tickers_to_analyze)} tickers")
 
         return {
             'date': target_date,
@@ -149,53 +216,6 @@ class EarningsAnalyzer:
             'analyzed_count': analyzed_count,
             'ticker_analyses': ticker_analyses
         }
-
-    def _analyze_ticker(self, ticker: str, ticker_data: Dict, earnings_date: str) -> Dict:
-        """
-        Run full analysis for a single ticker.
-
-        Args:
-            ticker: Ticker symbol
-            ticker_data: Basic ticker data from filter
-            earnings_date: Earnings date
-
-        Returns:
-            Complete analysis dict
-        """
-        analysis = {
-            'ticker': ticker,
-            'earnings_date': earnings_date,
-            'price': ticker_data.get('price', 0),
-            'score': ticker_data.get('score', 0),
-            'options_data': ticker_data.get('options_data', {}),
-            'sentiment': {},
-            'strategies': []
-        }
-
-        # Get sentiment analysis
-        if self.sentiment_analyzer:
-            try:
-                logger.info(f"{ticker}: Fetching sentiment...")
-                sentiment = self.sentiment_analyzer.analyze_earnings_sentiment(ticker, earnings_date)
-                analysis['sentiment'] = sentiment
-            except Exception as e:
-                logger.error(f"{ticker}: Sentiment analysis failed: {e}")
-
-        # Generate strategies
-        if self.strategy_generator and analysis['options_data'] and analysis['sentiment']:
-            try:
-                logger.info(f"{ticker}: Generating strategies...")
-                strategies = self.strategy_generator.generate_strategies(
-                    ticker,
-                    analysis['options_data'],
-                    analysis['sentiment'],
-                    ticker_data
-                )
-                analysis['strategies'] = strategies
-            except Exception as e:
-                logger.error(f"{ticker}: Strategy generation failed: {e}")
-
-        return analysis
 
     def generate_report(self, analysis_result: Dict) -> str:
         """
@@ -285,11 +305,11 @@ class EarningsAnalyzer:
 
 # CLI
 if __name__ == "__main__":
-    print()
-    print('='*80)
-    print('EARNINGS TRADE ANALYZER - AUTOMATED RESEARCH SYSTEM')
-    print('='*80)
-    print()
+    logger.info("")
+    logger.info('='*80)
+    logger.info('EARNINGS TRADE ANALYZER - AUTOMATED RESEARCH SYSTEM')
+    logger.info('='*80)
+    logger.info("")
 
     # Parse arguments
     skip_confirm = '--yes' in sys.argv or '-y' in sys.argv
@@ -300,19 +320,19 @@ if __name__ == "__main__":
 
     if target_date is None:
         target_date = datetime.now().strftime('%Y-%m-%d')
-        print(f"No date specified, using today: {target_date}")
+        logger.info(f"No date specified, using today: {target_date}")
 
-    print(f"\nAnalyzing up to {max_analyze} tickers for {target_date}")
-    print(f"WARNING: This will make API calls (estimated cost: ${0.05 * max_analyze:.2f})")
-    print()
+    logger.info(f"\nAnalyzing up to {max_analyze} tickers for {target_date}")
+    logger.warning(f"This will make API calls (estimated cost: ${0.05 * max_analyze:.2f})")
+    logger.info("")
 
     if not skip_confirm:
         confirmation = input("Continue? (y/n): ")
         if confirmation.lower() != 'y':
-            print("Aborted.")
+            logger.info("Aborted.")
             exit()
     else:
-        print("Auto-confirmed with --yes flag")
+        logger.info("Auto-confirmed with --yes flag")
 
     # Run analysis
     analyzer = EarningsAnalyzer()
@@ -320,12 +340,12 @@ if __name__ == "__main__":
 
     # Generate and display report
     report = analyzer.generate_report(result)
-    print("\n\n")
-    print(report)
+    logger.info("\n\n")
+    logger.info(report)
 
     # Optionally save to file
     output_file = f"data/earnings_analysis_{target_date}.txt"
     with open(output_file, 'w') as f:
         f.write(report)
 
-    print(f"\n\nReport saved to: {output_file}")
+    logger.info(f"\n\nReport saved to: {output_file}")

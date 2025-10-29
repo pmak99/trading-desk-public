@@ -168,7 +168,7 @@ Focus on actionable intelligence for an options trader looking to sell premium (
         Make AI API request with automatic fallback.
 
         Uses unified AI client that automatically falls back from:
-        Perplexity → Claude → Gemini when budget limits are reached.
+        Perplexity → Gemini when budget limits are reached.
 
         Args:
             prompt: Prompt string
@@ -305,13 +305,15 @@ Focus on actionable intelligence for an options trader looking to sell premium (
 
 # CLI for testing
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
     import sys
 
-    print()
-    print('='*70)
-    print('SONAR PRO + REDDIT SENTIMENT ANALYZER')
-    print('='*70)
-    print()
+    logger.info("")
+    logger.info('='*70)
+    logger.info('SONAR PRO + REDDIT SENTIMENT ANALYZER')
+    logger.info('='*70)
+    logger.info("")
 
     # Test with a ticker
     test_ticker = sys.argv[1] if len(sys.argv) > 1 else 'NVDA'
@@ -319,42 +321,42 @@ if __name__ == "__main__":
 
     analyzer = SentimentAnalyzer(preferred_model="sonar-pro")
 
-    print(f"Analyzing sentiment for: {test_ticker}")
+    logger.info(f"Analyzing sentiment for: {test_ticker}")
     if test_date:
-        print(f"Earnings date: {test_date}")
-    print()
+        logger.info(f"Earnings date: {test_date}")
+    logger.info("")
 
     result = analyzer.analyze_earnings_sentiment(test_ticker, test_date)
 
-    print("SENTIMENT ANALYSIS RESULTS:")
-    print('='*70)
-    print(f"\nOverall Sentiment: {result['overall_sentiment'].upper()}")
-    print(f"\nRetail Sentiment:\n{result['retail_sentiment']}")
-    print(f"\nInstitutional Sentiment:\n{result['institutional_sentiment']}")
-    print(f"\nHedge Fund Sentiment:\n{result['hedge_fund_sentiment']}")
+    logger.info("SENTIMENT ANALYSIS RESULTS:")
+    logger.info('='*70)
+    logger.info(f"\nOverall Sentiment: {result['overall_sentiment'].upper()}")
+    logger.info(f"\nRetail Sentiment:\n{result['retail_sentiment']}")
+    logger.info(f"\nInstitutional Sentiment:\n{result['institutional_sentiment']}")
+    logger.info(f"\nHedge Fund Sentiment:\n{result['hedge_fund_sentiment']}")
 
     if result['tailwinds']:
-        print(f"\nTailwinds:")
+        logger.info(f"\nTailwinds:")
         for tw in result['tailwinds']:
-            print(f"  + {tw}")
+            logger.info(f"  + {tw}")
 
     if result['headwinds']:
-        print(f"\nHeadwinds:")
+        logger.info(f"\nHeadwinds:")
         for hw in result['headwinds']:
-            print(f"  - {hw}")
+            logger.info(f"  - {hw}")
 
-    print(f"\nUnusual Activity:\n{result['unusual_activity']}")
-    print(f"\nGuidance History:\n{result['guidance_history']}")
-    print(f"\nMacro & Sector:\n{result['macro_sector']}")
+    logger.info(f"\nUnusual Activity:\n{result['unusual_activity']}")
+    logger.info(f"\nGuidance History:\n{result['guidance_history']}")
+    logger.info(f"\nMacro & Sector:\n{result['macro_sector']}")
 
     # Display Reddit data
     reddit = result.get('reddit_data', {})
     if reddit.get('posts_found', 0) > 0:
-        print(f"\n\nREDDIT SENTIMENT:")
-        print(f"  Posts Found: {reddit['posts_found']}")
-        print(f"  Sentiment Score: {reddit['sentiment_score']:.2f} (-1.0 to 1.0)")
-        print(f"  Avg Post Score: {reddit['avg_score']:.1f}")
-        print(f"  Total Comments: {reddit['total_comments']}")
+        logger.info(f"\n\nREDDIT SENTIMENT:")
+        logger.info(f"  Posts Found: {reddit['posts_found']}")
+        logger.info(f"  Sentiment Score: {reddit['sentiment_score']:.2f} (-1.0 to 1.0)")
+        logger.info(f"  Avg Post Score: {reddit['avg_score']:.1f}")
+        logger.info(f"  Total Comments: {reddit['total_comments']}")
 
-    print()
-    print('='*70)
+    logger.info("")
+    logger.info('='*70)

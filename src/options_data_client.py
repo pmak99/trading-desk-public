@@ -391,44 +391,46 @@ class OptionsDataClient:
 
 # CLI for testing
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
     import sys
 
-    print()
-    print('='*70)
-    print('OPTIONS DATA CLIENT (yfinance)')
-    print('='*70)
-    print()
+    logger.info("")
+    logger.info('='*70)
+    logger.info('OPTIONS DATA CLIENT (yfinance)')
+    logger.info('='*70)
+    logger.info("")
 
     # Test with a ticker
     test_ticker = sys.argv[1] if len(sys.argv) > 1 else 'AAPL'
 
     client = OptionsDataClient()
 
-    print(f"Testing with ticker: {test_ticker}")
-    print()
+    logger.info(f"Testing with ticker: {test_ticker}")
+    logger.info("")
 
     options_data = client.get_options_data(test_ticker)
 
     if options_data:
-        print("OPTIONS DATA:")
-        print(f"  IV Rank: {options_data.get('iv_rank', 'N/A')}% (using RV as proxy)")
-        print(f"  IV Percentile: {options_data.get('iv_percentile', 'N/A')}%")
-        print(f"  Current IV: {options_data.get('current_iv', 'N/A')}")
-        print(f"  Expected Move: ${options_data.get('expected_move', 'N/A')} ({options_data.get('expected_move_pct', 'N/A')}%)")
-        print(f"  Options Volume: {options_data.get('options_volume', 'N/A'):,}")
-        print(f"  Open Interest: {options_data.get('open_interest', 'N/A'):,}")
-        print(f"  Bid-Ask Spread: {options_data.get('bid_ask_spread_pct', 'N/A')}")
-        print(f"  IV Crush Ratio: {options_data.get('iv_crush_ratio', 'N/A')}")
-        print(f"  Avg Actual Move: {options_data.get('avg_actual_move_pct', 'N/A')}%")
+        logger.info("OPTIONS DATA:")
+        logger.info(f"  IV Rank: {options_data.get('iv_rank', 'N/A')}% (using RV as proxy)")
+        logger.info(f"  IV Percentile: {options_data.get('iv_percentile', 'N/A')}%")
+        logger.info(f"  Current IV: {options_data.get('current_iv', 'N/A')}")
+        logger.info(f"  Expected Move: ${options_data.get('expected_move', 'N/A')} ({options_data.get('expected_move_pct', 'N/A')}%)")
+        logger.info(f"  Options Volume: {options_data.get('options_volume', 'N/A'):,}")
+        logger.info(f"  Open Interest: {options_data.get('open_interest', 'N/A'):,}")
+        logger.info(f"  Bid-Ask Spread: {options_data.get('bid_ask_spread_pct', 'N/A')}")
+        logger.info(f"  IV Crush Ratio: {options_data.get('iv_crush_ratio', 'N/A')}")
+        logger.info(f"  Avg Actual Move: {options_data.get('avg_actual_move_pct', 'N/A')}%")
 
         if options_data.get('historical_moves'):
-            print(f"\nHistorical Earnings Moves (Last {len(options_data['historical_moves'])} quarters):")
+            logger.info(f"\nHistorical Earnings Moves (Last {len(options_data['historical_moves'])} quarters):")
             for move in options_data['historical_moves']:
-                print(f"  {move['date']}: {move['actual_move_pct']}%")
+                logger.info(f"  {move['date']}: {move['actual_move_pct']}%")
     else:
-        print("Failed to fetch options data")
+        logger.info("Failed to fetch options data")
 
-    print()
-    print('='*70)
-    print(f"yfinance calls made: {client.calls_made} (unlimited free)")
-    print('='*70)
+    logger.info("")
+    logger.info('='*70)
+    logger.info(f"yfinance calls made: {client.calls_made} (unlimited free)")
+    logger.info('='*70)

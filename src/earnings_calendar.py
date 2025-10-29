@@ -265,33 +265,35 @@ class EarningsCalendar:
 
 # CLI for testing
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
     from datetime import datetime
 
     calendar = EarningsCalendar()
 
-    print()
-    print('='*70)
-    print('EARNINGS CALENDAR - THIS WEEK')
-    print('='*70)
-    print()
+    logger.info("")
+    logger.info('='*70)
+    logger.info('EARNINGS CALENDAR - THIS WEEK')
+    logger.info('='*70)
+    logger.info("")
 
     # Get this week's earnings
     week_earnings = calendar.get_week_earnings(days=7)
 
     if not week_earnings:
-        print("No earnings found for this week.")
+        logger.info("No earnings found for this week.")
     else:
         total_earnings = sum(len(earnings) for earnings in week_earnings.values())
-        print(f"Found {total_earnings} total earnings across {len(week_earnings)} days")
-        print()
+        logger.info(f"Found {total_earnings} total earnings across {len(week_earnings)} days")
+        logger.info("")
 
         for date_str, earnings in week_earnings.items():
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
             day_name = date_obj.strftime('%A, %B %d, %Y')
 
-            print(f"\n{day_name}")
-            print('-' * 70)
-            print(f"Total: {len(earnings)} companies reporting")
+            logger.info(f"\n{day_name}")
+            logger.info('-' * 70)
+            logger.info(f"Total: {len(earnings)} companies reporting")
 
             # Show first 10 for each day
             for i, earning in enumerate(earnings[:10], 1):
@@ -299,10 +301,10 @@ if __name__ == "__main__":
                 company = earning['company'][:40] if earning['company'] else 'N/A'
                 time = earning['time']
 
-                print(f"{i:2d}. {ticker:6s} - {company:40s} ({time})")
+                logger.info(f"{i:2d}. {ticker:6s} - {company:40s} ({time})")
 
             if len(earnings) > 10:
-                print(f"    ... and {len(earnings) - 10} more")
+                logger.info(f"    ... and {len(earnings) - 10} more")
 
-    print()
-    print('='*70)
+    logger.info("")
+    logger.info('='*70)

@@ -97,11 +97,13 @@ class RedditScraper:
 
 # CLI for testing
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
     scraper = RedditScraper()
     result = scraper.get_ticker_sentiment("NVDA")
 
-    print(f"\nReddit sentiment for {result['ticker']}:")
-    print(f"Posts found: {result['posts_found']}")
-    print(f"Sentiment score: {result['sentiment_score']:.2f}")
-    print(f"Avg score: {result['avg_score']:.1f}")
-    print(f"Total comments: {result['total_comments']}")
+    logger.info(f"\nReddit sentiment for {result['ticker']}:")
+    logger.info(f"Posts found: {result['posts_found']}")
+    logger.info(f"Sentiment score: {result['sentiment_score']:.2f}")
+    logger.info(f"Avg score: {result['avg_score']:.1f}")
+    logger.info(f"Total comments: {result['total_comments']}")

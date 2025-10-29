@@ -1,7 +1,7 @@
 """
 AI-powered strategy generator for earnings trades.
 
-Uses unified AI client with automatic fallback (Perplexity → Claude → Gemini).
+Uses unified AI client with automatic fallback (Perplexity → Gemini).
 
 Generates 3-4 trade strategies based on Trading Research Prompt.pdf criteria:
 - Bull put spreads, bear call spreads, iron condors, iron butterflies
@@ -28,7 +28,7 @@ class StrategyGenerator:
         Args:
             preferred_model: Preferred model to use (auto-fallback if budget exceeded)
                             - "sonar-pro": Fast, cheap ($5/1M tokens) - default
-                            - Falls back to Claude → Gemini when Perplexity exhausted
+                            - Falls back to Gemini when Perplexity exhausted
             usage_tracker: Optional UsageTracker instance for cost control
         """
         self.preferred_model = preferred_model
@@ -184,7 +184,7 @@ Keep response under 800 words total. Be specific with numbers."""
         Make AI API request with automatic fallback.
 
         Uses unified AI client that automatically falls back from:
-        Perplexity → Claude → Gemini when budget limits are reached.
+        Perplexity → Gemini when budget limits are reached.
 
         Args:
             prompt: Prompt string
@@ -334,35 +334,37 @@ Keep response under 800 words total. Be specific with numbers."""
 
 # CLI for testing
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
     import sys
     from src.alpha_vantage_client import AlphaVantageClient
     from src.sentiment_analyzer import SentimentAnalyzer
 
-    print()
-    print('='*70)
-    print('GPT-5 STRATEGY GENERATOR')
-    print('='*70)
-    print()
+    logger.info("")
+    logger.info('='*70)
+    logger.info('GPT-5 STRATEGY GENERATOR')
+    logger.info('='*70)
+    logger.info("")
 
     # Test with a ticker
     test_ticker = sys.argv[1] if len(sys.argv) > 1 else 'NVDA'
 
-    print(f"WARNING: This will make API calls to OpenAI (cost: ~$0.02-0.05)")
-    print(f"Testing with ticker: {test_ticker}")
-    print()
+    logger.info(f"WARNING: This will make API calls to OpenAI (cost: ~$0.02-0.05)")
+    logger.info(f"Testing with ticker: {test_ticker}")
+    logger.info("")
 
     confirmation = input("Continue? (y/n): ")
     if confirmation.lower() != 'y':
-        print("Aborted.")
+        logger.info("Aborted.")
         exit()
 
     # Get options data
-    print("\nFetching options data...")
+    logger.info("\nFetching options data...")
     options_client = AlphaVantageClient()
     options_data = options_client.get_options_data(test_ticker)
 
     # Get sentiment data
-    print("Fetching sentiment data...")
+    logger.info("Fetching sentiment data...")
     sentiment_client = SentimentAnalyzer()
     sentiment_data = sentiment_client.analyze_earnings_sentiment(test_ticker)
 
@@ -370,34 +372,34 @@ if __name__ == "__main__":
     ticker_data = {'price': 195.0, 'market_cap': 3000e9}
 
     # Generate strategies
-    print("\nGenerating strategies...")
+    logger.info("\nGenerating strategies...")
     generator = StrategyGenerator()
     result = generator.generate_strategies(test_ticker, options_data, sentiment_data, ticker_data)
 
     if result['strategies']:
-        print("\nGENERATED STRATEGIES:")
-        print('='*70)
+        logger.info("\nGENERATED STRATEGIES:")
+        logger.info('='*70)
 
         for i, strategy in enumerate(result['strategies'], 1):
-            print(f"\nSTRATEGY {i}: {strategy['name']}")
-            print(f"  Type: {strategy['type']}")
-            print(f"  Strikes: {strategy['strikes']}")
-            print(f"  Expiration: {strategy['expiration']}")
-            print(f"  Credit/Debit: {strategy['credit_debit']}")
-            print(f"  Max Profit: {strategy['max_profit']}")
-            print(f"  Max Loss: {strategy['max_loss']}")
-            print(f"  Breakeven: {strategy['breakeven']}")
-            print(f"  POP: {strategy['probability_of_profit']}")
-            print(f"  Contracts: {strategy['contract_count']}")
-            print(f"  Scores: Profit {strategy['profitability_score']} / Risk {strategy['risk_score']}")
-            print(f"  Rationale: {strategy['rationale']}")
+            logger.info(f"\nSTRATEGY {i}: {strategy['name']}")
+            logger.info(f"  Type: {strategy['type']}")
+            logger.info(f"  Strikes: {strategy['strikes']}")
+            logger.info(f"  Expiration: {strategy['expiration']}")
+            logger.info(f"  Credit/Debit: {strategy['credit_debit']}")
+            logger.info(f"  Max Profit: {strategy['max_profit']}")
+            logger.info(f"  Max Loss: {strategy['max_loss']}")
+            logger.info(f"  Breakeven: {strategy['breakeven']}")
+            logger.info(f"  POP: {strategy['probability_of_profit']}")
+            logger.info(f"  Contracts: {strategy['contract_count']}")
+            logger.info(f"  Scores: Profit {strategy['profitability_score']} / Risk {strategy['risk_score']}")
+            logger.info(f"  Rationale: {strategy['rationale']}")
 
-        print(f"\nRECOMMENDED: Strategy {result['recommended_strategy'] + 1}")
-        print(f"Why: {result['recommendation_rationale']}")
+        logger.info(f"\nRECOMMENDED: Strategy {result['recommended_strategy'] + 1}")
+        logger.info(f"Why: {result['recommendation_rationale']}")
     else:
-        print("Failed to generate strategies")
+        logger.info("Failed to generate strategies")
 
-    print()
-    print('='*70)
-    print(f"API calls made: {generator.calls_made}")
-    print('='*70)
+    logger.info("")
+    logger.info('='*70)
+    logger.info(f"API calls made: {generator.calls_made}")
+    logger.info('='*70)

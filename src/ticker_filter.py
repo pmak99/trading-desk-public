@@ -414,21 +414,23 @@ class TickerFilter:
 
 # CLI for testing
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
     from src.earnings_calendar import EarningsCalendar
     from collections import defaultdict
 
-    print()
-    print('='*70)
-    print('TICKER FILTER - SELECT BEST EARNINGS CANDIDATES')
-    print('='*70)
-    print()
+    logger.info("")
+    logger.info('='*70)
+    logger.info('TICKER FILTER - SELECT BEST EARNINGS CANDIDATES')
+    logger.info('='*70)
+    logger.info("")
 
     # Get this week's earnings
     calendar = EarningsCalendar()
     week_earnings = calendar.get_week_earnings(days=7)
 
     if not week_earnings:
-        print("No earnings found for this week.")
+        logger.info("No earnings found for this week.")
         exit()
 
     filter_system = TickerFilter()
@@ -438,10 +440,10 @@ if __name__ == "__main__":
         date_obj = datetime.strptime(date_str, '%Y-%m-%d')
         day_name = date_obj.strftime('%A, %B %d, %Y')
 
-        print(f"\n{day_name}")
-        print('='*70)
-        print(f"Total earnings: {len(earnings)} companies")
-        print()
+        logger.info(f"\n{day_name}")
+        logger.info('='*70)
+        logger.info(f"Total earnings: {len(earnings)} companies")
+        logger.info("")
 
         # Separate by timing
         by_timing = defaultdict(list)
@@ -454,13 +456,13 @@ if __name__ == "__main__":
             elif 'after-hours' in time:
                 by_timing['after_hours'].append(ticker)
 
-        print(f"Pre-market: {len(by_timing['pre_market'])} tickers")
-        print(f"After-hours: {len(by_timing['after_hours'])} tickers")
-        print()
+        logger.info(f"Pre-market: {len(by_timing['pre_market'])} tickers")
+        logger.info(f"After-hours: {len(by_timing['after_hours'])} tickers")
+        logger.info("")
 
         # Select best candidates (2 pre-market + 3 after-hours)
-        print("Analyzing and scoring tickers...")
-        print()
+        logger.info("Analyzing and scoring tickers...")
+        logger.info("")
 
         selected = filter_system.select_daily_candidates(
             by_timing,
@@ -469,29 +471,29 @@ if __name__ == "__main__":
         )
 
         # Display results
-        print("\n🏆 SELECTED CANDIDATES (2 pre-market + 3 after-hours)")
-        print('-'*70)
+        logger.info("\n🏆 SELECTED CANDIDATES (2 pre-market + 3 after-hours)")
+        logger.info('-'*70)
 
         if selected['pre_market']:
-            print("\nPRE-MARKET (Top 2):")
+            logger.info("\nPRE-MARKET (Top 2):")
             for i, ticker_data in enumerate(selected['pre_market'], 1):
-                print(f"{i}. {ticker_data['ticker']:6s} - Score: {ticker_data['score']:5.1f}")
-                print(f"   Market Cap: ${ticker_data['market_cap']/1e9:.1f}B")
-                print(f"   Volume: {ticker_data['volume']:,} (Avg: {ticker_data['avg_volume']:,})")
-                print(f"   Price: ${ticker_data['price']:.2f}")
+                logger.info(f"{i}. {ticker_data['ticker']:6s} - Score: {ticker_data['score']:5.1f}")
+                logger.info(f"   Market Cap: ${ticker_data['market_cap']/1e9:.1f}B")
+                logger.info(f"   Volume: {ticker_data['volume']:,} (Avg: {ticker_data['avg_volume']:,})")
+                logger.info(f"   Price: ${ticker_data['price']:.2f}")
 
         if selected['after_hours']:
-            print("\nAFTER-HOURS (Top 3):")
+            logger.info("\nAFTER-HOURS (Top 3):")
             for i, ticker_data in enumerate(selected['after_hours'], 1):
-                print(f"{i}. {ticker_data['ticker']:6s} - Score: {ticker_data['score']:5.1f}")
-                print(f"   Market Cap: ${ticker_data['market_cap']/1e9:.1f}B")
-                print(f"   Volume: {ticker_data['volume']:,} (Avg: {ticker_data['avg_volume']:,})")
-                print(f"   Price: ${ticker_data['price']:.2f}")
+                logger.info(f"{i}. {ticker_data['ticker']:6s} - Score: {ticker_data['score']:5.1f}")
+                logger.info(f"   Market Cap: ${ticker_data['market_cap']/1e9:.1f}B")
+                logger.info(f"   Volume: {ticker_data['volume']:,} (Avg: {ticker_data['avg_volume']:,})")
+                logger.info(f"   Price: ${ticker_data['price']:.2f}")
 
-        print()
-        print('='*70)
-        print(f"\n✅ Selected {len(selected['pre_market']) + len(selected['after_hours'])} tickers for analysis")
-        print("   (2 pre-market + 3 after-hours = 5 total per day)")
-        print('='*70)
+        logger.info("")
+        logger.info('='*70)
+        logger.info(f"\n✅ Selected {len(selected['pre_market']) + len(selected['after_hours'])} tickers for analysis")
+        logger.info("   (2 pre-market + 3 after-hours = 5 total per day)")
+        logger.info('='*70)
 
         break  # Just show first day for demo

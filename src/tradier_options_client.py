@@ -409,44 +409,46 @@ class TradierOptionsClient:
 
 # CLI for testing
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
     import sys
 
-    print()
-    print('='*70)
-    print('TRADIER OPTIONS CLIENT - REAL IV RANK DATA')
-    print('='*70)
-    print()
+    logger.info("")
+    logger.info('='*70)
+    logger.info('TRADIER OPTIONS CLIENT - REAL IV RANK DATA')
+    logger.info('='*70)
+    logger.info("")
 
     test_ticker = sys.argv[1] if len(sys.argv) > 1 else 'AAPL'
 
-    print(f"Testing with ticker: {test_ticker}")
-    print()
+    logger.info(f"Testing with ticker: {test_ticker}")
+    logger.info("")
 
     client = TradierOptionsClient()
 
     if not client.is_available():
-        print("❌ Tradier API not configured")
-        print("Set TRADIER_ACCESS_TOKEN in .env file")
+        logger.info("❌ Tradier API not configured")
+        logger.info("Set TRADIER_ACCESS_TOKEN in .env file")
         exit(1)
 
-    print("✓ Tradier API configured")
-    print(f"  Endpoint: {client.endpoint}")
-    print()
+    logger.info("✓ Tradier API configured")
+    logger.info(f"  Endpoint: {client.endpoint}")
+    logger.info("")
 
-    print("Fetching options data...")
+    logger.info("Fetching options data...")
     data = client.get_options_data(test_ticker)
 
     if data:
-        print()
-        print("OPTIONS DATA:")
-        print(f"  IV Rank: {data.get('iv_rank', 'N/A')}%")
-        print(f"  IV Percentile: {data.get('iv_percentile', 'N/A')}%")
-        print(f"  Current IV: {data.get('current_iv', 'N/A')}%")
-        print(f"  Expected Move: {data.get('expected_move_pct', 'N/A')}%")
-        print(f"  Options Volume: {data.get('options_volume', 0):,}")
-        print(f"  Open Interest: {data.get('open_interest', 0):,}")
+        logger.info("")
+        logger.info("OPTIONS DATA:")
+        logger.info(f"  IV Rank: {data.get('iv_rank', 'N/A')}%")
+        logger.info(f"  IV Percentile: {data.get('iv_percentile', 'N/A')}%")
+        logger.info(f"  Current IV: {data.get('current_iv', 'N/A')}%")
+        logger.info(f"  Expected Move: {data.get('expected_move_pct', 'N/A')}%")
+        logger.info(f"  Options Volume: {data.get('options_volume', 0):,}")
+        logger.info(f"  Open Interest: {data.get('open_interest', 0):,}")
     else:
-        print("❌ Failed to fetch data")
+        logger.info("❌ Failed to fetch data")
 
-    print()
-    print('='*70)
+    logger.info("")
+    logger.info('='*70)
