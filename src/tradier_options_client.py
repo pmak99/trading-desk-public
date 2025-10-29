@@ -187,11 +187,8 @@ class TradierOptionsClient:
             current_iv = 0
             if atm_call and 'greeks' in atm_call:
                 # Use mid_iv from ATM call (most liquid and representative)
-                current_iv = atm_call['greeks'].get('mid_iv', 0)
-
-            # Convert from decimal to percentage if needed
-            if 0 < current_iv < 1:
-                current_iv = current_iv * 100
+                # Tradier returns IV as whole percentage (e.g., 1.23 = 123%, 0.50 = 50%)
+                current_iv = atm_call['greeks'].get('mid_iv', 0) * 100
 
             # TODO: Calculate IV Rank from 52-week IV history
             # For now, return 0 - this requires building a historical IV database
