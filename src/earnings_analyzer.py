@@ -25,6 +25,7 @@ from src.earnings_calendar import EarningsCalendar
 from src.ticker_filter import TickerFilter
 from src.sentiment_analyzer import SentimentAnalyzer
 from src.strategy_generator import StrategyGenerator
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -145,27 +146,19 @@ class EarningsAnalyzer:
         # Note: Sentiment analyzer and strategy generator are initialized
         # in worker processes for thread-safe parallel processing
 
-    def analyze_specific_tickers(self, tickers: list, earnings_date: str = None, override_daily_limit: bool = False) -> Dict:
+    def _validate_earnings_date(self, earnings_date: str = None) -> str:
         """
-        Analyze specific tickers directly (bypass calendar scanning).
-
-        Useful when you have specific tickers in mind for earnings plays.
+        Validate and normalize earnings date.
 
         Args:
-            tickers: List of ticker symbols (e.g., ['META', 'MSFT', 'GOOGL'])
-            earnings_date: Expected earnings date (YYYY-MM-DD), defaults to next trading day
-            override_daily_limit: If True, bypass daily API call limits (but still respect hard caps)
+            earnings_date: Earnings date string (YYYY-MM-DD) or None
 
         Returns:
-            Dict with:
-            - date: Earnings date used
-            - analyzed_count: Number of tickers analyzed
-            - ticker_analyses: List of full analyses
-            - failed_analyses: List of failed tickers
-        """
-        import yfinance as yf
+            Validated earnings date string (YYYY-MM-DD)
 
-        # Validate earnings_date format
+        Raises:
+            ValueError: If date format is invalid
+        """
         if earnings_date is not None:
             try:
                 # Validate format YYYY-MM-DD
@@ -180,17 +173,28 @@ class EarningsAnalyzer:
                 if days_out > 90:
                     logger.warning(f"Earnings date {earnings_date} is {days_out} days out - options may not exist")
 
+                return earnings_date
+
             except ValueError as e:
                 logger.error(f"Invalid earnings date format: {earnings_date}. Expected YYYY-MM-DD")
                 raise ValueError(f"Invalid earnings date format: {earnings_date}. Expected YYYY-MM-DD") from e
         else:
             # Default to next trading day
-            earnings_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-            logger.info(f"No earnings date provided, using next trading day: {earnings_date}")
+            default_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            logger.info(f"No earnings date provided, using next trading day: {default_date}")
+            return default_date
 
-        logger.info(f"Analyzing {len(tickers)} specific tickers for {earnings_date}")
+    def _validate_tradier_client(self, tickers: List[str], earnings_date: str) -> Optional[Dict]:
+        """
+        Validate that Tradier client is available.
 
-        # Validate Tradier client is available
+        Args:
+            tickers: List of tickers (for error reporting)
+            earnings_date: Earnings date (for error reporting)
+
+        Returns:
+            Error response dict if validation fails, None if successful
+        """
         if not self.ticker_filter.tradier_client or not self.ticker_filter.tradier_client.is_available():
             logger.error("Tradier client not available - cannot analyze in ticker list mode")
             logger.error("Set TRADIER_ACCESS_TOKEN in .env to use ticker list mode")
@@ -201,8 +205,23 @@ class EarningsAnalyzer:
                 'ticker_analyses': [],
                 'failed_analyses': [{'ticker': t, 'error': 'Tradier API not available'} for t in tickers]
             }
+        return None
 
-        # Get basic ticker data from yfinance
+    def _fetch_tickers_data(self, tickers: List[str], earnings_date: str) -> Tuple[List[Dict], List[str]]:
+        """
+        Fetch basic ticker data from yfinance and options data from Tradier.
+
+        Args:
+            tickers: List of ticker symbols
+            earnings_date: Earnings date for options selection
+
+        Returns:
+            Tuple of (tickers_data, failed_tickers)
+            - tickers_data: List of dicts with ticker info and options data
+            - failed_tickers: List of tickers that failed to fetch
+        """
+        import yfinance as yf
+
         tickers_data = []
         failed_tickers = []
 
@@ -245,19 +264,28 @@ class EarningsAnalyzer:
                 failed_tickers.append(ticker)
                 continue
 
-        if not tickers_data:
-            logger.warning(f"No valid tickers to analyze. Failed: {', '.join(failed_tickers) if failed_tickers else 'none'}")
-            return {
-                'date': earnings_date,
-                'analyzed_count': 0,
-                'failed_count': len(failed_tickers),
-                'ticker_analyses': [],
-                'failed_analyses': [{'ticker': t, 'error': 'Data fetch failed'} for t in failed_tickers]
-            }
+        return tickers_data, failed_tickers
 
-        # Prepare for parallel analysis
+    def _run_parallel_analysis(
+        self,
+        tickers_data: List[Dict],
+        earnings_date: str,
+        override_daily_limit: bool
+    ) -> List[Dict]:
+        """
+        Run parallel analysis on tickers using multiprocessing.
+
+        Args:
+            tickers_data: List of ticker data dicts
+            earnings_date: Earnings date
+            override_daily_limit: Whether to bypass daily API limits
+
+        Returns:
+            List of analysis results (may include errors)
+        """
         logger.info(f"Running full analysis on {len(tickers_data)} tickers...")
 
+        # Prepare arguments for parallel processing
         analysis_args = [
             (td['ticker'], td, earnings_date, override_daily_limit)
             for td in tickers_data
@@ -277,7 +305,18 @@ class EarningsAnalyzer:
             logger.error(f"Pool operation timed out after {timeout}s")
             ticker_analyses = []
 
-        # Separate successful and failed analyses
+        return ticker_analyses
+
+    def _process_analysis_results(self, ticker_analyses: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Separate successful and failed analyses.
+
+        Args:
+            ticker_analyses: List of analysis results from parallel processing
+
+        Returns:
+            Tuple of (successful_analyses, failed_analyses)
+        """
         successful_analyses = []
         failed_analyses = []
 
@@ -287,6 +326,55 @@ class EarningsAnalyzer:
                 logger.warning(f"❌ {analysis['ticker']}: {analysis['error']}")
             else:
                 successful_analyses.append(analysis)
+
+        return successful_analyses, failed_analyses
+
+    def analyze_specific_tickers(self, tickers: list, earnings_date: str = None, override_daily_limit: bool = False) -> Dict:
+        """
+        Analyze specific tickers directly (bypass calendar scanning).
+
+        Useful when you have specific tickers in mind for earnings plays.
+
+        Args:
+            tickers: List of ticker symbols (e.g., ['META', 'MSFT', 'GOOGL'])
+            earnings_date: Expected earnings date (YYYY-MM-DD), defaults to next trading day
+            override_daily_limit: If True, bypass daily API call limits (but still respect hard caps)
+
+        Returns:
+            Dict with:
+            - date: Earnings date used
+            - analyzed_count: Number of tickers analyzed
+            - ticker_analyses: List of full analyses
+            - failed_analyses: List of failed tickers
+        """
+        # Step 1: Validate earnings date
+        earnings_date = self._validate_earnings_date(earnings_date)
+
+        logger.info(f"Analyzing {len(tickers)} specific tickers for {earnings_date}")
+
+        # Step 2: Validate Tradier client is available
+        error_response = self._validate_tradier_client(tickers, earnings_date)
+        if error_response:
+            return error_response
+
+        # Step 3: Fetch ticker data
+        tickers_data, failed_tickers = self._fetch_tickers_data(tickers, earnings_date)
+
+        if not tickers_data:
+            logger.warning(f"No valid tickers to analyze. Failed: {', '.join(failed_tickers) if failed_tickers else 'none'}")
+            return {
+                'date': earnings_date,
+                'analyzed_count': 0,
+                'failed_count': len(failed_tickers),
+                'ticker_analyses': [],
+                'failed_analyses': [{'ticker': t, 'error': 'Data fetch failed'} for t in failed_tickers]
+            }
+
+        # Step 4: Run parallel analysis
+        ticker_analyses = self._run_parallel_analysis(tickers_data, earnings_date, override_daily_limit)
+
+        # Step 5: Process results
+        successful_analyses, failed_analyses = self._process_analysis_results(ticker_analyses)
 
         analyzed_count = len(successful_analyses)
         failed_count = len(failed_analyses)
