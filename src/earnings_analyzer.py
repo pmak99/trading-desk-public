@@ -27,17 +27,17 @@ from src.strategy_generator import StrategyGenerator
 logger = logging.getLogger(__name__)
 
 
-def _analyze_single_ticker(args: Tuple[str, Dict, str]) -> Dict:
+def _analyze_single_ticker(args: Tuple[str, Dict, str, bool]) -> Dict:
     """
     Standalone function for multiprocessing - analyzes a single ticker.
 
     Args:
-        args: Tuple of (ticker, ticker_data, earnings_date)
+        args: Tuple of (ticker, ticker_data, earnings_date, override_daily_limit)
 
     Returns:
         Complete analysis dict
     """
-    ticker, ticker_data, earnings_date = args
+    ticker, ticker_data, earnings_date, override_daily_limit = args
 
     try:
         # Initialize clients within worker process (use defaults from config)
@@ -57,7 +57,7 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str]) -> Dict:
         # Get sentiment analysis
         try:
             logger.info(f"{ticker}: Fetching sentiment...")
-            sentiment = sentiment_analyzer.analyze_earnings_sentiment(ticker, earnings_date)
+            sentiment = sentiment_analyzer.analyze_earnings_sentiment(ticker, earnings_date, override_daily_limit)
             analysis['sentiment'] = sentiment
         except Exception as e:
             error_msg = str(e)
@@ -79,7 +79,8 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str]) -> Dict:
                     ticker,
                     analysis['options_data'],
                     analysis['sentiment'],
-                    ticker_data
+                    ticker_data,
+                    override_daily_limit
                 )
                 analysis['strategies'] = strategies
             except Exception as e:
@@ -132,7 +133,7 @@ class EarningsAnalyzer:
         # Note: Sentiment analyzer and strategy generator are initialized
         # in worker processes for thread-safe parallel processing
 
-    def analyze_specific_tickers(self, tickers: list, earnings_date: str = None) -> Dict:
+    def analyze_specific_tickers(self, tickers: list, earnings_date: str = None, override_daily_limit: bool = False) -> Dict:
         """
         Analyze specific tickers directly (bypass calendar scanning).
 
@@ -141,6 +142,7 @@ class EarningsAnalyzer:
         Args:
             tickers: List of ticker symbols (e.g., ['META', 'MSFT', 'GOOGL'])
             earnings_date: Expected earnings date (YYYY-MM-DD), defaults to next trading day
+            override_daily_limit: If True, bypass daily API call limits (but still respect hard caps)
 
         Returns:
             Dict with:
@@ -245,7 +247,7 @@ class EarningsAnalyzer:
         logger.info(f"Running full analysis on {len(tickers_data)} tickers...")
 
         analysis_args = [
-            (td['ticker'], td, earnings_date)
+            (td['ticker'], td, earnings_date, override_daily_limit)
             for td in tickers_data
         ]
 
@@ -289,13 +291,14 @@ class EarningsAnalyzer:
             'failed_analyses': failed_analyses
         }
 
-    def analyze_daily_earnings(self, target_date: str = None, max_analyze: int = 2) -> Dict:
+    def analyze_daily_earnings(self, target_date: str = None, max_analyze: int = 2, override_daily_limit: bool = False) -> Dict:
         """
         Analyze earnings for a specific day and generate trade ideas.
 
         Args:
             target_date: Date to analyze (YYYY-MM-DD), defaults to today
             max_analyze: Maximum number of tickers to fully analyze (costs $$$)
+            override_daily_limit: If True, bypass daily API call limits (but still respect hard caps)
 
         Returns:
             Dict with:
@@ -375,7 +378,7 @@ class EarningsAnalyzer:
 
         # Prepare arguments for parallel processing
         analysis_args = [
-            (ticker_data['ticker'], ticker_data, target_date)
+            (ticker_data['ticker'], ticker_data, target_date, override_daily_limit)
             for ticker_data in tickers_to_analyze
         ]
 
@@ -548,6 +551,7 @@ if __name__ == "__main__":
 
     # Parse arguments
     skip_confirm = '--yes' in sys.argv or '-y' in sys.argv
+    override_daily_limit = '--override' in sys.argv
 
     # Check for ticker list mode
     ticker_list = None
@@ -557,7 +561,7 @@ if __name__ == "__main__":
             ticker_list = sys.argv[idx + 1].upper().replace(' ', '').split(',')
 
     # Remove flags from args
-    args = [arg for arg in sys.argv[1:] if arg not in ['--yes', '-y', '--tickers'] and not (ticker_list and arg.upper().replace(' ', '') == ','.join(ticker_list))]
+    args = [arg for arg in sys.argv[1:] if arg not in ['--yes', '-y', '--tickers', '--override'] and not (ticker_list and arg.upper().replace(' ', '') == ','.join(ticker_list))]
 
     analyzer = EarningsAnalyzer()
 
@@ -568,6 +572,8 @@ if __name__ == "__main__":
         logger.info(f"\n📋 TICKER LIST MODE")
         logger.info(f"Tickers: {', '.join(ticker_list)}")
         logger.info(f"Earnings Date: {earnings_date or 'next trading day (default)'}")
+        if override_daily_limit:
+            logger.warning("⚠️  OVERRIDE MODE: Daily limits bypassed (hard caps still enforced)")
         logger.warning(f"This will make API calls (estimated cost: ${0.05 * len(ticker_list):.2f})")
         logger.info("")
 
@@ -580,7 +586,7 @@ if __name__ == "__main__":
             logger.info("Auto-confirmed with --yes flag")
 
         # Run ticker list analysis
-        result = analyzer.analyze_specific_tickers(ticker_list, earnings_date)
+        result = analyzer.analyze_specific_tickers(ticker_list, earnings_date, override_daily_limit)
 
     # CALENDAR SCANNING MODE (default)
     else:
@@ -592,6 +598,8 @@ if __name__ == "__main__":
             logger.info(f"No date specified, using today: {target_date}")
 
         logger.info(f"\nAnalyzing up to {max_analyze} tickers for {target_date}")
+        if override_daily_limit:
+            logger.warning("⚠️  OVERRIDE MODE: Daily limits bypassed (hard caps still enforced)")
         logger.warning(f"This will make API calls (estimated cost: ${0.05 * max_analyze:.2f})")
         logger.info("")
 
@@ -604,7 +612,7 @@ if __name__ == "__main__":
             logger.info("Auto-confirmed with --yes flag")
 
         # Run calendar-based analysis
-        result = analyzer.analyze_daily_earnings(target_date, max_analyze)
+        result = analyzer.analyze_daily_earnings(target_date, max_analyze, override_daily_limit)
 
     # Generate and display report
     report = analyzer.generate_report(result)

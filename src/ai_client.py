@@ -52,7 +52,8 @@ class AIClient:
         use_case: str = "sentiment",
         ticker: Optional[str] = None,
         max_tokens: int = 2000,
-        max_retries: int = 3
+        max_retries: int = 3,
+        override_daily_limit: bool = False
     ) -> Dict:
         """
         Get chat completion with automatic fallback and retry logic.
@@ -64,6 +65,7 @@ class AIClient:
             ticker: Ticker symbol (for logging)
             max_tokens: Maximum tokens in response
             max_retries: Maximum retry attempts for transient errors (default: 3)
+            override_daily_limit: If True, bypass daily limits (but still check hard caps)
 
         Returns:
             Dict with 'content', 'model', 'provider', 'tokens_used', 'cost'
@@ -74,7 +76,7 @@ class AIClient:
         """
         # Get best available model
         try:
-            model, provider = self.usage_tracker.get_available_model(preferred_model, use_case)
+            model, provider = self.usage_tracker.get_available_model(preferred_model, use_case, override_daily_limit)
         except BudgetExceededError as e:
             logger.error(f"❌ All models exhausted: {e}")
             raise

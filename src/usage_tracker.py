@@ -150,13 +150,14 @@ class UsageTracker:
             return model_config.get('provider', 'perplexity')  # Default to perplexity
         return 'perplexity'
 
-    def get_available_model(self, preferred_model: str, use_case: str = "sentiment") -> tuple[str, str]:
+    def get_available_model(self, preferred_model: str, use_case: str = "sentiment", override_daily_limit: bool = False) -> tuple[str, str]:
         """
         Get best available model based on budget and cascade configuration.
 
         Args:
             preferred_model: Preferred model name (e.g., 'sonar-pro')
             use_case: Use case ('sentiment' or 'strategy')
+            override_daily_limit: If True, bypass daily limits (but still check hard caps)
 
         Returns:
             Tuple of (model_name, provider) or raises BudgetExceededError if no models available
@@ -165,39 +166,45 @@ class UsageTracker:
 
         if not cascade_enabled:
             # Cascade disabled, just check if preferred model is available
-            can_call, reason = self.can_make_call(preferred_model)
+            can_call, reason = self.can_make_call(preferred_model, override_daily_limit=override_daily_limit)
             if can_call:
                 return preferred_model, self._get_model_provider(preferred_model)
             raise BudgetExceededError(reason)
 
         # Try preferred model first
-        can_call, reason = self.can_make_call(preferred_model)
+        can_call, reason = self.can_make_call(preferred_model, override_daily_limit=override_daily_limit)
         if can_call:
             return preferred_model, self._get_model_provider(preferred_model)
 
-        # Perplexity exhausted - check if we should fall back
+        # Check if we should fall back
         if "PERPLEXITY_LIMIT_EXCEEDED" in reason:
             logger.warning(f"⚠️  Perplexity limit reached ({reason})")
             logger.info("🔄 Attempting fallback to alternative models...")
+        elif "DAILY_LIMIT" in reason:
+            logger.warning(f"⚠️  Daily limit reached ({reason})")
+            logger.info("🔄 Falling back to free Gemini model...")
+        else:
+            logger.warning(f"⚠️  Budget issue: {reason}")
+            logger.info("🔄 Attempting fallback to alternative models...")
 
-            # Try fallback models in order
-            cascade_order = self.config.get('model_cascade', {}).get('order', [])
+        # Try fallback models in order
+        cascade_order = self.config.get('model_cascade', {}).get('order', [])
 
-            for provider in cascade_order:
-                if provider == 'perplexity':
-                    continue  # Already exhausted
+        for provider in cascade_order:
+            if provider == 'perplexity' and "PERPLEXITY_LIMIT_EXCEEDED" in reason:
+                continue  # Already exhausted
 
-                # Find a model from this provider
-                fallback_model = self._get_fallback_model_for_provider(provider, use_case)
+            # Find a model from this provider
+            fallback_model = self._get_fallback_model_for_provider(provider, use_case)
 
-                if fallback_model:
-                    can_call, fallback_reason = self.can_make_call(fallback_model)
-                    if can_call:
-                        logger.info(f"✓ Using fallback: {fallback_model} ({provider})")
-                        return fallback_model, provider
+            if fallback_model:
+                can_call, fallback_reason = self.can_make_call(fallback_model, override_daily_limit=override_daily_limit)
+                if can_call:
+                    logger.info(f"✓ Using fallback: {fallback_model} ({provider})")
+                    return fallback_model, provider
 
-            # No fallback models available
-            raise BudgetExceededError("All models exhausted - Perplexity limit reached and no fallback models available")
+        # No fallback models available
+        raise BudgetExceededError("All models exhausted - No available models within budget")
 
         # Other budget issue
         raise BudgetExceededError(reason)
@@ -218,13 +225,14 @@ class UsageTracker:
             return 0.0
         return (self.usage_data['total_cost'] / monthly_budget) * 100
 
-    def can_make_call(self, model: str, estimated_tokens: int = 1000) -> tuple[bool, str]:
+    def can_make_call(self, model: str, estimated_tokens: int = 1000, override_daily_limit: bool = False) -> tuple[bool, str]:
         """
         Check if we can make an API call without exceeding budget (thread-safe).
 
         Args:
             model: Model name
             estimated_tokens: Estimated token count
+            override_daily_limit: If True, bypass daily limits (but still check hard caps)
 
         Returns:
             Tuple of (can_call, reason)
@@ -263,22 +271,25 @@ class UsageTracker:
                 if current_cost + estimated_cost > monthly_budget:
                     return False, f"Would exceed budget (${current_cost + estimated_cost:.2f} > ${monthly_budget:.2f})"
 
-            # Check daily limits
-            today = self._current_date()
-            daily_usage = self.usage_data['daily_usage'].get(today, {'calls': 0, 'model_calls': {}})
+            # Check daily limits (unless override is enabled)
+            if not override_daily_limit:
+                today = self._current_date()
+                daily_usage = self.usage_data['daily_usage'].get(today, {'calls': 0, 'model_calls': {}})
 
-            max_calls = self.config['daily_limits']['max_api_calls']
-            if daily_usage['calls'] >= max_calls:
-                return False, f"DAILY_LIMIT: Daily API call limit reached ({daily_usage['calls']} / {max_calls}). Resets at midnight ET."
+                max_calls = self.config['daily_limits']['max_api_calls']
+                if daily_usage['calls'] >= max_calls:
+                    return False, f"DAILY_LIMIT: Daily API call limit reached ({daily_usage['calls']} / {max_calls}). Resets at midnight ET."
 
-            # Check per-model daily limits
-            model_call_key = f"{model}_calls"
-            if model_call_key in self.config['daily_limits']:
-                model_limit = self.config['daily_limits'][model_call_key]
-                model_calls = daily_usage['model_calls'].get(model, 0)
+                # Check per-model daily limits
+                model_call_key = f"{model}_calls"
+                if model_call_key in self.config['daily_limits']:
+                    model_limit = self.config['daily_limits'][model_call_key]
+                    model_calls = daily_usage['model_calls'].get(model, 0)
 
-                if model_calls >= model_limit:
-                    return False, f"Daily limit for {model} reached ({model_calls} / {model_limit})"
+                    if model_calls >= model_limit:
+                        return False, f"Daily limit for {model} reached ({model_calls} / {model_limit})"
+            else:
+                logger.info(f"⚠️  Override mode: Bypassing daily limits for {model}")
 
             # Warn if approaching budget
             warn_percentage = self.config['warn_at_percentage']

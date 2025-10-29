@@ -47,7 +47,8 @@ class StrategyGenerator:
         ticker: str,
         options_data: Dict,
         sentiment_data: Dict,
-        ticker_data: Dict
+        ticker_data: Dict,
+        override_daily_limit: bool = False
     ) -> Dict:
         """
         Generate 3-4 trade strategies for a ticker.
@@ -92,7 +93,7 @@ class StrategyGenerator:
             )
 
             # Call AI API with automatic fallback
-            response = self._make_request(prompt, ticker=ticker)
+            response = self._make_request(prompt, ticker=ticker, override_daily_limit=override_daily_limit)
 
             # Parse response into structured format
             result = self._parse_strategy_response(response, ticker)
@@ -186,7 +187,7 @@ Keep response under 800 words total. Be specific with numbers."""
 
         return prompt
 
-    def _make_request(self, prompt: str, ticker: Optional[str] = None) -> str:
+    def _make_request(self, prompt: str, ticker: Optional[str] = None, override_daily_limit: bool = False) -> str:
         """
         Make AI API request with automatic fallback.
 
@@ -196,6 +197,7 @@ Keep response under 800 words total. Be specific with numbers."""
         Args:
             prompt: Prompt string
             ticker: Ticker symbol (for logging)
+            override_daily_limit: If True, bypass daily limits (but still respect hard caps)
 
         Returns:
             Response text
@@ -216,7 +218,8 @@ Keep response under 800 words total. Be specific with numbers."""
                 preferred_model=self.preferred_model,
                 use_case="strategy",
                 ticker=ticker,
-                max_tokens=2000
+                max_tokens=2000,
+                override_daily_limit=override_daily_limit
             )
 
             # AI client already logged the call - just return content

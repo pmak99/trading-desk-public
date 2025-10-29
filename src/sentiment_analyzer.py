@@ -45,7 +45,7 @@ class SentimentAnalyzer:
 
         self.preferred_model = preferred_model
 
-    def analyze_earnings_sentiment(self, ticker: str, earnings_date: Optional[str] = None) -> Dict:
+    def analyze_earnings_sentiment(self, ticker: str, earnings_date: Optional[str] = None, override_daily_limit: bool = False) -> Dict:
         """
         Analyze earnings sentiment for a ticker with Reddit data integration.
 
@@ -85,7 +85,7 @@ class SentimentAnalyzer:
             prompt = self._build_sentiment_prompt(ticker, earnings_date, reddit_data)
 
             # Call AI API with budget tracking
-            response = self._make_request(prompt, ticker=ticker)
+            response = self._make_request(prompt, ticker=ticker, override_daily_limit=override_daily_limit)
 
             # Parse response into structured format
             result = self._parse_sentiment_response(response, ticker)
@@ -169,7 +169,7 @@ Focus on actionable intelligence for an options trader looking to sell premium (
 
         return prompt
 
-    def _make_request(self, prompt: str, ticker: Optional[str] = None) -> str:
+    def _make_request(self, prompt: str, ticker: Optional[str] = None, override_daily_limit: bool = False) -> str:
         """
         Make AI API request with automatic fallback.
 
@@ -179,6 +179,7 @@ Focus on actionable intelligence for an options trader looking to sell premium (
         Args:
             prompt: Prompt string
             ticker: Ticker symbol (for logging)
+            override_daily_limit: If True, bypass daily limits (but still respect hard caps)
 
         Returns:
             Response text
@@ -199,7 +200,8 @@ Focus on actionable intelligence for an options trader looking to sell premium (
                 preferred_model=self.preferred_model,
                 use_case="sentiment",
                 ticker=ticker,
-                max_tokens=1500
+                max_tokens=1500,
+                override_daily_limit=override_daily_limit
             )
 
             # AI client already logged the call - just return content

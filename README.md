@@ -24,7 +24,10 @@ Scans earnings calendar → filters by IV metrics → analyzes sentiment → sug
 **Resilience Features**:
 - Retry logic: 3 attempts with exponential backoff for transient errors
 - Graceful degradation: Partial results if daily API limits reached
-- Automatic fallback: Perplexity → Google Gemini when budget exhausted
+- Automatic fallback cascade:
+  - Budget exhausted: Perplexity → Google Gemini (FREE)
+  - Daily limits hit: Automatic switch to Gemini (FREE - 1500/day)
+- Bypass mode: `--override` flag to bypass daily limits (respects hard caps)
 
 **NOT an auto-trader** - generates research for manual review and execution.
 
@@ -73,7 +76,10 @@ monthly_budget: 5.00
 # Analyze your watchlist
 python3 -m src.earnings_analyzer --tickers "META,MSFT,GOOGL,CMG" 2025-10-29 --yes
 
-# Syntax: --tickers "TICK1,TICK2,TICK3" [EARNINGS_DATE] [--yes]
+# Bypass daily limits (uses free Gemini if needed)
+python3 -m src.earnings_analyzer --tickers "META,MSFT,GOOGL,CMG" 2025-10-29 --yes --override
+
+# Syntax: --tickers "TICK1,TICK2,TICK3" [EARNINGS_DATE] [--yes] [--override]
 ```
 
 **Mode 2: Auto-Scan Earnings Calendar**
@@ -81,8 +87,18 @@ python3 -m src.earnings_analyzer --tickers "META,MSFT,GOOGL,CMG" 2025-10-29 --ye
 # Scan Oct 29 earnings, analyze top 10 by IV
 python3 -m src.earnings_analyzer 2025-10-29 10 --yes
 
-# Syntax: [DATE] [MAX_TICKERS] [--yes]
+# Bypass daily limits (uses free Gemini if needed)
+python3 -m src.earnings_analyzer 2025-10-29 10 --yes --override
+
+# Syntax: [DATE] [MAX_TICKERS] [--yes] [--override]
 ```
+
+**Flags:**
+- `--yes` / `-y`: Skip confirmation prompt
+- `--override`: Bypass daily API call limits (hard caps still enforced)
+  - Useful when you need to analyze many tickers in one day
+  - Automatically falls back to free Gemini if Perplexity limits reached
+  - Still respects $4.98 Perplexity and $5.00 total hard caps
 
 **Test Individual Components:**
 ```bash
@@ -115,16 +131,23 @@ src/
 
 **Model Selection**:
 - Sentiment: Perplexity Sonar Pro ($0.005/1k tokens)
-- Strategies: GPT-4o-mini ($0.0002/1k tokens - 60% cheaper!)
-- Fallback: Google Gemini (FREE)
+- Strategies: Perplexity Sonar Pro ($0.005/1k tokens)
+- Fallback: Google Gemini 2.0 Flash (FREE - 1500 calls/day)
 
 **Limits**:
 - Perplexity: $4.98/month HARD STOP
 - Total Budget: $5.00/month
 - Daily: 40 API calls (handles 10+ tickers)
+  - Use `--override` flag to bypass daily limits
+  - System automatically falls back to free Gemini when limits reached
 
-**Cost per ticker**: ~$0.005-0.01 (reduced from $0.01-0.02)
-**Monthly capacity**: ~500 analyses (~16/day)
+**Automatic Fallback System**:
+1. **Budget exhausted** ($4.98 Perplexity limit): Automatically switches to Gemini (FREE)
+2. **Daily limits hit** (40 calls/day): Automatically switches to Gemini (FREE)
+3. **Override mode** (`--override` flag): Bypasses daily limits, uses Gemini if needed
+
+**Cost per ticker**: ~$0.01 ($0.005 sentiment + $0.005 strategy)
+**Monthly capacity**: ~500 analyses (~16/day, or more with `--override`)
 
 **Budget Dashboard**:
 ```bash
@@ -153,11 +176,14 @@ python3 -m src.usage_tracker
 
 ### AI Fallback System
 - **Sentiment**: Perplexity Sonar Pro ($0.005/1k tokens)
-- **Strategies**: GPT-4o-mini ($0.0002/1k tokens - 60% cheaper!)
-- Fallback: Google Gemini 2.0 Flash (FREE - 1500/day)
-- Automatic cascade when budget limits reached
+- **Strategies**: Perplexity Sonar Pro ($0.005/1k tokens)
+- **Fallback**: Google Gemini 2.0 Flash (FREE - 1500/day)
+- **Automatic cascade** when limits reached:
+  - Budget exhausted → Gemini
+  - Daily limits hit → Gemini
 - **Retry logic**: 3 attempts with exponential backoff for transient errors
 - **Graceful degradation**: Partial results if daily limits hit
+- **Override mode**: `--override` flag bypasses daily limits (hard caps still enforced)
 
 ### Thread-Safe Budget Tracking
 - Persistent monthly usage log (`data/usage.json`)
@@ -208,22 +234,20 @@ daily_limits:
 
 # Model selection by use case
 defaults:
-  sentiment_model: "sonar-pro"     # Reddit analysis
-  strategy_model: "gpt-4o-mini"    # 60% cheaper!
+  sentiment_model: "sonar-pro"     # Reddit sentiment analysis
+  strategy_model: "sonar-pro"      # Strategy generation
 
 model_cascade:
   order:
-    - "perplexity"  # Try first
-    - "google"      # FREE fallback
+    - "perplexity"  # Try first (paid, high quality)
+    - "google"      # FREE fallback when limits hit
 
 models:
   sonar-pro:
     cost_per_1k_tokens: 0.005  # Perplexity
-  gpt-4o-mini:
-    cost_per_1k_tokens: 0.0002 # Via Perplexity API
   gemini-2.0-flash:
     provider: "google"
-    cost_per_1k_tokens: 0.0    # FREE
+    cost_per_1k_tokens: 0.0    # FREE (1500 calls/day)
 ```
 
 ### Trading Criteria (`ticker_filter.py`)
