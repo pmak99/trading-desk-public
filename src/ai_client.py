@@ -1,7 +1,7 @@
 """
 Unified AI client with automatic fallback cascade.
 
-Handles Perplexity → Claude → Gemini fallback when budget limits are reached.
+Handles Perplexity → Gemini fallback when budget limits are reached.
 Supports thread-safe budget tracking for concurrent execution.
 """
 
@@ -22,7 +22,7 @@ class AIClient:
     """
     Unified AI client with fallback cascade.
 
-    Automatically falls back from Perplexity → Claude → Gemini when budget limits reached.
+    Automatically falls back from Perplexity → Gemini when budget limits reached.
     """
 
     def __init__(self, usage_tracker: Optional[UsageTracker] = None):
@@ -36,13 +36,11 @@ class AIClient:
 
         # API keys for different providers
         self.perplexity_key = os.getenv('PERPLEXITY_API_KEY')
-        self.anthropic_key = os.getenv('ANTHROPIC_API_KEY')
         self.google_key = os.getenv('GOOGLE_API_KEY')
 
         # API endpoints
         self.endpoints = {
             'perplexity': 'https://api.perplexity.ai/chat/completions',
-            'anthropic': 'https://api.anthropic.com/v1/messages',
             'google': 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
         }
 
@@ -83,8 +81,6 @@ class AIClient:
         # Make API call based on provider
         if provider == 'perplexity':
             return self._call_perplexity(model, prompt, ticker, max_tokens)
-        elif provider == 'anthropic':
-            return self._call_anthropic(model, prompt, ticker, max_tokens)
         elif provider == 'google':
             return self._call_google(model, prompt, ticker, max_tokens)
         else:
@@ -146,71 +142,6 @@ class AIClient:
         except Exception as e:
             logger.error(f"Perplexity API error: {e}")
             # Log failed call
-            self.usage_tracker.log_api_call(model, 0, 0, ticker, success=False)
-            raise
-
-    def _call_anthropic(
-        self,
-        model: str,
-        prompt: str,
-        ticker: Optional[str],
-        max_tokens: int
-    ) -> Dict:
-        """Call Anthropic Claude API."""
-        if not self.anthropic_key:
-            raise ValueError("ANTHROPIC_API_KEY not set in environment")
-
-        headers = {
-            'x-api-key': self.anthropic_key,
-            'anthropic-version': '2023-06-01',
-            'Content-Type': 'application/json'
-        }
-
-        data = {
-            'model': 'claude-sonnet-4-20250514',  # Latest Claude Sonnet 4.5
-            'max_tokens': max_tokens,
-            'messages': [{'role': 'user', 'content': prompt}]
-        }
-
-        try:
-            response = requests.post(
-                self.endpoints['anthropic'],
-                headers=headers,
-                json=data,
-                timeout=60
-            )
-            response.raise_for_status()
-
-            result = response.json()
-
-            # Extract content and usage
-            content = result['content'][0]['text']
-            input_tokens = result['usage']['input_tokens']
-            output_tokens = result['usage']['output_tokens']
-            tokens_used = input_tokens + output_tokens
-
-            # Calculate cost (input and output priced differently)
-            config = self.usage_tracker.config
-            input_cost_per_1k = config['models'][model]['cost_per_1k_tokens']
-            output_cost_per_1k = config['models'][model]['cost_per_1k_output_tokens']
-
-            cost = (input_tokens / 1000) * input_cost_per_1k + (output_tokens / 1000) * output_cost_per_1k
-
-            # Log usage
-            self.usage_tracker.log_api_call(model, tokens_used, cost, ticker, success=True)
-
-            logger.info(f"✓ Claude response: {len(content)} chars, ${cost:.4f}")
-
-            return {
-                'content': content,
-                'model': model,
-                'provider': 'anthropic',
-                'tokens_used': tokens_used,
-                'cost': cost
-            }
-
-        except Exception as e:
-            logger.error(f"Anthropic API error: {e}")
             self.usage_tracker.log_api_call(model, 0, 0, ticker, success=False)
             raise
 

@@ -19,8 +19,7 @@ model_cascade:
   enabled: true
   order:
     - "perplexity"  # Try Perplexity first (until $4.90 limit)
-    - "anthropic"   # Fall back to Claude Sonnet 4.5
-    - "google"      # Fall back to Google Gemini
+    - "google"      # Fall back to Google Gemini (FREE)
 
 # Model selection and costs
 models:
@@ -47,16 +46,7 @@ models:
     timeout: 30  # seconds
     use_case: "daily"  # Cheaper alternative
 
-  # Claude models (fallback when Perplexity exhausted)
-  claude-sonnet-4.5:
-    provider: "anthropic"
-    cost_per_1k_tokens: 0.003  # $3 per 1M input tokens
-    cost_per_1k_output_tokens: 0.015  # $15 per 1M output tokens
-    timeout: 30
-    use_case: "fallback"
-    api_key_env: "ANTHROPIC_API_KEY"
-
-  # Google Gemini models (secondary fallback)
+  # Google Gemini models (fallback)
   gemini-2.0-flash:
     provider: "google"
     cost_per_1k_tokens: 0.0  # Free tier: 1500 RPD
@@ -78,7 +68,7 @@ daily_limits:
 
 # Default model preferences
 defaults:
-  sentiment_model: "sonar-pro"  # Fast, cheap ($0.005/1k tokens)
+  sentiment_model: "sonar-pro"  # Sonar Pro for Reddit sentiment analysis ($0.005/1k tokens)
   strategy_model: "sonar-pro"  # Same model for strategies ($0.005/1k tokens)
 
   # When to use deep research (DISABLED by default - too expensive!)

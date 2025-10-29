@@ -1,25 +1,28 @@
 """
 AI-powered sentiment analyzer for earnings trades.
 
-Uses unified AI client with automatic fallback (Perplexity → Claude → Gemini).
+Uses unified AI client with automatic fallback (Perplexity → Gemini).
+Uses Perplexity Sonar Pro for sentiment analysis with Reddit data integration.
 
 Analyzes sentiment based on Trading Research Prompt.pdf criteria:
 - Overall sentiment: Retail vs Institutional vs Hedge Fund
 - Key headwinds and tailwinds
 - Recent news, guidance history, unusual options flow
 - Dark pool activity and positioning
+- Reddit sentiment from r/wallstreetbets, r/stocks, r/options
 """
 
 import logging
 from typing import Dict, Optional
 from src.ai_client import AIClient
 from src.usage_tracker import UsageTracker, BudgetExceededError
+from src.reddit_scraper import RedditScraper
 
 logger = logging.getLogger(__name__)
 
 
 class SentimentAnalyzer:
-    """AI-powered sentiment analyzer with automatic fallback."""
+    """AI-powered sentiment analyzer with Reddit integration and automatic fallback."""
 
     def __init__(self, preferred_model: str = "sonar-pro", usage_tracker: Optional[UsageTracker] = None):
         """
@@ -27,23 +30,25 @@ class SentimentAnalyzer:
 
         Args:
             preferred_model: Preferred model to use (auto-fallback if budget exceeded)
-                            - "sonar-pro": Fast, cheap ($5/1M tokens) - default
-                            - Falls back to Claude → Gemini when Perplexity exhausted
+                            - "sonar-pro": Perplexity Sonar Pro for Reddit sentiment ($5/1M tokens) - default
+                            - Falls back to Gemini when Perplexity exhausted
             usage_tracker: Optional UsageTracker instance for cost control
         """
         self.preferred_model = preferred_model
         self.ai_client = AIClient(usage_tracker=usage_tracker)
         self.usage_tracker = self.ai_client.usage_tracker
+        self.reddit_scraper = RedditScraper()
 
     def analyze_earnings_sentiment(self, ticker: str, earnings_date: Optional[str] = None) -> Dict:
         """
-        Analyze earnings sentiment for a ticker.
+        Analyze earnings sentiment for a ticker with Reddit data integration.
 
         Based on Trading Research Prompt.pdf criteria:
         1. Overall sentiment: Retail vs Institutional vs Hedge Fund
         2. Key headwinds and tailwinds
         3. Recent news, guidance history, macro factors
         4. Unusual options flow and dark pool activity
+        5. Reddit sentiment from r/wallstreetbets, r/stocks, r/options
 
         Args:
             ticker: Ticker symbol
@@ -59,19 +64,28 @@ class SentimentAnalyzer:
             - tailwinds: List of positive factors
             - unusual_activity: Options flow, dark pool activity
             - guidance_history: Recent guidance and earnings results
+            - reddit_data: Reddit sentiment data
             - confidence: Low/Medium/High based on data quality
         """
         logger.info(f"Analyzing sentiment for {ticker}...")
 
         try:
-            # Construct prompt based on your criteria
-            prompt = self._build_sentiment_prompt(ticker, earnings_date)
+            # Get Reddit sentiment first
+            logger.info(f"{ticker}: Fetching Reddit sentiment...")
+            reddit_data = self.reddit_scraper.get_ticker_sentiment(ticker, limit=20)
+            logger.info(f"{ticker}: Found {reddit_data['posts_found']} Reddit posts")
 
-            # Call Perplexity API with budget tracking
+            # Construct prompt with Reddit data
+            prompt = self._build_sentiment_prompt(ticker, earnings_date, reddit_data)
+
+            # Call AI API with budget tracking
             response = self._make_request(prompt, ticker=ticker)
 
             # Parse response into structured format
             result = self._parse_sentiment_response(response, ticker)
+
+            # Add Reddit data to result
+            result['reddit_data'] = reddit_data
 
             logger.info(f"{ticker}: Overall sentiment = {result.get('overall_sentiment', 'unknown')}")
 
@@ -81,20 +95,37 @@ class SentimentAnalyzer:
             logger.error(f"Error analyzing sentiment for {ticker}: {e}")
             return self._get_empty_result(ticker)
 
-    def _build_sentiment_prompt(self, ticker: str, earnings_date: Optional[str]) -> str:
+    def _build_sentiment_prompt(self, ticker: str, earnings_date: Optional[str], reddit_data: Dict) -> str:
         """
-        Build sentiment analysis prompt based on user's criteria.
+        Build sentiment analysis prompt based on user's criteria with Reddit data.
 
         Args:
             ticker: Ticker symbol
             earnings_date: Optional earnings date
+            reddit_data: Reddit sentiment data from RedditScraper
 
         Returns:
-            Prompt string for Perplexity
+            Prompt string for Grok
         """
         earnings_context = f" with earnings on {earnings_date}" if earnings_date else " heading into upcoming earnings"
 
+        # Format Reddit data for prompt
+        reddit_summary = f"""
+REDDIT SENTIMENT DATA (r/wallstreetbets, r/stocks, r/options):
+- Posts Found: {reddit_data['posts_found']}
+- Average Score: {reddit_data['avg_score']:.1f}
+- Total Comments: {reddit_data['total_comments']}
+- Sentiment Score: {reddit_data['sentiment_score']:.2f} (-1.0 to 1.0)"""
+
+        if reddit_data.get('top_posts'):
+            reddit_summary += "\n\nTop Reddit Posts:"
+            for i, post in enumerate(reddit_data['top_posts'][:3], 1):
+                reddit_summary += f"\n  {i}. {post['title']} (Score: {post['score']}, Comments: {post['num_comments']})"
+
         prompt = f"""Analyze the earnings sentiment for {ticker}{earnings_context}.
+
+{reddit_summary}
+
 
 Structure your response EXACTLY as follows:
 
@@ -266,6 +297,7 @@ Focus on actionable intelligence for an options trader looking to sell premium (
             'unusual_activity': 'N/A',
             'guidance_history': 'N/A',
             'macro_sector': 'N/A',
+            'reddit_data': {'posts_found': 0, 'sentiment_score': 0.0},
             'raw_response': '',
             'confidence': 'low'
         }
@@ -277,7 +309,7 @@ if __name__ == "__main__":
 
     print()
     print('='*70)
-    print('PERPLEXITY SONAR SENTIMENT ANALYZER')
+    print('SONAR PRO + REDDIT SENTIMENT ANALYZER')
     print('='*70)
     print()
 
@@ -285,7 +317,7 @@ if __name__ == "__main__":
     test_ticker = sys.argv[1] if len(sys.argv) > 1 else 'NVDA'
     test_date = sys.argv[2] if len(sys.argv) > 2 else None
 
-    analyzer = SentimentAnalyzer(model="sonar-pro")
+    analyzer = SentimentAnalyzer(preferred_model="sonar-pro")
 
     print(f"Analyzing sentiment for: {test_ticker}")
     if test_date:
@@ -315,7 +347,14 @@ if __name__ == "__main__":
     print(f"\nGuidance History:\n{result['guidance_history']}")
     print(f"\nMacro & Sector:\n{result['macro_sector']}")
 
+    # Display Reddit data
+    reddit = result.get('reddit_data', {})
+    if reddit.get('posts_found', 0) > 0:
+        print(f"\n\nREDDIT SENTIMENT:")
+        print(f"  Posts Found: {reddit['posts_found']}")
+        print(f"  Sentiment Score: {reddit['sentiment_score']:.2f} (-1.0 to 1.0)")
+        print(f"  Avg Post Score: {reddit['avg_score']:.1f}")
+        print(f"  Total Comments: {reddit['total_comments']}")
+
     print()
-    print('='*70)
-    print(f"API calls made: {analyzer.calls_made}")
     print('='*70)
