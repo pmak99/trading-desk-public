@@ -8,6 +8,7 @@ Supports thread-safe budget tracking for concurrent execution.
 import os
 import requests
 import logging
+import time
 from typing import Dict, Optional
 from dotenv import load_dotenv
 from src.usage_tracker import UsageTracker, BudgetExceededError
@@ -50,10 +51,11 @@ class AIClient:
         preferred_model: str = "sonar-pro",
         use_case: str = "sentiment",
         ticker: Optional[str] = None,
-        max_tokens: int = 2000
+        max_tokens: int = 2000,
+        max_retries: int = 3
     ) -> Dict:
         """
-        Get chat completion with automatic fallback.
+        Get chat completion with automatic fallback and retry logic.
 
         Args:
             prompt: The prompt to send
@@ -61,13 +63,14 @@ class AIClient:
             use_case: Use case ('sentiment' or 'strategy')
             ticker: Ticker symbol (for logging)
             max_tokens: Maximum tokens in response
+            max_retries: Maximum retry attempts for transient errors (default: 3)
 
         Returns:
             Dict with 'content', 'model', 'provider', 'tokens_used', 'cost'
 
         Raises:
             BudgetExceededError: If all models are exhausted
-            Exception: If API call fails
+            Exception: If API call fails after all retries
         """
         # Get best available model
         try:
@@ -78,13 +81,36 @@ class AIClient:
 
         logger.info(f"📡 Using {model} ({provider}) for {use_case}")
 
-        # Make API call based on provider
-        if provider == 'perplexity':
-            return self._call_perplexity(model, prompt, ticker, max_tokens)
-        elif provider == 'google':
-            return self._call_google(model, prompt, ticker, max_tokens)
-        else:
-            raise ValueError(f"Unknown provider: {provider}")
+        # Retry logic with exponential backoff
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                # Make API call based on provider
+                if provider == 'perplexity':
+                    return self._call_perplexity(model, prompt, ticker, max_tokens)
+                elif provider == 'google':
+                    return self._call_google(model, prompt, ticker, max_tokens)
+                else:
+                    raise ValueError(f"Unknown provider: {provider}")
+
+            except BudgetExceededError:
+                # Don't retry budget errors
+                raise
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    logger.warning(f"⚠️  Retry {attempt + 1}/{max_retries} after {wait_time}s (error: {type(e).__name__})")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"❌ All {max_retries} retries exhausted")
+                    raise
+            except Exception as e:
+                # Don't retry non-transient errors
+                raise
+
+        # Should not reach here, but just in case
+        raise last_error if last_error else Exception("Unknown error during retries")
 
     def _call_perplexity(
         self,

@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 import sys
 from multiprocessing import Pool, cpu_count
+import pytz
 
 from src.earnings_calendar import EarningsCalendar
 from src.ticker_filter import TickerFilter
@@ -39,9 +40,9 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str]) -> Dict:
     ticker, ticker_data, earnings_date = args
 
     try:
-        # Initialize clients within worker process
-        sentiment_analyzer = SentimentAnalyzer(preferred_model="sonar-pro")
-        strategy_generator = StrategyGenerator(preferred_model="sonar-pro")
+        # Initialize clients within worker process (use defaults from config)
+        sentiment_analyzer = SentimentAnalyzer()  # Uses sonar-pro for Reddit sentiment
+        strategy_generator = StrategyGenerator()   # Uses gpt-4o-mini for cost savings
 
         analysis = {
             'ticker': ticker,
@@ -59,7 +60,16 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str]) -> Dict:
             sentiment = sentiment_analyzer.analyze_earnings_sentiment(ticker, earnings_date)
             analysis['sentiment'] = sentiment
         except Exception as e:
-            logger.error(f"{ticker}: Sentiment analysis failed: {e}")
+            error_msg = str(e)
+            if "DAILY_LIMIT" in error_msg:
+                logger.warning(f"{ticker}: Daily limit reached for sentiment - skipping AI analysis")
+                analysis['sentiment'] = {
+                    'overall_sentiment': 'pending',
+                    'note': 'Daily API limit reached - analysis deferred'
+                }
+            else:
+                logger.error(f"{ticker}: Sentiment analysis failed: {e}")
+                analysis['sentiment'] = {}
 
         # Generate strategies
         if analysis['options_data'] and analysis['sentiment']:
@@ -73,7 +83,16 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str]) -> Dict:
                 )
                 analysis['strategies'] = strategies
             except Exception as e:
-                logger.error(f"{ticker}: Strategy generation failed: {e}")
+                error_msg = str(e)
+                if "DAILY_LIMIT" in error_msg:
+                    logger.warning(f"{ticker}: Daily limit reached for strategies - skipping AI analysis")
+                    analysis['strategies'] = {
+                        'strategies': [],
+                        'note': 'Daily API limit reached - strategy generation deferred'
+                    }
+                else:
+                    logger.error(f"{ticker}: Strategy generation failed: {e}")
+                    analysis['strategies'] = {}
 
         return analysis
 
@@ -291,14 +310,27 @@ class EarningsAnalyzer:
 
         logger.info(f"Analyzing earnings for {target_date}...")
 
-        # Step 1: Get earnings for the date
+        # Step 1: Get earnings for the date (with filtering for already-reported)
         week_earnings = self.earnings_calendar.get_week_earnings(days=7)
 
         if target_date not in week_earnings:
             logger.warning(f"No earnings found for {target_date}")
             return {'date': target_date, 'error': 'No earnings found'}
 
-        earnings_list = week_earnings[target_date]
+        # Filter out already-reported earnings
+        eastern = pytz.timezone('US/Eastern')
+        now_et = datetime.now(eastern)
+
+        earnings_list_unfiltered = week_earnings[target_date]
+        earnings_list = [
+            earning for earning in earnings_list_unfiltered
+            if not self.earnings_calendar._is_already_reported(earning, now_et)
+        ]
+
+        filtered_count = len(earnings_list_unfiltered) - len(earnings_list)
+        if filtered_count > 0:
+            logger.info(f"Filtered out {filtered_count} already-reported earnings")
+
         total_count = len(earnings_list)
 
         logger.info(f"Found {total_count} companies reporting on {target_date}")
@@ -579,8 +611,9 @@ if __name__ == "__main__":
     logger.info("\n\n")
     logger.info(report)
 
-    # Optionally save to file
-    output_file = f"data/earnings_analysis_{result['date']}.txt"
+    # Save to file with timestamp to avoid overwriting
+    timestamp = datetime.now().strftime('%H%M%S')
+    output_file = f"data/earnings_analysis_{result['date']}_{timestamp}.txt"
     with open(output_file, 'w') as f:
         f.write(report)
 

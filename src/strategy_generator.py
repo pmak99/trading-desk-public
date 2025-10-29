@@ -21,19 +21,26 @@ logger = logging.getLogger(__name__)
 class StrategyGenerator:
     """AI-powered strategy generator with automatic fallback."""
 
-    def __init__(self, preferred_model: str = "sonar-pro", usage_tracker: Optional[UsageTracker] = None):
+    def __init__(self, preferred_model: str = None, usage_tracker: Optional[UsageTracker] = None):
         """
         Initialize strategy generator.
 
         Args:
             preferred_model: Preferred model to use (auto-fallback if budget exceeded)
-                            - "sonar-pro": Fast, cheap ($5/1M tokens) - default
+                            - None: Use default from config (gpt-4o-mini)
+                            - "sonar-pro": Fast, cheap ($5/1M tokens)
+                            - "gpt-4o-mini": Very cheap ($0.2/1M tokens) - default
                             - Falls back to Gemini when Perplexity exhausted
             usage_tracker: Optional UsageTracker instance for cost control
         """
-        self.preferred_model = preferred_model
         self.ai_client = AIClient(usage_tracker=usage_tracker)
         self.usage_tracker = self.ai_client.usage_tracker
+
+        # Use default from config if not specified
+        if preferred_model is None:
+            preferred_model = self.usage_tracker.config.get('defaults', {}).get('strategy_model', 'gpt-4o-mini')
+
+        self.preferred_model = preferred_model
 
     def generate_strategies(
         self,

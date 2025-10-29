@@ -15,8 +15,16 @@ Scans earnings calendar → filters by IV metrics → analyzes sentiment → sug
 
 1. **Scans earnings calendar** OR **accepts ticker list** - Nasdaq API or manual tickers
 2. **Filters tickers** - Actual IV % (60%+ min), expected move, liquidity (Tradier API)
+   - Filters already-reported earnings based on market hours
+   - Selects weekly options for same week or next week if Thu/Fri
 3. **Analyzes sentiment** - AI analysis with Reddit data (r/wallstreetbets, r/stocks, r/options)
 4. **Generates strategies** - 3-4 option strategies with sizing for $20K risk budget
+5. **Saves timestamped reports** - Multiple runs per day won't overwrite
+
+**Resilience Features**:
+- Retry logic: 3 attempts with exponential backoff for transient errors
+- Graceful degradation: Partial results if daily API limits reached
+- Automatic fallback: Perplexity → Google Gemini when budget exhausted
 
 **NOT an auto-trader** - generates research for manual review and execution.
 
@@ -105,13 +113,18 @@ src/
 
 ## Budget & Cost Controls
 
-**Cascade**: Perplexity → Google Gemini (free)
+**Model Selection**:
+- Sentiment: Perplexity Sonar Pro ($0.005/1k tokens)
+- Strategies: GPT-4o-mini ($0.0002/1k tokens - 60% cheaper!)
+- Fallback: Google Gemini (FREE)
 
-**Perplexity Limit**: $4.98/month HARD STOP
-**Total Budget**: $5.00/month
+**Limits**:
+- Perplexity: $4.98/month HARD STOP
+- Total Budget: $5.00/month
+- Daily: 40 API calls (handles 10+ tickers)
 
-**Cost per ticker**: ~$0.01-0.02
-**Monthly capacity**: ~250 analyses (~8/day)
+**Cost per ticker**: ~$0.005-0.01 (reduced from $0.01-0.02)
+**Monthly capacity**: ~500 analyses (~16/day)
 
 **Budget Dashboard**:
 ```bash
@@ -130,6 +143,7 @@ python3 -m src.usage_tracker
 - Scoring: 60-80% good, 80-100% excellent, 100%+ premium
 - Supports high IV tickers (100-200%+ for volatile earnings plays)
 - Accurate Greeks and expected move calculations
+- **Weekly options selection**: Same week or next week if Thursday/Friday
 - Free with Tradier brokerage account
 
 ### Reddit Sentiment Integration
@@ -138,15 +152,19 @@ python3 -m src.usage_tracker
 - Integrates into AI analysis for retail positioning
 
 ### AI Fallback System
-- Primary: Perplexity Sonar Pro (until $4.98 limit)
+- **Sentiment**: Perplexity Sonar Pro ($0.005/1k tokens)
+- **Strategies**: GPT-4o-mini ($0.0002/1k tokens - 60% cheaper!)
 - Fallback: Google Gemini 2.0 Flash (FREE - 1500/day)
 - Automatic cascade when budget limits reached
+- **Retry logic**: 3 attempts with exponential backoff for transient errors
+- **Graceful degradation**: Partial results if daily limits hit
 
 ### Thread-Safe Budget Tracking
 - Persistent monthly usage log (`data/usage.json`)
 - Auto-resets each month
 - Pre-flight budget checks before API calls
 - Per-model and per-provider tracking
+- **Daily limits**: 40 calls/day (handles 10+ tickers)
 
 ---
 
@@ -181,6 +199,17 @@ python3 -m src.usage_tracker
 
 ```yaml
 perplexity_monthly_limit: 4.98  # Hard stop for Perplexity
+monthly_budget: 5.00
+
+# Daily limits (increased from 20 to 40)
+daily_limits:
+  max_tickers: 10
+  max_api_calls: 40
+
+# Model selection by use case
+defaults:
+  sentiment_model: "sonar-pro"     # Reddit analysis
+  strategy_model: "gpt-4o-mini"    # 60% cheaper!
 
 model_cascade:
   order:
@@ -190,6 +219,8 @@ model_cascade:
 models:
   sonar-pro:
     cost_per_1k_tokens: 0.005  # Perplexity
+  gpt-4o-mini:
+    cost_per_1k_tokens: 0.0002 # Via Perplexity API
   gemini-2.0-flash:
     provider: "google"
     cost_per_1k_tokens: 0.0    # FREE

@@ -269,7 +269,7 @@ class UsageTracker:
 
             max_calls = self.config['daily_limits']['max_api_calls']
             if daily_usage['calls'] >= max_calls:
-                return False, f"Daily API call limit reached ({daily_usage['calls']} / {max_calls})"
+                return False, f"DAILY_LIMIT: Daily API call limit reached ({daily_usage['calls']} / {max_calls}). Resets at midnight ET."
 
             # Check per-model daily limits
             model_call_key = f"{model}_calls"

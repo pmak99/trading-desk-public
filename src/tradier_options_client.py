@@ -296,9 +296,9 @@ class TradierOptionsClient:
                     earnings_dt = datetime.strptime(earnings_date, '%Y-%m-%d').date()
 
                     # Determine target week
-                    # If today is Friday, look for next week expiration
+                    # If today is Thursday or Friday, look for next week expiration
                     # Otherwise, look for same week as earnings
-                    if today.weekday() == 4:  # Friday = 4
+                    if today.weekday() >= 3:  # Thursday = 3, Friday = 4
                         # Look for expiration in following week
                         target_start = today + timedelta(days=7)
                         target_end = today + timedelta(days=14)
