@@ -5,8 +5,9 @@ Selects 2 pre-market + 3 after-hours tickers per trading day.
 
 import yfinance as yf
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.options_data_client import OptionsDataClient
 from src.tradier_options_client import TradierOptionsClient
 
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 class TickerFilter:
     """Filter and score earnings candidates."""
 
-    def __init__(self):
+    def __init__(self, cache_ttl_minutes: int = 15):
         """
         Initialize ticker filter.
 
@@ -29,6 +30,9 @@ class TickerFilter:
         - IV Rank > 50% (minimum), prefer 75%+ for max edge
         - Historical implied move > actual move (consistent IV overpricing)
         - Liquid options markets (tight spreads, high OI/volume)
+
+        Args:
+            cache_ttl_minutes: Cache TTL in minutes (default: 15)
         """
         self.weights = {
             'iv_score': 0.50,         # 50% - PRIMARY: IV % 60%+ required, 80%+ ideal
@@ -42,37 +46,62 @@ class TickerFilter:
         self.IV_RANK_GOOD = 60     # Standard allocation
         self.IV_RANK_EXCELLENT = 75 # Larger allocation, prefer spreads
 
+        # Cache for ticker data (prevents redundant API calls)
+        self._ticker_cache: Dict[str, tuple[Dict, datetime]] = {}
+        self._cache_ttl = timedelta(minutes=cache_ttl_minutes)
+
         # Initialize Tradier client (preferred - real IV data)
+        self.tradier_client = None
         try:
             self.tradier_client = TradierOptionsClient()
             if self.tradier_client.is_available():
                 logger.info("Using Tradier API for real IV data")
             else:
+                logger.info("Tradier client initialized but not available (missing API key)")
                 self.tradier_client = None
+        except (ValueError, KeyError, OSError) as e:
+            # Expected errors: missing config, env vars, file access
+            logger.info(f"Tradier client not configured: {e}")
         except Exception as e:
-            logger.warning(f"Tradier client not available: {e}")
-            self.tradier_client = None
+            # Unexpected initialization errors
+            logger.warning(f"Unexpected error initializing Tradier client: {e}", exc_info=True)
 
         # Initialize fallback options client (yfinance RV proxy)
+        self.options_client = None
         try:
             self.options_client = OptionsDataClient()
+            logger.debug("Options data client (yfinance fallback) initialized")
+        except (ValueError, KeyError) as e:
+            # Expected configuration errors
+            logger.info(f"Options client not configured: {e}")
         except Exception as e:
-            logger.warning(f"Options client not available: {e}")
-            self.options_client = None
+            # Unexpected initialization errors
+            logger.warning(f"Unexpected error initializing options client: {e}", exc_info=True)
 
-    def get_ticker_data(self, ticker: str) -> Optional[Dict]:
+    def get_ticker_data(self, ticker: str, use_cache: bool = True) -> Optional[Dict]:
         """
         Get market data for a ticker including options data.
 
         Fetches yfinance data ONCE and extracts all needed information
-        to avoid duplicate API calls.
+        to avoid duplicate API calls. Uses TTL cache to prevent redundant requests.
 
         Args:
             ticker: Ticker symbol
+            use_cache: Whether to use cache (default: True)
 
         Returns:
             Dict with market data and options_data or None if error
         """
+        # Check cache first
+        if use_cache and ticker in self._ticker_cache:
+            cached_data, cached_time = self._ticker_cache[ticker]
+            age = datetime.now() - cached_time
+            if age < self._cache_ttl:
+                logger.debug(f"{ticker}: Cache hit (age: {age.seconds}s)")
+                return cached_data
+            else:
+                logger.debug(f"{ticker}: Cache expired (age: {age.seconds}s)")
+
         try:
             # Fetch yfinance data ONCE
             stock = yf.Ticker(ticker)
@@ -170,6 +199,11 @@ class TickerFilter:
                     logger.warning(f"{ticker}: Could not fetch options data: {e}")
 
             data['options_data'] = options_data
+
+            # Update cache
+            if use_cache:
+                self._ticker_cache[ticker] = (data, datetime.now())
+                logger.debug(f"{ticker}: Cached ticker data")
 
             return data
 
@@ -351,10 +385,43 @@ class TickerFilter:
 
         return round(total_score, 2)
 
+    def _process_single_ticker(self, ticker: str) -> Optional[Dict]:
+        """
+        Process a single ticker: fetch data and calculate score.
+
+        Args:
+            ticker: Ticker symbol
+
+        Returns:
+            Dict with ticker data and score, or None if filtered out
+        """
+        try:
+            logger.info(f"Analyzing {ticker}...")
+
+            data = self.get_ticker_data(ticker)
+            if not data:
+                return None
+
+            score = self.calculate_score(data)
+
+            # HARD FILTER: Skip if IV Rank < 50% (score = 0)
+            if score == 0:
+                logger.info(f"{ticker}: Filtered out (IV Rank < 50%)")
+                return None
+
+            data['score'] = score
+            return data
+
+        except Exception as e:
+            logger.warning(f"{ticker}: Processing failed: {e}")
+            return None
+
     def filter_and_score_tickers(
         self,
         tickers: List[str],
-        max_tickers: int = 10
+        max_tickers: int = 10,
+        parallel: bool = True,
+        max_workers: int = 5
     ) -> List[Dict]:
         """
         Filter and score a list of tickers.
@@ -366,29 +433,43 @@ class TickerFilter:
         Args:
             tickers: List of ticker symbols
             max_tickers: Max number to process (avoid rate limits)
+            parallel: Use parallel processing (default: True)
+            max_workers: Max parallel workers (default: 5)
 
         Returns:
             List of dicts with ticker data and scores, sorted by score
             Only returns tickers that pass IV Rank filter (score > 0)
         """
+        tickers_to_process = tickers[:max_tickers]
         results = []
 
-        for ticker in tickers[:max_tickers]:
-            logger.info(f"Analyzing {ticker}...")
+        if parallel and len(tickers_to_process) > 1:
+            # Parallel processing (much faster for I/O-bound operations)
+            logger.debug(f"Processing {len(tickers_to_process)} tickers in parallel ({max_workers} workers)")
 
-            data = self.get_ticker_data(ticker)
-            if not data:
-                continue
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all tasks
+                future_to_ticker = {
+                    executor.submit(self._process_single_ticker, ticker): ticker
+                    for ticker in tickers_to_process
+                }
 
-            score = self.calculate_score(data)
-
-            # HARD FILTER: Skip if IV Rank < 50% (score = 0)
-            if score == 0:
-                logger.info(f"{ticker}: Filtered out (IV Rank < 50%)")
-                continue
-
-            data['score'] = score
-            results.append(data)
+                # Collect results as they complete
+                for future in as_completed(future_to_ticker):
+                    ticker = future_to_ticker[future]
+                    try:
+                        data = future.result()
+                        if data:
+                            results.append(data)
+                    except Exception as e:
+                        logger.error(f"{ticker}: Unexpected error: {e}")
+        else:
+            # Sequential processing (fallback or single ticker)
+            logger.debug(f"Processing {len(tickers_to_process)} tickers sequentially")
+            for ticker in tickers_to_process:
+                data = self._process_single_ticker(ticker)
+                if data:
+                    results.append(data)
 
         # Sort by score descending
         results.sort(key=lambda x: x['score'], reverse=True)

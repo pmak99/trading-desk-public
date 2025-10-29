@@ -97,9 +97,14 @@ class SentimentAnalyzer:
 
             return result
 
-        except Exception as e:
-            logger.error(f"Error analyzing sentiment for {ticker}: {e}")
+        except (ValueError, KeyError, TypeError) as e:
+            # Data parsing/structure errors
+            logger.error(f"{ticker}: Data error in sentiment analysis: {e}")
             return self._get_empty_result(ticker)
+        except Exception as e:
+            # Unexpected errors - log and re-raise for visibility
+            logger.error(f"{ticker}: Unexpected error in sentiment analysis: {e}", exc_info=True)
+            raise
 
     def _build_sentiment_prompt(self, ticker: str, earnings_date: Optional[str], reddit_data: Dict) -> str:
         """

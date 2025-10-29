@@ -102,9 +102,14 @@ class StrategyGenerator:
 
             return result
 
-        except Exception as e:
-            logger.error(f"Error generating strategies for {ticker}: {e}")
+        except (ValueError, KeyError, TypeError) as e:
+            # Data parsing/structure errors
+            logger.error(f"{ticker}: Data error in strategy generation: {e}")
             return self._get_empty_result(ticker)
+        except Exception as e:
+            # Unexpected errors - log and re-raise for visibility
+            logger.error(f"{ticker}: Unexpected error in strategy generation: {e}", exc_info=True)
+            raise
 
     def _build_strategy_prompt(
         self,

@@ -125,12 +125,22 @@ class EarningsAnalyzer:
     5. Output formatted research report for manual execution
     """
 
-    def __init__(self):
-        """Initialize earnings analyzer components."""
+    def __init__(
+        self,
+        earnings_calendar: Optional[EarningsCalendar] = None,
+        ticker_filter: Optional[TickerFilter] = None
+    ):
+        """
+        Initialize earnings analyzer components.
+
+        Args:
+            earnings_calendar: EarningsCalendar instance (for dependency injection/testing)
+            ticker_filter: TickerFilter instance (for dependency injection/testing)
+        """
         logger.info("Initializing Earnings Analyzer...")
 
-        self.earnings_calendar = EarningsCalendar()
-        self.ticker_filter = TickerFilter()
+        self.earnings_calendar = earnings_calendar or EarningsCalendar()
+        self.ticker_filter = ticker_filter or TickerFilter()
 
         # Note: Sentiment analyzer and strategy generator are initialized
         # in worker processes for thread-safe parallel processing
