@@ -1,4 +1,4 @@
-# Phase 1 Dependencies
+# Phase 3 Dependencies
 yfinance>=0.2.32
 requests>=2.31.0
 praw>=7.7.1
@@ -7,3 +7,4 @@ python-dotenv>=1.0.0
 pytest>=7.4.3
 pytest-cov>=4.1.0
 pandas>=2.2.0
+pytz>=2024.1  # Timezone support for market hours

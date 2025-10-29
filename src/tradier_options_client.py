@@ -53,13 +53,14 @@ class TradierOptionsClient:
         """Check if Tradier API is configured and accessible."""
         return self.access_token is not None
 
-    def get_options_data(self, ticker: str, current_price: float = None) -> Optional[Dict]:
+    def get_options_data(self, ticker: str, current_price: float = None, earnings_date: Optional[str] = None) -> Optional[Dict]:
         """
         Get comprehensive options data including real IV Rank.
 
         Args:
             ticker: Stock ticker symbol
             current_price: Current stock price (optional, will fetch if not provided)
+            earnings_date: Earnings date (YYYY-MM-DD) for weekly options selection
 
         Returns:
             Dict with:
@@ -86,11 +87,11 @@ class TradierOptionsClient:
                 logger.error(f"{ticker}: Could not get current price")
                 return None
 
-            # Get IV Rank from market data
-            iv_data = self._get_iv_rank(ticker)
+            # Get IV Rank from market data (pass earnings date for weekly expiration selection)
+            iv_data = self._get_iv_rank(ticker, earnings_date)
 
             # Get options chain for expected move and liquidity
-            chain_data = self._get_options_chain(ticker, current_price)
+            chain_data = self._get_options_chain(ticker, current_price, earnings_date)
 
             # Combine data
             result = {
@@ -132,12 +133,16 @@ class TradierOptionsClient:
             logger.error(f"{ticker}: Failed to get quote: {e}")
             return None
 
-    def _get_iv_rank(self, ticker: str) -> Dict:
+    def _get_iv_rank(self, ticker: str, earnings_date: Optional[str] = None) -> Dict:
         """
         Get IV data from Tradier.
 
         Tradier provides real implied volatility from options Greeks.
         IV Rank calculation requires 52-week IV history (to be implemented).
+
+        Args:
+            ticker: Stock ticker
+            earnings_date: Earnings date for weekly expiration selection
 
         Returns:
             Dict with iv_rank, iv_percentile, current_iv
@@ -146,8 +151,8 @@ class TradierOptionsClient:
               iv_rank still uses RV proxy until historical IV tracking is added.
         """
         try:
-            # Get nearest expiration
-            expiration = self._get_nearest_weekly_expiration(ticker)
+            # Get nearest weekly expiration (pass earnings date for better selection)
+            expiration = self._get_nearest_weekly_expiration(ticker, earnings_date)
             if not expiration:
                 logger.warning(f"{ticker}: No expiration found for IV calculation")
                 return {'iv_rank': 0, 'iv_percentile': 0, 'current_iv': 0}
@@ -202,20 +207,21 @@ class TradierOptionsClient:
             logger.error(f"{ticker}: Failed to get IV data: {e}")
             return {'iv_rank': 0, 'iv_percentile': 0, 'current_iv': 0}
 
-    def _get_options_chain(self, ticker: str, current_price: float) -> Dict:
+    def _get_options_chain(self, ticker: str, current_price: float, earnings_date: Optional[str] = None) -> Dict:
         """
         Get options chain for expected move and liquidity metrics.
 
         Args:
             ticker: Stock symbol
             current_price: Current stock price
+            earnings_date: Earnings date for weekly expiration selection
 
         Returns:
             Dict with expected_move_pct, options_volume, open_interest
         """
         try:
-            # Get nearest weekly expiration (earnings trades typically use weeklies)
-            expiration = self._get_nearest_weekly_expiration(ticker)
+            # Get nearest weekly expiration (pass earnings date for better selection)
+            expiration = self._get_nearest_weekly_expiration(ticker, earnings_date)
 
             if not expiration:
                 logger.warning(f"{ticker}: No expiration found")
@@ -256,8 +262,21 @@ class TradierOptionsClient:
             logger.error(f"{ticker}: Failed to get options chain: {e}")
             return {'expected_move_pct': 0, 'options_volume': 0, 'open_interest': 0}
 
-    def _get_nearest_weekly_expiration(self, ticker: str) -> Optional[str]:
-        """Get the nearest weekly options expiration date."""
+    def _get_nearest_weekly_expiration(self, ticker: str, earnings_date: Optional[str] = None) -> Optional[str]:
+        """
+        Get the weekly options expiration for earnings trade.
+
+        Strategy:
+        - If earnings date provided: Find expiration in same week or next week if Friday
+        - Otherwise: Find nearest weekly expiration within 2 weeks
+
+        Args:
+            ticker: Stock ticker
+            earnings_date: Earnings date (YYYY-MM-DD) if known
+
+        Returns:
+            Expiration date string (YYYY-MM-DD) or None
+        """
         try:
             url = f"{self.endpoint}/v1/markets/options/expirations"
             params = {'symbol': ticker, 'includeAllRoots': 'true'}
@@ -269,18 +288,49 @@ class TradierOptionsClient:
 
             if 'expirations' in data and 'date' in data['expirations']:
                 dates = data['expirations']['date']
-
-                # Find nearest expiration 7-14 days out (typical earnings trade window)
                 today = datetime.now().date()
-                target_range = (today + timedelta(days=7), today + timedelta(days=14))
 
+                # Parse earnings date if provided
+                if earnings_date:
+                    earnings_dt = datetime.strptime(earnings_date, '%Y-%m-%d').date()
+
+                    # Determine target week
+                    # If today is Friday, look for next week expiration
+                    # Otherwise, look for same week as earnings
+                    if today.weekday() == 4:  # Friday = 4
+                        # Look for expiration in following week
+                        target_start = today + timedelta(days=7)
+                        target_end = today + timedelta(days=14)
+                    else:
+                        # Look for expiration in same week as earnings
+                        # Find Friday of earnings week
+                        days_until_friday = (4 - earnings_dt.weekday()) % 7
+                        if days_until_friday == 0 and earnings_dt.weekday() != 4:
+                            days_until_friday = 7
+                        target_friday = earnings_dt + timedelta(days=days_until_friday)
+
+                        # Allow +/- 3 days from Friday of earnings week
+                        target_start = target_friday - timedelta(days=3)
+                        target_end = target_friday + timedelta(days=3)
+
+                else:
+                    # No earnings date - use original logic (7-14 days out)
+                    target_start = today + timedelta(days=7)
+                    target_end = today + timedelta(days=14)
+
+                # Find first expiration in target range
                 for date_str in dates:
                     exp_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    if target_range[0] <= exp_date <= target_range[1]:
+                    if target_start <= exp_date <= target_end:
+                        logger.debug(f"{ticker}: Using weekly expiration {date_str}")
                         return date_str
 
                 # Fallback: return nearest future expiration
-                return dates[0] if dates else None
+                for date_str in dates:
+                    exp_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    if exp_date >= today:
+                        logger.warning(f"{ticker}: Using fallback expiration {date_str}")
+                        return date_str
 
             return None
 
