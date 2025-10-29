@@ -10,6 +10,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.options_data_client import OptionsDataClient
 from src.tradier_options_client import TradierOptionsClient
+from src.scorers import CompositeScorer
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,9 @@ class TickerFilter:
         # Cache for ticker data (prevents redundant API calls)
         self._ticker_cache: Dict[str, tuple[Dict, datetime]] = {}
         self._cache_ttl = timedelta(minutes=cache_ttl_minutes)
+
+        # Initialize composite scorer (Strategy pattern - refactored from 172-line god function)
+        self.scorer = CompositeScorer(min_iv=self.IV_RANK_MIN)
 
         # Initialize Tradier client (preferred - real IV data)
         self.tradier_client = None
@@ -215,6 +219,9 @@ class TickerFilter:
         """
         Calculate ticker score for IV crush strategy.
 
+        REFACTORED: Now delegates to CompositeScorer (Strategy pattern).
+        Previous 172-line implementation broken into separate scorer classes.
+
         Scoring based on Trading Research Prompt.pdf criteria:
         - IV % >= 60% required (uses actual implied volatility from options)
         - 60-80% IV is good, 80-100% excellent, 100%+ premium for IV crush trades
@@ -227,163 +234,7 @@ class TickerFilter:
         Returns:
             Score (0-100), or 0 if IV < 60%
         """
-        options_data = data.get('options_data', {})
-
-        # ==========================================
-        # 1. IV Score (50% weight) - PRIMARY
-        # ==========================================
-        # Use current_iv (actual IV %) from Tradier, fallback to iv_rank if available
-        current_iv = options_data.get('current_iv', None)
-        iv_rank = options_data.get('iv_rank', None)
-
-        # HARD FILTER: Use actual IV % for filtering (more reliable than IV Rank)
-        if current_iv is not None and current_iv > 0:
-            # Filter: Skip anything below 60% IV (minimum for earnings IV crush plays)
-            MIN_IV_PERCENT = 60
-            if current_iv < MIN_IV_PERCENT:
-                logger.info(f"{data['ticker']}: IV {current_iv}% < {MIN_IV_PERCENT}% - SKIPPING")
-                return 0.0
-
-            # Score based on actual IV % thresholds
-            # For earnings plays: 60-80% = good, 80-100% = excellent, 100%+ = premium
-            if current_iv >= 100:  # Premium IV - exceptional IV crush opportunity
-                iv_score = 100
-            elif current_iv >= 80:  # Excellent IV - very good opportunity
-                iv_score = 80 + (current_iv - 80) * 1.0  # Scale 80-100
-            else:  # 60-80% - good IV
-                iv_score = 60 + (current_iv - 60) * 1.0  # Scale 60-80
-
-        elif iv_rank is not None and iv_rank > 0:
-            # Fallback to IV Rank if current_iv not available
-            if iv_rank < self.IV_RANK_MIN:
-                logger.info(f"{data['ticker']}: IV Rank {iv_rank}% < {self.IV_RANK_MIN}% - SKIPPING")
-                return 0.0
-
-            # Score based on IV Rank thresholds
-            if iv_rank >= self.IV_RANK_EXCELLENT:  # 75%+
-                iv_score = 100
-            elif iv_rank >= self.IV_RANK_GOOD:  # 60-75%
-                iv_score = 70 + (iv_rank - self.IV_RANK_GOOD) * 2  # Scale 70-100
-            else:  # 50-60%
-                iv_score = 50 + (iv_rank - self.IV_RANK_MIN) * 2  # Scale 50-70
-        else:
-            # No options data yet - use basic IV estimate from yfinance
-            iv = data.get('iv', 0)
-            if iv >= 0.60:
-                iv_score = 80  # Probably high IV
-            elif iv >= 0.40:
-                iv_score = 60
-            else:
-                iv_score = 30  # Low confidence without real IV data
-
-        # ==========================================
-        # 2. IV Crush Edge Score (30% weight)
-        # ==========================================
-        # Does implied move historically > actual move?
-        iv_crush_ratio = options_data.get('iv_crush_ratio', None)
-
-        if iv_crush_ratio is not None:
-            # iv_crush_ratio > 1.0 means implied consistently beats actual (GOOD!)
-            if iv_crush_ratio >= 1.3:  # Implied 30%+ higher than actual
-                iv_crush_score = 100
-            elif iv_crush_ratio >= 1.2:  # Implied 20%+ higher
-                iv_crush_score = 80
-            elif iv_crush_ratio >= 1.1:  # Implied 10%+ higher
-                iv_crush_score = 60
-            elif iv_crush_ratio >= 1.0:  # Implied slightly higher
-                iv_crush_score = 40
-            else:  # Implied < actual (BAD - no edge)
-                iv_crush_score = 0
-        else:
-            # No historical data yet - assume neutral
-            iv_crush_score = 50
-
-        # ==========================================
-        # 3. Options Liquidity Score (15% weight)
-        # ==========================================
-        options_volume = options_data.get('options_volume', 0)
-        open_interest = options_data.get('open_interest', 0)
-        bid_ask_spread_pct = options_data.get('bid_ask_spread_pct', None)
-
-        liquidity_score = 0
-
-        # Options volume component (40% of liquidity score)
-        if options_volume >= 50000:  # Very high options volume
-            vol_score = 100
-        elif options_volume >= 10000:  # High
-            vol_score = 80
-        elif options_volume >= 5000:  # Good
-            vol_score = 60
-        elif options_volume >= 1000:  # Acceptable
-            vol_score = 40
-        else:
-            vol_score = 20
-        liquidity_score += vol_score * 0.4
-
-        # Open interest component (40% of liquidity score)
-        if open_interest >= 100000:  # Very liquid
-            oi_score = 100
-        elif open_interest >= 50000:  # Liquid
-            oi_score = 80
-        elif open_interest >= 10000:  # Good
-            oi_score = 60
-        elif open_interest >= 5000:  # Acceptable
-            oi_score = 40
-        else:
-            oi_score = 20
-        liquidity_score += oi_score * 0.4
-
-        # Bid-ask spread component (20% of liquidity score)
-        if bid_ask_spread_pct is not None:
-            if bid_ask_spread_pct <= 0.02:  # 2% or less - excellent
-                spread_score = 100
-            elif bid_ask_spread_pct <= 0.05:  # 5% or less - good
-                spread_score = 80
-            elif bid_ask_spread_pct <= 0.10:  # 10% or less - okay
-                spread_score = 60
-            else:  # Wide spreads - bad
-                spread_score = 20
-        else:
-            spread_score = 50  # No data
-        liquidity_score += spread_score * 0.2
-
-        # ==========================================
-        # 4. Fundamentals Score (5% weight)
-        # ==========================================
-        market_cap = data.get('market_cap', 0)
-        price = data.get('price', 0)
-
-        # Market cap (50% of fundamentals)
-        if market_cap >= 200e9:  # $200B+ mega/large cap
-            cap_score = 100
-        elif market_cap >= 50e9:  # $50B+
-            cap_score = 80
-        elif market_cap >= 10e9:  # $10B+
-            cap_score = 60
-        else:
-            cap_score = 40
-
-        # Price range for quality premiums (50% of fundamentals)
-        if 50 <= price <= 400:  # Ideal for selling premium
-            price_score = 100
-        elif 20 <= price <= 500:  # Acceptable
-            price_score = 80
-        else:
-            price_score = 50
-
-        fundamentals_score = (cap_score + price_score) / 2
-
-        # ==========================================
-        # TOTAL SCORE
-        # ==========================================
-        total_score = (
-            iv_score * self.weights['iv_score'] +
-            iv_crush_score * self.weights['iv_crush_edge'] +
-            liquidity_score * self.weights['options_liquidity'] +
-            fundamentals_score * self.weights['fundamentals']
-        )
-
-        return round(total_score, 2)
+        return self.scorer.calculate_score(data)
 
     def _process_single_ticker(self, ticker: str) -> Optional[Dict]:
         """
