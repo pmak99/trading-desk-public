@@ -6,6 +6,7 @@ Tracks API calls, token usage, and enforces budget limits.
 import json
 import os
 import yaml
+import fcntl
 from datetime import datetime, date
 from typing import Dict, Optional
 from pathlib import Path
@@ -22,9 +23,12 @@ class BudgetExceededError(Exception):
 
 class UsageTracker:
     """
-    Thread-safe usage tracker for API calls and budget enforcement.
+    Thread-safe AND process-safe usage tracker for API calls and budget enforcement.
 
-    Uses file-based locking for concurrent access across multiple processes.
+    Uses:
+    - threading.Lock() for thread safety within a process
+    - fcntl file locking for process safety across multiple workers
+    - Reload-before-write pattern to avoid race conditions
     """
 
     def __init__(self, config_path: str = "config/budget.yaml"):
@@ -57,13 +61,18 @@ class UsageTracker:
             raise
 
     def _load_usage(self) -> Dict:
-        """Load usage data from JSON file."""
+        """Load usage data from JSON file with file locking (process-safe)."""
         if not self.usage_file.exists():
             return self._create_empty_usage()
 
         try:
             with open(self.usage_file, 'r') as f:
-                data = json.load(f)
+                # Acquire shared lock (multiple readers allowed)
+                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                try:
+                    data = json.load(f)
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
             # Reset if new month
             if data.get('month') != self._current_month():
@@ -72,15 +81,21 @@ class UsageTracker:
 
             return data
 
-        except (json.JSONDecodeError, KeyError):
-            logger.warning("Invalid usage file. Creating new one.")
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning(f"Invalid usage file: {e}. Creating new one.")
             return self._create_empty_usage()
 
     def _save_usage(self):
-        """Save usage data to JSON file (thread-safe)."""
-        # Lock is held by caller (log_api_call)
+        """Save usage data to JSON file with file locking (process-safe)."""
+        # Thread lock is held by caller (log_api_call)
+        # File lock protects against other processes
         with open(self.usage_file, 'w') as f:
-            json.dump(self.usage_data, f, indent=2, default=str)
+            # Acquire exclusive lock (only one writer)
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                json.dump(self.usage_data, f, indent=2, default=str)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     def _create_empty_usage(self) -> Dict:
         """Create empty usage data structure."""
@@ -286,7 +301,7 @@ class UsageTracker:
         success: bool = True
     ):
         """
-        Log an API call (thread-safe).
+        Log an API call (thread-safe AND process-safe).
 
         Args:
             model: Model name
@@ -296,6 +311,11 @@ class UsageTracker:
             success: Whether call was successful
         """
         with self._lock:
+            # Reload from disk to get latest data from other processes
+            # This prevents race condition where Process A's updates
+            # get overwritten by Process B's stale in-memory data
+            self.usage_data = self._load_usage()
+
             today = self._current_date()
             provider = self._get_model_provider(model)
 
@@ -408,7 +428,7 @@ if __name__ == "__main__":
     logger.info(f"  API Calls: {summary['today']['calls']}")
     logger.info(f"  Cost: ${summary['today']['cost']:.4f}")
     logger.info("")
-    logger.info('Total Calls This Month:', summary['total_calls'])
+    logger.info(f"Total Calls This Month: {summary['total_calls']}")
     logger.info("")
     if summary['model_usage']:
         logger.info('Model Usage:')

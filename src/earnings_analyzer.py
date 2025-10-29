@@ -23,11 +23,6 @@ from src.ticker_filter import TickerFilter
 from src.sentiment_analyzer import SentimentAnalyzer
 from src.strategy_generator import StrategyGenerator
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 
@@ -200,21 +195,43 @@ class EarningsAnalyzer:
         num_workers = min(cpu_count(), len(tickers_to_analyze), 4)
         logger.info(f"Using {num_workers} parallel workers")
 
-        with Pool(processes=num_workers) as pool:
-            ticker_analyses = pool.map(_analyze_single_ticker, analysis_args)
+        # Timeout: 120 seconds per ticker (generous for API calls + Reddit scraping)
+        timeout = 120 * len(tickers_to_analyze)
 
-        # Filter out failed analyses
-        ticker_analyses = [a for a in ticker_analyses if not a.get('error')]
-        analyzed_count = len(ticker_analyses)
+        try:
+            with Pool(processes=num_workers) as pool:
+                result = pool.map_async(_analyze_single_ticker, analysis_args)
+                ticker_analyses = result.get(timeout=timeout)
+        except TimeoutError:
+            logger.error(f"Pool operation timed out after {timeout}s")
+            ticker_analyses = []
+
+        # Separate successful and failed analyses
+        successful_analyses = []
+        failed_analyses = []
+
+        for analysis in ticker_analyses:
+            if analysis.get('error'):
+                failed_analyses.append(analysis)
+                logger.warning(f"❌ {analysis['ticker']}: {analysis['error']}")
+            else:
+                successful_analyses.append(analysis)
+
+        analyzed_count = len(successful_analyses)
+        failed_count = len(failed_analyses)
 
         logger.info(f"Successfully analyzed {analyzed_count}/{len(tickers_to_analyze)} tickers")
+        if failed_count > 0:
+            logger.warning(f"Failed to analyze {failed_count} tickers - see warnings above for details")
 
         return {
             'date': target_date,
             'total_earnings': total_count,
             'filtered_count': filtered_count,
             'analyzed_count': analyzed_count,
-            'ticker_analyses': ticker_analyses
+            'failed_count': failed_count,
+            'ticker_analyses': successful_analyses,
+            'failed_analyses': failed_analyses
         }
 
     def generate_report(self, analysis_result: Dict) -> str:
@@ -235,6 +252,10 @@ class EarningsAnalyzer:
         report_lines.append(f"Total Earnings: {analysis_result['total_earnings']} companies")
         report_lines.append(f"Passed IV Filter: {analysis_result['filtered_count']} tickers")
         report_lines.append(f"Fully Analyzed: {analysis_result['analyzed_count']} tickers")
+
+        if analysis_result.get('failed_count', 0) > 0:
+            report_lines.append(f"Failed: {analysis_result['failed_count']} tickers")
+
         report_lines.append("\n" + "=" * 80)
 
         # Detail each analyzed ticker
@@ -296,6 +317,14 @@ class EarningsAnalyzer:
                 report_lines.append(f"\n  RECOMMENDED: Strategy {rec_idx + 1}")
                 report_lines.append(f"  Why: {strategies.get('recommendation_rationale', 'N/A')[:200]}...")
 
+        # Add failed tickers section if any
+        if analysis_result.get('failed_analyses'):
+            report_lines.append("\n\n" + "=" * 80)
+            report_lines.append("FAILED ANALYSES")
+            report_lines.append("=" * 80)
+            for failed in analysis_result['failed_analyses']:
+                report_lines.append(f"\n{failed['ticker']}: {failed.get('error', 'Unknown error')}")
+
         report_lines.append("\n\n" + "=" * 80)
         report_lines.append("END OF REPORT")
         report_lines.append("=" * 80)
@@ -305,6 +334,12 @@ class EarningsAnalyzer:
 
 # CLI
 if __name__ == "__main__":
+    # Setup logging for CLI execution
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
     logger.info("")
     logger.info('='*80)
     logger.info('EARNINGS TRADE ANALYZER - AUTOMATED RESEARCH SYSTEM')
