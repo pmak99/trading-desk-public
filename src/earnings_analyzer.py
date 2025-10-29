@@ -18,6 +18,8 @@ from typing import Dict, List, Tuple
 import sys
 from multiprocessing import Pool, cpu_count
 import pytz
+import os
+import glob
 
 from src.earnings_calendar import EarningsCalendar
 from src.ticker_filter import TickerFilter
@@ -534,6 +536,50 @@ class EarningsAnalyzer:
 
         return "\n".join(report_lines)
 
+    @staticmethod
+    def cleanup_old_reports(days: int = 15) -> None:
+        """
+        Delete report files older than specified number of days.
+
+        Args:
+            days: Number of days to keep reports (default: 15)
+        """
+        try:
+            data_dir = "data"
+            if not os.path.exists(data_dir):
+                return
+
+            # Find all earnings analysis report files
+            pattern = os.path.join(data_dir, "earnings_analysis_*.txt")
+            report_files = glob.glob(pattern)
+
+            if not report_files:
+                return
+
+            # Calculate cutoff date
+            cutoff_date = datetime.now() - timedelta(days=days)
+            deleted_count = 0
+
+            for file_path in report_files:
+                try:
+                    # Get file modification time
+                    file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
+
+                    # Delete if older than cutoff
+                    if file_mtime < cutoff_date:
+                        os.remove(file_path)
+                        deleted_count += 1
+                        logger.debug(f"Deleted old report: {os.path.basename(file_path)} (age: {(datetime.now() - file_mtime).days} days)")
+
+                except Exception as e:
+                    logger.warning(f"Failed to delete {file_path}: {e}")
+
+            if deleted_count > 0:
+                logger.info(f"🗑️  Cleaned up {deleted_count} old report(s) (>{days} days)")
+
+        except Exception as e:
+            logger.warning(f"Cleanup failed: {e}")
+
 
 # CLI
 if __name__ == "__main__":
@@ -626,3 +672,6 @@ if __name__ == "__main__":
         f.write(report)
 
     logger.info(f"\n\nReport saved to: {output_file}")
+
+    # Cleanup old reports (>15 days) as final step
+    EarningsAnalyzer.cleanup_old_reports(days=15)
