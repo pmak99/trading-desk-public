@@ -14,6 +14,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class BudgetExceededError(Exception):
+    """Raised when budget is exceeded and no fallback available."""
+    pass
+
+
 class UsageTracker:
     """Track API usage and enforce budget limits."""
 
@@ -72,9 +77,11 @@ class UsageTracker:
         return {
             'month': self._current_month(),
             'total_cost': 0.0,
+            'perplexity_cost': 0.0,  # Track Perplexity separately
             'total_calls': 0,
             'daily_usage': {},
             'model_usage': {},
+            'provider_usage': {},  # Track by provider (perplexity, anthropic, google)
             'calls': []
         }
 
@@ -92,10 +99,92 @@ class UsageTracker:
         """Get total cost for current month."""
         return self.usage_data['total_cost']
 
+    def get_perplexity_cost(self) -> float:
+        """Get Perplexity cost for current month."""
+        return self.usage_data.get('perplexity_cost', 0.0)
+
     def get_remaining_budget(self) -> float:
         """Get remaining budget for current month."""
         monthly_budget = self.config['monthly_budget']
         return monthly_budget - self.usage_data['total_cost']
+
+    def get_remaining_perplexity_budget(self) -> float:
+        """Get remaining Perplexity budget for current month."""
+        perplexity_limit = self.config.get('perplexity_monthly_limit', 4.90)
+        return perplexity_limit - self.usage_data.get('perplexity_cost', 0.0)
+
+    def _get_model_provider(self, model: str) -> str:
+        """
+        Get provider for a model.
+
+        Returns:
+            Provider name: 'perplexity', 'anthropic', or 'google'
+        """
+        if model in self.config['models']:
+            model_config = self.config['models'][model]
+            return model_config.get('provider', 'perplexity')  # Default to perplexity
+        return 'perplexity'
+
+    def get_available_model(self, preferred_model: str, use_case: str = "sentiment") -> tuple[str, str]:
+        """
+        Get best available model based on budget and cascade configuration.
+
+        Args:
+            preferred_model: Preferred model name (e.g., 'sonar-pro')
+            use_case: Use case ('sentiment' or 'strategy')
+
+        Returns:
+            Tuple of (model_name, provider) or raises BudgetExceededError if no models available
+        """
+        cascade_enabled = self.config.get('model_cascade', {}).get('enabled', True)
+
+        if not cascade_enabled:
+            # Cascade disabled, just check if preferred model is available
+            can_call, reason = self.can_make_call(preferred_model)
+            if can_call:
+                return preferred_model, self._get_model_provider(preferred_model)
+            raise BudgetExceededError(reason)
+
+        # Try preferred model first
+        can_call, reason = self.can_make_call(preferred_model)
+        if can_call:
+            return preferred_model, self._get_model_provider(preferred_model)
+
+        # Perplexity exhausted - check if we should fall back
+        if "PERPLEXITY_LIMIT_EXCEEDED" in reason:
+            logger.warning(f"⚠️  Perplexity limit reached ({reason})")
+            logger.info("🔄 Attempting fallback to alternative models...")
+
+            # Try fallback models in order
+            cascade_order = self.config.get('model_cascade', {}).get('order', [])
+
+            for provider in cascade_order:
+                if provider == 'perplexity':
+                    continue  # Already exhausted
+
+                # Find a model from this provider
+                fallback_model = self._get_fallback_model_for_provider(provider, use_case)
+
+                if fallback_model:
+                    can_call, fallback_reason = self.can_make_call(fallback_model)
+                    if can_call:
+                        logger.info(f"✓ Using fallback: {fallback_model} ({provider})")
+                        return fallback_model, provider
+
+            # No fallback models available
+            raise BudgetExceededError("All models exhausted - Perplexity limit reached and no fallback models available")
+
+        # Other budget issue
+        raise BudgetExceededError(reason)
+
+    def _get_fallback_model_for_provider(self, provider: str, use_case: str) -> Optional[str]:
+        """Get fallback model name for a provider."""
+        for model_name, model_config in self.config['models'].items():
+            if model_config.get('provider') == provider:
+                # Check if this model is suitable for the use case
+                if model_config.get('use_case') in ['fallback', 'daily', use_case]:
+                    return model_name
+        return None
 
     def get_budget_percentage(self) -> float:
         """Get percentage of budget used."""
@@ -115,6 +204,16 @@ class UsageTracker:
         Returns:
             Tuple of (can_call, reason)
         """
+        provider = self._get_model_provider(model)
+
+        # Check Perplexity-specific hard limit ($4.90)
+        if provider == 'perplexity':
+            perplexity_limit = self.config.get('perplexity_monthly_limit', 4.90)
+            perplexity_cost = self.usage_data.get('perplexity_cost', 0.0)
+
+            if perplexity_cost >= perplexity_limit:
+                return False, f"PERPLEXITY_LIMIT_EXCEEDED: ${perplexity_cost:.2f} / ${perplexity_limit:.2f}"
+
         # Check monthly budget
         monthly_budget = self.config['monthly_budget']
         current_cost = self.usage_data['total_cost']
@@ -126,6 +225,14 @@ class UsageTracker:
         if model in self.config['models']:
             cost_per_1k = self.config['models'][model]['cost_per_1k_tokens']
             estimated_cost = (estimated_tokens / 1000) * cost_per_1k
+
+            # Check if adding this call would exceed Perplexity limit
+            if provider == 'perplexity':
+                perplexity_cost = self.usage_data.get('perplexity_cost', 0.0)
+                perplexity_limit = self.config.get('perplexity_monthly_limit', 4.90)
+
+                if perplexity_cost + estimated_cost > perplexity_limit:
+                    return False, f"PERPLEXITY_LIMIT_EXCEEDED: Would exceed (${perplexity_cost + estimated_cost:.2f} > ${perplexity_limit:.2f})"
 
             if current_cost + estimated_cost > monthly_budget:
                 return False, f"Would exceed budget (${current_cost + estimated_cost:.2f} > ${monthly_budget:.2f})"
@@ -178,11 +285,26 @@ class UsageTracker:
             success: Whether call was successful
         """
         today = self._current_date()
+        provider = self._get_model_provider(model)
 
         # Update total cost
         if success:
             self.usage_data['total_cost'] += cost
             self.usage_data['total_calls'] += 1
+
+            # Track Perplexity separately (for $4.90 hard limit)
+            if provider == 'perplexity':
+                if 'perplexity_cost' not in self.usage_data:
+                    self.usage_data['perplexity_cost'] = 0.0
+                self.usage_data['perplexity_cost'] += cost
+
+            # Track by provider
+            if 'provider_usage' not in self.usage_data:
+                self.usage_data['provider_usage'] = {}
+            if provider not in self.usage_data['provider_usage']:
+                self.usage_data['provider_usage'][provider] = {'calls': 0, 'cost': 0.0}
+            self.usage_data['provider_usage'][provider]['calls'] += 1
+            self.usage_data['provider_usage'][provider]['cost'] += cost
 
         # Update daily usage
         if today not in self.usage_data['daily_usage']:

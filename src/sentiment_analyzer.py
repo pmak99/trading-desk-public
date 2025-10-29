@@ -1,5 +1,7 @@
 """
-Perplexity Sonar sentiment analyzer for earnings trades.
+AI-powered sentiment analyzer for earnings trades.
+
+Uses unified AI client with automatic fallback (Perplexity → Claude → Gemini).
 
 Analyzes sentiment based on Trading Research Prompt.pdf criteria:
 - Overall sentiment: Retail vs Institutional vs Hedge Fund
@@ -8,47 +10,30 @@ Analyzes sentiment based on Trading Research Prompt.pdf criteria:
 - Dark pool activity and positioning
 """
 
-import os
-import requests
 import logging
 from typing import Dict, Optional
-from dotenv import load_dotenv
-from src.usage_tracker import UsageTracker
-
-# Load environment variables
-load_dotenv()
+from src.ai_client import AIClient
+from src.usage_tracker import UsageTracker, BudgetExceededError
 
 logger = logging.getLogger(__name__)
 
 
-class BudgetExceededError(Exception):
-    """Raised when API budget is exceeded."""
-    pass
-
-
 class SentimentAnalyzer:
-    """Perplexity Sonar API client for sentiment analysis."""
+    """AI-powered sentiment analyzer with automatic fallback."""
 
-    def __init__(self, model: str = "sonar-pro", usage_tracker: Optional[UsageTracker] = None):
+    def __init__(self, preferred_model: str = "sonar-pro", usage_tracker: Optional[UsageTracker] = None):
         """
         Initialize sentiment analyzer.
 
         Args:
-            model: Perplexity model to use
-                   - "sonar-pro": Fast, cheap ($5/1M tokens) - default
-                   - "sonar-deep-research": Expensive (~$0.75/call) - manual only
+            preferred_model: Preferred model to use (auto-fallback if budget exceeded)
+                            - "sonar-pro": Fast, cheap ($5/1M tokens) - default
+                            - Falls back to Claude → Gemini when Perplexity exhausted
             usage_tracker: Optional UsageTracker instance for cost control
         """
-        self.api_key = os.getenv('PERPLEXITY_API_KEY')
-        if not self.api_key:
-            raise ValueError("PERPLEXITY_API_KEY not found in environment")
-
-        self.model = model
-        self.api_url = "https://api.perplexity.ai/chat/completions"
-        self.calls_made = 0
-
-        # Initialize usage tracker for cost control
-        self.usage_tracker = usage_tracker or UsageTracker()
+        self.preferred_model = preferred_model
+        self.ai_client = AIClient(usage_tracker=usage_tracker)
+        self.usage_tracker = self.ai_client.usage_tracker
 
     def analyze_earnings_sentiment(self, ticker: str, earnings_date: Optional[str] = None) -> Dict:
         """
@@ -149,7 +134,10 @@ Focus on actionable intelligence for an options trader looking to sell premium (
 
     def _make_request(self, prompt: str, ticker: Optional[str] = None) -> str:
         """
-        Make API request to Perplexity with budget checking.
+        Make AI API request with automatic fallback.
+
+        Uses unified AI client that automatically falls back from:
+        Perplexity → Claude → Gemini when budget limits are reached.
 
         Args:
             prompt: Prompt string
@@ -159,74 +147,33 @@ Focus on actionable intelligence for an options trader looking to sell premium (
             Response text
 
         Raises:
-            BudgetExceededError: If budget limit would be exceeded
+            BudgetExceededError: If all models exhausted
             Exception: If request fails
         """
-        # Estimate tokens (rough: ~4 chars per token)
-        estimated_tokens = len(prompt) / 4 + 1500  # prompt + max_tokens response
+        # Add system context to prompt
+        full_prompt = f"""You are a professional options trading analyst specializing in earnings plays and sentiment analysis.
 
-        # Check budget BEFORE making call
-        can_call, reason = self.usage_tracker.can_make_call(self.model, estimated_tokens)
-        if not can_call:
-            logger.error(f"Budget check failed: {reason}")
-            raise BudgetExceededError(reason)
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a professional options trading analyst specializing in earnings plays and sentiment analysis."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "temperature": 0.2,  # Low temperature for consistent, factual analysis
-            "max_tokens": 1500
-        }
-
-        success = False
-        tokens_used = 0
-        cost = 0.0
+{prompt}"""
 
         try:
-            response = requests.post(self.api_url, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
+            # AI client handles budget checking and fallback automatically
+            result = self.ai_client.chat_completion(
+                prompt=full_prompt,
+                preferred_model=self.preferred_model,
+                use_case="sentiment",
+                ticker=ticker,
+                max_tokens=1500
+            )
 
-            data = response.json()
+            # AI client already logged the call - just return content
+            logger.info(f"{ticker}: Used {result['model']} ({result['provider']}) - ${result['cost']:.4f}")
+            return result['content']
 
-            # Get actual token usage from response
-            if 'usage' in data:
-                tokens_used = data['usage'].get('total_tokens', estimated_tokens)
-            else:
-                tokens_used = estimated_tokens  # Fallback to estimate
-
-            # Calculate cost
-            cost_per_1k = self.usage_tracker.config['models'][self.model]['cost_per_1k_tokens']
-            cost = (tokens_used / 1000) * cost_per_1k
-
-            success = True
-            self.calls_made += 1
-
-            # Log usage AFTER successful call
-            self.usage_tracker.log_api_call(self.model, tokens_used, cost, ticker, success=True)
-
-            return data['choices'][0]['message']['content']
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Perplexity API request failed: {e}")
-            # Log failed call with estimated cost
-            if estimated_tokens > 0:
-                cost_per_1k = self.usage_tracker.config['models'][self.model]['cost_per_1k_tokens']
-                cost = (estimated_tokens / 1000) * cost_per_1k
-                self.usage_tracker.log_api_call(self.model, estimated_tokens, cost, ticker, success=False)
+        except BudgetExceededError as e:
+            logger.error(f"{ticker}: All models exhausted - {e}")
+            raise
+        except Exception as e:
+            logger.error(f"{ticker}: API request failed - {e}")
             raise
 
     def _parse_sentiment_response(self, response: str, ticker: str) -> Dict:

@@ -50,6 +50,9 @@ logs/
 *.log
 *.csv
 
+# Documentation (personal research notes)
+docs/
+
 # Jupyter
 .ipynb_checkpoints
 
