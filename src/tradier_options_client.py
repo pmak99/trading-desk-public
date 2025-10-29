@@ -19,6 +19,7 @@ import logging
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from src.iv_history_tracker import IVHistoryTracker
 
 # Load environment variables
 load_dotenv()
@@ -48,6 +49,9 @@ class TradierOptionsClient:
             'Authorization': f'Bearer {self.access_token}',
             'Accept': 'application/json'
         }
+
+        # Initialize IV history tracker for IV Rank calculation
+        self.iv_tracker = IVHistoryTracker()
 
     def is_available(self) -> bool:
         """Check if Tradier API is configured and accessible."""
@@ -194,13 +198,21 @@ class TradierOptionsClient:
                 # Tradier returns IV as whole percentage (e.g., 1.23 = 123%, 0.50 = 50%)
                 current_iv = atm_call['greeks'].get('mid_iv', 0) * 100
 
-            # TODO: Calculate IV Rank from 52-week IV history
-            # For now, return 0 - this requires building a historical IV database
+            # Calculate IV Rank from historical IV data
             iv_rank = 0
+            if current_iv > 0:
+                # Record current IV for history
+                self.iv_tracker.record_iv(ticker, current_iv)
+
+                # Calculate IV Rank (percentile in 52-week range)
+                iv_rank = self.iv_tracker.calculate_iv_rank(ticker, current_iv)
+
+                if iv_rank > 0:
+                    logger.info(f"{ticker}: IV Rank = {iv_rank}% (current IV: {current_iv}%)")
 
             return {
                 'iv_rank': iv_rank,
-                'iv_percentile': 0,
+                'iv_percentile': iv_rank,  # Same as IV Rank
                 'current_iv': round(current_iv, 2)
             }
 
