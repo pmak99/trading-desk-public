@@ -75,7 +75,7 @@
 │                  USAGE TRACKER (usage_tracker.py)            │
 │                                                              │
 │  Monthly Budget: $5.00                                       │
-│  Perplexity Limit: $4.90 (HARD STOP)                        │
+│  Perplexity Limit: $4.98 (HARD STOP)                        │
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │  Pre-Flight Check:                                     │ │
@@ -107,7 +107,7 @@
 ┌───────────────────────────────────────────────────────────┐
 │                  AI CLIENT (ai_client.py)                 │
 │                                                           │
-│  1. Check Perplexity budget ($4.90 limit)                │
+│  1. Check Perplexity budget ($4.98 limit)                │
 │     │                                                     │
 │     ├─ Available? ──> Use Sonar Pro ($0.005/1k tokens)  │
 │     │                                                     │
@@ -198,7 +198,7 @@ Trading Desk/
 
 ### 3. Perplexity → Gemini Cascade
 **Why**:
-- Perplexity has $4.90 hard limit (user constraint)
+- Perplexity has $4.98 hard limit (user constraint)
 - Gemini is FREE with 1500 calls/day (sufficient fallback)
 - Removed Anthropic (requires prepaid credits, not free)
 
@@ -217,7 +217,7 @@ Trading Desk/
 **Budget Utilization**:
 - Per ticker: ~$0.01-0.02
 - Monthly capacity: ~250 tickers (~8/day)
-- Perplexity: Primary until $4.90
+- Perplexity: Primary until $4.98
 - Gemini: Unlimited fallback (1500/day)
 
 **API Calls per Ticker**:
@@ -243,10 +243,10 @@ Trading Desk/
 - Nasdaq: $0 (free)
 - Tradier: $0 (free with account)
 - Reddit: $0 (free)
-- Perplexity: $0.01-0.02 per ticker (until $4.90)
+- Perplexity: $0.01-0.02 per ticker (until $4.98)
 - Gemini: $0 (free - 1500/day)
 
-**Bottleneck**: Perplexity $4.90 limit (~250 tickers/month)
+**Bottleneck**: Perplexity $4.98 limit (~250 tickers/month)
 
 ---
 

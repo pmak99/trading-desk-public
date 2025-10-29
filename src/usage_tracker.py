@@ -135,7 +135,7 @@ class UsageTracker:
 
     def get_remaining_perplexity_budget(self) -> float:
         """Get remaining Perplexity budget for current month."""
-        perplexity_limit = self.config.get('perplexity_monthly_limit', 4.90)
+        perplexity_limit = self.config.get('perplexity_monthly_limit', 4.98)
         return perplexity_limit - self.usage_data.get('perplexity_cost', 0.0)
 
     def _get_model_provider(self, model: str) -> str:
@@ -232,9 +232,9 @@ class UsageTracker:
         with self._lock:
             provider = self._get_model_provider(model)
 
-            # Check Perplexity-specific hard limit ($4.90)
+            # Check Perplexity-specific hard limit ($4.98)
             if provider == 'perplexity':
-                perplexity_limit = self.config.get('perplexity_monthly_limit', 4.90)
+                perplexity_limit = self.config.get('perplexity_monthly_limit', 4.98)
                 perplexity_cost = self.usage_data.get('perplexity_cost', 0.0)
 
                 if perplexity_cost >= perplexity_limit:
@@ -255,7 +255,7 @@ class UsageTracker:
                 # Check if adding this call would exceed Perplexity limit
                 if provider == 'perplexity':
                     perplexity_cost = self.usage_data.get('perplexity_cost', 0.0)
-                    perplexity_limit = self.config.get('perplexity_monthly_limit', 4.90)
+                    perplexity_limit = self.config.get('perplexity_monthly_limit', 4.98)
 
                     if perplexity_cost + estimated_cost > perplexity_limit:
                         return False, f"PERPLEXITY_LIMIT_EXCEEDED: Would exceed (${perplexity_cost + estimated_cost:.2f} > ${perplexity_limit:.2f})"
@@ -324,7 +324,7 @@ class UsageTracker:
                 self.usage_data['total_cost'] += cost
                 self.usage_data['total_calls'] += 1
 
-                # Track Perplexity separately (for $4.90 hard limit)
+                # Track Perplexity separately (for $4.98 hard limit)
                 if provider == 'perplexity':
                     if 'perplexity_cost' not in self.usage_data:
                         self.usage_data['perplexity_cost'] = 0.0

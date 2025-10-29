@@ -1,14 +1,14 @@
 # Budget Configuration for API Usage
 # Edit these values to control costs
 
-# Perplexity monthly hard limit (USD) - HARD STOP at $4.90
-perplexity_monthly_limit: 4.90
+# Perplexity monthly hard limit (USD) - HARD STOP at $4.98
+perplexity_monthly_limit: 4.98
 
 # Total monthly budget including fallback models (USD)
 monthly_budget: 5.00
 
 # Warn when reaching this percentage of Perplexity budget
-warn_at_percentage: 80  # Warn at $3.92
+warn_at_percentage: 80  # Warn at $3.98
 
 # Stop all API calls when budget exceeded
 hard_stop: true
@@ -18,7 +18,7 @@ hard_stop: true
 model_cascade:
   enabled: true
   order:
-    - "perplexity"  # Try Perplexity first (until $4.90 limit)
+    - "perplexity"  # Try Perplexity first (until $4.98 limit)
     - "google"      # Fall back to Google Gemini (FREE)
 
 # Model selection and costs

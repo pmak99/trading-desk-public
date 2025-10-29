@@ -37,7 +37,7 @@ pip install -r requirements.txt
 Copy `.env.example` to `.env` and add your keys:
 
 ```bash
-# PRIMARY (until $4.90/month limit)
+# PRIMARY (until $4.98/month limit)
 PERPLEXITY_API_KEY=your_key_here       # https://www.perplexity.ai/api
 
 # FALLBACK (FREE - 1500 calls/day)
@@ -54,7 +54,7 @@ REDDIT_CLIENT_SECRET=your_secret_here
 Edit `config/budget.yaml`:
 
 ```yaml
-perplexity_monthly_limit: 4.90  # HARD STOP
+perplexity_monthly_limit: 4.98  # HARD STOP
 monthly_budget: 5.00
 ```
 
@@ -98,7 +98,7 @@ src/
 ├── sentiment_analyzer.py         # AI analysis with Reddit integration
 ├── strategy_generator.py         # AI strategy generation
 ├── ai_client.py                  # Unified AI client (Perplexity → Gemini)
-└── usage_tracker.py              # Budget tracking with $4.90 hard stop
+└── usage_tracker.py              # Budget tracking with $4.98 hard stop
 ```
 
 ---
@@ -107,7 +107,7 @@ src/
 
 **Cascade**: Perplexity → Google Gemini (free)
 
-**Perplexity Limit**: $4.90/month HARD STOP
+**Perplexity Limit**: $4.98/month HARD STOP
 **Total Budget**: $5.00/month
 
 **Cost per ticker**: ~$0.01-0.02
@@ -138,7 +138,7 @@ python3 -m src.usage_tracker
 - Integrates into AI analysis for retail positioning
 
 ### AI Fallback System
-- Primary: Perplexity Sonar Pro (until $4.90 limit)
+- Primary: Perplexity Sonar Pro (until $4.98 limit)
 - Fallback: Google Gemini 2.0 Flash (FREE - 1500/day)
 - Automatic cascade when budget limits reached
 
@@ -180,7 +180,7 @@ python3 -m src.usage_tracker
 ### Budget (`config/budget.yaml`)
 
 ```yaml
-perplexity_monthly_limit: 4.90  # Hard stop for Perplexity
+perplexity_monthly_limit: 4.98  # Hard stop for Perplexity
 
 model_cascade:
   order:
