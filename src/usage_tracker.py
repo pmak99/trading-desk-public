@@ -10,6 +10,7 @@ from datetime import datetime, date
 from typing import Dict, Optional
 from pathlib import Path
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +21,15 @@ class BudgetExceededError(Exception):
 
 
 class UsageTracker:
-    """Track API usage and enforce budget limits."""
+    """
+    Thread-safe usage tracker for API calls and budget enforcement.
+
+    Uses file-based locking for concurrent access across multiple processes.
+    """
 
     def __init__(self, config_path: str = "config/budget.yaml"):
         """
-        Initialize usage tracker.
+        Initialize usage tracker with thread-safe locking.
 
         Args:
             config_path: Path to budget configuration file
@@ -33,6 +38,10 @@ class UsageTracker:
         self.config = self._load_config()
         self.usage_file = Path(self.config['logging']['log_file'])
         self.usage_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Thread lock for concurrent access
+        self._lock = threading.Lock()
+
         self.usage_data = self._load_usage()
 
     def _load_config(self) -> Dict:
@@ -68,7 +77,8 @@ class UsageTracker:
             return self._create_empty_usage()
 
     def _save_usage(self):
-        """Save usage data to JSON file."""
+        """Save usage data to JSON file (thread-safe)."""
+        # Lock is held by caller (log_api_call)
         with open(self.usage_file, 'w') as f:
             json.dump(self.usage_data, f, indent=2, default=str)
 
@@ -195,7 +205,7 @@ class UsageTracker:
 
     def can_make_call(self, model: str, estimated_tokens: int = 1000) -> tuple[bool, str]:
         """
-        Check if we can make an API call without exceeding budget.
+        Check if we can make an API call without exceeding budget (thread-safe).
 
         Args:
             model: Model name
@@ -204,67 +214,68 @@ class UsageTracker:
         Returns:
             Tuple of (can_call, reason)
         """
-        provider = self._get_model_provider(model)
+        with self._lock:
+            provider = self._get_model_provider(model)
 
-        # Check Perplexity-specific hard limit ($4.90)
-        if provider == 'perplexity':
-            perplexity_limit = self.config.get('perplexity_monthly_limit', 4.90)
-            perplexity_cost = self.usage_data.get('perplexity_cost', 0.0)
-
-            if perplexity_cost >= perplexity_limit:
-                return False, f"PERPLEXITY_LIMIT_EXCEEDED: ${perplexity_cost:.2f} / ${perplexity_limit:.2f}"
-
-        # Check monthly budget
-        monthly_budget = self.config['monthly_budget']
-        current_cost = self.usage_data['total_cost']
-
-        if self.config.get('hard_stop', True) and current_cost >= monthly_budget:
-            return False, f"Monthly budget exceeded (${current_cost:.2f} / ${monthly_budget:.2f})"
-
-        # Estimate cost for this call
-        if model in self.config['models']:
-            cost_per_1k = self.config['models'][model]['cost_per_1k_tokens']
-            estimated_cost = (estimated_tokens / 1000) * cost_per_1k
-
-            # Check if adding this call would exceed Perplexity limit
+            # Check Perplexity-specific hard limit ($4.90)
             if provider == 'perplexity':
-                perplexity_cost = self.usage_data.get('perplexity_cost', 0.0)
                 perplexity_limit = self.config.get('perplexity_monthly_limit', 4.90)
+                perplexity_cost = self.usage_data.get('perplexity_cost', 0.0)
 
-                if perplexity_cost + estimated_cost > perplexity_limit:
-                    return False, f"PERPLEXITY_LIMIT_EXCEEDED: Would exceed (${perplexity_cost + estimated_cost:.2f} > ${perplexity_limit:.2f})"
+                if perplexity_cost >= perplexity_limit:
+                    return False, f"PERPLEXITY_LIMIT_EXCEEDED: ${perplexity_cost:.2f} / ${perplexity_limit:.2f}"
 
-            if current_cost + estimated_cost > monthly_budget:
-                return False, f"Would exceed budget (${current_cost + estimated_cost:.2f} > ${monthly_budget:.2f})"
+            # Check monthly budget
+            monthly_budget = self.config['monthly_budget']
+            current_cost = self.usage_data['total_cost']
 
-        # Check daily limits
-        today = self._current_date()
-        daily_usage = self.usage_data['daily_usage'].get(today, {'calls': 0, 'model_calls': {}})
+            if self.config.get('hard_stop', True) and current_cost >= monthly_budget:
+                return False, f"Monthly budget exceeded (${current_cost:.2f} / ${monthly_budget:.2f})"
 
-        max_calls = self.config['daily_limits']['max_api_calls']
-        if daily_usage['calls'] >= max_calls:
-            return False, f"Daily API call limit reached ({daily_usage['calls']} / {max_calls})"
+            # Estimate cost for this call
+            if model in self.config['models']:
+                cost_per_1k = self.config['models'][model]['cost_per_1k_tokens']
+                estimated_cost = (estimated_tokens / 1000) * cost_per_1k
 
-        # Check per-model daily limits
-        model_call_key = f"{model}_calls"
-        if model_call_key in self.config['daily_limits']:
-            model_limit = self.config['daily_limits'][model_call_key]
-            model_calls = daily_usage['model_calls'].get(model, 0)
+                # Check if adding this call would exceed Perplexity limit
+                if provider == 'perplexity':
+                    perplexity_cost = self.usage_data.get('perplexity_cost', 0.0)
+                    perplexity_limit = self.config.get('perplexity_monthly_limit', 4.90)
 
-            if model_calls >= model_limit:
-                return False, f"Daily limit for {model} reached ({model_calls} / {model_limit})"
+                    if perplexity_cost + estimated_cost > perplexity_limit:
+                        return False, f"PERPLEXITY_LIMIT_EXCEEDED: Would exceed (${perplexity_cost + estimated_cost:.2f} > ${perplexity_limit:.2f})"
 
-        # Warn if approaching budget
-        warn_percentage = self.config['warn_at_percentage']
-        current_percentage = self.get_budget_percentage()
+                if current_cost + estimated_cost > monthly_budget:
+                    return False, f"Would exceed budget (${current_cost + estimated_cost:.2f} > ${monthly_budget:.2f})"
 
-        if current_percentage >= warn_percentage:
-            logger.warning(
-                f"⚠️  Budget warning: {current_percentage:.1f}% used "
-                f"(${current_cost:.2f} / ${monthly_budget:.2f})"
-            )
+            # Check daily limits
+            today = self._current_date()
+            daily_usage = self.usage_data['daily_usage'].get(today, {'calls': 0, 'model_calls': {}})
 
-        return True, "OK"
+            max_calls = self.config['daily_limits']['max_api_calls']
+            if daily_usage['calls'] >= max_calls:
+                return False, f"Daily API call limit reached ({daily_usage['calls']} / {max_calls})"
+
+            # Check per-model daily limits
+            model_call_key = f"{model}_calls"
+            if model_call_key in self.config['daily_limits']:
+                model_limit = self.config['daily_limits'][model_call_key]
+                model_calls = daily_usage['model_calls'].get(model, 0)
+
+                if model_calls >= model_limit:
+                    return False, f"Daily limit for {model} reached ({model_calls} / {model_limit})"
+
+            # Warn if approaching budget
+            warn_percentage = self.config['warn_at_percentage']
+            current_percentage = self.get_budget_percentage()
+
+            if current_percentage >= warn_percentage:
+                logger.warning(
+                    f"⚠️  Budget warning: {current_percentage:.1f}% used "
+                    f"(${current_cost:.2f} / ${monthly_budget:.2f})"
+                )
+
+            return True, "OK"
 
     def log_api_call(
         self,
@@ -275,7 +286,7 @@ class UsageTracker:
         success: bool = True
     ):
         """
-        Log an API call.
+        Log an API call (thread-safe).
 
         Args:
             model: Model name
@@ -284,67 +295,68 @@ class UsageTracker:
             ticker: Ticker symbol (if applicable)
             success: Whether call was successful
         """
-        today = self._current_date()
-        provider = self._get_model_provider(model)
+        with self._lock:
+            today = self._current_date()
+            provider = self._get_model_provider(model)
 
-        # Update total cost
-        if success:
-            self.usage_data['total_cost'] += cost
-            self.usage_data['total_calls'] += 1
+            # Update total cost
+            if success:
+                self.usage_data['total_cost'] += cost
+                self.usage_data['total_calls'] += 1
 
-            # Track Perplexity separately (for $4.90 hard limit)
-            if provider == 'perplexity':
-                if 'perplexity_cost' not in self.usage_data:
-                    self.usage_data['perplexity_cost'] = 0.0
-                self.usage_data['perplexity_cost'] += cost
+                # Track Perplexity separately (for $4.90 hard limit)
+                if provider == 'perplexity':
+                    if 'perplexity_cost' not in self.usage_data:
+                        self.usage_data['perplexity_cost'] = 0.0
+                    self.usage_data['perplexity_cost'] += cost
 
-            # Track by provider
-            if 'provider_usage' not in self.usage_data:
-                self.usage_data['provider_usage'] = {}
-            if provider not in self.usage_data['provider_usage']:
-                self.usage_data['provider_usage'][provider] = {'calls': 0, 'cost': 0.0}
-            self.usage_data['provider_usage'][provider]['calls'] += 1
-            self.usage_data['provider_usage'][provider]['cost'] += cost
+                # Track by provider
+                if 'provider_usage' not in self.usage_data:
+                    self.usage_data['provider_usage'] = {}
+                if provider not in self.usage_data['provider_usage']:
+                    self.usage_data['provider_usage'][provider] = {'calls': 0, 'cost': 0.0}
+                self.usage_data['provider_usage'][provider]['calls'] += 1
+                self.usage_data['provider_usage'][provider]['cost'] += cost
 
-        # Update daily usage
-        if today not in self.usage_data['daily_usage']:
-            self.usage_data['daily_usage'][today] = {'calls': 0, 'cost': 0.0, 'model_calls': {}}
+            # Update daily usage
+            if today not in self.usage_data['daily_usage']:
+                self.usage_data['daily_usage'][today] = {'calls': 0, 'cost': 0.0, 'model_calls': {}}
 
-        self.usage_data['daily_usage'][today]['calls'] += 1
-        self.usage_data['daily_usage'][today]['cost'] += cost
+            self.usage_data['daily_usage'][today]['calls'] += 1
+            self.usage_data['daily_usage'][today]['cost'] += cost
 
-        # Update per-model daily calls
-        if model not in self.usage_data['daily_usage'][today]['model_calls']:
-            self.usage_data['daily_usage'][today]['model_calls'][model] = 0
-        self.usage_data['daily_usage'][today]['model_calls'][model] += 1
+            # Update per-model daily calls
+            if model not in self.usage_data['daily_usage'][today]['model_calls']:
+                self.usage_data['daily_usage'][today]['model_calls'][model] = 0
+            self.usage_data['daily_usage'][today]['model_calls'][model] += 1
 
-        # Update model usage
-        if model not in self.usage_data['model_usage']:
-            self.usage_data['model_usage'][model] = {'calls': 0, 'tokens': 0, 'cost': 0.0}
+            # Update model usage
+            if model not in self.usage_data['model_usage']:
+                self.usage_data['model_usage'][model] = {'calls': 0, 'tokens': 0, 'cost': 0.0}
 
-        self.usage_data['model_usage'][model]['calls'] += 1
-        self.usage_data['model_usage'][model]['tokens'] += tokens_used
-        self.usage_data['model_usage'][model]['cost'] += cost
+            self.usage_data['model_usage'][model]['calls'] += 1
+            self.usage_data['model_usage'][model]['tokens'] += tokens_used
+            self.usage_data['model_usage'][model]['cost'] += cost
 
-        # Log call details
-        call_record = {
-            'timestamp': datetime.now().isoformat(),
-            'model': model,
-            'tokens': tokens_used,
-            'cost': cost,
-            'ticker': ticker,
-            'success': success
-        }
-        self.usage_data['calls'].append(call_record)
+            # Log call details
+            call_record = {
+                'timestamp': datetime.now().isoformat(),
+                'model': model,
+                'tokens': tokens_used,
+                'cost': cost,
+                'ticker': ticker,
+                'success': success
+            }
+            self.usage_data['calls'].append(call_record)
 
-        # Save to file
-        self._save_usage()
+            # Save to file
+            self._save_usage()
 
-        if success:
-            logger.info(
-                f"API call logged: {model} - {tokens_used} tokens - ${cost:.4f} "
-                f"(Total: ${self.usage_data['total_cost']:.2f})"
-            )
+            if success:
+                logger.info(
+                    f"API call logged: {model} - {tokens_used} tokens - ${cost:.4f} "
+                    f"(Total: ${self.usage_data['total_cost']:.2f})"
+                )
 
     def get_dashboard_summary(self) -> Dict:
         """Get summary for dashboard display."""
