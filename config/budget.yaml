@@ -62,7 +62,7 @@ daily_limits:
 # Default model preferences
 defaults:
   sentiment_model: "sonar-pro"     # Sonar Pro for Reddit sentiment analysis ($0.005/1k tokens)
-  strategy_model: "gpt-4o-mini"    # Cheaper model for strategies ($0.0002/1k tokens - 60% cost savings!)
+  strategy_model: "sonar-pro"      # Use sonar-pro for strategies (gpt-4o-mini not available via Perplexity API)
 
 # Alpha Vantage (free tier)
 alpha_vantage:
