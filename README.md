@@ -13,7 +13,7 @@ Scans earnings calendar → filters by IV metrics → analyzes sentiment → sug
 
 ## What It Does
 
-1. **Scans earnings calendar** OR **accepts ticker list** - Nasdaq API or manual tickers
+1. **Scans earnings calendar** OR **accepts ticker list** - Alpha Vantage (official NASDAQ vendor) or Nasdaq API, or manual tickers
 2. **Filters tickers** - Actual IV % (60%+ min), expected move, liquidity (Tradier API)
    - Filters already-reported earnings based on market hours
    - Selects weekly options for same week or next week if Thu/Fri
@@ -48,26 +48,39 @@ pip install -r requirements.txt
 Copy `.env.example` to `.env` and add your keys:
 
 ```bash
-# PRIMARY (until $4.98/month limit)
+# PRIMARY AI (until $4.98/month limit)
 PERPLEXITY_API_KEY=your_key_here       # https://www.perplexity.ai/api
 
-# FALLBACK (FREE - 1500 calls/day)
+# FALLBACK AI (FREE - 1500 calls/day)
 GOOGLE_API_KEY=your_key_here           # https://aistudio.google.com/apikey
 
-# DATA SOURCES
+# EARNINGS CALENDAR (FREE - 25 calls/day, official NASDAQ vendor)
+ALPHA_VANTAGE_API_KEY=your_key_here    # https://www.alphavantage.co/support/#api-key
+
+# OPTIONS DATA (FREE with Tradier account)
 TRADIER_ACCESS_TOKEN=your_key_here     # https://tradier.com (free with account)
+
+# SENTIMENT DATA (FREE)
 REDDIT_CLIENT_ID=your_id_here          # https://reddit.com/prefs/apps
 REDDIT_CLIENT_SECRET=your_secret_here
 ```
 
-### 3. Set Budget
+### 3. Set Budget & Earnings Source
 
 Edit `config/budget.yaml`:
 
 ```yaml
+# Earnings calendar source (alphavantage or nasdaq)
+earnings_source: "alphavantage"  # Default: Alpha Vantage (official NASDAQ vendor)
+
+# Budget limits
 perplexity_monthly_limit: 4.98  # HARD STOP
 monthly_budget: 5.00
 ```
+
+**Earnings Calendar Options:**
+- `alphavantage` (recommended): Official NASDAQ vendor, confirmed dates, EPS estimates, 25 calls/day (cached 12hrs = ~2 calls/day)
+- `nasdaq`: Free unlimited, includes pre/post timing, but dates may be estimated
 
 ### 4. Run Analysis
 
@@ -102,11 +115,13 @@ python3 -m src.earnings_analyzer 2025-10-29 10 --yes --override
 
 **Test Individual Components:**
 ```bash
-python3 -m src.reddit_scraper          # Test Reddit scraper
-python3 -m src.sentiment_analyzer AAPL # Test sentiment with Reddit
-python3 -m src.tradier_options_client  # Test Tradier IV data
-python3 -m src.earnings_calendar       # View upcoming earnings
-python3 -m src.usage_tracker           # View budget dashboard
+python3 -m src.reddit_scraper             # Test Reddit scraper
+python3 -m src.sentiment_analyzer AAPL    # Test sentiment with Reddit
+python3 -m src.tradier_options_client     # Test Tradier IV data
+python3 -m src.alpha_vantage_calendar     # View Alpha Vantage earnings (recommended)
+python3 -m src.earnings_calendar          # View Nasdaq earnings (fallback)
+python3 -m src.earnings_calendar_factory  # Compare both sources
+python3 -m src.usage_tracker              # View budget dashboard
 ```
 
 ---
@@ -115,14 +130,16 @@ python3 -m src.usage_tracker           # View budget dashboard
 
 ```
 src/
-├── earnings_calendar.py         # Nasdaq earnings calendar
+├── alpha_vantage_calendar.py     # Alpha Vantage earnings (official NASDAQ vendor)
+├── earnings_calendar.py          # Nasdaq earnings calendar (fallback)
+├── earnings_calendar_factory.py  # Factory for switching calendar sources
 ├── ticker_filter.py              # Filter by IV crush criteria
 ├── tradier_options_client.py     # Real IV Rank via ORATS
 ├── reddit_scraper.py             # Reddit sentiment (WSB, stocks, options)
 ├── sentiment_analyzer.py         # AI analysis with Reddit integration
 ├── strategy_generator.py         # AI strategy generation
 ├── ai_client.py                  # Unified AI client (Perplexity → Gemini)
-└── usage_tracker.py              # Budget tracking with $4.98 hard stop
+└── usage_tracker_sqlite.py       # Budget tracking with $4.98 hard stop
 ```
 
 ---
@@ -224,6 +241,9 @@ python3 -m src.usage_tracker
 ### Budget (`config/budget.yaml`)
 
 ```yaml
+# Earnings calendar source
+earnings_source: "alphavantage"  # alphavantage (recommended) or nasdaq
+
 perplexity_monthly_limit: 4.98  # Hard stop for Perplexity
 monthly_budget: 5.00
 
@@ -248,6 +268,12 @@ models:
   gemini-2.0-flash:
     provider: "google"
     cost_per_1k_tokens: 0.0    # FREE (1500 calls/day)
+
+# Alpha Vantage (earnings calendar)
+alpha_vantage:
+  calls_per_day: 25           # Free tier limit
+  cost_per_call: 0.00         # FREE
+  cache_duration_hours: 12    # Reduces API usage to ~2 calls/day
 ```
 
 ### Trading Criteria (`ticker_filter.py`)

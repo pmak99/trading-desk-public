@@ -20,8 +20,9 @@ from multiprocessing import Pool, cpu_count
 import pytz
 import os
 import glob
+import yaml
 
-from src.earnings_calendar import EarningsCalendar
+from src.earnings_calendar_factory import EarningsCalendarFactory
 from src.ticker_filter import TickerFilter
 from src.sentiment_analyzer import SentimentAnalyzer
 from src.strategy_generator import StrategyGenerator
@@ -128,19 +129,38 @@ class EarningsAnalyzer:
 
     def __init__(
         self,
-        earnings_calendar: Optional[EarningsCalendar] = None,
-        ticker_filter: Optional[TickerFilter] = None
+        earnings_calendar = None,
+        ticker_filter: Optional[TickerFilter] = None,
+        earnings_source: Optional[str] = None
     ):
         """
         Initialize earnings analyzer components.
 
         Args:
-            earnings_calendar: EarningsCalendar instance (for dependency injection/testing)
+            earnings_calendar: Calendar instance (for dependency injection/testing)
             ticker_filter: TickerFilter instance (for dependency injection/testing)
+            earnings_source: Calendar source ('nasdaq' or 'alphavantage'), defaults to config
         """
         logger.info("Initializing Earnings Analyzer...")
 
-        self.earnings_calendar = earnings_calendar or EarningsCalendar()
+        # Load calendar source from config if not provided
+        if earnings_calendar is None:
+            if earnings_source is None:
+                # Load from config
+                config_path = 'config/budget.yaml'
+                try:
+                    with open(config_path, 'r') as f:
+                        config = yaml.safe_load(f)
+                        earnings_source = config.get('earnings_source', 'alphavantage')
+                except (FileNotFoundError, yaml.YAMLError) as e:
+                    logger.warning(f"Could not load config, using default: {e}")
+                    earnings_source = 'alphavantage'
+
+            # Create calendar using factory
+            self.earnings_calendar = EarningsCalendarFactory.create(earnings_source)
+        else:
+            self.earnings_calendar = earnings_calendar
+
         self.ticker_filter = ticker_filter or TickerFilter()
 
         # Note: Sentiment analyzer and strategy generator are initialized

@@ -1,6 +1,10 @@
 # Budget Configuration for API Usage
 # Edit these values to control costs
 
+# Earnings Calendar Source
+# Options: 'nasdaq' (free, unlimited) or 'alphavantage' (official NASDAQ vendor, 25 calls/day)
+earnings_source: "alphavantage"  # Default to Alpha Vantage for better data quality
+
 # Perplexity monthly hard limit (USD) - HARD STOP at $4.98
 perplexity_monthly_limit: 4.98
 
