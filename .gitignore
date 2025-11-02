@@ -44,8 +44,8 @@ venv.bak/
 htmlcov/
 .tox/
 
-# Data and logs
-data/
+# Data and logs (root level only, not src/data)
+/data/
 logs/
 *.log
 *.csv
