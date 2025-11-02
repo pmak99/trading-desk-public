@@ -20,10 +20,10 @@ Improvements:
 import logging
 import json
 from typing import Dict, Optional
-from src.ai_client import AIClient
-from src.usage_tracker import UsageTracker, BudgetExceededError
-from src.reddit_scraper import RedditScraper
-from src.ai_response_validator import AIResponseValidator
+from src.ai.client import AIClient
+from src.core.usage_tracker import UsageTracker, BudgetExceededError
+from src.data.reddit_scraper import RedditScraper
+from src.ai.response_validator import AIResponseValidator
 
 logger = logging.getLogger(__name__)
 

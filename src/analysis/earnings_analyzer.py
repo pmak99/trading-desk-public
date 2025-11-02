@@ -22,10 +22,10 @@ import os
 import glob
 import yaml
 
-from src.earnings_calendar_factory import EarningsCalendarFactory
-from src.ticker_filter import TickerFilter
-from src.sentiment_analyzer import SentimentAnalyzer
-from src.strategy_generator import StrategyGenerator
+from src.data.calendars.factory import EarningsCalendarFactory
+from src.analysis.ticker_filter import TickerFilter
+from src.ai.sentiment_analyzer import SentimentAnalyzer
+from src.ai.strategy_generator import StrategyGenerator
 from typing import Optional
 
 logger = logging.getLogger(__name__)

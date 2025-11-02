@@ -5,7 +5,7 @@ Tests for Reddit scraper with parallel search optimization.
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
-from src.reddit_scraper import RedditScraper
+from src.data.reddit_scraper import RedditScraper
 
 
 class TestRedditScraperParallelSearch:

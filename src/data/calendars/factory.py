@@ -35,12 +35,12 @@ class EarningsCalendarFactory:
             source = 'alphavantage'
 
         if source == 'nasdaq':
-            from src.earnings_calendar import EarningsCalendar
+            from src.data.calendars.base import EarningsCalendar
             logger.info("Using Nasdaq earnings calendar (free, unlimited)")
             return EarningsCalendar()
 
         elif source == 'alphavantage':
-            from src.alpha_vantage_calendar import AlphaVantageCalendar
+            from src.data.calendars.alpha_vantage import AlphaVantageCalendar
             logger.info("Using Alpha Vantage earnings calendar (official NASDAQ vendor, 25 calls/day)")
             return AlphaVantageCalendar()
 

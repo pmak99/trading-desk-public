@@ -6,7 +6,7 @@ REFACTORED: Now uses SQLite backend for better concurrent performance.
 Eliminates file lock bottleneck in multiprocessing scenarios.
 """
 
-from src.usage_tracker_sqlite import UsageTrackerSQLite, BudgetExceededError
+from src.core.usage_tracker_sqlite import UsageTrackerSQLite, BudgetExceededError
 from typing import Dict, Optional, Tuple
 import logging
 

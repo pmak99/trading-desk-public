@@ -8,9 +8,9 @@ from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from src.options_data_client import OptionsDataClient
-from src.tradier_options_client import TradierOptionsClient
-from src.scorers import CompositeScorer
+from src.options.data_client import OptionsDataClient
+from src.options.tradier_client import TradierOptionsClient
+from src.analysis.scorers import CompositeScorer
 
 logger = logging.getLogger(__name__)
 
@@ -372,7 +372,7 @@ class TickerFilter:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
-    from src.earnings_calendar import EarningsCalendar
+    from src.data.calendars.base import EarningsCalendar
     from collections import defaultdict
 
     logger.info("")

@@ -681,3 +681,217 @@ After completing all improvements:
 
 **Total Implementation Time**: 34-48 hours (4-6 weeks at 8-10 hours/week)
 **Expected ROI**: High - significantly more reliable and maintainable system
+
+---
+
+## Priority 5: Code Restructuring (4-6 hours)
+
+### 5.1 Organize Code into Logical Module Structure ⚡ **IMPORTANT**
+
+**Current State**:
+```
+src/
+├── ai_client.py
+├── ai_response_validator.py
+├── sentiment_analyzer.py
+├── strategy_generator.py
+├── earnings_analyzer.py
+├── ticker_filter.py
+├── scorers.py
+├── tradier_options_client.py
+├── options_data_client.py
+├── iv_history_tracker.py
+├── earnings_calendar.py
+├── alpha_vantage_calendar.py
+├── earnings_calendar_factory.py
+├── reddit_scraper.py
+├── usage_tracker.py
+└── usage_tracker_sqlite.py
+```
+
+**Problem**: 
+- Flat structure makes it hard to navigate
+- No clear separation of concerns
+- Difficult to understand module relationships
+- Harder to maintain as codebase grows
+
+**Proposed Structure**:
+```
+src/
+├── __init__.py
+├── ai/
+│   ├── __init__.py
+│   ├── client.py              (was: ai_client.py)
+│   ├── response_validator.py  (was: ai_response_validator.py)
+│   ├── sentiment_analyzer.py  (unchanged)
+│   └── strategy_generator.py  (unchanged)
+├── data/
+│   ├── __init__.py
+│   ├── calendars/
+│   │   ├── __init__.py
+│   │   ├── base.py           (was: earnings_calendar.py)
+│   │   ├── alpha_vantage.py  (was: alpha_vantage_calendar.py)
+│   │   └── factory.py        (was: earnings_calendar_factory.py)
+│   └── reddit_scraper.py     (unchanged)
+├── options/
+│   ├── __init__.py
+│   ├── tradier_client.py     (was: tradier_options_client.py)
+│   ├── data_client.py        (was: options_data_client.py)
+│   └── iv_history_tracker.py (unchanged)
+├── analysis/
+│   ├── __init__.py
+│   ├── earnings_analyzer.py  (unchanged)
+│   ├── ticker_filter.py      (unchanged)
+│   └── scorers.py            (unchanged)
+└── core/
+    ├── __init__.py
+    ├── usage_tracker.py      (unchanged)
+    └── usage_tracker_sqlite.py (unchanged)
+```
+
+**Benefits**:
+- **Discoverability**: Clear module organization
+- **Maintainability**: Related code grouped together
+- **Scalability**: Easy to add new modules in correct location
+- **Documentation**: Structure tells story of architecture
+
+**Implementation Steps**:
+
+**Step 1**: Create new directory structure (1h)
+```bash
+mkdir -p src/ai src/data/calendars src/options src/analysis src/core
+touch src/ai/__init__.py src/data/__init__.py src/data/calendars/__init__.py
+touch src/options/__init__.py src/analysis/__init__.py src/core/__init__.py
+```
+
+**Step 2**: Move and rename files with git mv (1h)
+```bash
+# AI module
+git mv src/ai_client.py src/ai/client.py
+git mv src/ai_response_validator.py src/ai/response_validator.py
+git mv src/sentiment_analyzer.py src/ai/sentiment_analyzer.py
+git mv src/strategy_generator.py src/ai/strategy_generator.py
+
+# Data module
+git mv src/earnings_calendar.py src/data/calendars/base.py
+git mv src/alpha_vantage_calendar.py src/data/calendars/alpha_vantage.py
+git mv src/earnings_calendar_factory.py src/data/calendars/factory.py
+git mv src/reddit_scraper.py src/data/reddit_scraper.py
+
+# Options module
+git mv src/tradier_options_client.py src/options/tradier_client.py
+git mv src/options_data_client.py src/options/data_client.py
+git mv src/iv_history_tracker.py src/options/iv_history_tracker.py
+
+# Analysis module
+git mv src/earnings_analyzer.py src/analysis/earnings_analyzer.py
+git mv src/ticker_filter.py src/analysis/ticker_filter.py
+git mv src/scorers.py src/analysis/scorers.py
+
+# Core module
+git mv src/usage_tracker.py src/core/usage_tracker.py
+git mv src/usage_tracker_sqlite.py src/core/usage_tracker_sqlite.py
+```
+
+**Step 3**: Update all import statements (2-3h)
+```python
+# OLD imports
+from src.ai_client import AIClient
+from src.sentiment_analyzer import SentimentAnalyzer
+from src.tradier_options_client import TradierOptionsClient
+
+# NEW imports
+from src.ai.client import AIClient
+from src.ai.sentiment_analyzer import SentimentAnalyzer
+from src.options.tradier_client import TradierOptionsClient
+```
+
+Search and replace pattern:
+```bash
+# Find all Python files
+find . -name "*.py" -not -path "./venv/*"
+
+# For each file, update imports:
+sed -i '' 's/from src\.ai_client/from src.ai.client/g' *.py
+sed -i '' 's/from src\.sentiment_analyzer/from src.ai.sentiment_analyzer/g' *.py
+# ... (repeat for all modules)
+```
+
+**Step 4**: Update __init__.py files for clean imports (30min)
+```python
+# src/ai/__init__.py
+from .client import AIClient
+from .response_validator import AIResponseValidator
+from .sentiment_analyzer import SentimentAnalyzer
+from .strategy_generator import StrategyGenerator
+
+__all__ = ['AIClient', 'AIResponseValidator', 'SentimentAnalyzer', 'StrategyGenerator']
+
+# src/data/calendars/__init__.py
+from .factory import EarningsCalendarFactory
+from .base import EarningsCalendar
+from .alpha_vantage import AlphaVantageCalendar
+
+__all__ = ['EarningsCalendarFactory', 'EarningsCalendar', 'AlphaVantageCalendar']
+
+# src/options/__init__.py
+from .tradier_client import TradierOptionsClient
+from .data_client import OptionsDataClient
+from .iv_history_tracker import IVHistoryTracker
+
+__all__ = ['TradierOptionsClient', 'OptionsDataClient', 'IVHistoryTracker']
+
+# src/analysis/__init__.py
+from .earnings_analyzer import EarningsAnalyzer
+from .ticker_filter import TickerFilter
+from .scorers import CompositeScorer
+
+__all__ = ['EarningsAnalyzer', 'TickerFilter', 'CompositeScorer']
+
+# src/core/__init__.py
+from .usage_tracker import UsageTracker, BudgetExceededError
+from .usage_tracker_sqlite import SQLiteUsageTracker
+
+__all__ = ['UsageTracker', 'BudgetExceededError', 'SQLiteUsageTracker']
+```
+
+This allows cleaner imports:
+```python
+# Instead of:
+from src.ai.client import AIClient
+from src.ai.sentiment_analyzer import SentimentAnalyzer
+
+# Can use:
+from src.ai import AIClient, SentimentAnalyzer
+```
+
+**Step 5**: Update tests to match new structure (30min)
+```python
+# OLD test imports
+from src.sentiment_analyzer import SentimentAnalyzer
+
+# NEW test imports
+from src.ai.sentiment_analyzer import SentimentAnalyzer
+# OR
+from src.ai import SentimentAnalyzer
+```
+
+**Step 6**: Run full test suite to verify (15min)
+```bash
+python -m pytest tests/ -v
+# Should still pass all 65+ tests
+```
+
+**Expected Impact**:
+- ✅ Better code organization and discoverability
+- ✅ Clearer separation of concerns
+- ✅ Easier onboarding for new developers
+- ✅ More scalable architecture
+- ✅ Professional project structure
+
+**Time Estimate**: 4-6 hours total
+
+**Priority**: Medium-High (improves maintainability significantly)
+
+**Note**: This is a pure refactoring - no logic changes, just file moves and import updates. All tests should continue to pass.
+

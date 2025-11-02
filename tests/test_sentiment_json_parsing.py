@@ -6,7 +6,7 @@ Tests the new JSON-based parsing with fallback to legacy format.
 
 import json
 import pytest
-from src.sentiment_analyzer import SentimentAnalyzer
+from src.ai.sentiment_analyzer import SentimentAnalyzer
 
 
 class TestSentimentJSONParsing:

@@ -10,8 +10,8 @@ Tests the refactored ticker filtering system with:
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timedelta
-from src.ticker_filter import TickerFilter
-from src.scorers import CompositeScorer
+from src.analysis.ticker_filter import TickerFilter
+from src.analysis.scorers import CompositeScorer
 
 
 @pytest.fixture

@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import Mock, patch, mock_open
 import json
-from src.usage_tracker import UsageTracker, BudgetExceededError
+from src.core.usage_tracker import UsageTracker, BudgetExceededError
 
 
 class TestDailyLimits:

@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Dict, Optional
 from dotenv import load_dotenv
-from src.usage_tracker import UsageTracker, BudgetExceededError
+from src.core.usage_tracker import UsageTracker, BudgetExceededError
 
 # Load environment variables
 load_dotenv()

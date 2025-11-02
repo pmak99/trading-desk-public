@@ -10,7 +10,7 @@ Tests all scorer components:
 """
 
 import pytest
-from src.scorers import (
+from src.analysis.scorers import (
     IVScorer,
     IVCrushEdgeScorer,
     LiquidityScorer,

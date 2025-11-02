@@ -7,7 +7,7 @@ Tests IV calculations, expected move, and API integration.
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timedelta
-from src.tradier_options_client import TradierOptionsClient
+from src.options.tradier_client import TradierOptionsClient
 
 
 class TestTradierOptionsClient:

@@ -18,9 +18,9 @@ Improvements:
 import logging
 import json
 from typing import Dict, List, Optional
-from src.ai_client import AIClient
-from src.usage_tracker import UsageTracker, BudgetExceededError
-from src.ai_response_validator import AIResponseValidator
+from src.ai.client import AIClient
+from src.core.usage_tracker import UsageTracker, BudgetExceededError
+from src.ai.response_validator import AIResponseValidator
 
 logger = logging.getLogger(__name__)
 
@@ -415,7 +415,7 @@ if __name__ == "__main__":
 
     import sys
     from src.alpha_vantage_client import AlphaVantageClient
-    from src.sentiment_analyzer import SentimentAnalyzer
+    from src.ai.sentiment_analyzer import SentimentAnalyzer
 
     logger.info("")
     logger.info('='*70)

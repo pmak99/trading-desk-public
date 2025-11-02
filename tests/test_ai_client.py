@@ -3,8 +3,8 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 import requests
-from src.ai_client import AIClient
-from src.usage_tracker import UsageTracker, BudgetExceededError
+from src.ai.client import AIClient
+from src.core.usage_tracker import UsageTracker, BudgetExceededError
 
 
 class TestAIClientRetryLogic:

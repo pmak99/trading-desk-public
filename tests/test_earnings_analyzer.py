@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
-from src.earnings_analyzer import _analyze_single_ticker, EarningsAnalyzer
+from src.analysis.earnings_analyzer import _analyze_single_ticker, EarningsAnalyzer
 
 
 class TestGracefulDegradation:
@@ -87,7 +87,7 @@ class TestAlreadyReportedFiltering:
 
     def test_filtering_logic_exists(self):
         """Test that filtering logic is implemented in earnings_calendar."""
-        from src.earnings_calendar import EarningsCalendar
+        from src.data.calendars.base import EarningsCalendar
         import pytz
 
         calendar = EarningsCalendar()

@@ -19,7 +19,7 @@ import logging
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from src.iv_history_tracker import IVHistoryTracker
+from src.options.iv_history_tracker import IVHistoryTracker
 
 # Load environment variables
 load_dotenv()

@@ -6,7 +6,7 @@ Tests the new JSON-based parsing with fallback to legacy format.
 
 import json
 import pytest
-from src.strategy_generator import StrategyGenerator
+from src.ai.strategy_generator import StrategyGenerator
 
 
 class TestStrategyJSONParsing:

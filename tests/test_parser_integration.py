@@ -7,8 +7,8 @@ Tests complete parsing pipeline with realistic AI responses.
 import json
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.sentiment_analyzer import SentimentAnalyzer
-from src.strategy_generator import StrategyGenerator
+from src.ai.sentiment_analyzer import SentimentAnalyzer
+from src.ai.strategy_generator import StrategyGenerator
 
 
 class TestSentimentAnalyzerIntegration:
@@ -17,7 +17,7 @@ class TestSentimentAnalyzerIntegration:
     @pytest.fixture
     def analyzer(self):
         """Create sentiment analyzer with mocked dependencies."""
-        with patch('src.sentiment_analyzer.RedditScraper'):
+        with patch('src.ai.sentiment_analyzer.RedditScraper'):
             analyzer = SentimentAnalyzer()
             # Mock Reddit scraper
             analyzer.reddit_scraper.get_ticker_sentiment = Mock(return_value={

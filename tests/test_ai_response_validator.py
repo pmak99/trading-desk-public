@@ -5,7 +5,7 @@ Tests validation logic for sentiment and strategy responses.
 """
 
 import pytest
-from src.ai_response_validator import AIResponseValidator
+from src.ai.response_validator import AIResponseValidator
 
 
 class TestAIResponseValidator:

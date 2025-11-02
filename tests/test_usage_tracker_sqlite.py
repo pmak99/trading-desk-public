@@ -12,7 +12,7 @@ import yaml
 from datetime import datetime
 from pathlib import Path
 
-from src.usage_tracker_sqlite import UsageTrackerSQLite, BudgetExceededError
+from src.core.usage_tracker_sqlite import UsageTrackerSQLite, BudgetExceededError
 
 
 @pytest.fixture
