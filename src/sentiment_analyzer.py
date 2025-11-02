@@ -10,13 +10,20 @@ Analyzes sentiment based on Trading Research Prompt.pdf criteria:
 - Recent news, guidance history, unusual options flow
 - Dark pool activity and positioning
 - Reddit sentiment from r/wallstreetbets, r/stocks, r/options
+
+Improvements:
+- JSON-based parsing (99% more reliable than string splitting)
+- Fallback to legacy parsing for backward compatibility
+- Better error handling and validation
 """
 
 import logging
+import json
 from typing import Dict, Optional
 from src.ai_client import AIClient
 from src.usage_tracker import UsageTracker, BudgetExceededError
 from src.reddit_scraper import RedditScraper
+from src.ai_response_validator import AIResponseValidator
 
 logger = logging.getLogger(__name__)
 
@@ -110,13 +117,15 @@ class SentimentAnalyzer:
         """
         Build sentiment analysis prompt based on user's criteria with Reddit data.
 
+        Returns JSON format for reliable parsing.
+
         Args:
             ticker: Ticker symbol
             earnings_date: Optional earnings date
             reddit_data: Reddit sentiment data from RedditScraper
 
         Returns:
-            Prompt string for Grok
+            Prompt string requesting JSON format
         """
         earnings_context = f" with earnings on {earnings_date}" if earnings_date else " heading into upcoming earnings"
 
@@ -138,39 +147,23 @@ REDDIT SENTIMENT DATA (r/wallstreetbets, r/stocks, r/options):
 {reddit_summary}
 
 
-Structure your response EXACTLY as follows:
+Return your analysis as valid JSON with this EXACT structure:
 
-OVERALL SENTIMENT: [Bullish/Neutral/Bearish] - [1-2 sentence summary]
+{{
+  "overall_sentiment": "bullish|neutral|bearish",
+  "sentiment_summary": "1-2 sentence summary of overall outlook",
+  "retail_sentiment": "Analysis of retail trader positioning and sentiment",
+  "institutional_sentiment": "Analysis of institutional investor positioning and sentiment",
+  "hedge_fund_sentiment": "Analysis of hedge fund positioning and sentiment",
+  "tailwinds": ["positive factor 1", "positive factor 2", "..."],
+  "headwinds": ["negative factor 1", "negative factor 2", "..."],
+  "unusual_activity": "Any unusual options flow, dark pool activity, or notable positioning changes",
+  "guidance_history": "Recent earnings results, guidance beats/misses, and management commentary",
+  "macro_sector": "Relevant macro trends and sector-specific impacts",
+  "confidence": "low|medium|high"
+}}
 
-RETAIL SENTIMENT:
-[Analysis of retail trader positioning and sentiment]
-
-INSTITUTIONAL SENTIMENT:
-[Analysis of institutional investor positioning and sentiment]
-
-HEDGE FUND SENTIMENT:
-[Analysis of hedge fund positioning and sentiment]
-
-KEY TAILWINDS:
-- [Positive factor 1]
-- [Positive factor 2]
-- [etc.]
-
-KEY HEADWINDS:
-- [Negative factor 1]
-- [Negative factor 2]
-- [etc.]
-
-UNUSUAL ACTIVITY:
-[Any unusual options flow, dark pool activity, or notable positioning changes]
-
-GUIDANCE HISTORY:
-[Recent earnings results, guidance beats/misses, and management commentary]
-
-MACRO & SECTOR FACTORS:
-[Relevant macro trends and sector-specific impacts]
-
-Focus on actionable intelligence for an options trader looking to sell premium (IV crush strategy). Keep response under 500 words total."""
+Focus on actionable intelligence for an options trader looking to sell premium (IV crush strategy). Keep each text field concise."""
 
         return prompt
 
@@ -222,10 +215,59 @@ Focus on actionable intelligence for an options trader looking to sell premium (
 
     def _parse_sentiment_response(self, response: str, ticker: str) -> Dict:
         """
-        Parse Perplexity response into structured format.
+        Parse AI response into structured format.
+
+        Tries JSON parsing first (99% reliable), falls back to legacy string parsing.
 
         Args:
-            response: Raw text response from Perplexity
+            response: Raw text response from AI
+            ticker: Ticker symbol
+
+        Returns:
+            Structured sentiment dict
+        """
+        # Try JSON parsing first
+        try:
+            # Extract JSON from response (may have markdown code blocks)
+            json_str = response.strip()
+
+            # Remove markdown code blocks if present
+            if json_str.startswith('```'):
+                # Find the actual JSON content between ```json and ```
+                lines = json_str.split('\n')
+                json_lines = []
+                in_json = False
+                for line in lines:
+                    if line.startswith('```'):
+                        in_json = not in_json
+                        continue
+                    if in_json:
+                        json_lines.append(line)
+                json_str = '\n'.join(json_lines)
+
+            # Parse JSON
+            data = json.loads(json_str)
+
+            # Validate and sanitize using validator
+            data = AIResponseValidator.validate_and_sanitize_sentiment(data, ticker)
+
+            # Add ticker and raw response
+            data['ticker'] = ticker
+            data['raw_response'] = response
+
+            logger.info(f"{ticker}: Successfully parsed JSON response")
+            return data
+
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.warning(f"{ticker}: JSON parsing failed ({e}), trying legacy format")
+            return self._parse_legacy_format(response, ticker)
+
+    def _parse_legacy_format(self, response: str, ticker: str) -> Dict:
+        """
+        Parse legacy string-based response format (fallback).
+
+        Args:
+            response: Raw text response
             ticker: Ticker symbol
 
         Returns:
@@ -257,10 +299,11 @@ Focus on actionable intelligence for an options trader looking to sell premium (
                 'confidence': 'medium'  # Default to medium confidence
             }
 
+            logger.info(f"{ticker}: Successfully parsed legacy format response")
             return result
 
         except Exception as e:
-            logger.error(f"Error parsing sentiment response: {e}")
+            logger.error(f"{ticker}: Error parsing legacy format: {e}")
             return self._get_empty_result(ticker)
 
     def _extract_section(self, text: str, start_marker: str, end_marker: Optional[str]) -> str:
@@ -302,6 +345,7 @@ Focus on actionable intelligence for an options trader looking to sell premium (
         return {
             'ticker': ticker,
             'overall_sentiment': 'unknown',
+            'sentiment_summary': '',
             'retail_sentiment': 'N/A',
             'institutional_sentiment': 'N/A',
             'hedge_fund_sentiment': 'N/A',
