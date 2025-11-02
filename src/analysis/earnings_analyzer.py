@@ -24,6 +24,7 @@ import yaml
 
 from src.data.calendars.factory import EarningsCalendarFactory
 from src.analysis.ticker_filter import TickerFilter
+from src.analysis.report_formatter import ReportFormatter
 from src.ai.sentiment_analyzer import SentimentAnalyzer
 from src.ai.strategy_generator import StrategyGenerator
 from typing import Optional
@@ -551,108 +552,12 @@ class EarningsAnalyzer:
         Generate formatted research report.
 
         Args:
-            analysis_result: Result from analyze_daily_earnings()
+            analysis_result: Result from analyze_daily_earnings() or analyze_specific_tickers()
 
         Returns:
             Formatted text report
         """
-        report_lines = []
-        report_lines.append("=" * 80)
-        report_lines.append("EARNINGS TRADE RESEARCH REPORT")
-        report_lines.append("=" * 80)
-        report_lines.append(f"\nDate: {analysis_result['date']}")
-
-        # Different format for ticker list mode vs calendar mode
-        if 'total_earnings' in analysis_result:
-            # Calendar mode
-            report_lines.append(f"Total Earnings: {analysis_result['total_earnings']} companies")
-            report_lines.append(f"Passed IV Filter: {analysis_result['filtered_count']} tickers")
-            report_lines.append(f"Fully Analyzed: {analysis_result['analyzed_count']} tickers")
-        else:
-            # Ticker list mode
-            report_lines.append(f"Fully Analyzed: {analysis_result['analyzed_count']} tickers")
-
-        if analysis_result.get('failed_count', 0) > 0:
-            report_lines.append(f"Failed: {analysis_result['failed_count']} tickers")
-
-        report_lines.append("\n" + "=" * 80)
-
-        # Detail each analyzed ticker
-        for i, ticker_analysis in enumerate(analysis_result['ticker_analyses'], 1):
-            ticker = ticker_analysis['ticker']
-            options = ticker_analysis['options_data']
-            sentiment = ticker_analysis['sentiment']
-            strategies = ticker_analysis.get('strategies', {})
-
-            report_lines.append(f"\n\nTICKER {i}: {ticker}")
-            report_lines.append("-" * 80)
-
-            # Key metrics
-            report_lines.append(f"\nPrice: ${ticker_analysis['price']:.2f}")
-            report_lines.append(f"Score: {ticker_analysis['score']:.1f}/100")
-            report_lines.append(f"Earnings: {ticker_analysis['earnings_date']}")
-
-            # Options data
-            if options:
-                report_lines.append(f"\nOPTIONS METRICS:")
-                # Show actual IV % prominently (primary filter metric)
-                current_iv = options.get('current_iv', None)
-                if current_iv is not None and current_iv > 0:
-                    report_lines.append(f"  Current IV: {current_iv}% {'(HIGH - Good for IV crush)' if current_iv >= 60 else ''}")
-                report_lines.append(f"  IV Rank: {options.get('iv_rank', 'N/A')}%")
-                report_lines.append(f"  Expected Move: {options.get('expected_move_pct', 'N/A')}%")
-                report_lines.append(f"  Avg Actual Move: {options.get('avg_actual_move_pct', 'N/A')}%")
-                report_lines.append(f"  IV Crush Ratio: {options.get('iv_crush_ratio', 'N/A')}x")
-                report_lines.append(f"  Options Volume: {options.get('options_volume', 0):,}")
-                report_lines.append(f"  Open Interest: {options.get('open_interest', 0):,}")
-
-            # Sentiment
-            if sentiment:
-                report_lines.append(f"\nSENTIMENT:")
-                report_lines.append(f"  Overall: {sentiment.get('overall_sentiment', 'N/A').upper()}")
-                report_lines.append(f"  Retail: {sentiment.get('retail_sentiment', 'N/A')[:150]}...")
-                report_lines.append(f"  Institutional: {sentiment.get('institutional_sentiment', 'N/A')[:150]}...")
-
-                if sentiment.get('tailwinds'):
-                    report_lines.append(f"\n  Tailwinds:")
-                    for tw in sentiment['tailwinds'][:3]:
-                        report_lines.append(f"    + {tw}")
-
-                if sentiment.get('headwinds'):
-                    report_lines.append(f"  Headwinds:")
-                    for hw in sentiment['headwinds'][:3]:
-                        report_lines.append(f"    - {hw}")
-
-            # Strategies
-            if strategies and strategies.get('strategies'):
-                report_lines.append(f"\nTRADE STRATEGIES:")
-                for j, strat in enumerate(strategies['strategies'], 1):
-                    report_lines.append(f"\n  Strategy {j}: {strat.get('name', 'N/A')}")
-                    report_lines.append(f"    Strikes: {strat.get('strikes', 'N/A')}")
-                    report_lines.append(f"    Credit/Debit: {strat.get('credit_debit', 'N/A')}")
-                    report_lines.append(f"    Max Profit: {strat.get('max_profit', 'N/A')}")
-                    report_lines.append(f"    Max Loss: {strat.get('max_loss', 'N/A')}")
-                    report_lines.append(f"    POP: {strat.get('probability_of_profit', 'N/A')}")
-                    report_lines.append(f"    Contracts: {strat.get('contract_count', 'N/A')} (for $20K risk)")
-                    report_lines.append(f"    Scores: Profit {strat.get('profitability_score', 'N/A')}/10, Risk {strat.get('risk_score', 'N/A')}/10")
-
-                rec_idx = strategies.get('recommended_strategy', 0)
-                report_lines.append(f"\n  RECOMMENDED: Strategy {rec_idx + 1}")
-                report_lines.append(f"  Why: {strategies.get('recommendation_rationale', 'N/A')[:200]}...")
-
-        # Add failed tickers section if any
-        if analysis_result.get('failed_analyses'):
-            report_lines.append("\n\n" + "=" * 80)
-            report_lines.append("FAILED ANALYSES")
-            report_lines.append("=" * 80)
-            for failed in analysis_result['failed_analyses']:
-                report_lines.append(f"\n{failed['ticker']}: {failed.get('error', 'Unknown error')}")
-
-        report_lines.append("\n\n" + "=" * 80)
-        report_lines.append("END OF REPORT")
-        report_lines.append("=" * 80)
-
-        return "\n".join(report_lines)
+        return ReportFormatter.format_analysis_report(analysis_result)
 
     @staticmethod
     def cleanup_old_reports(days: int = 15) -> None:

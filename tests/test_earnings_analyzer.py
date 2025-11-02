@@ -15,15 +15,15 @@ class TestGracefulDegradation:
             'price': 150.0,
             'score': 75.0,
             'options_data': {'current_iv': 80.0}
-        }, "2025-10-30")
+        }, "2025-10-30", False)
 
         # Mock SentimentAnalyzer to raise daily limit error
-        with patch('src.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
+        with patch('src.analysis.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
             mock_sentiment = Mock()
             mock_sentiment.analyze_earnings_sentiment.side_effect = Exception("DAILY_LIMIT: Daily API call limit reached")
             mock_sentiment_class.return_value = mock_sentiment
 
-            with patch('src.earnings_analyzer.StrategyGenerator') as mock_strategy_class:
+            with patch('src.analysis.earnings_analyzer.StrategyGenerator') as mock_strategy_class:
                 mock_strategy = Mock()
                 mock_strategy.generate_strategies.return_value = {'strategies': []}
                 mock_strategy_class.return_value = mock_strategy
@@ -42,14 +42,14 @@ class TestGracefulDegradation:
             'price': 150.0,
             'score': 75.0,
             'options_data': {'current_iv': 80.0}
-        }, "2025-10-30")
+        }, "2025-10-30", False)
 
-        with patch('src.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
+        with patch('src.analysis.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
             mock_sentiment = Mock()
             mock_sentiment.analyze_earnings_sentiment.return_value = {'overall_sentiment': 'bullish'}
             mock_sentiment_class.return_value = mock_sentiment
 
-            with patch('src.earnings_analyzer.StrategyGenerator') as mock_strategy_class:
+            with patch('src.analysis.earnings_analyzer.StrategyGenerator') as mock_strategy_class:
                 mock_strategy = Mock()
                 mock_strategy.generate_strategies.side_effect = Exception("DAILY_LIMIT: Daily API call limit reached")
                 mock_strategy_class.return_value = mock_strategy
@@ -67,14 +67,14 @@ class TestGracefulDegradation:
             'price': 150.0,
             'score': 75.0,
             'options_data': {'current_iv': 80.0}
-        }, "2025-10-30")
+        }, "2025-10-30", False)
 
-        with patch('src.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
+        with patch('src.analysis.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
             mock_sentiment = Mock()
             mock_sentiment.analyze_earnings_sentiment.side_effect = Exception("Network error")
             mock_sentiment_class.return_value = mock_sentiment
 
-            with patch('src.earnings_analyzer.StrategyGenerator'):
+            with patch('src.analysis.earnings_analyzer.StrategyGenerator'):
                 result = _analyze_single_ticker(args)
 
         # Should return empty sentiment, not pending
