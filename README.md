@@ -371,5 +371,3 @@ fundamentals:
 Private/Personal Use Only
 
 ---
-
-**Technical Details**: See `ARCHITECTURE_REVIEW.md`
