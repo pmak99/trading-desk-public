@@ -473,13 +473,17 @@ class EarningsAnalyzer:
         # Step 2: Separate by timing and filter/score
         by_timing = {'pre_market': [], 'after_hours': []}
         for earning in earnings_list:
-            time = earning.get('time', '')
+            time = earning.get('time', '').lower()
             ticker = earning.get('ticker', '')
 
-            if 'pre-market' in time:
+            if 'pre-market' in time or 'pre_market' in time or 'bmo' in time:
                 by_timing['pre_market'].append(ticker)
-            elif 'after-hours' in time:
+            elif 'after-hours' in time or 'after_hours' in time or 'amc' in time:
                 by_timing['after_hours'].append(ticker)
+            elif time:  # Has time field but unknown timing - default to after-hours
+                # Most earnings (~70-80%) are after-hours, so default to that
+                by_timing['after_hours'].append(ticker)
+                logger.debug(f"{ticker}: Unknown time '{time}' - defaulting to after-hours")
 
         # Apply ticker filter (includes IV Rank check)
         logger.info("Filtering and scoring tickers...")

@@ -404,12 +404,14 @@ if __name__ == "__main__":
         # Separate by timing
         by_timing = defaultdict(list)
         for earning in earnings:
-            time = earning.get('time', '')
+            time = earning.get('time', '').lower()
             ticker = earning.get('ticker', '')
 
-            if 'pre-market' in time:
+            if 'pre-market' in time or 'pre_market' in time or 'bmo' in time:
                 by_timing['pre_market'].append(ticker)
-            elif 'after-hours' in time:
+            elif 'after-hours' in time or 'after_hours' in time or 'amc' in time:
+                by_timing['after_hours'].append(ticker)
+            elif time:  # Has time field but unknown timing - default to after-hours
                 by_timing['after_hours'].append(ticker)
 
         logger.info(f"Pre-market: {len(by_timing['pre_market'])} tickers")
