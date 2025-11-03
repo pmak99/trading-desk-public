@@ -1,12 +1,12 @@
 # Remaining Tasks - Trading Desk
 
-**Status**: 9 of 11 tasks complete (82% done) ✅
-**Test Suite**: 233 tests passing
-**Last Updated**: November 2, 2025
+**Status**: 10 of 11 tasks complete (91% done) ✅ - **PRODUCTION READY**
+**Test Suite**: 241 tests passing (233 + 8 E2E)
+**Last Updated**: November 3, 2025
 
 ---
 
-## ✅ Completed (9 tasks)
+## ✅ Completed (10 tasks)
 
 1. ✅ **Priority 1.1-1.3**: JSON parsing + validation for AI responses
    - JSON-first parsing with legacy fallback
@@ -30,93 +30,36 @@
    - 22 tests for already-reported filtering, weekends, holidays
    - **Coverage**: 57% of base calendar module
 
-6. ✅ **Priority 3.1**: Extracted ReportFormatter class
+6. ✅ **Priority 2.5**: End-to-end integration tests
+   - 8 comprehensive E2E tests validating complete workflow
+   - Tests full pipeline from ticker input to report generation
+   - Includes error handling, API failures, and graceful degradation
+   - **Coverage**: 35% of earnings_analyzer (up from 19%)
+   - **Note**: Some tests use real AI APIs (~2min runtime)
+
+7. ✅ **Priority 3.1**: Extracted ReportFormatter class
    - Separated 107-line report formatting logic
    - Better separation of concerns (analysis vs formatting)
 
-7. ✅ **Priority 3.2**: Centralized configuration
+8. ✅ **Priority 3.2**: Centralized configuration
    - Created `config/trading_criteria.yaml` with all thresholds
    - All scorers load from config with fallback to defaults
    - **Impact**: Easy to tune thresholds without code changes
 
-8. ✅ **Priority 5.1**: Code restructuring
+9. ✅ **Priority 5.1**: Code restructuring
    - Reorganized into logical modules: ai/, data/, options/, analysis/, core/
    - **Impact**: Professional structure, better maintainability
 
-9. ✅ **Documentation**: Updated README and roadmap
+10. ✅ **Documentation**: Updated README and roadmap
    - Documented new architecture
    - Updated all module paths
    - Added configuration documentation
 
 ---
 
-## 🚧 Remaining (2 tasks)
+## 🚧 Remaining (1 task)
 
-### 1. End-to-End Integration Tests (Priority 2) - HIGH PRIORITY
-
-**Status**: Partial - have 8 parser integration tests, need full E2E tests
-
-**What exists**:
-- `tests/test_parser_integration.py` - 8 tests for sentiment/strategy with mocked AI
-
-**What's needed**:
-- Full end-to-end test of complete analysis flow:
-  1. Mock earnings calendar data
-  2. Mock Tradier options data
-  3. Mock Reddit scraper
-  4. Mock AI responses (sentiment + strategy)
-  5. Run full `analyze_specific_tickers()` or `analyze_daily_earnings()`
-  6. Verify complete report generation
-
-**Benefits**:
-- Catches integration issues before production
-- Validates complete workflow
-- Ensures all components work together
-- Tests error handling in real scenarios
-
-**Estimated effort**: 2-3 hours
-
-**Example test structure**:
-```python
-def test_complete_ticker_analysis_flow():
-    """Test full analysis from ticker input to report output."""
-    # Given: Mocked external dependencies
-    with patch('src.data.calendars.factory') as mock_calendar:
-        with patch('src.options.tradier_client') as mock_tradier:
-            with patch('src.data.reddit_scraper') as mock_reddit:
-                with patch('src.ai.client') as mock_ai:
-                    # When: Run full analysis
-                    analyzer = EarningsAnalyzer()
-                    result = analyzer.analyze_specific_tickers(['NVDA'], '2025-11-05')
-
-                    # Then: Verify complete output structure
-                    assert result['analyzed_count'] == 1
-                    assert 'ticker_analyses' in result
-                    assert result['ticker_analyses'][0]['ticker'] == 'NVDA'
-                    assert 'sentiment' in result['ticker_analyses'][0]
-                    assert 'strategies' in result['ticker_analyses'][0]
-
-                    # And: Verify report generation
-                    report = analyzer.generate_report(result)
-                    assert 'EARNINGS TRADE RESEARCH REPORT' in report
-                    assert 'NVDA' in report
-```
-
-**Test cases needed**:
-- ✅ Happy path: Complete analysis with all data
-- ✅ Error handling: API failures at each step
-- ✅ Budget limits: Daily limit reached, fallback to Gemini
-- ✅ Partial results: Some tickers fail, others succeed
-- ✅ Already-reported filtering: Earnings filtered correctly
-- ✅ Weekend filtering: Weekends excluded from results
-- ✅ Report formatting: Complete report structure validated
-
-**Files to create**:
-- `tests/test_end_to_end_integration.py` (~300-400 lines)
-
----
-
-### 2. Split TradierOptionsClient (Priority 3) - LOWER PRIORITY
+### 1. Split TradierOptionsClient (Priority 3) - OPTIONAL (Can Defer)
 
 **Status**: Not started
 
