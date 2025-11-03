@@ -162,13 +162,15 @@ class AlphaVantageCalendar:
         if earning_date < today:
             return True
 
-        # Today - since we don't know the time, be conservative
-        # Consider it reported if market has opened (9:30 AM ET)
+        # Today - since we don't know the time, assume after-hours (most common)
+        # Only filter if market has closed (4:00 PM ET), so after-hours earnings are still available
         current_hour = now_et.hour
         current_minute = now_et.minute
-        market_open = current_hour > 9 or (current_hour == 9 and current_minute >= 30)
+        market_closed = current_hour > 16 or (current_hour == 16 and current_minute >= 0)
 
-        return market_open
+        # Before 4pm ET: keep earnings (could be after-hours)
+        # After 4pm ET: filter earnings (likely already reported)
+        return market_closed
 
     def _is_weekend_or_holiday(self, date: datetime) -> bool:
         """
