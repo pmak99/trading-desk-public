@@ -9,20 +9,20 @@
 
 ## Completion Status
 
-### ✅ Completed (7 tasks)
+### ✅ Completed (9 tasks)
 1. **Priority 1.1-1.3**: JSON parsing + validation for AI responses
 2. **Priority 2.1**: Tradier client comprehensive tests (19 tests)
 3. **Priority 2.2**: Batch yfinance fetching optimization (50% faster)
-4. **Priority 3.1**: Extracted ReportFormatter class
-5. **Priority 3.2**: Centralized configuration for magic numbers
-6. **Priority 5.1**: Code restructuring into logical modules
-7. **Documentation**: Updated implementation roadmap
+4. **Priority 2.3**: Strategy parser tests (11 tests)
+5. **Priority 2.4**: Calendar filtering tests (22 tests)
+6. **Priority 3.1**: Extracted ReportFormatter class
+7. **Priority 3.2**: Centralized configuration for magic numbers
+8. **Priority 5.1**: Code restructuring into logical modules
+9. **Documentation**: Updated implementation roadmap
 
-### 🚧 Remaining (4 tasks)
-- Strategy parser tests (Priority 2)
-- Calendar filtering tests (Priority 2)
-- End-to-end integration tests (Priority 2)
-- Split TradierOptionsClient (Priority 3)
+### 🚧 Remaining (2 tasks)
+- **End-to-end integration tests** (Priority 2) - Most critical remaining task
+- **Split TradierOptionsClient** (Priority 3) - Lower priority refactoring
 
 ---
 
