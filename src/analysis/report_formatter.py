@@ -5,6 +5,21 @@ Separates report formatting logic from analysis logic for better maintainability
 """
 
 from typing import Dict
+import yaml
+import os
+
+
+def _load_trading_criteria():
+    """Load trading criteria from config file."""
+    config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'trading_criteria.yaml')
+    try:
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        return None
+
+
+_TRADING_CRITERIA = _load_trading_criteria()
 
 
 class ReportFormatter:
@@ -118,7 +133,8 @@ class ReportFormatter:
         # Show actual IV % prominently (primary filter metric)
         current_iv = options.get('current_iv', None)
         if current_iv is not None and current_iv > 0:
-            iv_note = '(HIGH - Good for IV crush)' if current_iv >= 60 else ''
+            min_iv = _TRADING_CRITERIA['iv_thresholds']['minimum'] if _TRADING_CRITERIA else 60
+            iv_note = '(HIGH - Good for IV crush)' if current_iv >= min_iv else ''
             lines.append(f"  Current IV: {current_iv}% {iv_note}")
 
         lines.append(f"  IV Rank: {options.get('iv_rank', 'N/A')}%")

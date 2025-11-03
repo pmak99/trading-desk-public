@@ -1,0 +1,91 @@
+# Trading Criteria Configuration
+# Centralized thresholds and weights for the Trading Desk application
+
+# IV (Implied Volatility) thresholds
+iv_thresholds:
+  minimum: 60  # Minimum IV % to consider for IV crush strategies
+  good: 70     # Good IV level
+  excellent: 80  # Excellent IV level
+  extreme: 100   # Extreme/premium IV level
+
+# IV Rank thresholds (0-100%)
+iv_rank_thresholds:
+  minimum: 50  # Minimum IV Rank to consider
+  good: 60     # Good IV Rank
+  excellent: 75  # Excellent IV Rank
+
+# IV Crush ratio thresholds (implied move / actual move)
+iv_crush_thresholds:
+  minimum: 1.0   # At least equal
+  good: 1.1      # Implied 10%+ higher
+  better: 1.2    # Implied 20%+ higher
+  excellent: 1.3  # Implied 30%+ higher
+
+# Scoring weights (must sum to 1.0)
+scoring_weights:
+  iv_score: 0.50           # IV level importance
+  iv_crush_edge: 0.30      # IV crush potential importance
+  options_liquidity: 0.15  # Liquidity importance
+  fundamentals: 0.05       # Market cap/price importance
+
+# Options liquidity thresholds
+liquidity_thresholds:
+  # Volume levels
+  volume:
+    acceptable: 1000    # Minimum acceptable daily volume
+    good: 5000          # Good volume
+    high: 10000         # High volume
+    very_high: 50000    # Very high volume
+
+  # Open Interest levels
+  open_interest:
+    acceptable: 5000    # Minimum acceptable OI
+    good: 10000         # Good OI
+    liquid: 50000       # Liquid
+    very_liquid: 100000  # Very liquid
+
+  # Bid-Ask spread (as percentage)
+  spread:
+    excellent: 0.02  # 2% or less
+    good: 0.05       # 5% or less
+    okay: 0.10       # 10% or less
+
+# Fundamentals thresholds
+fundamentals:
+  # Market cap levels (in billions)
+  market_cap:
+    mid_cap: 10      # $10B+ mid cap
+    large_cap: 50    # $50B+ large cap
+    mega_cap: 200    # $200B+ mega cap
+
+  # Price levels (for premium selling)
+  price:
+    min_ideal: 50     # Minimum ideal price
+    max_ideal: 400    # Maximum ideal price
+    min_acceptable: 20  # Minimum acceptable price
+    max_acceptable: 500  # Maximum acceptable price
+
+# IV history tracking
+iv_history:
+  min_data_points: 30  # Minimum data points for IV Rank calculation
+  lookback_days: 365   # 52-week lookback for IV Rank
+
+# Cache TTL settings
+cache:
+  ticker_data_ttl_minutes: 15  # Cache ticker data for 15 minutes
+  alpha_vantage_ttl_hours: 12  # Cache earnings data for 12 hours
+
+# Reddit scraping settings
+reddit:
+  max_posts_per_subreddit: 20  # Max posts to fetch per subreddit
+  subreddits:
+    - wallstreetbets
+    - stocks
+    - options
+
+# Daily analysis limits
+analysis:
+  default_max_analyze: 2  # Default number of tickers to fully analyze
+  max_tickers_pre_market: 15   # Max pre-market tickers to score
+  max_tickers_after_hours: 20  # Max after-hours tickers to score
+  max_workers: 5  # Max parallel workers for processing
