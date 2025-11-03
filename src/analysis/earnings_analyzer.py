@@ -623,6 +623,68 @@ if __name__ == "__main__":
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
+    # Check for help flag first
+    if '-h' in sys.argv or '--help' in sys.argv:
+        print("""
+EARNINGS TRADE ANALYZER - Automated Research System
+
+USAGE:
+  Mode 1 - Specific Tickers (Recommended):
+    python -m src.analysis.earnings_analyzer --tickers "TICK1,TICK2,..." [DATE] [OPTIONS]
+
+  Mode 2 - Calendar Scan:
+    python -m src.analysis.earnings_analyzer [DATE] [MAX_TICKERS] [OPTIONS]
+
+ARGUMENTS:
+  --tickers TICKERS     Comma-separated list of tickers (e.g., "NVDA,META,GOOGL")
+  DATE                  Earnings date in YYYY-MM-DD format (default: today)
+  MAX_TICKERS           Max number of tickers to analyze in calendar mode (default: 2)
+
+OPTIONS:
+  -h, --help            Show this help message and exit
+  -y, --yes             Skip confirmation prompt
+  --override            Bypass daily API limits (hard caps still enforced)
+
+EXAMPLES:
+  # Analyze specific tickers with confirmation
+  python -m src.analysis.earnings_analyzer --tickers "NVDA,META" 2025-11-05
+
+  # Analyze specific tickers, skip confirmation
+  python -m src.analysis.earnings_analyzer --tickers "NVDA,META,GOOGL" 2025-11-05 --yes
+
+  # Scan calendar for Nov 5, analyze top 5 tickers
+  python -m src.analysis.earnings_analyzer 2025-11-05 5 --yes
+
+  # Use override mode to bypass daily limits
+  python -m src.analysis.earnings_analyzer --tickers "NVDA,META" 2025-11-05 --yes --override
+
+MODES:
+  Ticker List Mode:
+    - Analyzes only the specified tickers
+    - Recommended for targeted analysis
+    - Use when you have a watchlist
+
+  Calendar Scan Mode:
+    - Scans earnings calendar for specified date
+    - Filters by IV metrics (60%+ minimum)
+    - Analyzes top N tickers by score
+    - Use for discovering new opportunities
+
+OUTPUT:
+  - Generates timestamped report in data/ directory
+  - Shows IV metrics, sentiment, and 3-4 option strategies
+  - Report saved to: data/earnings_analysis_DATE_HHMMSS.txt
+
+COST:
+  - ~$0.01 per ticker analyzed
+  - Uses Perplexity Sonar Pro until daily/monthly limits
+  - Auto-fallback to free Google Gemini when limits reached
+  - Override mode bypasses daily limits but respects hard caps
+
+For more information, see README.md
+""")
+        exit(0)
+
     logger.info("")
     logger.info('='*80)
     logger.info('EARNINGS TRADE ANALYZER - AUTOMATED RESEARCH SYSTEM')
