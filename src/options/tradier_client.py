@@ -20,6 +20,8 @@ from typing import Dict, Optional
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from src.options.iv_history_tracker import IVHistoryTracker
+from src.options.expected_move_calculator import ExpectedMoveCalculator
+from src.options.option_selector import OptionSelector
 
 # Load environment variables
 load_dotenv()
@@ -355,6 +357,8 @@ class TradierOptionsClient:
         """
         Find ATM (at-the-money) call and put options.
 
+        Delegates to OptionSelector for pure selection logic.
+
         Args:
             options: List of option contracts
             current_price: Current stock price
@@ -362,30 +366,13 @@ class TradierOptionsClient:
         Returns:
             Tuple of (atm_call, atm_put)
         """
-        atm_call = None
-        atm_put = None
-        min_distance = float('inf')
-
-        for opt in options:
-            strike = opt.get('strike', 0)
-            distance = abs(strike - current_price)
-
-            if distance < min_distance:
-                min_distance = distance
-
-            # Find closest call and put separately
-            if opt.get('option_type') == 'call':
-                if not atm_call or distance < abs(atm_call.get('strike', 0) - current_price):
-                    atm_call = opt
-            elif opt.get('option_type') == 'put':
-                if not atm_put or distance < abs(atm_put.get('strike', 0) - current_price):
-                    atm_put = opt
-
-        return atm_call, atm_put
+        return OptionSelector.find_atm_options(options, current_price)
 
     def _calculate_expected_move(self, options: list, current_price: float) -> float:
         """
         Calculate expected move % from ATM straddle price.
+
+        Delegates to ExpectedMoveCalculator for pure calculation logic.
 
         Args:
             options: List of option contracts
@@ -394,30 +381,11 @@ class TradierOptionsClient:
         Returns:
             Expected move as percentage
         """
-        try:
-            # Find ATM call and put
-            atm_call, atm_put = self._find_atm_options(options, current_price)
+        # Find ATM call and put
+        atm_call, atm_put = self._find_atm_options(options, current_price)
 
-            if not atm_call or not atm_put:
-                return 0
-
-            # Expected move = (ATM call price + ATM put price) / stock price
-            call_bid = atm_call.get('bid', 0) or 0
-            call_ask = atm_call.get('ask', 0) or 0
-            put_bid = atm_put.get('bid', 0) or 0
-            put_ask = atm_put.get('ask', 0) or 0
-
-            call_price = (call_bid + call_ask) / 2 if call_ask > 0 else call_bid
-            put_price = (put_bid + put_ask) / 2 if put_ask > 0 else put_bid
-
-            straddle_price = call_price + put_price
-            expected_move_pct = (straddle_price / current_price) * 100
-
-            return round(expected_move_pct, 2)
-
-        except Exception as e:
-            logger.error(f"Failed to calculate expected move: {e}")
-            return 0
+        # Use ExpectedMoveCalculator for the calculation
+        return ExpectedMoveCalculator.calculate_from_options(atm_call, atm_put, current_price)
 
 
 # CLI for testing
