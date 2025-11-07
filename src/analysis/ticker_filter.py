@@ -1,6 +1,6 @@
 """
 Ticker filtering algorithm to select best earnings candidates.
-Selects 2 pre-market + 3 after-hours tickers per trading day.
+Selects top N tickers by score based on IV metrics and liquidity.
 """
 
 import yfinance as yf
@@ -36,9 +36,9 @@ class TickerFilter:
             cache_ttl_minutes: Cache TTL in minutes (default: 15)
         """
         self.weights = {
-            'iv_score': 0.50,         # 50% - PRIMARY: IV % 60%+ required, 80%+ ideal
-            'iv_crush_edge': 0.30,    # 30% - Historical implied > actual move
-            'options_liquidity': 0.15, # 15% - Volume, OI, bid-ask spreads
+            'iv_score': 0.40,         # 40% - PRIMARY: IV % 60%+ required, 80%+ ideal
+            'options_liquidity': 0.30, # 30% - CRITICAL: Volume, OI, bid-ask spreads (tighter spreads!)
+            'iv_crush_edge': 0.25,    # 25% - Historical implied > actual move
             'fundamentals': 0.05      # 5% - Market cap, price for premium quality
         }
 
@@ -354,7 +354,9 @@ class TickerFilter:
             pre_tickers = earnings_by_timing['pre_market']
             logger.info(f"Scoring {len(pre_tickers)} pre-market candidates...")
 
-            scored = self.filter_and_score_tickers(pre_tickers, max_tickers=15)
+            # Process up to 10x the requested count (min 20, max 100) to avoid alphabetical bias
+            max_process = min(max(pre_market_count * 10, 20), 100)
+            scored = self.filter_and_score_tickers(pre_tickers, max_tickers=max_process)
             selected['pre_market'] = scored[:pre_market_count]
 
         # Process after-hours tickers
@@ -362,7 +364,9 @@ class TickerFilter:
             ah_tickers = earnings_by_timing['after_hours']
             logger.info(f"Scoring {len(ah_tickers)} after-hours candidates...")
 
-            scored = self.filter_and_score_tickers(ah_tickers, max_tickers=20)
+            # Process up to 10x the requested count (min 30, max 100) to avoid alphabetical bias
+            max_process = min(max(after_hours_count * 10, 30), 100)
+            scored = self.filter_and_score_tickers(ah_tickers, max_tickers=max_process)
             selected['after_hours'] = scored[:after_hours_count]
 
         return selected

@@ -75,6 +75,11 @@ class ReportFormatter:
             failed_section = ReportFormatter._format_failed_section(analysis_result['failed_analyses'])
             report_lines.append(failed_section)
 
+        # Add summary table
+        if analysis_result['ticker_analyses']:
+            summary_section = ReportFormatter._format_summary_table(analysis_result['ticker_analyses'])
+            report_lines.append(summary_section)
+
         report_lines.append("\n\n" + "=" * 80)
         report_lines.append("END OF REPORT")
         report_lines.append("=" * 80)
@@ -186,6 +191,32 @@ class ReportFormatter:
         rec_idx = strategies.get('recommended_strategy', 0)
         lines.append(f"\n  RECOMMENDED: Strategy {rec_idx + 1}")
         lines.append(f"  Why: {strategies.get('recommendation_rationale', 'N/A')[:200]}...")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_summary_table(ticker_analyses: list) -> str:
+        """Format summary table of all analyzed tickers."""
+        lines = []
+        lines.append("\n\n" + "=" * 80)
+        lines.append("SUMMARY TABLE")
+        lines.append("=" * 80)
+        lines.append("")
+
+        # Header
+        lines.append(f"{'Ticker':<10} {'IV %':<10} {'IV Rank %':<12} {'Open Interest':<15} {'Score':<10}")
+        lines.append("-" * 80)
+
+        # Rows
+        for analysis in ticker_analyses:
+            ticker = analysis['ticker']
+            options = analysis.get('options_data', {})
+            iv = options.get('current_iv', 0)
+            iv_rank = options.get('iv_rank', 0)
+            oi = options.get('open_interest', 0)
+            score = analysis.get('score', 0)
+
+            lines.append(f"{ticker:<10} {iv:<10.2f} {iv_rank:<12.1f} {oi:<15,} {score:<10.1f}")
 
         return "\n".join(lines)
 

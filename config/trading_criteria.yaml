@@ -23,9 +23,9 @@ iv_crush_thresholds:
 
 # Scoring weights (must sum to 1.0)
 scoring_weights:
-  iv_score: 0.50           # 50% - IV level (PRIMARY factor)
-  options_liquidity: 0.25  # 25% - Liquidity (CRITICAL for execution)
-  iv_crush_edge: 0.20      # 20% - IV crush potential
+  iv_score: 0.40           # 40% - IV level (PRIMARY factor)
+  options_liquidity: 0.30  # 30% - Liquidity (CRITICAL for execution - tighter spreads!)
+  iv_crush_edge: 0.25      # 25% - IV crush potential
   fundamentals: 0.05       # 5% - Market cap/price
 
 # Options liquidity thresholds

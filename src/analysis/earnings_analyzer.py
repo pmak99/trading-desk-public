@@ -45,6 +45,8 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str, bool]) -> Dict:
     ticker, ticker_data, earnings_date, override_daily_limit = args
 
     try:
+        logger.info(f"📊 {ticker}: Starting analysis (Score: {ticker_data.get('score', 0):.1f}/100, IV: {ticker_data.get('options_data', {}).get('current_iv', 'N/A')}%)")
+
         # Initialize clients within worker process (use defaults from config)
         sentiment_analyzer = SentimentAnalyzer()  # Uses sonar-pro for Reddit sentiment
         strategy_generator = StrategyGenerator()   # Uses gpt-4o-mini for cost savings
@@ -61,7 +63,7 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str, bool]) -> Dict:
 
         # Get sentiment analysis
         try:
-            logger.info(f"{ticker}: Fetching sentiment...")
+            logger.info(f"  {ticker}: Fetching sentiment...")
             sentiment = sentiment_analyzer.analyze_earnings_sentiment(ticker, earnings_date, override_daily_limit)
             analysis['sentiment'] = sentiment
         except Exception as e:
@@ -79,7 +81,7 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str, bool]) -> Dict:
         # Generate strategies
         if analysis['options_data'] and analysis['sentiment']:
             try:
-                logger.info(f"{ticker}: Generating strategies...")
+                logger.info(f"  {ticker}: Generating strategies...")
                 strategies = strategy_generator.generate_strategies(
                     ticker,
                     analysis['options_data'],
@@ -91,15 +93,16 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str, bool]) -> Dict:
             except Exception as e:
                 error_msg = str(e)
                 if "DAILY_LIMIT" in error_msg:
-                    logger.warning(f"{ticker}: Daily limit reached for strategies - skipping AI analysis")
+                    logger.warning(f"  {ticker}: Daily limit reached for strategies - skipping AI analysis")
                     analysis['strategies'] = {
                         'strategies': [],
                         'note': 'Daily API limit reached - strategy generation deferred'
                     }
                 else:
-                    logger.error(f"{ticker}: Strategy generation failed: {e}")
+                    logger.error(f"  {ticker}: Strategy generation failed: {e}")
                     analysis['strategies'] = {}
 
+        logger.info(f"✅ {ticker}: Analysis complete")
         return analysis
 
     except Exception as e:
@@ -252,11 +255,12 @@ class EarningsAnalyzer:
             return tickers_data, failed_tickers
 
         # Batch fetch all tickers at once (more efficient than individual calls)
-        logger.info(f"Batch fetching data for {len(tickers)} tickers...")
+        logger.info(f"📥 Batch fetching data for {len(tickers)} tickers...")
         tickers_str = ' '.join(tickers)
         tickers_obj = yf.Tickers(tickers_str)
 
-        for ticker in tickers:
+        for i, ticker in enumerate(tickers, 1):
+            logger.info(f"  [{i}/{len(tickers)}] Processing {ticker}...")
             try:
                 # Access individual ticker from batch
                 stock = tickers_obj.tickers[ticker]
@@ -289,10 +293,10 @@ class EarningsAnalyzer:
                 ticker_data['score'] = self.ticker_filter.calculate_score(ticker_data)
 
                 tickers_data.append(ticker_data)
-                logger.info(f"{ticker}: IV={options_data.get('current_iv', 0):.2f}%, Score={ticker_data['score']:.1f}")
+                logger.info(f"    ✓ {ticker}: IV={options_data.get('current_iv', 0):.2f}%, Score={ticker_data['score']:.1f}")
 
             except Exception as e:
-                logger.warning(f"{ticker}: Failed to fetch data: {e}")
+                logger.warning(f"    ✗ {ticker}: Failed to fetch data: {e}")
                 failed_tickers.append(ticker)
                 continue
 
@@ -402,10 +406,31 @@ class EarningsAnalyzer:
                 'failed_analyses': [{'ticker': t, 'error': 'Data fetch failed'} for t in failed_tickers]
             }
 
-        # Step 4: Run parallel analysis
-        ticker_analyses = self._run_parallel_analysis(tickers_data, earnings_date, override_daily_limit)
+        # Step 4: Filter out tickers that failed IV filter (score=0)
+        filtered_tickers = [td for td in tickers_data if td.get('score', 0) > 0]
+        filtered_out = [td for td in tickers_data if td.get('score', 0) == 0]
 
-        # Step 5: Process results
+        if filtered_out:
+            logger.warning(f"❌ {len(filtered_out)} ticker(s) filtered out (IV < 50%): {', '.join([td['ticker'] for td in filtered_out])}")
+            failed_tickers.extend([td['ticker'] for td in filtered_out])
+
+        if not filtered_tickers:
+            logger.warning("❌ No tickers passed IV filter (>50% IV or IV Rank required)")
+            logger.info("💡 Try tickers with higher IV or adjust filter thresholds in config")
+            return {
+                'date': earnings_date,
+                'analyzed_count': 0,
+                'failed_count': len(failed_tickers),
+                'ticker_analyses': [],
+                'failed_analyses': [{'ticker': t, 'error': 'Failed IV filter (< 50%)' if t in [td['ticker'] for td in filtered_out] else 'Data fetch failed'} for t in failed_tickers]
+            }
+
+        logger.info(f"✅ {len(filtered_tickers)}/{len(tickers_data)} ticker(s) passed IV filter")
+
+        # Step 5: Run parallel analysis
+        ticker_analyses = self._run_parallel_analysis(filtered_tickers, earnings_date, override_daily_limit)
+
+        # Step 6: Process results
         successful_analyses, failed_analyses = self._process_analysis_results(ticker_analyses)
 
         analyzed_count = len(successful_analyses)
@@ -470,30 +495,19 @@ class EarningsAnalyzer:
 
         logger.info(f"Found {total_count} companies reporting on {target_date}")
 
-        # Step 2: Separate by timing and filter/score
-        by_timing = {'pre_market': [], 'after_hours': []}
-        for earning in earnings_list:
-            time = earning.get('time', '').lower()
-            ticker = earning.get('ticker', '')
-
-            if 'pre-market' in time or 'pre_market' in time or 'bmo' in time:
-                by_timing['pre_market'].append(ticker)
-            elif 'after-hours' in time or 'after_hours' in time or 'amc' in time:
-                by_timing['after_hours'].append(ticker)
-            elif time:  # Has time field but unknown timing - default to after-hours
-                # Most earnings (~70-80%) are after-hours, so default to that
-                by_timing['after_hours'].append(ticker)
-                logger.debug(f"{ticker}: Unknown time '{time}' - defaulting to after-hours")
+        # Step 2: Extract all tickers
+        all_tickers = [earning.get('ticker', '') for earning in earnings_list if earning.get('ticker')]
 
         # Apply ticker filter (includes IV Rank check)
         logger.info("Filtering and scoring tickers...")
-        selected = self.ticker_filter.select_daily_candidates(
-            by_timing,
-            pre_market_count=min(2, len(by_timing['pre_market'])),
-            after_hours_count=min(3, len(by_timing['after_hours']))
+
+        # Process up to 10x the requested count (min 50, max 200) to avoid alphabetical bias
+        max_process = min(max(max_analyze * 10, 50), 200)
+        filtered_tickers = self.ticker_filter.filter_and_score_tickers(
+            all_tickers,
+            max_tickers=max_process
         )
 
-        filtered_tickers = selected['pre_market'] + selected['after_hours']
         filtered_count = len(filtered_tickers)
 
         logger.info(f"Filtered to {filtered_count} tickers passing IV Rank criteria")
@@ -621,6 +635,15 @@ class EarningsAnalyzer:
 
 # CLI
 if __name__ == "__main__":
+    # Fix multiprocessing RuntimeWarning on macOS with 'python -m'
+    # Set start method to 'spawn' to avoid module import issues
+    try:
+        from multiprocessing import set_start_method
+        set_start_method('spawn', force=True)
+    except RuntimeError:
+        # Already set, ignore
+        pass
+
     # Setup logging for CLI execution
     logging.basicConfig(
         level=logging.INFO,
