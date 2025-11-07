@@ -7,6 +7,7 @@ import yfinance as yf
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import logging
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.options.data_client import OptionsDataClient
 from src.options.tradier_client import TradierOptionsClient
@@ -291,7 +292,11 @@ class TickerFilter:
             List of dicts with ticker data and scores, sorted by score
             Only returns tickers that pass IV Rank filter (score > 0)
         """
-        tickers_to_process = tickers[:max_tickers]
+        # Shuffle tickers to avoid alphabetical bias (earnings calendars are often alphabetically sorted)
+        shuffled_tickers = tickers.copy()
+        random.shuffle(shuffled_tickers)
+
+        tickers_to_process = shuffled_tickers[:max_tickers]
         results = []
 
         if parallel and len(tickers_to_process) > 1:
