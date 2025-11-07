@@ -498,21 +498,26 @@ class EarningsAnalyzer:
         # Step 2: Extract all tickers
         all_tickers = [earning.get('ticker', '') for earning in earnings_list if earning.get('ticker')]
 
-        # Apply ticker filter (includes IV Rank check)
-        logger.info("Filtering and scoring tickers...")
+        logger.info(f"📊 Scoring all {len(all_tickers)} tickers by options data (IV, liquidity, etc.)...")
+        logger.info("This will identify the best candidates before expensive AI analysis")
 
-        # Process up to 10x the requested count (min 50, max 200) to avoid alphabetical bias
-        max_process = min(max(max_analyze * 10, 50), 200)
+        # Score ALL tickers with options data (cheap operation)
+        # This ensures we get the BEST tickers by score, not just a random sample
         filtered_tickers = self.ticker_filter.filter_and_score_tickers(
             all_tickers,
-            max_tickers=max_process
+            max_tickers=len(all_tickers)  # Process ALL tickers
         )
 
         filtered_count = len(filtered_tickers)
 
-        logger.info(f"Filtered to {filtered_count} tickers passing IV Rank criteria")
+        logger.info(f"✅ Scored {len(all_tickers)} tickers, {filtered_count} passed IV filter (>50%)")
 
-        # Step 3: Full analysis for top tickers (parallel processing)
+        if filtered_count > 0:
+            logger.info(f"🏆 Top scorer: {filtered_tickers[0]['ticker']} (Score: {filtered_tickers[0]['score']:.1f}/100)")
+            if filtered_count > 1:
+                logger.info(f"   Runner-up: {filtered_tickers[1]['ticker']} (Score: {filtered_tickers[1]['score']:.1f}/100)")
+
+        # Step 3: Select top N tickers by score for expensive AI analysis
         tickers_to_analyze = filtered_tickers[:max_analyze]
 
         if not tickers_to_analyze:
@@ -524,7 +529,8 @@ class EarningsAnalyzer:
                 'ticker_analyses': []
             }
 
-        logger.info(f"Analyzing {len(tickers_to_analyze)} tickers in parallel...")
+        logger.info(f"🤖 Running AI analysis on top {len(tickers_to_analyze)} scorer(s)...")
+        logger.info(f"   Selected: {', '.join([td['ticker'] for td in tickers_to_analyze])}")
 
         # Prepare arguments for parallel processing
         analysis_args = [
