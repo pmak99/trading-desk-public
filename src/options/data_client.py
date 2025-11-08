@@ -379,14 +379,30 @@ class OptionsDataClient:
                 return {
                     'iv_crush_ratio': None,  # Will calculate when we have implied moves
                     'historical_moves': moves,
-                    'avg_actual_move_pct': round(avg_actual_move, 2)
+                    'avg_actual_move_pct': round(avg_actual_move, 2),
+                    'last_earnings_move': moves[0]['actual_move_pct'] if moves else None,
+                    'earnings_beat_rate': None  # Not calculated yet
                 }
             else:
-                return {'iv_crush_ratio': None, 'historical_moves': []}
+                # IMPORTANT: Always include avg_actual_move_pct key even if 0
+                # Otherwise ticker_filter.py will default to 0 and break IV crush ratio calc
+                return {
+                    'iv_crush_ratio': None,
+                    'historical_moves': [],
+                    'avg_actual_move_pct': None,  # Use None instead of missing key
+                    'last_earnings_move': None,
+                    'earnings_beat_rate': None
+                }
 
         except Exception as e:
             logger.error(f"{ticker}: Error analyzing historical earnings: {e}")
-            return {'iv_crush_ratio': None, 'historical_moves': []}
+            return {
+                'iv_crush_ratio': None,
+                'historical_moves': [],
+                'avg_actual_move_pct': None,
+                'last_earnings_move': None,
+                'earnings_beat_rate': None
+            }
 
 
 # CLI for testing

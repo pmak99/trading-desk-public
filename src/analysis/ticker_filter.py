@@ -7,6 +7,7 @@ import yfinance as yf
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.options.data_client import OptionsDataClient
 from src.options.tradier_client import TradierOptionsClient
@@ -168,10 +169,10 @@ class TickerFilter:
                             except Exception as e:
                                 logger.warning(f"{ticker}: Could not get yfinance supplement: {e}")
 
-                        # Calculate IV crush ratio (check for division by zero)
-                        expected = options_data.get('expected_move_pct', 0)
-                        actual = options_data.get('avg_actual_move_pct', 0)
-                        if expected > 0 and actual > 0:
+                        # Calculate IV crush ratio (check for None and division by zero)
+                        expected = options_data.get('expected_move_pct')
+                        actual = options_data.get('avg_actual_move_pct')
+                        if expected and actual and expected > 0 and actual > 0:
                             iv_crush_ratio = expected / actual
                             options_data['iv_crush_ratio'] = round(iv_crush_ratio, 2)
 
@@ -190,10 +191,10 @@ class TickerFilter:
                         stock, ticker, hist, current_price
                     )
 
-                    # Calculate IV crush ratio (check for division by zero)
-                    expected = options_data.get('expected_move_pct', 0)
-                    actual = options_data.get('avg_actual_move_pct', 0)
-                    if expected > 0 and actual > 0:
+                    # Calculate IV crush ratio (check for None and division by zero)
+                    expected = options_data.get('expected_move_pct')
+                    actual = options_data.get('avg_actual_move_pct')
+                    if expected and actual and expected > 0 and actual > 0:
                         iv_crush_ratio = expected / actual
                         options_data['iv_crush_ratio'] = round(iv_crush_ratio, 2)
 
@@ -236,17 +237,22 @@ class TickerFilter:
         """
         return self.scorer.calculate_score(data)
 
-    def _process_single_ticker(self, ticker: str) -> Optional[Dict]:
+    def _process_single_ticker(self, ticker: str, add_delay: bool = True) -> Optional[Dict]:
         """
         Process a single ticker: fetch data and calculate score.
 
         Args:
             ticker: Ticker symbol
+            add_delay: Add small delay to avoid rate limits (default: True)
 
         Returns:
             Dict with ticker data and score, or None if filtered out
         """
         try:
+            # Add small delay to avoid rate limits (helps with parallel processing)
+            if add_delay:
+                time.sleep(0.3)  # 300ms delay between requests
+
             logger.info(f"Analyzing {ticker}...")
 
             data = self.get_ticker_data(ticker)
@@ -272,7 +278,7 @@ class TickerFilter:
         tickers: List[str],
         max_tickers: int = 10,
         parallel: bool = True,
-        max_workers: int = 5
+        max_workers: int = 2  # Reduced from 5 to avoid rate limits
     ) -> List[Dict]:
         """
         Filter and score a list of tickers.
