@@ -50,6 +50,9 @@ logs/
 *.log
 *.csv
 
+# Cache files (persistent API cache)
+src/data/cache/
+
 # Documentation (personal research notes)
 docs/
 

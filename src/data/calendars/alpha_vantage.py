@@ -9,6 +9,8 @@ import requests
 import csv
 import io
 import os
+import json
+from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import logging
@@ -43,10 +45,63 @@ class AlphaVantageCalendar:
         # Eastern timezone for market hours
         self.eastern = pytz.timezone('US/Eastern')
 
-        # Cache to reduce API calls (25/day limit on free tier)
+        # Persistent cache to reduce API calls (25/day limit on free tier)
+        self._cache_dir = Path(__file__).parent.parent.parent / 'data' / 'cache'
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        self._cache_file = self._cache_dir / 'alpha_vantage_earnings.json'
+
         self._cache = {}
         self._cache_timestamp = None
-        self._cache_duration_hours = 12  # Refresh twice daily
+        self._cache_duration_hours = 24  # Cache for 24 hours (earnings calendars don't change often)
+
+        # Load existing cache from file
+        self._load_cache_from_file()
+
+    def _load_cache_from_file(self) -> None:
+        """Load cache from persistent file storage."""
+        try:
+            if self._cache_file.exists():
+                with open(self._cache_file, 'r') as f:
+                    cache_data = json.load(f)
+
+                # Restore cache and timestamp
+                self._cache = cache_data.get('data', {})
+                timestamp_str = cache_data.get('timestamp')
+
+                if timestamp_str:
+                    self._cache_timestamp = datetime.fromisoformat(timestamp_str)
+                    age = datetime.now() - self._cache_timestamp
+
+                    if age < timedelta(hours=self._cache_duration_hours):
+                        logger.info(f"Loaded Alpha Vantage cache from file (age: {age.seconds // 3600}h {(age.seconds % 3600) // 60}m)")
+                    else:
+                        logger.info(f"Cache file exists but is stale (age: {age.days}d {age.seconds // 3600}h)")
+                        self._cache = {}
+                        self._cache_timestamp = None
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.warning(f"Failed to load cache from file: {e}. Starting with empty cache.")
+            self._cache = {}
+            self._cache_timestamp = None
+        except Exception as e:
+            logger.error(f"Unexpected error loading cache: {e}")
+            self._cache = {}
+            self._cache_timestamp = None
+
+    def _save_cache_to_file(self) -> None:
+        """Save cache to persistent file storage."""
+        try:
+            cache_data = {
+                'data': self._cache,
+                'timestamp': self._cache_timestamp.isoformat() if self._cache_timestamp else None,
+                'cache_duration_hours': self._cache_duration_hours
+            }
+
+            with open(self._cache_file, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+
+            logger.debug(f"Saved cache to {self._cache_file}")
+        except Exception as e:
+            logger.warning(f"Failed to save cache to file: {e}")
 
     def _is_cache_valid(self) -> bool:
         """Check if cache is still valid."""
@@ -94,6 +149,14 @@ class AlphaVantageCalendar:
                 logger.error("Alpha Vantage API rate limit exceeded (25 requests/day on free tier)")
                 logger.error("Wait until tomorrow or upgrade to premium plan")
                 logger.error("See: https://www.alphavantage.co/premium/")
+
+                # Try to use stale cache if available
+                if horizon in self._cache and self._cache[horizon]:
+                    age = datetime.now() - self._cache_timestamp if self._cache_timestamp else timedelta(days=999)
+                    logger.warning(f"Using STALE cached data (age: {age.days}d {age.seconds // 3600}h)")
+                    logger.warning("This data may be outdated but better than nothing!")
+                    return self._cache[horizon]
+
                 return []
 
             # Parse CSV
@@ -127,9 +190,12 @@ class AlphaVantageCalendar:
 
             logger.info(f"Fetched {len(earnings)} earnings from Alpha Vantage")
 
-            # Update cache
+            # Update cache in memory
             self._cache[horizon] = earnings
             self._cache_timestamp = datetime.now()
+
+            # Save cache to persistent file
+            self._save_cache_to_file()
 
             return earnings
 
