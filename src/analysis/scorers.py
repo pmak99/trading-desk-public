@@ -63,11 +63,11 @@ class IVScorer(TickerScorer):
     """
     Score based on implied volatility (IV) levels.
 
-    PRIMARY FILTER - 50% weight
-    - IV >= 60% required (hard filter)
-    - 60-80%: Good (score 60-80)
-    - 80-100%: Excellent (score 80-100)
-    - 100%+: Premium (score 100)
+    PRIMARY FILTER - 40% weight
+    - IV >= minimum required (60% for IV, 50% for IV Rank from config)
+    - 60-80% IV: Good (score 60-80)
+    - 80-100% IV: Excellent (score 80-100)
+    - 100%+ IV: Premium (score 100)
     """
 
     def __init__(self, weight: float = None, min_iv: int = None):
@@ -141,9 +141,11 @@ class IVScorer(TickerScorer):
 
     def _score_from_yf_iv(self, iv: float) -> float:
         """Score from yfinance IV estimate (least reliable)."""
-        if iv >= 0.60:
+        # Convert decimal to percentage for comparison with self.min_iv
+        iv_pct = iv * 100
+        if iv_pct >= self.min_iv:
             return 80.0  # Probably high IV
-        elif iv >= 0.40:
+        elif iv_pct >= (self.min_iv * 0.67):  # ~2/3 of minimum
             return 60.0
         else:
             return 30.0  # Low confidence

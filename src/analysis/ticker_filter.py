@@ -38,7 +38,7 @@ class TickerFilter:
             cache_ttl_minutes: Cache TTL in minutes (default: 15)
         """
         self.weights = {
-            'iv_score': 0.40,         # 40% - PRIMARY: IV % 60%+ required, 80%+ ideal
+            'iv_score': 0.40,         # 40% - PRIMARY: IV 60%+ OR IV Rank 50%+ required, 80%+ ideal
             'options_liquidity': 0.30, # 30% - CRITICAL: Volume, OI, bid-ask spreads (tighter spreads!)
             'iv_crush_edge': 0.25,    # 25% - Historical implied > actual move
             'fundamentals': 0.05      # 5% - Market cap, price for premium quality
@@ -51,10 +51,13 @@ class TickerFilter:
 
         # Cache for ticker data (prevents redundant API calls)
         self._ticker_cache: Dict[str, tuple[Dict, datetime]] = {}
+        # Cache for raw yfinance info dicts (shared between pre_filter and get_ticker_data)
+        self._info_cache: Dict[str, tuple[Dict, datetime]] = {}
         self._cache_ttl = timedelta(minutes=cache_ttl_minutes)
 
         # Initialize composite scorer (Strategy pattern - refactored from 172-line god function)
-        self.scorer = CompositeScorer(min_iv=self.IV_RANK_MIN)
+        # Don't override min_iv - let it use correct config values (60% for IV, 50% for IV Rank)
+        self.scorer = CompositeScorer()
 
         # Initialize Tradier client (preferred - real IV data)
         self.tradier_client = None
@@ -124,8 +127,9 @@ class TickerFilter:
                 # Get info dict - needed for both market cap and volume
                 # NOTE: fast_info doesn't have averageVolume, must use regular info
                 info = stock.info
-                market_cap = info.get('marketCap', 0)
-                avg_volume = info.get('averageVolume', 0)
+                # Ensure we get numeric values, never None (prevents TypeError in division)
+                market_cap = info.get('marketCap') or 0
+                avg_volume = info.get('averageVolume') or 0
 
                 # Check market cap
                 if market_cap < min_market_cap:
@@ -137,7 +141,10 @@ class TickerFilter:
                     logger.debug(f"  {ticker}: Filtered (volume {avg_volume:,} < {min_avg_volume:,})")
                     return None
 
-                logger.debug(f"  {ticker}: ✓ Passed pre-filter (${market_cap/1e6:.0f}M, {avg_volume:,} vol)")
+                # CRITICAL FIX: Cache the info dict to avoid re-fetching in get_ticker_data()
+                # This saves 75 duplicate API calls (one per ticker that passes pre-filter)
+                self._info_cache[ticker] = (info, datetime.now())
+                logger.debug(f"  {ticker}: ✓ Passed pre-filter (${market_cap/1e6:.0f}M, {avg_volume:,} vol) [cached info]")
                 return ticker
 
             except Exception as e:
@@ -166,7 +173,9 @@ class TickerFilter:
                     filtered.append(result)
 
         logger.info(f"✅ Pre-filter: {len(filtered)}/{len(tickers)} tickers passed ({len(tickers) - len(filtered)} filtered out)")
-        logger.info(f"   API call savings: {((len(tickers) - len(filtered)) * 4):.0f} expensive calls avoided")
+        # Each filtered ticker saves ~3 expensive calls (5d history, 2y history, options analysis)
+        # We already paid 1 info call per ticker, but that info is cached for reuse
+        logger.info(f"   Saved {((len(tickers) - len(filtered)) * 3):.0f} expensive API calls (history + options analysis avoided)")
 
         return filtered
 
@@ -217,7 +226,21 @@ class TickerFilter:
         try:
             # Fetch yfinance data ONCE
             stock = yf.Ticker(ticker)
-            info = stock.info
+
+            # CRITICAL OPTIMIZATION: Check if we already have info from pre_filter
+            # This avoids duplicate API calls (saves ~75 calls per run)
+            info = None
+            if ticker in self._info_cache:
+                cached_info, cached_time = self._info_cache[ticker]
+                age = datetime.now() - cached_time
+                if age < self._cache_ttl:
+                    info = cached_info
+                    logger.debug(f"{ticker}: Reusing info from pre-filter cache (age: {age.seconds}s)")
+
+            # Fetch if not in cache
+            if info is None:
+                info = stock.info
+                logger.debug(f"{ticker}: Fetched fresh info from yfinance")
 
             # OPTIMIZATION: Start with lightweight 5-day history for price/volume
             # Only fetch expensive 1-2 year history if needed for IV rank or earnings
@@ -232,13 +255,14 @@ class TickerFilter:
 
             data = {
                 'ticker': ticker,
-                'market_cap': info.get('marketCap', 0),
+                # Ensure numeric values, never None (prevents TypeError in logging/calculations)
+                'market_cap': info.get('marketCap') or 0,
                 'volume': hist_light['Volume'].iloc[-1] if len(hist_light) > 0 else 0,
-                'avg_volume': info.get('averageVolume', 0),
+                'avg_volume': info.get('averageVolume') or 0,
                 'price': current_price,
-                'iv': info.get('impliedVolatility', 0),
+                'iv': info.get('impliedVolatility') or 0,
                 'sector': info.get('sector', 'Unknown'),
-                'beta': info.get('beta', 1.0)
+                'beta': info.get('beta') or 1.0
             }
 
             # Get options data - try Tradier first (real IV), fall back to yfinance (RV proxy)
@@ -333,8 +357,8 @@ class TickerFilter:
         REFACTORED: Now delegates to CompositeScorer (Strategy pattern).
         Previous 172-line implementation broken into separate scorer classes.
 
-        Scoring based on Trading Research Prompt.pdf criteria:
-        - IV % >= 60% required (uses actual implied volatility from options)
+        Scoring based on Trading Research Prompt.pdf and trading_criteria.yaml:
+        - IV >= 60% OR IV Rank >= 50% required (uses actual IV from Tradier/options)
         - 60-80% IV is good, 80-100% excellent, 100%+ premium for IV crush trades
         - Historical implied move > actual move (IV overpricing edge)
         - Options liquidity (volume, OI, bid-ask spreads)
@@ -343,7 +367,7 @@ class TickerFilter:
             data: Ticker data dict (with optional options_data from Tradier)
 
         Returns:
-            Score (0-100), or 0 if IV < 60%
+            Score (0-100), or 0 if filtered out by hard filters
         """
         return self.scorer.calculate_score(data)
 
