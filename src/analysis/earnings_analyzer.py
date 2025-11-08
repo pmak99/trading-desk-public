@@ -508,19 +508,38 @@ class EarningsAnalyzer:
         # Step 2: Extract all tickers
         all_tickers = [earning.get('ticker', '') for earning in earnings_list if earning.get('ticker')]
 
-        logger.info(f"📊 Scoring all {len(all_tickers)} tickers by options data (IV, liquidity, etc.)...")
+        # Step 2.5: Pre-filter by market cap and volume (HUGE API savings!)
+        # This eliminates penny stocks and low-volume tickers BEFORE expensive API calls
+        # Typical reduction: 265 → ~50 tickers (80% reduction)
+        pre_filtered_tickers = self.ticker_filter.pre_filter_tickers(
+            all_tickers,
+            min_market_cap=500_000_000,  # $500M minimum
+            min_avg_volume=100_000       # 100K shares/day minimum
+        )
+
+        if not pre_filtered_tickers:
+            logger.warning("❌ No tickers passed pre-filter (market cap/volume requirements)")
+            return {
+                'date': target_date,
+                'total_earnings': total_count,
+                'filtered_count': 0,
+                'analyzed_count': 0,
+                'ticker_analyses': []
+            }
+
+        logger.info(f"📊 Scoring {len(pre_filtered_tickers)} pre-filtered tickers by options data (IV, liquidity, etc.)...")
         logger.info("This will identify the best candidates before expensive AI analysis")
 
-        # Score ALL tickers with options data (cheap operation)
-        # This ensures we get the BEST tickers by score, not just a random sample
+        # Score pre-filtered tickers with options data
+        # This ensures we get the BEST tickers by score from viable candidates
         filtered_tickers = self.ticker_filter.filter_and_score_tickers(
-            all_tickers,
-            max_tickers=len(all_tickers)  # Process ALL tickers
+            pre_filtered_tickers,
+            max_tickers=len(pre_filtered_tickers)  # Process all pre-filtered tickers
         )
 
         filtered_count = len(filtered_tickers)
 
-        logger.info(f"✅ Scored {len(all_tickers)} tickers, {filtered_count} passed IV filter (>50%)")
+        logger.info(f"✅ Scored {len(pre_filtered_tickers)} tickers, {filtered_count} passed IV filter (>50%)")
 
         if filtered_count > 0:
             logger.info(f"🏆 Top scorer: {filtered_tickers[0]['ticker']} (Score: {filtered_tickers[0]['score']:.1f}/100)")

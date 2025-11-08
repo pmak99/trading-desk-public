@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.options.data_client import OptionsDataClient
 from src.options.tradier_client import TradierOptionsClient
 from src.analysis.scorers import CompositeScorer
+from src.core.retry_utils import retry_on_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +84,108 @@ class TickerFilter:
             # Unexpected initialization errors
             logger.warning(f"Unexpected error initializing options client: {e}", exc_info=True)
 
+    def pre_filter_tickers(
+        self,
+        tickers: List[str],
+        min_market_cap: int = 500_000_000,  # $500M minimum
+        min_avg_volume: int = 100_000,      # 100K shares/day minimum
+        parallel: bool = True,
+        max_workers: int = 3
+    ) -> List[str]:
+        """
+        Pre-filter tickers by basic criteria before expensive API calls.
+
+        This SIGNIFICANTLY reduces API usage by filtering out:
+        - Micro-cap stocks (< $500M market cap)
+        - Low-volume stocks (< 100K shares/day)
+        - Problematic tickers (API errors, missing data)
+
+        Uses lightweight yfinance.Ticker.fast_info (single API call per ticker).
+        Typical reduction: 265 tickers → ~50 tickers (80% reduction)
+
+        Args:
+            tickers: List of ticker symbols to pre-filter
+            min_market_cap: Minimum market cap in dollars (default: $500M)
+            min_avg_volume: Minimum average daily volume (default: 100K)
+            parallel: Use parallel processing (default: True)
+            max_workers: Max parallel workers (default: 3)
+
+        Returns:
+            Filtered list of tickers that meet basic criteria
+        """
+        logger.info(f"🔍 Pre-filtering {len(tickers)} tickers (market cap ≥ ${min_market_cap/1e6:.0f}M, volume ≥ {min_avg_volume:,})...")
+
+        def check_ticker(ticker: str) -> Optional[str]:
+            """Check if ticker meets basic criteria."""
+            try:
+                time.sleep(0.1)  # Small delay to avoid rate limits
+                stock = yf.Ticker(ticker)
+
+                # Use fast_info for quick access (lighter than full info)
+                try:
+                    market_cap = stock.fast_info.get('marketCap', 0)
+                except:
+                    # Fallback to regular info if fast_info fails
+                    info = stock.info
+                    market_cap = info.get('marketCap', 0)
+
+                # Check market cap
+                if market_cap < min_market_cap:
+                    logger.debug(f"  {ticker}: Filtered (market cap ${market_cap/1e6:.0f}M < ${min_market_cap/1e6:.0f}M)")
+                    return None
+
+                # Get average volume (use fast_info if available)
+                try:
+                    avg_volume = stock.fast_info.get('averageVolume', 0)
+                except:
+                    avg_volume = stock.info.get('averageVolume', 0)
+
+                if avg_volume < min_avg_volume:
+                    logger.debug(f"  {ticker}: Filtered (volume {avg_volume:,} < {min_avg_volume:,})")
+                    return None
+
+                logger.debug(f"  {ticker}: ✓ Passed pre-filter (${market_cap/1e6:.0f}M, {avg_volume:,} vol)")
+                return ticker
+
+            except Exception as e:
+                logger.debug(f"  {ticker}: Filtered (error: {e})")
+                return None
+
+        # Process in parallel for speed
+        filtered = []
+
+        if parallel and len(tickers) > 1:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_ticker = {
+                    executor.submit(check_ticker, ticker): ticker
+                    for ticker in tickers
+                }
+
+                for future in as_completed(future_to_ticker):
+                    result = future.result()
+                    if result:
+                        filtered.append(result)
+        else:
+            # Sequential processing
+            for ticker in tickers:
+                result = check_ticker(ticker)
+                if result:
+                    filtered.append(result)
+
+        logger.info(f"✅ Pre-filter: {len(filtered)}/{len(tickers)} tickers passed ({len(tickers) - len(filtered)} filtered out)")
+        logger.info(f"   API call savings: {((len(tickers) - len(filtered)) * 4):.0f} expensive calls avoided")
+
+        return filtered
+
+    @retry_on_rate_limit(max_retries=3, initial_backoff=2.0, backoff_multiplier=2.0)
     def get_ticker_data(self, ticker: str, use_cache: bool = True) -> Optional[Dict]:
         """
         Get market data for a ticker including options data.
 
         Fetches yfinance data ONCE and extracts all needed information
         to avoid duplicate API calls. Uses TTL cache to prevent redundant requests.
+
+        Decorated with @retry_on_rate_limit for automatic retry on rate limit errors.
 
         Args:
             ticker: Ticker symbol
@@ -112,20 +209,21 @@ class TickerFilter:
             stock = yf.Ticker(ticker)
             info = stock.info
 
-            # Get historical data for volume analysis
-            hist = stock.history(period='1y')  # Get full year for IV rank calculation
+            # OPTIMIZATION: Start with lightweight 5-day history for price/volume
+            # Only fetch expensive 1-2 year history if needed for IV rank or earnings
+            hist_light = stock.history(period='5d')
 
-            if hist.empty:
+            if hist_light.empty:
                 logger.warning(f"No historical data for {ticker}")
                 return None
 
             # Get current price
-            current_price = info.get('currentPrice') or info.get('regularMarketPrice') or hist['Close'].iloc[-1]
+            current_price = info.get('currentPrice') or info.get('regularMarketPrice') or hist_light['Close'].iloc[-1]
 
             data = {
                 'ticker': ticker,
                 'market_cap': info.get('marketCap', 0),
-                'volume': hist['Volume'].iloc[-1] if len(hist) > 0 else 0,
+                'volume': hist_light['Volume'].iloc[-1] if len(hist_light) > 0 else 0,
                 'avg_volume': info.get('averageVolume', 0),
                 'price': current_price,
                 'iv': info.get('impliedVolatility', 0),
@@ -146,10 +244,14 @@ class TickerFilter:
                         options_data = tradier_data
 
                         # Get supplemental data from yfinance:
-                        # 1. Historical earnings moves (not in Tradier)
-                        # 2. IV Rank based on RV (Tradier doesn't have 52-week IV history yet)
+                        # 1. Historical earnings moves (not in Tradier) - needs 2y data
+                        # 2. IV Rank based on RV (Tradier doesn't have 52-week IV history yet) - needs 1y data
                         if self.options_client:
                             try:
+                                # Fetch full 2-year history for earnings analysis (only if needed)
+                                hist = stock.history(period='2y')
+                                logger.debug(f"{ticker}: Fetched 2y history for earnings analysis")
+
                                 yf_data = self.options_client.get_options_data_from_stock(
                                     stock, ticker, hist, current_price
                                 )
@@ -187,6 +289,11 @@ class TickerFilter:
             if not options_data and self.options_client:
                 try:
                     logger.debug(f"{ticker}: Using yfinance fallback (RV proxy)")
+
+                    # Need full year history for RV-based IV rank calculation
+                    hist = stock.history(period='1y')
+                    logger.debug(f"{ticker}: Fetched 1y history for RV-based IV rank")
+
                     options_data = self.options_client.get_options_data_from_stock(
                         stock, ticker, hist, current_price
                     )
