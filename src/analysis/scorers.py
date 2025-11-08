@@ -214,6 +214,8 @@ class LiquidityScorer(TickerScorer):
         if _TRADING_CRITERIA:
             weight = weight or _TRADING_CRITERIA['scoring_weights']['options_liquidity']
             liq = _TRADING_CRITERIA['liquidity_thresholds']
+            self.min_volume = liq.get('minimum_volume', 100)
+            self.min_oi = liq.get('minimum_open_interest', 500)
             self.vol_very_high = liq['volume']['very_high']
             self.vol_high = liq['volume']['high']
             self.vol_good = liq['volume']['good']
@@ -227,6 +229,8 @@ class LiquidityScorer(TickerScorer):
             self.spread_okay = liq['spread']['okay']
         else:
             weight = weight or 0.15
+            self.min_volume = 100
+            self.min_oi = 500
             self.vol_very_high = 50000
             self.vol_high = 10000
             self.vol_good = 5000
@@ -244,13 +248,18 @@ class LiquidityScorer(TickerScorer):
     def score(self, data: Dict) -> float:
         """Score based on liquidity metrics."""
         options_data = data.get('options_data', {})
+        ticker = data.get('ticker', 'UNKNOWN')
 
-        volume_score = self._score_options_volume(
-            options_data.get('options_volume', 0)
-        )
-        oi_score = self._score_open_interest(
-            options_data.get('open_interest', 0)
-        )
+        volume = options_data.get('options_volume', 0)
+        oi = options_data.get('open_interest', 0)
+
+        # HARD FILTER: Must meet minimum liquidity requirements
+        if volume < self.min_volume or oi < self.min_oi:
+            logger.info(f"{ticker}: Liquidity too low (Vol: {volume}, OI: {oi}) - SKIPPING")
+            return 0.0
+
+        volume_score = self._score_options_volume(volume)
+        oi_score = self._score_open_interest(oi)
         spread_score = self._score_bid_ask_spread(
             options_data.get('bid_ask_spread_pct')
         )
@@ -410,9 +419,10 @@ class CompositeScorer:
         for scorer in self.scorers:
             score = scorer.score(data)
 
-            # Hard filter: If any scorer returns 0, the ticker is filtered out
-            # (currently only IVScorer does this for IV < 60%)
-            if score == 0 and isinstance(scorer, IVScorer):
+            # Hard filter: If IVScorer or LiquidityScorer returns 0, filter out the ticker
+            # IVScorer: IV < 50% or IV Rank < 50%
+            # LiquidityScorer: Volume < 100 or OI < 500
+            if score == 0 and isinstance(scorer, (IVScorer, LiquidityScorer)):
                 return 0.0
 
             scores.append(score * scorer.weight)

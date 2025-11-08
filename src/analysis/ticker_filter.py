@@ -7,7 +7,6 @@ import yfinance as yf
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import logging
-import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.options.data_client import OptionsDataClient
 from src.options.tradier_client import TradierOptionsClient
@@ -280,23 +279,22 @@ class TickerFilter:
 
         FILTERS OUT:
         - Tickers with IV Rank < 50% (score = 0)
+        - Tickers with liquidity below minimums (volume < 100, OI < 500)
         - Tickers with insufficient data
 
         Args:
             tickers: List of ticker symbols
-            max_tickers: Max number to process (avoid rate limits)
+            max_tickers: Max number to process (pass len(tickers) to score ALL)
             parallel: Use parallel processing (default: True)
             max_workers: Max parallel workers (default: 5)
 
         Returns:
-            List of dicts with ticker data and scores, sorted by score
-            Only returns tickers that pass IV Rank filter (score > 0)
+            List of dicts with ticker data and scores, sorted by score descending
+            Only returns tickers that pass all filters (score > 0)
         """
-        # Shuffle tickers to avoid alphabetical bias (earnings calendars are often alphabetically sorted)
-        shuffled_tickers = tickers.copy()
-        random.shuffle(shuffled_tickers)
-
-        tickers_to_process = shuffled_tickers[:max_tickers]
+        # No longer need shuffle since we score ALL tickers and sort by score
+        # This ensures deterministic, reproducible results
+        tickers_to_process = tickers[:max_tickers]
         results = []
 
         if parallel and len(tickers_to_process) > 1:

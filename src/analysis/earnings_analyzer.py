@@ -68,18 +68,23 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str, bool]) -> Dict:
             analysis['sentiment'] = sentiment
         except Exception as e:
             error_msg = str(e)
-            if "DAILY_LIMIT" in error_msg:
-                logger.warning(f"{ticker}: Daily limit reached for sentiment - skipping AI analysis")
+            if "DAILY_LIMIT" in error_msg or "budget" in error_msg.lower() or "limit" in error_msg.lower():
+                logger.warning(f"  {ticker}: API limit reached for sentiment")
                 analysis['sentiment'] = {
-                    'overall_sentiment': 'pending',
-                    'note': 'Daily API limit reached - analysis deferred'
+                    'overall_sentiment': 'unavailable',
+                    'error': 'API limit exceeded',
+                    'note': 'Daily/monthly API limits reached for all providers. Run again tomorrow or use --override flag.'
                 }
             else:
-                logger.error(f"{ticker}: Sentiment analysis failed: {e}")
-                analysis['sentiment'] = {}
+                logger.error(f"  {ticker}: Sentiment analysis failed: {e}")
+                analysis['sentiment'] = {
+                    'overall_sentiment': 'unavailable',
+                    'error': str(e)[:100],
+                    'note': 'Sentiment analysis failed - see logs for details'
+                }
 
-        # Generate strategies
-        if analysis['options_data'] and analysis['sentiment']:
+        # Generate strategies - try even if sentiment failed (don't let sentiment block strategies)
+        if analysis['options_data']:
             try:
                 logger.info(f"  {ticker}: Generating strategies...")
                 strategies = strategy_generator.generate_strategies(
@@ -92,15 +97,20 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str, bool]) -> Dict:
                 analysis['strategies'] = strategies
             except Exception as e:
                 error_msg = str(e)
-                if "DAILY_LIMIT" in error_msg:
-                    logger.warning(f"  {ticker}: Daily limit reached for strategies - skipping AI analysis")
+                if "DAILY_LIMIT" in error_msg or "budget" in error_msg.lower() or "limit" in error_msg.lower():
+                    logger.warning(f"  {ticker}: API limit reached for strategies")
                     analysis['strategies'] = {
                         'strategies': [],
-                        'note': 'Daily API limit reached - strategy generation deferred'
+                        'error': 'API limit exceeded',
+                        'note': 'Daily/monthly API limits reached for all providers. Run again tomorrow or use --override flag.'
                     }
                 else:
                     logger.error(f"  {ticker}: Strategy generation failed: {e}")
-                    analysis['strategies'] = {}
+                    analysis['strategies'] = {
+                        'strategies': [],
+                        'error': str(e)[:100],
+                        'note': 'Strategy generation failed - see logs for details'
+                    }
 
         logger.info(f"✅ {ticker}: Analysis complete")
         return analysis

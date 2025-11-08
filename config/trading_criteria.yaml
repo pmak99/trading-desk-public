@@ -30,6 +30,10 @@ scoring_weights:
 
 # Options liquidity thresholds
 liquidity_thresholds:
+  # HARD MINIMUMS (below these = filtered out, score = 0)
+  minimum_volume: 100         # Hard filter: must have some daily activity
+  minimum_open_interest: 500  # Hard filter: minimum for tradeable spreads
+
   # Volume levels
   volume:
     acceptable: 1000    # Minimum acceptable daily volume

@@ -122,8 +122,8 @@ class ReportFormatter:
             sentiment_section = ReportFormatter._format_sentiment_section(sentiment)
             lines.append(sentiment_section)
 
-        # Strategies
-        if strategies and strategies.get('strategies'):
+        # Strategies - show section even if there's an error (for transparency)
+        if strategies and (strategies.get('strategies') or strategies.get('error')):
             strategies_section = ReportFormatter._format_strategies_section(strategies)
             lines.append(strategies_section)
 
@@ -156,9 +156,23 @@ class ReportFormatter:
         """Format sentiment analysis section."""
         lines = []
         lines.append(f"\nSENTIMENT:")
+
+        # Check if there was an error
+        if sentiment.get('error'):
+            lines.append(f"  ⚠️  {sentiment['error']}")
+            if sentiment.get('note'):
+                lines.append(f"  {sentiment['note']}")
+            return "\n".join(lines)
+
         lines.append(f"  Overall: {sentiment.get('overall_sentiment', 'N/A').upper()}")
-        lines.append(f"  Retail: {sentiment.get('retail_sentiment', 'N/A')[:150]}...")
-        lines.append(f"  Institutional: {sentiment.get('institutional_sentiment', 'N/A')[:150]}...")
+
+        retail = sentiment.get('retail_sentiment', 'N/A')
+        if retail and retail != 'N/A':
+            lines.append(f"  Retail: {retail[:150]}...")
+
+        institutional = sentiment.get('institutional_sentiment', 'N/A')
+        if institutional and institutional != 'N/A':
+            lines.append(f"  Institutional: {institutional[:150]}...")
 
         if sentiment.get('tailwinds'):
             lines.append(f"\n  Tailwinds:")
@@ -177,6 +191,20 @@ class ReportFormatter:
         """Format trading strategies section."""
         lines = []
         lines.append(f"\nTRADE STRATEGIES:")
+
+        # Check if there was an error
+        if strategies.get('error'):
+            lines.append(f"  ⚠️  {strategies['error']}")
+            if strategies.get('note'):
+                lines.append(f"  {strategies['note']}")
+            return "\n".join(lines)
+
+        # Check if strategies list is empty
+        if not strategies.get('strategies'):
+            lines.append(f"  ⚠️  No strategies generated")
+            if strategies.get('note'):
+                lines.append(f"  {strategies['note']}")
+            return "\n".join(lines)
 
         for j, strat in enumerate(strategies['strategies'], 1):
             lines.append(f"\n  Strategy {j}: {strat.get('name', 'N/A')}")
