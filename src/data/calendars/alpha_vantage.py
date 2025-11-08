@@ -89,6 +89,13 @@ class AlphaVantageCalendar:
             # Alpha Vantage returns CSV format
             csv_data = response.text
 
+            # Check for rate limit error (returns "I,n,f,o,r,m" instead of real data)
+            if csv_data.strip().startswith('symbol,name,reportDate') and 'I,n,f,o,r,m' in csv_data:
+                logger.error("Alpha Vantage API rate limit exceeded (25 requests/day on free tier)")
+                logger.error("Wait until tomorrow or upgrade to premium plan")
+                logger.error("See: https://www.alphavantage.co/premium/")
+                return []
+
             # Parse CSV
             earnings = []
             reader = csv.DictReader(io.StringIO(csv_data))
