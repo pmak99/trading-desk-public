@@ -161,6 +161,8 @@ class OptionsDataClient:
                 return {'iv_rank': None, 'iv_percentile': None, 'current_iv': None}
 
             # Calculate 30-day realized volatility for each day
+            # Use explicit copy to avoid SettingWithCopyWarning
+            hist = hist.copy()
             hist['returns'] = hist['Close'].pct_change()
             hist['rv_30'] = hist['returns'].rolling(window=30).std() * (252 ** 0.5)
 
@@ -348,14 +350,16 @@ class OptionsDataClient:
 
             moves = []
 
+            # Pre-compute historical dates list (avoid O(n*m) by creating list once)
+            hist_dates = [d.date() for d in hist.index]
+
             # Analyze last 4-8 quarters (user's criteria)
             for i, (date, _) in enumerate(earnings.head(8).iterrows()):
                 try:
                     # Get price movement on earnings day
                     earnings_date = date.date() if hasattr(date, 'date') else date
 
-                    # Find closest trading day
-                    hist_dates = [d.date() for d in hist.index]
+                    # Find closest trading day (now O(1) list access instead of O(n) creation)
                     closest_idx = min(range(len(hist_dates)),
                                     key=lambda i: abs((hist_dates[i] - earnings_date).days))
 

@@ -94,7 +94,7 @@ class TradierOptionsClient:
                 return None
 
             # Get IV Rank from market data (pass earnings date for weekly expiration selection)
-            iv_data = self._get_iv_rank(ticker, earnings_date)
+            iv_data = self._get_iv_rank(ticker, current_price, earnings_date)
 
             # Get options chain for expected move and liquidity
             chain_data = self._get_options_chain(ticker, current_price, earnings_date)
@@ -139,7 +139,7 @@ class TradierOptionsClient:
             logger.error(f"{ticker}: Failed to get quote: {e}")
             return None
 
-    def _get_iv_rank(self, ticker: str, earnings_date: Optional[str] = None) -> Dict:
+    def _get_iv_rank(self, ticker: str, current_price: float, earnings_date: Optional[str] = None) -> Dict:
         """
         Get IV data from Tradier.
 
@@ -148,6 +148,7 @@ class TradierOptionsClient:
 
         Args:
             ticker: Stock ticker
+            current_price: Current stock price (avoids redundant API call)
             earnings_date: Earnings date for weekly expiration selection
 
         Returns:
@@ -185,9 +186,10 @@ class TradierOptionsClient:
 
             options = data['options']['option']
 
-            # Get current stock price from first option's underlying
-            current_price = self._get_quote(ticker)
+            # Use current_price from parameter (already fetched by caller)
+            # This avoids duplicate API call to _get_quote()
             if not current_price:
+                logger.warning(f"{ticker}: No current price provided")
                 return {'iv_rank': 0, 'iv_percentile': 0, 'current_iv': 0}
 
             # Find ATM options to get current IV

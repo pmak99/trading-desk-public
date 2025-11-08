@@ -421,18 +421,18 @@ class EarningsAnalyzer:
         filtered_out = [td for td in tickers_data if td.get('score', 0) == 0]
 
         if filtered_out:
-            logger.warning(f"❌ {len(filtered_out)} ticker(s) filtered out (IV < 50%): {', '.join([td['ticker'] for td in filtered_out])}")
+            logger.warning(f"❌ {len(filtered_out)} ticker(s) filtered out (IV/IV Rank too low): {', '.join([td['ticker'] for td in filtered_out])}")
             failed_tickers.extend([td['ticker'] for td in filtered_out])
 
         if not filtered_tickers:
-            logger.warning("❌ No tickers passed IV filter (>50% IV or IV Rank required)")
-            logger.info("💡 Try tickers with higher IV or adjust filter thresholds in config")
+            logger.warning("❌ No tickers passed IV filter (IV >= 60% OR IV Rank >= 50% required)")
+            logger.info("💡 Try tickers with higher IV or adjust filter thresholds in config/trading_criteria.yaml")
             return {
                 'date': earnings_date,
                 'analyzed_count': 0,
                 'failed_count': len(failed_tickers),
                 'ticker_analyses': [],
-                'failed_analyses': [{'ticker': t, 'error': 'Failed IV filter (< 50%)' if t in [td['ticker'] for td in filtered_out] else 'Data fetch failed'} for t in failed_tickers]
+                'failed_analyses': [{'ticker': t, 'error': 'Failed IV filter (IV < 60% and IV Rank < 50%)' if t in [td['ticker'] for td in filtered_out] else 'Data fetch failed'} for t in failed_tickers]
             }
 
         logger.info(f"✅ {len(filtered_tickers)}/{len(tickers_data)} ticker(s) passed IV filter")
