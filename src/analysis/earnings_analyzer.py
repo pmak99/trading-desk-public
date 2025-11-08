@@ -520,11 +520,21 @@ class EarningsAnalyzer:
         # Step 2.5: Pre-filter by market cap and volume (HUGE API savings!)
         # This eliminates penny stocks and low-volume tickers BEFORE expensive API calls
         # Typical reduction: 265 → ~50 tickers (80% reduction)
-        pre_filtered_tickers = self.ticker_filter.pre_filter_tickers(
-            all_tickers,
-            min_market_cap=500_000_000,  # $500M minimum
-            min_avg_volume=100_000       # 100K shares/day minimum
-        )
+        try:
+            pre_filtered_tickers = self.ticker_filter.pre_filter_tickers(
+                all_tickers,
+                min_market_cap=500_000_000,  # $500M minimum
+                min_avg_volume=100_000       # 100K shares/day minimum
+            )
+        except Exception as e:
+            logger.error(f"Pre-filter failed: {e}")
+            pre_filtered_tickers = None
+
+        # Validate pre-filter results
+        if pre_filtered_tickers is None or not isinstance(pre_filtered_tickers, list):
+            logger.error("❌ Pre-filter returned invalid data (None or not a list)")
+            logger.warning("Falling back to processing all tickers (this may be slow!)")
+            pre_filtered_tickers = all_tickers  # Fallback to all tickers
 
         if not pre_filtered_tickers:
             logger.warning("❌ No tickers passed pre-filter (market cap/volume requirements)")

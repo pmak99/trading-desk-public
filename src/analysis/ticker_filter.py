@@ -121,25 +121,18 @@ class TickerFilter:
                 time.sleep(0.1)  # Small delay to avoid rate limits
                 stock = yf.Ticker(ticker)
 
-                # Use fast_info for quick access (lighter than full info)
-                try:
-                    market_cap = stock.fast_info.get('marketCap', 0)
-                except Exception:
-                    # Fallback to regular info if fast_info fails
-                    info = stock.info
-                    market_cap = info.get('marketCap', 0)
+                # Get info dict - needed for both market cap and volume
+                # NOTE: fast_info doesn't have averageVolume, must use regular info
+                info = stock.info
+                market_cap = info.get('marketCap', 0)
+                avg_volume = info.get('averageVolume', 0)
 
                 # Check market cap
                 if market_cap < min_market_cap:
                     logger.debug(f"  {ticker}: Filtered (market cap ${market_cap/1e6:.0f}M < ${min_market_cap/1e6:.0f}M)")
                     return None
 
-                # Get average volume (use fast_info if available)
-                try:
-                    avg_volume = stock.fast_info.get('averageVolume', 0)
-                except Exception:
-                    avg_volume = stock.info.get('averageVolume', 0)
-
+                # Check average volume
                 if avg_volume < min_avg_volume:
                     logger.debug(f"  {ticker}: Filtered (volume {avg_volume:,} < {min_avg_volume:,})")
                     return None
@@ -176,6 +169,23 @@ class TickerFilter:
         logger.info(f"   API call savings: {((len(tickers) - len(filtered)) * 4):.0f} expensive calls avoided")
 
         return filtered
+
+    def _calculate_iv_crush_ratio(self, options_data: Dict) -> None:
+        """
+        Calculate IV crush ratio in-place.
+
+        IV crush ratio = expected_move_pct / avg_actual_move_pct
+        Ratio > 1.0 means implied move > actual move (good for selling premium)
+
+        Args:
+            options_data: Options data dict to update in-place
+        """
+        expected = options_data.get('expected_move_pct')
+        actual = options_data.get('avg_actual_move_pct')
+
+        if expected and actual and expected > 0 and actual > 0:
+            iv_crush_ratio = expected / actual
+            options_data['iv_crush_ratio'] = round(iv_crush_ratio, 2)
 
     @retry_on_rate_limit(max_retries=3, initial_backoff=2.0, backoff_multiplier=2.0)
     def get_ticker_data(self, ticker: str, use_cache: bool = True) -> Optional[Dict]:
@@ -272,12 +282,8 @@ class TickerFilter:
                             except Exception as e:
                                 logger.warning(f"{ticker}: Could not get yfinance supplement: {e}")
 
-                        # Calculate IV crush ratio (check for None and division by zero)
-                        expected = options_data.get('expected_move_pct')
-                        actual = options_data.get('avg_actual_move_pct')
-                        if expected and actual and expected > 0 and actual > 0:
-                            iv_crush_ratio = expected / actual
-                            options_data['iv_crush_ratio'] = round(iv_crush_ratio, 2)
+                        # Calculate IV crush ratio
+                        self._calculate_iv_crush_ratio(options_data)
 
                         # Mark as using real IV
                         options_data['data_source'] = 'tradier'
@@ -299,12 +305,8 @@ class TickerFilter:
                         stock, ticker, hist, current_price
                     )
 
-                    # Calculate IV crush ratio (check for None and division by zero)
-                    expected = options_data.get('expected_move_pct')
-                    actual = options_data.get('avg_actual_move_pct')
-                    if expected and actual and expected > 0 and actual > 0:
-                        iv_crush_ratio = expected / actual
-                        options_data['iv_crush_ratio'] = round(iv_crush_ratio, 2)
+                    # Calculate IV crush ratio
+                    self._calculate_iv_crush_ratio(options_data)
 
                     options_data['data_source'] = 'yfinance_rv_proxy'
 
