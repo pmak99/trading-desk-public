@@ -124,7 +124,7 @@ class TickerFilter:
                 # Use fast_info for quick access (lighter than full info)
                 try:
                     market_cap = stock.fast_info.get('marketCap', 0)
-                except:
+                except Exception:
                     # Fallback to regular info if fast_info fails
                     info = stock.info
                     market_cap = info.get('marketCap', 0)
@@ -137,7 +137,7 @@ class TickerFilter:
                 # Get average volume (use fast_info if available)
                 try:
                     avg_volume = stock.fast_info.get('averageVolume', 0)
-                except:
+                except Exception:
                     avg_volume = stock.info.get('averageVolume', 0)
 
                 if avg_volume < min_avg_volume:
@@ -257,9 +257,10 @@ class TickerFilter:
                                 )
 
                                 # Extract earnings-related fields
-                                options_data['avg_actual_move_pct'] = yf_data.get('avg_actual_move_pct', 0)
-                                options_data['last_earnings_move'] = yf_data.get('last_earnings_move', 0)
-                                options_data['earnings_beat_rate'] = yf_data.get('earnings_beat_rate', 0)
+                                # IMPORTANT: Use None as default, not 0, to distinguish "no data" from "0% move"
+                                options_data['avg_actual_move_pct'] = yf_data.get('avg_actual_move_pct')
+                                options_data['last_earnings_move'] = yf_data.get('last_earnings_move')
+                                options_data['earnings_beat_rate'] = yf_data.get('earnings_beat_rate')
 
                                 # Use yfinance IV Rank (RV-based) if Tradier doesn't have it
                                 # Note: yfinance RV Rank is ~70-80% correlated with real IV Rank

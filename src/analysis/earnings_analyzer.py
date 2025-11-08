@@ -485,7 +485,16 @@ class EarningsAnalyzer:
 
         if target_date not in week_earnings:
             logger.warning(f"No earnings found for {target_date}")
-            return {'date': target_date, 'error': 'No earnings found'}
+            return {
+                'date': target_date,
+                'total_earnings': 0,
+                'filtered_count': 0,
+                'analyzed_count': 0,
+                'failed_count': 0,
+                'ticker_analyses': [],
+                'failed_analyses': [],
+                'error': 'No earnings found'
+            }
 
         # Filter out already-reported earnings
         eastern = pytz.timezone('US/Eastern')
