@@ -1,0 +1,5 @@
+# Ignore benchmark result files
+results/*.json
+
+# Keep directory structure
+!results/.gitkeep

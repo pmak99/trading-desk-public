@@ -1,0 +1,6 @@
+# Ignore profiling result files
+results/*.prof
+results/*.txt
+
+# Keep directory structure
+!results/.gitkeep
