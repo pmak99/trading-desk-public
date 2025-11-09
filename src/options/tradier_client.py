@@ -63,6 +63,9 @@ class TradierOptionsClient:
         """
         Get comprehensive options data including real IV Rank.
 
+        OPTIMIZED: Fetches options chain ONCE and extracts all needed metrics.
+        Previous version made 2 duplicate API calls for the same chain.
+
         Args:
             ticker: Stock ticker symbol
             current_price: Current stock price (optional, will fetch if not provided)
@@ -93,20 +96,32 @@ class TradierOptionsClient:
                 logger.error(f"{ticker}: Could not get current price")
                 return None
 
-            # Get IV Rank from market data (pass earnings date for weekly expiration selection)
-            iv_data = self._get_iv_rank(ticker, current_price, earnings_date)
+            # Get expiration date for earnings
+            expiration = self._get_nearest_weekly_expiration(ticker, earnings_date)
+            if not expiration:
+                logger.warning(f"{ticker}: No expiration found")
+                return None
 
-            # Get options chain for expected move and liquidity
-            chain_data = self._get_options_chain(ticker, current_price, earnings_date)
+            # OPTIMIZATION: Fetch options chain ONCE (was fetching twice before!)
+            # This eliminates a duplicate API call per ticker
+            options_chain = self._fetch_options_chain(ticker, expiration)
+            if not options_chain:
+                return None
+
+            # Extract IV rank from the chain
+            iv_data = self._extract_iv_rank(options_chain, current_price, ticker)
+
+            # Extract liquidity metrics from the SAME chain
+            liquidity_data = self._extract_liquidity_metrics(options_chain, current_price)
 
             # Combine data
             result = {
                 'iv_rank': iv_data.get('iv_rank', 0),
                 'iv_percentile': iv_data.get('iv_percentile', 0),
                 'current_iv': iv_data.get('current_iv', 0),
-                'expected_move_pct': chain_data.get('expected_move_pct', 0),
-                'options_volume': chain_data.get('options_volume', 0),
-                'open_interest': chain_data.get('open_interest', 0),
+                'expected_move_pct': liquidity_data.get('expected_move_pct', 0),
+                'options_volume': liquidity_data.get('options_volume', 0),
+                'open_interest': liquidity_data.get('open_interest', 0),
             }
 
             logger.info(f"{ticker}: IV Rank = {result['iv_rank']:.1f}% (real ORATS data)")
@@ -139,36 +154,18 @@ class TradierOptionsClient:
             logger.error(f"{ticker}: Failed to get quote: {e}")
             return None
 
-    def _get_iv_rank(self, ticker: str, current_price: float, earnings_date: Optional[str] = None) -> Dict:
+    def _fetch_options_chain(self, ticker: str, expiration: str) -> Optional[list]:
         """
-        Get IV data from Tradier.
-
-        Tradier provides real implied volatility from options Greeks via ORATS.
-        IV Rank calculation requires 52-week IV history (to be implemented).
+        Fetch options chain from Tradier API (single API call).
 
         Args:
-            ticker: Stock ticker
-            current_price: Current stock price (avoids redundant API call)
-            earnings_date: Earnings date for weekly expiration selection
+            ticker: Stock symbol
+            expiration: Expiration date (YYYY-MM-DD)
 
         Returns:
-            Dict with:
-                - iv_rank: 0 (not yet implemented, requires historical IV data)
-                - iv_percentile: 0 (not yet implemented)
-                - current_iv: Actual implied volatility % (e.g., 93.82 means 93.82%)
-
-        Note: Tradier API returns IV in format: 1.23 = 123%, 0.50 = 50%
-              We multiply by 100 to get standard percentage format.
-              current_iv is REAL implied volatility from live options market.
+            List of option contracts with Greeks, or None if failed
         """
         try:
-            # Get nearest weekly expiration (pass earnings date for better selection)
-            expiration = self._get_nearest_weekly_expiration(ticker, earnings_date)
-            if not expiration:
-                logger.warning(f"{ticker}: No expiration found for IV calculation")
-                return {'iv_rank': 0, 'iv_percentile': 0, 'current_iv': 0}
-
-            # Get options chain with Greeks
             url = f"{self.endpoint}/v1/markets/options/chains"
             params = {
                 'symbol': ticker,
@@ -182,24 +179,39 @@ class TradierOptionsClient:
             data = response.json()
 
             if 'options' not in data or 'option' not in data['options']:
-                return {'iv_rank': 0, 'iv_percentile': 0, 'current_iv': 0}
+                logger.warning(f"{ticker}: No options data in response")
+                return None
 
-            options = data['options']['option']
+            return data['options']['option']
 
-            # Use current_price from parameter (already fetched by caller)
-            # This avoids duplicate API call to _get_quote()
-            if not current_price:
-                logger.warning(f"{ticker}: No current price provided")
+        except Exception as e:
+            logger.error(f"{ticker}: Failed to fetch options chain: {e}")
+            return None
+
+    def _extract_iv_rank(self, options_chain: list, current_price: float, ticker: str) -> Dict:
+        """
+        Extract IV Rank from already-fetched options chain.
+
+        Args:
+            options_chain: List of option contracts from Tradier
+            current_price: Current stock price
+            ticker: Stock ticker (for logging)
+
+        Returns:
+            Dict with iv_rank, iv_percentile, current_iv
+        """
+        try:
+            if not options_chain or not current_price:
                 return {'iv_rank': 0, 'iv_percentile': 0, 'current_iv': 0}
 
             # Find ATM options to get current IV
-            atm_call, atm_put = self._find_atm_options(options, current_price)
+            atm_call, atm_put = self._find_atm_options(options_chain, current_price)
 
             # Extract real implied volatility from ATM options
             current_iv = 0
             if atm_call and 'greeks' in atm_call:
                 # Use mid_iv from ATM call (most liquid and representative)
-                # Tradier returns IV as whole percentage (e.g., 1.23 = 123%, 0.50 = 50%)
+                # Tradier returns IV as decimal (e.g., 1.23 = 123%, 0.50 = 50%)
                 current_iv = atm_call['greeks'].get('mid_iv', 0) * 100
 
             # Calculate IV Rank from historical IV data
@@ -211,9 +223,6 @@ class TradierOptionsClient:
                 # Calculate IV Rank (percentile in 52-week range)
                 iv_rank = self.iv_tracker.calculate_iv_rank(ticker, current_iv)
 
-                if iv_rank > 0:
-                    logger.info(f"{ticker}: IV Rank = {iv_rank}% (current IV: {current_iv}%)")
-
             return {
                 'iv_rank': iv_rank,
                 'iv_percentile': iv_rank,  # Same as IV Rank
@@ -221,53 +230,30 @@ class TradierOptionsClient:
             }
 
         except Exception as e:
-            logger.error(f"{ticker}: Failed to get IV data: {e}")
+            logger.error(f"{ticker}: Failed to extract IV rank: {e}")
             return {'iv_rank': 0, 'iv_percentile': 0, 'current_iv': 0}
 
-    def _get_options_chain(self, ticker: str, current_price: float, earnings_date: Optional[str] = None) -> Dict:
+    def _extract_liquidity_metrics(self, options_chain: list, current_price: float) -> Dict:
         """
-        Get options chain for expected move and liquidity metrics.
+        Extract liquidity metrics from already-fetched options chain.
 
         Args:
-            ticker: Stock symbol
+            options_chain: List of option contracts from Tradier
             current_price: Current stock price
-            earnings_date: Earnings date for weekly expiration selection
 
         Returns:
             Dict with expected_move_pct, options_volume, open_interest
         """
         try:
-            # Get nearest weekly expiration (pass earnings date for better selection)
-            expiration = self._get_nearest_weekly_expiration(ticker, earnings_date)
-
-            if not expiration:
-                logger.warning(f"{ticker}: No expiration found")
+            if not options_chain:
                 return {'expected_move_pct': 0, 'options_volume': 0, 'open_interest': 0}
-
-            # Get options chain for this expiration
-            url = f"{self.endpoint}/v1/markets/options/chains"
-            params = {
-                'symbol': ticker,
-                'expiration': expiration,
-                'greeks': 'true'
-            }
-
-            response = requests.get(url, headers=self.headers, params=params, timeout=15)
-            response.raise_for_status()
-
-            data = response.json()
-
-            if 'options' not in data or 'option' not in data['options']:
-                return {'expected_move_pct': 0, 'options_volume': 0, 'open_interest': 0}
-
-            options = data['options']['option']
 
             # Calculate expected move from ATM straddle
-            expected_move_pct = self._calculate_expected_move(options, current_price)
+            expected_move_pct = self._calculate_expected_move(options_chain, current_price)
 
             # Sum total volume and open interest
-            total_volume = sum(opt.get('volume', 0) for opt in options)
-            total_oi = sum(opt.get('open_interest', 0) for opt in options)
+            total_volume = sum(opt.get('volume', 0) for opt in options_chain)
+            total_oi = sum(opt.get('open_interest', 0) for opt in options_chain)
 
             return {
                 'expected_move_pct': expected_move_pct,
@@ -276,7 +262,7 @@ class TradierOptionsClient:
             }
 
         except Exception as e:
-            logger.error(f"{ticker}: Failed to get options chain: {e}")
+            logger.error(f"Failed to extract liquidity metrics: {e}")
             return {'expected_move_pct': 0, 'options_volume': 0, 'open_interest': 0}
 
     def _get_nearest_weekly_expiration(self, ticker: str, earnings_date: Optional[str] = None) -> Optional[str]:

@@ -276,16 +276,24 @@ class TickerFilter:
                 info = stock.info
                 logger.debug(f"{ticker}: Fetched fresh info from yfinance")
 
-            # OPTIMIZATION: Start with lightweight 5-day history for price/volume
-            # Only fetch expensive 1-2 year history if needed for IV rank or earnings
-            hist_light = stock.history(period='5d')
+            # OPTIMIZATION: Fetch 2y history once if we'll need it for earnings analysis
+            # If Tradier is available, we always need 2y history for yfinance supplement
+            # Otherwise, 5d is enough for current price/volume
+            if self.tradier_client and self.options_client:
+                # Fetch 2y once (will use for both current data AND earnings analysis)
+                hist = stock.history(period='2y')
+                logger.debug(f"{ticker}: Fetched 2y history (for current data + earnings analysis)")
+            else:
+                # Only need 5d for current price if not using earnings analysis
+                hist = stock.history(period='5d')
+                logger.debug(f"{ticker}: Fetched 5d history (for current data only)")
 
-            if hist_light.empty:
+            if hist.empty:
                 logger.warning(f"No historical data for {ticker}")
                 return None
 
             # Get current price
-            current_price = info.get('currentPrice') or info.get('regularMarketPrice') or hist_light['Close'].iloc[-1]
+            current_price = info.get('currentPrice') or info.get('regularMarketPrice') or hist['Close'].iloc[-1]
 
             data = {
                 'ticker': ticker,
@@ -293,7 +301,7 @@ class TickerFilter:
                 'market_cap': info.get('marketCap') or 0,
                 # NOTE: 'volume' and 'avg_volume' are STOCK volume (underlying shares traded)
                 # Options volume is in options_data['options_volume'] below
-                'volume': hist_light['Volume'].iloc[-1] if len(hist_light) > 0 else 0,
+                'volume': hist['Volume'].iloc[-1] if len(hist) > 0 else 0,
                 'avg_volume': info.get('averageVolume') or 0,
                 'price': current_price,
                 'iv': info.get('impliedVolatility') or 0,
@@ -318,10 +326,8 @@ class TickerFilter:
                         # 2. IV Rank based on RV (Tradier doesn't have 52-week IV history yet) - needs 1y data
                         if self.options_client:
                             try:
-                                # Fetch full 2-year history for earnings analysis (only if needed)
-                                hist = stock.history(period='2y')
-                                logger.debug(f"{ticker}: Fetched 2y history for earnings analysis")
-
+                                # OPTIMIZATION: Reuse already-fetched 2y history (fetched at line 284)
+                                # No need to fetch again - hist already contains 2y data
                                 yf_data = self.options_client.get_options_data_from_stock(
                                     stock, ticker, hist, current_price
                                 )
