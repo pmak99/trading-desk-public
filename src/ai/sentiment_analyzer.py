@@ -152,6 +152,19 @@ REDDIT SENTIMENT DATA (r/wallstreetbets, r/stocks, r/options):
 
 {reddit_summary}
 
+IMPORTANT: For unusual options activity, you MUST search recent data from these sources:
+1. Barchart unusual options activity
+2. CBOE published volume data
+3. Financial news about institutional positioning (Bloomberg, CNBC, Reuters)
+4. Options flow discussions on financial sites (past 3 days only)
+
+For EACH unusual activity finding, you MUST provide:
+- Specific data point (e.g., "15,000 contracts at $180 call strike")
+- Source name (e.g., "Barchart Unusual Activity", "CBOE Data")
+- Date observed (e.g., "November 8, 2025")
+
+If NO reliable sources found, set detected=false and summary="No unusual activity detected from verified sources."
+DO NOT speculate or infer unusual activity without citing a specific, named source with a date.
 
 Return your analysis as valid JSON with this EXACT structure:
 
@@ -163,7 +176,12 @@ Return your analysis as valid JSON with this EXACT structure:
   "hedge_fund_sentiment": "Analysis of hedge fund positioning and sentiment",
   "tailwinds": ["positive factor 1", "positive factor 2", "..."],
   "headwinds": ["negative factor 1", "negative factor 2", "..."],
-  "unusual_activity": "Any unusual options flow, dark pool activity, or notable positioning changes",
+  "unusual_activity": {{
+    "detected": true|false,
+    "sources": ["source 1", "source 2"],
+    "findings": ["finding 1 with date", "finding 2 with date"],
+    "summary": "Brief summary OR 'No unusual activity detected from verified sources'"
+  }},
   "guidance_history": "Recent earnings results, guidance beats/misses, and management commentary",
   "macro_sector": "Relevant macro trends and sector-specific impacts",
   "confidence": "low|medium|high"
