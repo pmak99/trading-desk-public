@@ -83,10 +83,16 @@ class SentimentAnalyzer:
         logger.info(f"Analyzing sentiment for {ticker}...")
 
         try:
-            # Get Reddit sentiment first
-            logger.info(f"{ticker}: Fetching Reddit sentiment...")
-            reddit_data = self.reddit_scraper.get_ticker_sentiment(ticker, limit=20)
-            logger.info(f"{ticker}: Found {reddit_data['posts_found']} Reddit posts")
+            # Get ENHANCED Reddit sentiment with AI content analysis (uses free Gemini)
+            logger.info(f"{ticker}: Fetching Reddit sentiment with AI content analysis...")
+            reddit_data = self.reddit_scraper.get_ticker_sentiment(
+                ticker,
+                limit=20,
+                analyze_content=True,
+                ai_client=self.ai_client
+            )
+            logger.info(f"{ticker}: Found {reddit_data['posts_found']} Reddit posts, "
+                       f"sentiment: {reddit_data.get('sentiment_score', 0):.2f}")
 
             # Construct prompt with Reddit data
             prompt = self._build_sentiment_prompt(ticker, earnings_date, reddit_data)

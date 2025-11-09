@@ -71,7 +71,9 @@ class IVHistoryTracker:
 
         conn.commit()
 
-    def record_iv(self, ticker: str, iv_value: float, date: Optional[str] = None):
+    def record_iv(self, ticker: str, iv_value: float,
+                  date: Optional[str] = None,
+                  timestamp: Optional[datetime] = None):
         """
         Record IV value for a ticker.
 
@@ -79,11 +81,18 @@ class IVHistoryTracker:
             ticker: Ticker symbol
             iv_value: IV percentage (e.g., 75.5 for 75.5%)
             date: Date string (YYYY-MM-DD), defaults to today
+            timestamp: Datetime object for backfilling, defaults to now
         """
         if iv_value <= 0:
             return  # Skip invalid values
 
-        if date is None:
+        # Handle both datetime objects and strings
+        if timestamp is not None:
+            if isinstance(timestamp, datetime):
+                date = timestamp.strftime('%Y-%m-%d')
+            else:
+                date = str(timestamp)
+        elif date is None:
             date = datetime.now().strftime('%Y-%m-%d')
 
         conn = self._get_connection()
