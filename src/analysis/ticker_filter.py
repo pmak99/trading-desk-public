@@ -291,6 +291,8 @@ class TickerFilter:
                 'ticker': ticker,
                 # Ensure numeric values, never None (prevents TypeError in logging/calculations)
                 'market_cap': info.get('marketCap') or 0,
+                # NOTE: 'volume' and 'avg_volume' are STOCK volume (underlying shares traded)
+                # Options volume is in options_data['options_volume'] below
                 'volume': hist_light['Volume'].iloc[-1] if len(hist_light) > 0 else 0,
                 'avg_volume': info.get('averageVolume') or 0,
                 'price': current_price,
@@ -648,7 +650,7 @@ if __name__ == "__main__":
             for i, ticker_data in enumerate(selected['pre_market'], 1):
                 logger.info(f"{i}. {ticker_data['ticker']:6s} - Score: {ticker_data['score']:5.1f}")
                 logger.info(f"   Market Cap: ${ticker_data['market_cap']/1e9:.1f}B")
-                logger.info(f"   Volume: {ticker_data['volume']:,} (Avg: {ticker_data['avg_volume']:,})")
+                logger.info(f"   Stock Volume: {ticker_data['volume']:,} (Avg: {ticker_data['avg_volume']:,})")
                 logger.info(f"   Price: ${ticker_data['price']:.2f}")
 
         if selected['after_hours']:
@@ -656,7 +658,7 @@ if __name__ == "__main__":
             for i, ticker_data in enumerate(selected['after_hours'], 1):
                 logger.info(f"{i}. {ticker_data['ticker']:6s} - Score: {ticker_data['score']:5.1f}")
                 logger.info(f"   Market Cap: ${ticker_data['market_cap']/1e9:.1f}B")
-                logger.info(f"   Volume: {ticker_data['volume']:,} (Avg: {ticker_data['avg_volume']:,})")
+                logger.info(f"   Stock Volume: {ticker_data['volume']:,} (Avg: {ticker_data['avg_volume']:,})")
                 logger.info(f"   Price: ${ticker_data['price']:.2f}")
 
         logger.info("")

@@ -202,13 +202,17 @@ class IVCrushEdgeScorer(TickerScorer):
 
 class LiquidityScorer(TickerScorer):
     """
-    Score based on options market liquidity.
+    Score based on OPTIONS market liquidity (not stock volume).
 
-    15% weight
+    30% weight in final score
+
     Components:
-    - Options volume (40%)
-    - Open interest (40%)
-    - Bid-ask spread (20%)
+    - Options volume (40%) - total daily volume of options contracts traded
+    - Open interest (40%) - total outstanding options contracts
+    - Bid-ask spread (20%) - tightness of options market
+
+    IMPORTANT: This uses OPTIONS metrics, NOT underlying stock volume.
+    Stock volume is stored separately in data['volume'] but NOT used for scoring.
     """
 
     def __init__(self, weight: float = None):
@@ -248,20 +252,23 @@ class LiquidityScorer(TickerScorer):
         super().__init__(weight)
 
     def score(self, data: Dict) -> float:
-        """Score based on liquidity metrics."""
+        """Score based on OPTIONS liquidity metrics (not stock volume)."""
         options_data = data.get('options_data', {})
         ticker = data.get('ticker', 'UNKNOWN')
 
-        volume = options_data.get('options_volume', 0)
-        oi = options_data.get('open_interest', 0)
+        # NOTE: Using OPTIONS volume and open interest, NOT stock volume
+        # options_volume = total daily volume of all options contracts
+        # open_interest = total number of outstanding options contracts
+        options_volume = options_data.get('options_volume', 0)
+        open_interest = options_data.get('open_interest', 0)
 
         # HARD FILTER: Must meet minimum liquidity requirements
-        if volume < self.min_volume or oi < self.min_oi:
-            logger.info(f"{ticker}: Liquidity too low (Vol: {volume}, OI: {oi}) - SKIPPING")
+        if options_volume < self.min_volume or open_interest < self.min_oi:
+            logger.info(f"{ticker}: Liquidity too low (Options Vol: {options_volume}, OI: {open_interest}) - SKIPPING")
             return 0.0
 
-        volume_score = self._score_options_volume(volume)
-        oi_score = self._score_open_interest(oi)
+        volume_score = self._score_options_volume(options_volume)
+        oi_score = self._score_open_interest(open_interest)
         spread_score = self._score_bid_ask_spread(
             options_data.get('bid_ask_spread_pct')
         )
