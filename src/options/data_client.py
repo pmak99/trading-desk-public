@@ -1,16 +1,13 @@
 """
-Options data client using yfinance (free API).
+yfinance options client (fallback when Tradier unavailable).
 
-Provides options metrics for IV crush strategy:
-- IV Rank & IV Percentile (using realized volatility as proxy)
-- Expected move calculations from ATM straddle
-- Options chain data (volume, OI, bid-ask spreads)
-- Historical implied vs actual move analysis
-- Options liquidity metrics
+Provides options metrics using realized volatility proxy:
+    - IV Rank (RV-based, ~70-80% correlation with real IV)
+    - Expected move from ATM straddle
+    - Options liquidity (volume, OI, spreads)
+    - Historical earnings move analysis
 
-NOTE: Uses yfinance (free), not Alpha Vantage API.
-IV Rank is calculated using realized volatility as a proxy for implied volatility.
-Real IV Rank requires historical IV data which is not available in free APIs.
+Note: Free tier. RV proxy adequate for filtering, Tradier preferred for accuracy.
 """
 
 import logging

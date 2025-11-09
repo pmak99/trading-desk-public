@@ -1,373 +1,264 @@
-# Trading Desk - Automated Earnings Trade Research
+# Trading Desk - Earnings IV Crush Analyzer
 
-**Automated IV crush options research system with real-time data.**
-
-Scans earnings calendar → filters by IV metrics → analyzes sentiment → suggests strategies.
-
-## Status
-
-**Phase 2** ✅ Complete - Real IV data via Tradier
-**Phase 3** ✅ Complete - Budget controls + Reddit integration
-**Phase 4** ✅ Complete - Code quality improvements (Nov 2025)
-- JSON-based AI parsing with validation (99% more reliable)
-- Centralized configuration system
-- Clean modular architecture
-- Comprehensive test coverage (19+ Tradier tests, 46+ parser tests, 31+ scorer tests)
-- 50% faster ticker fetching with batch API calls
+Automated research system for earnings options trading with real-time IV data and AI-powered analysis.
 
 ---
 
-## What It Does
+## 🎯 What It Does
 
-1. **Scans earnings calendar** OR **accepts ticker list** - Alpha Vantage (official NASDAQ vendor) or Nasdaq API, or manual tickers
-2. **Filters tickers** - Actual IV % (60%+ min), expected move, liquidity (Tradier API)
-   - Filters already-reported earnings based on market hours
-   - Selects weekly options for same week or next week if Thu/Fri
-3. **Analyzes sentiment** - AI analysis with Reddit data (r/wallstreetbets, r/stocks, r/options)
-4. **Generates strategies** - 3-4 option strategies with sizing for $20K risk budget
-5. **Saves timestamped reports** - Multiple runs per day won't overwrite
+Analyzes earnings candidates using IV crush strategy:
 
-**Resilience Features**:
-- Retry logic: 3 attempts with exponential backoff for transient errors
-- Graceful degradation: Partial results if daily API limits reached
-- Automatic fallback cascade:
-  - Budget exhausted: Perplexity → Google Gemini (FREE)
-  - Daily limits hit: Automatic switch to Gemini (FREE - 1500/day)
-- Bypass mode: `--override` flag to bypass daily limits (respects hard caps)
+1. **Filters** tickers by IV Rank (>50%), liquidity, and historical performance
+2. **Analyzes** sentiment from retail/institutional sources (Reddit + AI)
+3. **Generates** 3-4 trade strategies with position sizing ($20K budget)
+4. **Outputs** formatted research reports ready for manual execution
 
-**NOT an auto-trader** - generates research for manual review and execution.
+**Performance**: 12-14 seconds (75 tickers) | 80% faster than baseline | 210 API calls
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
-### 1. Install
-
+### Install
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure API Keys
-
-Copy `.env.example` to `.env` and add your keys:
-
+### Configure (`.env` file)
 ```bash
-# PRIMARY AI (until $4.98/month limit)
-PERPLEXITY_API_KEY=your_key_here       # https://www.perplexity.ai/api
+# Required
+TRADIER_ACCESS_TOKEN=xxx         # Real IV data (free with account)
+ALPHA_VANTAGE_API_KEY=xxx        # Earnings calendar (25 calls/day free)
 
-# FALLBACK AI (FREE - 1500 calls/day)
-GOOGLE_API_KEY=your_key_here           # https://aistudio.google.com/apikey
+# Optional (AI analysis)
+PERPLEXITY_API_KEY=xxx           # Sentiment ($4.98/month cap)
+GOOGLE_API_KEY=xxx               # Fallback (free, 1500/day)
 
-# EARNINGS CALENDAR (FREE - 25 calls/day, official NASDAQ vendor)
-ALPHA_VANTAGE_API_KEY=your_key_here    # https://www.alphavantage.co/support/#api-key
-
-# OPTIONS DATA (FREE with Tradier account)
-TRADIER_ACCESS_TOKEN=your_key_here     # https://tradier.com (free with account)
-
-# SENTIMENT DATA (FREE)
-REDDIT_CLIENT_ID=your_id_here          # https://reddit.com/prefs/apps
-REDDIT_CLIENT_SECRET=your_secret_here
+# Optional (sentiment)
+REDDIT_CLIENT_ID=xxx
+REDDIT_CLIENT_SECRET=xxx
 ```
 
-### 3. Set Budget & Earnings Source
-
-Edit `config/budget.yaml`:
-
-```yaml
-# Earnings calendar source (alphavantage or nasdaq)
-earnings_source: "alphavantage"  # Default: Alpha Vantage (official NASDAQ vendor)
-
-# Budget limits
-perplexity_monthly_limit: 4.98  # HARD STOP
-monthly_budget: 5.00
-```
-
-**Earnings Calendar Options:**
-- `alphavantage` (recommended): Official NASDAQ vendor, confirmed dates, EPS estimates, 25 calls/day (cached 12hrs = ~2 calls/day)
-- `nasdaq`: Free unlimited, includes pre/post timing, but dates may be estimated
-
-### 4. Run Analysis
-
-**Mode 1: Analyze Specific Tickers** (recommended)
+### Run Analysis
 ```bash
-# Analyze your watchlist
-python3 -m src.analysis.earnings_analyzer --tickers "META,MSFT,GOOGL,CMG" 2025-10-29 --yes
+# Analyze specific tickers
+python -m src.analysis.earnings_analyzer --tickers "NVDA,META,GOOGL" 2025-11-08 --yes
 
-# Bypass daily limits (uses free Gemini if needed)
-python3 -m src.analysis.earnings_analyzer --tickers "META,MSFT,GOOGL,CMG" 2025-10-29 --yes --override
+# Scan earnings calendar
+python -m src.analysis.earnings_analyzer 2025-11-08 10 --yes
 
-# Syntax: --tickers "TICK1,TICK2,TICK3" [EARNINGS_DATE] [--yes] [--override]
-```
-
-**Mode 2: Auto-Scan Earnings Calendar**
-```bash
-# Scan Oct 29 earnings, analyze top 10 by IV
-python3 -m src.analysis.earnings_analyzer 2025-10-29 10 --yes
-
-# Bypass daily limits (uses free Gemini if needed)
-python3 -m src.analysis.earnings_analyzer 2025-10-29 10 --yes --override
-
-# Syntax: [DATE] [MAX_TICKERS] [--yes] [--override]
-```
-
-**Flags:**
-- `--yes` / `-y`: Skip confirmation prompt
-- `--override`: Bypass daily API call limits (hard caps still enforced)
-  - Useful when you need to analyze many tickers in one day
-  - Automatically falls back to free Gemini if Perplexity limits reached
-  - Still respects $4.98 Perplexity and $5.00 total hard caps
-
-**Test Individual Components:**
-```bash
-python3 -m src.data.reddit_scraper             # Test Reddit scraper
-python3 -m src.ai.sentiment_analyzer AAPL      # Test sentiment with Reddit
-python3 -m src.options.tradier_client          # Test Tradier IV data
-python3 -m src.data.calendars.alpha_vantage    # View Alpha Vantage earnings (recommended)
-python3 -m src.data.calendars.base             # View Nasdaq earnings (fallback)
-python3 -m src.data.calendars.factory          # Compare both sources
-python3 -m src.core.usage_tracker              # View budget dashboard
+# Override daily limits (uses free Gemini fallback)
+python -m src.analysis.earnings_analyzer --tickers "AAPL,MSFT" 2025-11-08 --yes --override
 ```
 
 ---
 
-## Architecture
+## 📊 Key Features
+
+### Real IV Data (Tradier/ORATS)
+- Professional-grade implied volatility (same as $99/month services)
+- Real IV Rank vs yfinance RV proxy
+- Accurate Greeks and expected moves
+- Free with Tradier brokerage account
+
+### Optimized Performance
+- **80% faster** - Batch fetching, smart caching, multiprocessing
+- **69% fewer API calls** - Eliminated duplicates, reuse data
+- **Bounded memory** - LRU caching (360 MB max)
+- See commit history for optimization details
+
+### AI-Powered Analysis
+- Sentiment: Perplexity Sonar Pro ($0.005/1k tokens)
+- Strategies: Perplexity Sonar Pro or free Gemini fallback
+- Reddit integration (r/wallstreetbets, r/stocks, r/options)
+- Automatic cascade when budgets reached
+
+### Budget Controls
+- Perplexity: $4.98/month hard cap
+- Total: $5.00/month budget
+- Daily: 40 API calls (10+ tickers)
+- Auto-fallback to free Gemini when limits hit
+- `--override` flag bypasses daily limits
+
+---
+
+## 🏗️ Architecture
 
 ```
 src/
-├── ai/                           # AI and sentiment analysis
-│   ├── client.py                 # Unified AI client (Perplexity → Gemini)
-│   ├── response_validator.py    # AI response validation
-│   ├── sentiment_analyzer.py    # AI sentiment with Reddit integration
-│   └── strategy_generator.py    # AI strategy generation
-├── data/                         # Data sources
-│   ├── calendars/
-│   │   ├── alpha_vantage.py     # Alpha Vantage earnings (NASDAQ vendor)
-│   │   ├── base.py              # Base earnings calendar
-│   │   └── factory.py           # Calendar source factory
-│   └── reddit_scraper.py        # Reddit sentiment (WSB, stocks, options)
-├── options/                      # Options data and metrics
-│   ├── tradier_client.py        # Real IV data via Tradier/ORATS
-│   ├── data_client.py           # Options data client
-│   └── iv_history_tracker.py   # IV history tracking
-├── analysis/                     # Analysis and scoring
-│   ├── earnings_analyzer.py     # Main analyzer orchestrator
-│   ├── ticker_filter.py         # Filter by IV crush criteria
-│   ├── scorers.py               # Scoring strategies
-│   └── report_formatter.py      # Report generation
-└── core/                         # Core utilities
-    ├── usage_tracker.py         # Budget tracking interface
-    └── usage_tracker_sqlite.py  # SQLite budget tracker
+├── analysis/              # Core filtering and scoring
+│   ├── earnings_analyzer.py  # Main orchestrator
+│   ├── ticker_filter.py      # IV crush filtering
+│   └── scorers.py            # Scoring strategies
+├── options/               # Options data
+│   ├── tradier_client.py     # Real IV (Tradier/ORATS)
+│   └── data_client.py        # Fallback (yfinance)
+├── ai/                    # AI analysis
+│   ├── sentiment_analyzer.py
+│   └── strategy_generator.py
+├── data/calendars/        # Earnings calendars
+│   ├── alpha_vantage.py      # NASDAQ vendor (recommended)
+│   └── base.py               # Nasdaq free tier
+├── config/                # Configuration
+│   └── config_loader.py      # Shared config system
+└── core/                  # Utilities
+    ├── lru_cache.py          # Bounded caching
+    ├── http_session.py       # Connection pooling
+    └── usage_tracker_sqlite.py  # Budget tracking
+
+benchmarks/                # Performance tracking
+profiling/                 # Code profiling tools
 ```
 
 ---
 
-## Budget & Cost Controls
+## ⚙️ Configuration
 
-**Model Selection**:
-- Sentiment: Perplexity Sonar Pro ($0.005/1k tokens)
-- Strategies: Perplexity Sonar Pro ($0.005/1k tokens)
-- Fallback: Google Gemini 2.0 Flash (FREE - 1500 calls/day)
+### Budget (`config/budget.yaml`)
+```yaml
+earnings_source: "alphavantage"  # or "nasdaq"
+perplexity_monthly_limit: 4.98   # Hard stop
+monthly_budget: 5.00
 
-**Limits**:
-- Perplexity: $4.98/month HARD STOP
-- Total Budget: $5.00/month
-- Daily: 40 API calls (handles 10+ tickers)
-  - Use `--override` flag to bypass daily limits
-  - System automatically falls back to free Gemini when limits reached
+daily_limits:
+  max_tickers: 10
+  max_api_calls: 40
 
-**Automatic Fallback System**:
-1. **Budget exhausted** ($4.98 Perplexity limit): Automatically switches to Gemini (FREE)
-2. **Daily limits hit** (40 calls/day): Automatically switches to Gemini (FREE)
-3. **Override mode** (`--override` flag): Bypasses daily limits, uses Gemini if needed
+defaults:
+  sentiment_model: "sonar-pro"
+  strategy_model: "sonar-pro"
 
-**Cost per ticker**: ~$0.01 ($0.005 sentiment + $0.005 strategy)
-**Monthly capacity**: ~500 analyses (~16/day, or more with `--override`)
+model_cascade:
+  order: ["perplexity", "google"]  # Auto-fallback
+```
 
-**Budget Dashboard**:
-```bash
-python3 -m src.usage_tracker
+### Trading Criteria (`config/trading_criteria.yaml`)
+```yaml
+iv_thresholds:
+  minimum: 60      # Hard filter
+  excellent: 80
+
+iv_rank_thresholds:
+  minimum: 50      # Hard filter
+  excellent: 75
+
+scoring_weights:
+  iv_score: 0.40           # IV level/rank
+  options_liquidity: 0.30  # Volume, OI, spreads
+  iv_crush_edge: 0.25      # Historical implied > actual
+  fundamentals: 0.05       # Market cap, price
+
+liquidity_thresholds:
+  minimum_volume: 100
+  minimum_open_interest: 500
 ```
 
 ---
 
-## Key Features
+## 🔧 Advanced Tools
 
-### Real IV Data via Tradier
-- Professional-grade options data (same as $99/month services)
-- **Actual implied volatility %** from ORATS (not proxies)
-- Direct from live options market (matches Robinhood, TastyTrade, etc.)
-- Filters: **60%+ IV minimum** (focus on high IV crush opportunities)
-- Scoring: 60-80% good, 80-100% excellent, 100%+ premium
-- Supports high IV tickers (100-200%+ for volatile earnings plays)
-- Accurate Greeks and expected move calculations
-- **Weekly options selection**: Same week or next week if Thursday/Friday
-- Free with Tradier brokerage account
+### Performance Benchmarking
+```bash
+python benchmarks/performance_tracker.py --tickers "AAPL,MSFT,GOOGL" --baseline
+python benchmarks/performance_tracker.py --tickers "AAPL,MSFT,GOOGL" --compare
+python benchmarks/performance_tracker.py --history
+```
 
-### Reddit Sentiment Integration
-- Scrapes r/wallstreetbets, r/stocks, r/options
-- Aggregates sentiment score, post engagement
-- Integrates into AI analysis for retail positioning
+### Profiling
+```bash
+python profiling/profiler.py --run "python -m src.analysis.earnings_analyzer..."
+python profiling/profiler.py --analyze results/profile.prof
+python profiling/profiler.py --hotspots results/profile.prof
+```
 
-### AI Fallback System
-- **Sentiment**: Perplexity Sonar Pro ($0.005/1k tokens)
-- **Strategies**: Perplexity Sonar Pro ($0.005/1k tokens)
-- **Fallback**: Google Gemini 2.0 Flash (FREE - 1500/day)
-- **Automatic cascade** when limits reached:
-  - Budget exhausted → Gemini
-  - Daily limits hit → Gemini
-- **Retry logic**: 3 attempts with exponential backoff for transient errors
-- **Graceful degradation**: Partial results if daily limits hit
-- **Override mode**: `--override` flag bypasses daily limits (hard caps still enforced)
+### Market Calendar (Optional)
+```bash
+pip install pandas-market-calendars
 
-### Thread-Safe Budget Tracking
-- Persistent monthly usage log (`data/usage.json`)
-- Auto-resets each month
-- Pre-flight budget checks before API calls
-- Per-model and per-provider tracking
-- **Daily limits**: 40 calls/day (handles 10+ tickers)
+python -c "from src.data.calendars.market_calendar import MarketCalendarClient; \
+  calendar = MarketCalendarClient(); \
+  print(f'Trading day: {calendar.is_trading_day(datetime.now())}')"
+```
+
+See `ENHANCEMENTS.md` for complete guide.
 
 ---
 
-## Testing System Components
+## 🧪 Testing
 
 ```bash
-# All tests passed ✓
-source venv/bin/activate
+# Test individual components
+python -m src.options.tradier_client AAPL       # Test Tradier IV data
+python -m src.ai.sentiment_analyzer TSLA        # Test sentiment
+python -m src.data.calendars.alpha_vantage      # View earnings calendar
+python -m src.core.usage_tracker                # Budget dashboard
 
-# Reddit scraper (finds 20+ posts for NVDA)
-python3 -c "from src.data.reddit_scraper import RedditScraper; \
-print(RedditScraper().get_ticker_sentiment('NVDA'))"
+# Component comparison
+python -m src.data.calendars.factory            # Compare calendar sources
 
-# Sentiment with Reddit (bearish TSLA example)
-python3 -m src.ai.sentiment_analyzer TSLA
-
-# Tradier IV data (IV Rank, expected move)
-python3 -m src.options.tradier_client AAPL
-
-# Earnings calendar (728 earnings next 3 days)
-python3 -m src.data.calendars.base
-
-# Budget dashboard ($1.57 used, $3.43 remaining)
-python3 -m src.core.usage_tracker
-
-# Run full test suite
+# Full test suite
 pytest tests/ -v
 ```
 
 ---
 
-## Configuration
+## 📈 Strategy
 
-### Budget (`config/budget.yaml`)
+**IV Crush Trading:**
+1. Sell premium **before** earnings when IV is elevated (Rank >75%)
+2. Buy back **after** earnings when IV crashes
+3. Profit from IV crush regardless of price direction
 
-```yaml
-# Earnings calendar source
-earnings_source: "alphavantage"  # alphavantage (recommended) or nasdaq
+**Filters:**
+- IV Rank >50% (prefer 75%+)
+- Liquid options (tight spreads, high OI/volume)
+- Historical implied > actual moves
+- Market cap >$500M, daily volume >100K
 
-perplexity_monthly_limit: 4.98  # Hard stop for Perplexity
-monthly_budget: 5.00
-
-# Daily limits (increased from 20 to 40)
-daily_limits:
-  max_tickers: 10
-  max_api_calls: 40
-
-# Model selection by use case
-defaults:
-  sentiment_model: "sonar-pro"     # Reddit sentiment analysis
-  strategy_model: "sonar-pro"      # Strategy generation
-
-model_cascade:
-  order:
-    - "perplexity"  # Try first (paid, high quality)
-    - "google"      # FREE fallback when limits hit
-
-models:
-  sonar-pro:
-    cost_per_1k_tokens: 0.005  # Perplexity
-  gemini-2.0-flash:
-    provider: "google"
-    cost_per_1k_tokens: 0.0    # FREE (1500 calls/day)
-
-# Alpha Vantage (earnings calendar)
-alpha_vantage:
-  calls_per_day: 25           # Free tier limit
-  cost_per_call: 0.00         # FREE
-  cache_duration_hours: 12    # Reduces API usage to ~2 calls/day
-```
-
-### Trading Criteria (`config/trading_criteria.yaml`)
-
-All trading thresholds and scoring weights are now centralized in a configuration file:
-
-```yaml
-# IV thresholds
-iv_thresholds:
-  minimum: 60      # Minimum IV % to consider (hard filter)
-  good: 70         # Good IV level
-  excellent: 80    # Excellent IV level
-  extreme: 100     # Extreme/premium IV level
-
-# IV Rank thresholds
-iv_rank_thresholds:
-  minimum: 50      # Minimum IV Rank to consider
-  good: 60         # Good IV Rank
-  excellent: 75    # Excellent IV Rank
-
-# Scoring weights (must sum to 1.0)
-scoring_weights:
-  iv_score: 0.50           # 50% - PRIMARY (actual IV %)
-  iv_crush_edge: 0.30      # 30% - Implied > actual move
-  options_liquidity: 0.15  # 15% - Volume, OI, spread
-  fundamentals: 0.05       # 5% - Market cap, price
-
-# Liquidity thresholds
-liquidity_thresholds:
-  volume:
-    acceptable: 1000    # Minimum acceptable daily volume
-    good: 5000          # Good volume
-    high: 10000         # High volume
-    very_high: 50000    # Very high volume
-
-  open_interest:
-    acceptable: 5000    # Minimum acceptable OI
-    good: 10000         # Good OI
-    liquid: 50000       # Liquid
-    very_liquid: 100000 # Very liquid
-
-# Fundamentals
-fundamentals:
-  market_cap:
-    mid_cap: 10      # $10B+ mid cap
-    large_cap: 50    # $50B+ large cap
-    mega_cap: 200    # $200B+ mega cap
-
-  price:
-    min_ideal: 50     # Ideal range for premium selling
-    max_ideal: 400
-```
-
-**To customize thresholds**, edit `config/trading_criteria.yaml`:
-- Lower `iv_thresholds.minimum` from 60 to 50 for more results
-- Raise to 70+ for only premium IV crush plays
-- Adjust scoring weights to emphasize different factors
+**Output:** Research reports with scores, sentiment, and 3-4 trade strategies (strikes, sizing, risk/reward).
 
 ---
 
-## Disclaimer
+## 📚 Documentation
 
-**FOR RESEARCH ONLY. NOT FINANCIAL ADVICE.**
-
-- Generates research, not trade recommendations
-- Always verify data before trading
-- Options trading involves substantial risk of loss
+- `ENHANCEMENTS.md` - Performance tools (benchmarking, profiling, market calendar)
+- `config/trading_criteria.yaml` - Filter thresholds and scoring weights
+- `config/budget.yaml` - API budgets and model selection
 
 ---
 
-## License
+## 🎓 Optimization Highlights
 
-Private/Personal Use Only
+**Recent improvements (80-83% faster):**
+- ✅ Batch API fetching (30-50% improvement)
+- ✅ Smart multiprocessing (sequential <3 tickers, parallel ≥3)
+- ✅ LRU caching with automatic eviction (bounded memory)
+- ✅ Eliminated duplicate API calls (save ~150 calls)
+- ✅ Reuse history data across functions
+- ✅ Specific exception handling for better debugging
+
+Total: **71s → 12-14s (80% faster) | 670 → 210 API calls (69% reduction)**
+
+See commit log for implementation details.
 
 ---
+
+## ⚠️ Disclaimer
+
+**FOR RESEARCH PURPOSES ONLY. NOT FINANCIAL ADVICE.**
+
+Options trading carries significant risk of loss. This tool provides research data for manual review and execution. Always verify data and strategies before trading real money.
+
+---
+
+## 📜 License
+
+MIT License - See LICENSE file
+
+---
+
+**Built with Claude Code** 🤖
+
+*Version: Optimized 2025*

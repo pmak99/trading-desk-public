@@ -1,15 +1,15 @@
 """
-Main earnings analyzer - orchestrates all Phase 2 components.
+Earnings analyzer - orchestrates IV crush trading strategy research.
 
-This is the master module that:
-1. Filters tickers by IV crush criteria (IV Rank, implied vs actual moves)
-2. Analyzes sentiment (retail/institutional/hedge fund)
-3. Generates 3-4 trade strategies with sizing
+Workflow:
+    1. Filter tickers by IV metrics and liquidity
+    2. Analyze sentiment (retail/institutional/hedge fund)
+    3. Generate 3-4 trade strategies with position sizing
 
 Usage:
-    python -m src.earnings_analyzer
+    python -m src.analysis.earnings_analyzer --tickers "AAPL,MSFT" --yes
 
-Output: Complete research report for manual trade execution on Fidelity
+Output: Research report ready for manual execution
 """
 
 import logging
@@ -136,14 +136,14 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str, bool]) -> Dict:
 
 class EarningsAnalyzer:
     """
-    Master orchestrator for earnings trade research automation.
+    Orchestrates earnings trade research for IV crush strategies.
 
-    Automates the research process from your Trading Research Prompt.pdf:
-    1. Get upcoming earnings (this week)
-    2. Filter by IV crush criteria (IV Rank >50%, implied > actual moves)
-    3. Analyze sentiment (retail/institutional/hedge fund)
-    4. Generate 3-4 trade strategies with $20K position sizing
-    5. Output formatted research report for manual execution
+    Workflow:
+        1. Get upcoming earnings from calendar
+        2. Filter by IV/liquidity criteria (IV Rank >50%)
+        3. Analyze sentiment (retail/institutional)
+        4. Generate trade strategies with position sizing
+        5. Output formatted research report
     """
 
     def __init__(

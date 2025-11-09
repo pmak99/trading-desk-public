@@ -1,16 +1,12 @@
 """
-Tradier API client for real IV Rank data via ORATS.
+Tradier API client for real IV data (ORATS integration).
 
-Tradier provides professional-grade options data including:
-- Real IV Rank from ORATS (same data $99/month services use)
-- IV Percentile
-- Accurate Greeks
-- Options chains with bid/ask spreads
+Provides professional-grade options data:
+    - Real IV Rank (vs yfinance RV proxy)
+    - IV Percentile and Greeks
+    - Options chains with liquidity metrics
 
-This replaces the RV proxy in OptionsDataClient with actual implied volatility data.
-
-Free with Tradier brokerage account.
-API Docs: https://documentation.tradier.com/brokerage-api
+Free with Tradier account. API: https://documentation.tradier.com/
 """
 
 import os

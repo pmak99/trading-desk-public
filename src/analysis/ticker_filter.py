@@ -1,6 +1,8 @@
 """
-Ticker filtering algorithm to select best earnings candidates.
-Selects top N tickers by score based on IV metrics and liquidity.
+Ticker filtering and scoring for IV crush earnings strategies.
+
+Filters tickers by IV metrics, liquidity, and historical performance.
+Uses LRU caching and batch fetching for optimal performance.
 """
 
 import yfinance as yf
@@ -29,70 +31,56 @@ class TickerFilter:
 
     def __init__(self, cache_ttl_minutes: int = 15):
         """
-        Initialize ticker filter.
+        Initialize ticker filter for IV crush strategies.
 
-        Optimized for POST-EARNINGS IV CRUSH STRATEGY:
-        - Sell premium before earnings (high IV Rank 75%+)
-        - Buy it back cheaper after earnings (IV crush)
-        - Based on criteria from Trading Research Prompt.pdf
+        Strategy: Sell premium before earnings when IV is high, buy back after IV crush.
 
-        KEY FILTERS:
-        - IV Rank > 50% (minimum), prefer 75%+ for max edge
-        - Historical implied move > actual move (consistent IV overpricing)
-        - Liquid options markets (tight spreads, high OI/volume)
+        Filters:
+            - IV Rank >50% (prefer 75%+)
+            - Liquid options (tight spreads, high OI/volume)
+            - Historical implied > actual moves
 
         Args:
             cache_ttl_minutes: Cache TTL in minutes (default: 15)
         """
         self.weights = {
-            'iv_score': 0.40,         # 40% - PRIMARY: IV 60%+ OR IV Rank 50%+ required, 80%+ ideal
-            'options_liquidity': 0.30, # 30% - CRITICAL: Volume, OI, bid-ask spreads (tighter spreads!)
-            'iv_crush_edge': 0.25,    # 25% - Historical implied > actual move
-            'fundamentals': 0.05      # 5% - Market cap, price for premium quality
+            'iv_score': 0.40,          # IV level and rank
+            'options_liquidity': 0.30,  # Volume, OI, spreads
+            'iv_crush_edge': 0.25,     # Historical IV > actual
+            'fundamentals': 0.05       # Market cap, price
         }
 
-        # IV Rank thresholds from your criteria
-        self.IV_RANK_MIN = 50      # Skip anything below this
-        self.IV_RANK_GOOD = 60     # Standard allocation
-        self.IV_RANK_EXCELLENT = 75 # Larger allocation, prefer spreads
+        self.IV_RANK_MIN = 50
+        self.IV_RANK_GOOD = 60
+        self.IV_RANK_EXCELLENT = 75
 
-        # Cache for ticker data (prevents redundant API calls)
-        # LRU cache with 500-ticker limit to prevent memory leaks (~360 MB max)
+        # LRU caches (bounded memory, automatic eviction)
         self._ticker_cache = LRUCache(max_size=500, ttl_minutes=cache_ttl_minutes)
-        # Cache for raw yfinance info dicts (shared between pre_filter and get_ticker_data)
         self._info_cache = LRUCache(max_size=1000, ttl_minutes=cache_ttl_minutes)
         self._cache_ttl = timedelta(minutes=cache_ttl_minutes)
 
-        # Initialize composite scorer (Strategy pattern - refactored from 172-line god function)
-        # Don't override min_iv - let it use correct config values (60% for IV, 50% for IV Rank)
         self.scorer = CompositeScorer()
 
-        # Initialize Tradier client (preferred - real IV data)
+        # Initialize Tradier (real IV) with fallback to yfinance (RV proxy)
         self.tradier_client = None
         try:
             self.tradier_client = TradierOptionsClient()
             if self.tradier_client.is_available():
                 logger.info("Using Tradier API for real IV data")
             else:
-                logger.info("Tradier client initialized but not available (missing API key)")
                 self.tradier_client = None
         except (ValueError, KeyError, OSError) as e:
-            # Expected errors: missing config, env vars, file access
             logger.info(f"Tradier client not configured: {e}")
         except Exception as e:
-            # Unexpected initialization errors
-            logger.warning(f"Unexpected error initializing Tradier client: {e}", exc_info=True)
+            logger.warning(f"Unexpected error initializing Tradier: {e}", exc_info=True)
 
-        # Initialize fallback options client (yfinance RV proxy)
         self.options_client = None
         try:
             self.options_client = OptionsDataClient()
-            logger.debug("Options data client (yfinance fallback) initialized")
+            logger.debug("yfinance fallback initialized")
         except (ValueError, KeyError) as e:
-            # Expected configuration errors
             logger.info(f"Options client not configured: {e}")
         except Exception as e:
-            # Unexpected initialization errors
             logger.warning(f"Unexpected error initializing options client: {e}", exc_info=True)
 
     def pre_filter_tickers(
@@ -249,7 +237,6 @@ class TickerFilter:
         Returns:
             Dict with market data and options_data or None if error
         """
-        # Check cache first (LRU cache handles TTL internally)
         if use_cache:
             cached_data = self._ticker_cache.get(ticker)
             if cached_data is not None:
@@ -257,30 +244,23 @@ class TickerFilter:
                 return cached_data
 
         try:
-            # Fetch yfinance data ONCE
             stock = yf.Ticker(ticker)
 
-            # CRITICAL OPTIMIZATION: Check if we already have info from pre_filter
-            # This avoids duplicate API calls (saves ~75 calls per run)
-            # LRU cache handles TTL internally
+            # Reuse cached info from pre_filter to avoid duplicate API calls
             info = self._info_cache.get(ticker)
             if info is not None:
-                logger.debug(f"{ticker}: Reusing info from pre-filter cache")
+                logger.debug(f"{ticker}: Reusing cached info")
             else:
                 info = stock.info
-                logger.debug(f"{ticker}: Fetched fresh info from yfinance")
+                logger.debug(f"{ticker}: Fetched fresh info")
 
-            # OPTIMIZATION: Fetch 2y history once if we'll need it for earnings analysis
-            # If Tradier is available, we always need 2y history for yfinance supplement
-            # Otherwise, 5d is enough for current price/volume
+            # Fetch 2y history if needed for earnings analysis, otherwise 5d
             if self.tradier_client and self.options_client:
-                # Fetch 2y once (will use for both current data AND earnings analysis)
                 hist = stock.history(period='2y')
-                logger.debug(f"{ticker}: Fetched 2y history (for current data + earnings analysis)")
+                logger.debug(f"{ticker}: Fetched 2y history")
             else:
-                # Only need 5d for current price if not using earnings analysis
                 hist = stock.history(period='5d')
-                logger.debug(f"{ticker}: Fetched 5d history (for current data only)")
+                logger.debug(f"{ticker}: Fetched 5d history")
 
             if hist.empty:
                 logger.warning(f"No historical data for {ticker}")
@@ -291,11 +271,8 @@ class TickerFilter:
 
             data = {
                 'ticker': ticker,
-                # Ensure numeric values, never None (prevents TypeError in logging/calculations)
                 'market_cap': info.get('marketCap') or 0,
-                # NOTE: 'volume' and 'avg_volume' are STOCK volume (underlying shares traded)
-                # Options volume is in options_data['options_volume'] below
-                'volume': hist['Volume'].iloc[-1] if len(hist) > 0 else 0,
+                'volume': hist['Volume'].iloc[-1] if len(hist) > 0 else 0,  # Stock volume
                 'avg_volume': info.get('averageVolume') or 0,
                 'price': current_price,
                 'iv': info.get('impliedVolatility') or 0,
@@ -303,68 +280,55 @@ class TickerFilter:
                 'beta': info.get('beta') or 1.0
             }
 
-            # Get options data - try Tradier first (real IV), fall back to yfinance (RV proxy)
             options_data = {}
 
-            # Try Tradier first (preferred - real implied volatility)
+            # Try Tradier first (real IV), fallback to yfinance (RV proxy)
             if self.tradier_client:
                 try:
-                    logger.debug(f"{ticker}: Fetching options data from Tradier (real IV)")
+                    logger.debug(f"{ticker}: Fetching from Tradier")
                     tradier_data = self.tradier_client.get_options_data(ticker, current_price)
 
                     if tradier_data:
                         options_data = tradier_data
 
-                        # Get supplemental data from yfinance:
-                        # 1. Historical earnings moves (not in Tradier) - needs 2y data
-                        # 2. IV Rank based on RV (Tradier doesn't have 52-week IV history yet) - needs 1y data
+                        # Supplement with yfinance historical earnings data
                         if self.options_client:
                             try:
-                                # OPTIMIZATION: Reuse already-fetched 2y history (fetched at line 284)
-                                # No need to fetch again - hist already contains 2y data
                                 yf_data = self.options_client.get_options_data_from_stock(
                                     stock, ticker, hist, current_price
                                 )
 
-                                # Extract earnings-related fields
-                                # IMPORTANT: Use None as default, not 0, to distinguish "no data" from "0% move"
                                 options_data['avg_actual_move_pct'] = yf_data.get('avg_actual_move_pct')
                                 options_data['last_earnings_move'] = yf_data.get('last_earnings_move')
                                 options_data['earnings_beat_rate'] = yf_data.get('earnings_beat_rate')
 
-                                # Use yfinance IV Rank (RV-based) if Tradier doesn't have it
-                                # Note: yfinance RV Rank is ~70-80% correlated with real IV Rank
+                                # Use yfinance IV Rank if Tradier doesn't provide it
                                 if options_data.get('iv_rank', 0) == 0 and yf_data.get('iv_rank', 0) > 0:
                                     options_data['iv_rank'] = yf_data['iv_rank']
                                     options_data['iv_rank_source'] = 'yfinance_rv_proxy'
-                                    logger.debug(f"{ticker}: Using yfinance RV Rank ({options_data['iv_rank']}%) as proxy")
+                                    logger.debug(f"{ticker}: Using yfinance RV Rank proxy")
 
                             except Exception as e:
-                                logger.warning(f"{ticker}: Could not get yfinance supplement: {e}")
+                                logger.warning(f"{ticker}: yfinance supplement failed: {e}")
 
-                        # Calculate IV crush ratio
                         self._calculate_iv_crush_ratio(options_data)
-
-                        # Mark as using real IV
                         options_data['data_source'] = 'tradier'
-                        logger.debug(f"{ticker}: Using Tradier data (real IV: {options_data.get('current_iv')}%)")
+                        logger.debug(f"{ticker}: Using Tradier (IV: {options_data.get('current_iv')}%)")
 
                 except Exception as e:
-                    logger.warning(f"{ticker}: Tradier failed, falling back to yfinance: {e}")
+                    logger.warning(f"{ticker}: Tradier failed: {e}")
 
-            # Fall back to OptionsDataClient (yfinance RV proxy) if Tradier didn't work
+            # Fallback to yfinance if Tradier didn't work
             if not options_data and self.options_client:
                 try:
-                    logger.debug(f"{ticker}: Using yfinance fallback (RV proxy)")
+                    logger.debug(f"{ticker}: Using yfinance fallback")
 
-                    # OPTIMIZATION: Reuse already-fetched history if we have enough data
-                    # Need at least 1 year (252 trading days) for RV-based IV rank calculation
-                    # If we already fetched 2y history above (line 284), reuse it!
+                    # Reuse existing history if sufficient (252+ days for IV rank)
                     if hist.empty or len(hist) < 252:
                         hist = stock.history(period='1y')
-                        logger.debug(f"{ticker}: Fetched 1y history for RV-based IV rank")
+                        logger.debug(f"{ticker}: Fetched 1y history")
                     else:
-                        logger.debug(f"{ticker}: Reusing existing history ({len(hist)} days) for RV-based IV rank")
+                        logger.debug(f"{ticker}: Reusing history ({len(hist)} days)")
 
                     options_data = self.options_client.get_options_data_from_stock(
                         stock, ticker, hist, current_price
