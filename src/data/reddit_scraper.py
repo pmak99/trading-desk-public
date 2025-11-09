@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import logging
 from dotenv import load_dotenv
+from src.core.lru_cache import LRUCache
 
 # Load environment variables
 load_dotenv()
@@ -28,6 +29,10 @@ class RedditScraper:
             client_secret=os.getenv('REDDIT_CLIENT_SECRET'),
             user_agent='earnings-bot/1.0'
         )
+
+        # OPTIMIZED: Cache Reddit results (60-min TTL, instant repeat tickers)
+        # Prevents duplicate scraping within same hour
+        self._cache = LRUCache(max_size=100, ttl_minutes=60)
 
     def _search_subreddit(
         self,
@@ -97,6 +102,14 @@ class RedditScraper:
         """
         subreddits = subreddits or ['wallstreetbets', 'stocks', 'options']
 
+        # OPTIMIZED: Check cache first (60-min TTL)
+        # Build cache key that includes parameters
+        cache_key = f"reddit_{ticker}_{'-'.join(sorted(subreddits))}_{limit}_{analyze_content}"
+        cached_result = self._cache.get(cache_key)
+        if cached_result:
+            logger.debug(f"{ticker}: Using cached Reddit sentiment (age < 60 min)")
+            return cached_result
+
         # Parallel search across subreddits (3x faster than sequential)
         posts = []
         with ThreadPoolExecutor(max_workers=len(subreddits)) as executor:
@@ -121,13 +134,16 @@ class RedditScraper:
 
         # Analyze sentiment (simple scoring)
         if not posts:
-            return {
+            result = {
                 'ticker': ticker,
                 'posts_found': 0,
                 'sentiment_score': 0.0,
                 'avg_score': 0,
                 'total_comments': 0
             }
+            # Cache empty result too (avoid repeated scraping)
+            self._cache.set(cache_key, result)
+            return result
 
         total_score = sum(p['score'] for p in posts)
         total_comments = sum(p['num_comments'] for p in posts)
@@ -154,6 +170,9 @@ class RedditScraper:
                 logger.info(f"{ticker}: Enhanced sentiment with AI content analysis")
             except Exception as e:
                 logger.warning(f"{ticker}: AI content analysis failed, using score-based: {e}")
+
+        # OPTIMIZED: Cache result for 60 minutes
+        self._cache.set(cache_key, result)
 
         return result
 

@@ -28,6 +28,7 @@ from src.analysis.ticker_filter import TickerFilter
 from src.analysis.report_formatter import ReportFormatter
 from src.ai.sentiment_analyzer import SentimentAnalyzer
 from src.ai.strategy_generator import StrategyGenerator
+from src.core.timezone_utils import get_eastern_now, get_market_date
 from src.core.startup_validator import StartupValidator
 from typing import Optional
 
@@ -213,12 +214,15 @@ class EarningsAnalyzer:
                 # Validate format YYYY-MM-DD
                 parsed_date = datetime.strptime(earnings_date, '%Y-%m-%d')
 
+                # FIXED: Use Eastern timezone for market date comparison
+                now_et = get_eastern_now()
+
                 # Warn if date is in the past
-                if parsed_date.date() < datetime.now().date():
+                if parsed_date.date() < now_et.date():
                     logger.warning(f"Earnings date {earnings_date} is in the past")
 
                 # Warn if date is too far in future (>90 days)
-                days_out = (parsed_date - datetime.now()).days
+                days_out = (parsed_date - now_et).days
                 if days_out > 90:
                     logger.warning(f"Earnings date {earnings_date} is {days_out} days out - options may not exist")
 
@@ -228,8 +232,8 @@ class EarningsAnalyzer:
                 logger.error(f"Invalid earnings date format: {earnings_date}. Expected YYYY-MM-DD")
                 raise ValueError(f"Invalid earnings date format: {earnings_date}. Expected YYYY-MM-DD") from e
         else:
-            # Default to next trading day
-            default_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            # FIXED: Default to next trading day in Eastern time
+            default_date = (get_eastern_now() + timedelta(days=1)).strftime('%Y-%m-%d')
             logger.info(f"No earnings date provided, using next trading day: {default_date}")
             return default_date
 
@@ -585,7 +589,8 @@ class EarningsAnalyzer:
             - ticker_analyses: List of full analyses for top tickers
         """
         if target_date is None:
-            target_date = datetime.now().strftime('%Y-%m-%d')
+            # FIXED: Use Eastern timezone for market date
+            target_date = get_market_date()
 
         logger.info(f"Analyzing earnings for {target_date}...")
 
@@ -605,9 +610,8 @@ class EarningsAnalyzer:
                 'error': 'No earnings found'
             }
 
-        # Filter out already-reported earnings
-        eastern = pytz.timezone('US/Eastern')
-        now_et = datetime.now(eastern)
+        # FIXED: Filter out already-reported earnings using timezone utility
+        now_et = get_eastern_now()
 
         earnings_list_unfiltered = week_earnings[target_date]
         earnings_list = [
@@ -907,7 +911,8 @@ For more information, see README.md
         max_analyze = int(args[1]) if len(args) > 1 else 2
 
         if target_date is None:
-            target_date = datetime.now().strftime('%Y-%m-%d')
+            # FIXED: Use Eastern timezone for market date
+            target_date = get_market_date()
             logger.info(f"No date specified, using today: {target_date}")
 
         logger.info(f"\nAnalyzing up to {max_analyze} tickers for {target_date}")
