@@ -13,6 +13,7 @@ from src.options.data_client import OptionsDataClient
 from src.options.tradier_client import TradierOptionsClient
 from src.analysis.scorers import CompositeScorer
 from src.core.retry_utils import retry_on_rate_limit
+from src.core.lru_cache import LRUCache
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +57,10 @@ class TickerFilter:
         self.IV_RANK_EXCELLENT = 75 # Larger allocation, prefer spreads
 
         # Cache for ticker data (prevents redundant API calls)
-        self._ticker_cache: Dict[str, tuple[Dict, datetime]] = {}
+        # LRU cache with 500-ticker limit to prevent memory leaks (~360 MB max)
+        self._ticker_cache = LRUCache(max_size=500, ttl_minutes=cache_ttl_minutes)
         # Cache for raw yfinance info dicts (shared between pre_filter and get_ticker_data)
-        self._info_cache: Dict[str, tuple[Dict, datetime]] = {}
+        self._info_cache = LRUCache(max_size=1000, ttl_minutes=cache_ttl_minutes)
         self._cache_ttl = timedelta(minutes=cache_ttl_minutes)
 
         # Initialize composite scorer (Strategy pattern - refactored from 172-line god function)
@@ -160,7 +162,7 @@ class TickerFilter:
 
                         # Cache the info dict to avoid re-fetching in get_ticker_data()
                         # This saves 75 duplicate API calls (one per ticker that passes pre-filter)
-                        self._info_cache[ticker] = (info, datetime.now())
+                        self._info_cache.set(ticker, info)
                         logger.debug(f"  {ticker}: ✓ Passed pre-filter (${market_cap/1e6:.0f}M, {avg_volume:,} vol) [cached info]")
                         filtered.append(ticker)
 
@@ -198,7 +200,7 @@ class TickerFilter:
                         continue
 
                     # Cache the info dict to avoid re-fetching in get_ticker_data()
-                    self._info_cache[ticker] = (info, datetime.now())
+                    self._info_cache.set(ticker, info)
                     logger.debug(f"  {ticker}: ✓ Passed pre-filter (${market_cap/1e6:.0f}M, {avg_volume:,} vol) [cached info]")
                     filtered.append(ticker)
 
@@ -247,15 +249,12 @@ class TickerFilter:
         Returns:
             Dict with market data and options_data or None if error
         """
-        # Check cache first
-        if use_cache and ticker in self._ticker_cache:
-            cached_data, cached_time = self._ticker_cache[ticker]
-            age = datetime.now() - cached_time
-            if age < self._cache_ttl:
-                logger.debug(f"{ticker}: Cache hit (age: {age.seconds}s)")
+        # Check cache first (LRU cache handles TTL internally)
+        if use_cache:
+            cached_data = self._ticker_cache.get(ticker)
+            if cached_data is not None:
+                logger.debug(f"{ticker}: Cache hit")
                 return cached_data
-            else:
-                logger.debug(f"{ticker}: Cache expired (age: {age.seconds}s)")
 
         try:
             # Fetch yfinance data ONCE
@@ -263,16 +262,11 @@ class TickerFilter:
 
             # CRITICAL OPTIMIZATION: Check if we already have info from pre_filter
             # This avoids duplicate API calls (saves ~75 calls per run)
-            info = None
-            if ticker in self._info_cache:
-                cached_info, cached_time = self._info_cache[ticker]
-                age = datetime.now() - cached_time
-                if age < self._cache_ttl:
-                    info = cached_info
-                    logger.debug(f"{ticker}: Reusing info from pre-filter cache (age: {age.seconds}s)")
-
-            # Fetch if not in cache
-            if info is None:
+            # LRU cache handles TTL internally
+            info = self._info_cache.get(ticker)
+            if info is not None:
+                logger.debug(f"{ticker}: Reusing info from pre-filter cache")
+            else:
                 info = stock.info
                 logger.debug(f"{ticker}: Fetched fresh info from yfinance")
 
@@ -363,9 +357,14 @@ class TickerFilter:
                 try:
                     logger.debug(f"{ticker}: Using yfinance fallback (RV proxy)")
 
-                    # Need full year history for RV-based IV rank calculation
-                    hist = stock.history(period='1y')
-                    logger.debug(f"{ticker}: Fetched 1y history for RV-based IV rank")
+                    # OPTIMIZATION: Reuse already-fetched history if we have enough data
+                    # Need at least 1 year (252 trading days) for RV-based IV rank calculation
+                    # If we already fetched 2y history above (line 284), reuse it!
+                    if hist.empty or len(hist) < 252:
+                        hist = stock.history(period='1y')
+                        logger.debug(f"{ticker}: Fetched 1y history for RV-based IV rank")
+                    else:
+                        logger.debug(f"{ticker}: Reusing existing history ({len(hist)} days) for RV-based IV rank")
 
                     options_data = self.options_client.get_options_data_from_stock(
                         stock, ticker, hist, current_price
@@ -376,14 +375,18 @@ class TickerFilter:
 
                     options_data['data_source'] = 'yfinance_rv_proxy'
 
+                except (KeyError, ValueError, AttributeError) as e:
+                    # Data access errors - likely empty/malformed data
+                    logger.warning(f"{ticker}: Options data error (empty/malformed history): {e}")
                 except Exception as e:
-                    logger.warning(f"{ticker}: Could not fetch options data: {e}")
+                    # Catch-all for unexpected errors
+                    logger.warning(f"{ticker}: Unexpected options data error: {e}")
 
             data['options_data'] = options_data
 
-            # Update cache
+            # Update cache (LRU cache handles timestamp internally)
             if use_cache:
-                self._ticker_cache[ticker] = (data, datetime.now())
+                self._ticker_cache.set(ticker, data)
                 logger.debug(f"{ticker}: Cached ticker data")
 
             return data
@@ -486,10 +489,10 @@ class TickerFilter:
         # OPTIMIZATION: Batch prefetch ticker info if not already cached
         # This is especially beneficial when pre_filter wasn't run
         if use_batch_prefetch and len(tickers_to_process) > BATCH_PREFETCH_THRESHOLD:
+            # LRU cache handles TTL internally, just check if ticker is in cache
             uncached_tickers = [
                 t for t in tickers_to_process
-                if t not in self._info_cache or
-                (datetime.now() - self._info_cache[t][1]) > self._cache_ttl
+                if t not in self._info_cache
             ]
 
             if uncached_tickers:
@@ -503,7 +506,7 @@ class TickerFilter:
                             stock = tickers_obj.tickers.get(ticker)
                             if stock:
                                 info = stock.info
-                                self._info_cache[ticker] = (info, datetime.now())
+                                self._info_cache.set(ticker, info)
                         except Exception as e:
                             logger.debug(f"  {ticker}: Prefetch failed: {e}")
                 except Exception as e:

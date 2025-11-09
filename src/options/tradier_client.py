@@ -128,8 +128,13 @@ class TradierOptionsClient:
 
             return result
 
+        except (KeyError, ValueError, TypeError) as e:
+            # Data parsing/access errors - likely API response format changed
+            logger.error(f"{ticker}: Tradier data parsing error (check API response format): {e}")
+            return None
         except Exception as e:
-            logger.error(f"{ticker}: Tradier request failed: {e}")
+            # Catch-all for unexpected errors (network issues, etc.)
+            logger.error(f"{ticker}: Unexpected Tradier error: {e}")
             return None
 
     def _get_quote(self, ticker: str) -> Optional[float]:

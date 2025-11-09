@@ -357,13 +357,23 @@ class EarningsAnalyzer:
         logger.info(f"Using {num_workers} parallel workers")
 
         timeout = ANALYSIS_TIMEOUT_PER_TICKER * len(tickers_data)
+        logger.debug(f"Pool timeout set to {timeout}s ({ANALYSIS_TIMEOUT_PER_TICKER}s per ticker)")
 
         try:
             with Pool(processes=num_workers) as pool:
                 result = pool.map_async(_analyze_single_ticker, analysis_args)
                 ticker_analyses = result.get(timeout=timeout)
         except TimeoutError:
-            logger.error(f"Pool operation timed out after {timeout}s")
+            logger.error(f"Pool operation timed out after {timeout}s - some workers may be hung")
+            logger.error("Try reducing the number of tickers or increase ANALYSIS_TIMEOUT_PER_TICKER")
+            ticker_analyses = []
+        except KeyboardInterrupt:
+            logger.warning("Analysis interrupted by user (Ctrl+C)")
+            pool.terminate()
+            pool.join()
+            raise
+        except Exception as e:
+            logger.error(f"Pool operation failed unexpectedly: {e}", exc_info=True)
             ticker_analyses = []
 
         return ticker_analyses

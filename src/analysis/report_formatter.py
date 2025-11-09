@@ -5,21 +5,11 @@ Separates report formatting logic from analysis logic for better maintainability
 """
 
 from typing import Dict
-import yaml
-import os
+from src.config.config_loader import ConfigLoader
 
 
-def _load_trading_criteria():
-    """Load trading criteria from config file."""
-    config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'trading_criteria.yaml')
-    try:
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        return None
-
-
-_TRADING_CRITERIA = _load_trading_criteria()
+# Load config once at module level using shared config loader
+_TRADING_CRITERIA = ConfigLoader.load_trading_criteria()
 
 
 class ReportFormatter:

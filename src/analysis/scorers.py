@@ -8,25 +8,13 @@ manageable, testable components.
 from abc import ABC, abstractmethod
 from typing import Dict
 import logging
-import yaml
-import os
+from src.config.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
 
-def load_trading_criteria():
-    """Load trading criteria from config file."""
-    config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'trading_criteria.yaml')
-    try:
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        logger.warning(f"Trading criteria config not found at {config_path}, using defaults")
-        return None
-
-
-# Load config once at module level
-_TRADING_CRITERIA = load_trading_criteria()
+# Load config once at module level using shared config loader
+_TRADING_CRITERIA = ConfigLoader.load_trading_criteria()
 
 
 class TickerScorer(ABC):

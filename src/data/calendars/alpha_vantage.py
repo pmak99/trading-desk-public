@@ -259,21 +259,51 @@ class AlphaVantageCalendar:
         if date.weekday() >= 5:
             return True
 
-        # Major market holidays 2025 (extend as needed)
-        holidays_2025 = [
-            (1, 1),    # New Year's Day
-            (1, 20),   # MLK Day
-            (2, 17),   # Presidents Day
-            (4, 18),   # Good Friday
-            (5, 26),   # Memorial Day
-            (7, 4),    # Independence Day
-            (9, 1),    # Labor Day
-            (11, 27),  # Thanksgiving
-            (12, 25),  # Christmas
-        ]
+        # Major market holidays by year
+        # Note: Update annually or use a market calendar library for production
+        holidays_by_year = {
+            2025: [
+                (1, 1),    # New Year's Day
+                (1, 20),   # MLK Day
+                (2, 17),   # Presidents Day
+                (4, 18),   # Good Friday
+                (5, 26),   # Memorial Day
+                (7, 4),    # Independence Day
+                (9, 1),    # Labor Day
+                (11, 27),  # Thanksgiving
+                (12, 25),  # Christmas
+            ],
+            2026: [
+                (1, 1),    # New Year's Day
+                (1, 19),   # MLK Day
+                (2, 16),   # Presidents Day
+                (4, 3),    # Good Friday
+                (5, 25),   # Memorial Day
+                (7, 3),    # Independence Day (observed)
+                (9, 7),    # Labor Day
+                (11, 26),  # Thanksgiving
+                (12, 25),  # Christmas
+            ],
+            2027: [
+                (1, 1),    # New Year's Day
+                (1, 18),   # MLK Day
+                (2, 15),   # Presidents Day
+                (3, 26),   # Good Friday
+                (5, 31),   # Memorial Day
+                (7, 5),    # Independence Day (observed)
+                (9, 6),    # Labor Day
+                (11, 25),  # Thanksgiving
+                (12, 24),  # Christmas (observed)
+            ]
+        }
+
+        # Get holidays for this year, fallback to empty list for unknown years
+        year_holidays = holidays_by_year.get(date.year, [])
+        if not year_holidays:
+            logger.warning(f"No holiday data for {date.year}, update holidays_by_year in alpha_vantage.py")
 
         date_tuple = (date.month, date.day)
-        return date_tuple in holidays_2025
+        return date_tuple in year_holidays
 
     def get_earnings_for_date(self, date: datetime) -> List[Dict]:
         """
