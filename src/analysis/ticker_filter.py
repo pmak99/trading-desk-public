@@ -16,6 +16,12 @@ from src.core.retry_utils import retry_on_rate_limit
 
 logger = logging.getLogger(__name__)
 
+# Constants for filtering and rate limiting
+RATE_LIMIT_DELAY_SECONDS = 0.3  # Delay between individual API requests
+MIN_MARKET_CAP_DOLLARS = 500_000_000  # $500M minimum for tradeable options
+MIN_DAILY_VOLUME = 100_000  # 100K shares/day minimum for liquidity
+BATCH_PREFETCH_THRESHOLD = 5  # Only batch prefetch for 5+ tickers
+
 
 class TickerFilter:
     """Filter and score earnings candidates."""
@@ -90,9 +96,9 @@ class TickerFilter:
     def pre_filter_tickers(
         self,
         tickers: List[str],
-        min_market_cap: int = 500_000_000,  # $500M minimum
-        min_avg_volume: int = 100_000,      # 100K shares/day minimum
-        use_batch: bool = True  # New: use batch fetching (30-50% faster)
+        min_market_cap: int = MIN_MARKET_CAP_DOLLARS,
+        min_avg_volume: int = MIN_DAILY_VOLUME,
+        use_batch: bool = True  # Use batch fetching (30-50% faster)
     ) -> List[str]:
         """
         Pre-filter tickers by basic criteria before expensive API calls.
@@ -172,7 +178,7 @@ class TickerFilter:
             logger.debug(f"   Using individual fetch for {len(tickers)} tickers...")
             for ticker in tickers:
                 try:
-                    time.sleep(0.1)  # Small delay to avoid rate limits
+                    time.sleep(RATE_LIMIT_DELAY_SECONDS)  # Delay to avoid rate limits
                     stock = yf.Ticker(ticker)
 
                     # Get info dict - needed for both market cap and volume
@@ -413,7 +419,7 @@ class TickerFilter:
         try:
             # Add small delay to avoid rate limits (helps with parallel processing)
             if add_delay:
-                time.sleep(0.3)  # 300ms delay between requests
+                time.sleep(RATE_LIMIT_DELAY_SECONDS)
 
             logger.info(f"Analyzing {ticker}...")
 
@@ -471,7 +477,7 @@ class TickerFilter:
 
         # OPTIMIZATION: Batch prefetch ticker info if not already cached
         # This is especially beneficial when pre_filter wasn't run
-        if use_batch_prefetch and len(tickers_to_process) > 5:
+        if use_batch_prefetch and len(tickers_to_process) > BATCH_PREFETCH_THRESHOLD:
             uncached_tickers = [
                 t for t in tickers_to_process
                 if t not in self._info_cache or

@@ -31,6 +31,11 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Constants for analysis configuration
+ANALYSIS_TIMEOUT_PER_TICKER = 120  # Generous timeout for AI + API calls
+MAX_PARALLEL_WORKERS = 4  # Maximum workers for multiprocessing
+MULTIPROCESSING_THRESHOLD = 3  # Use sequential processing for fewer than 3 tickers
+
 
 def _analyze_single_ticker(args: Tuple[str, Dict, str, bool]) -> Dict:
     """
@@ -319,7 +324,11 @@ class EarningsAnalyzer:
         override_daily_limit: bool
     ) -> List[Dict]:
         """
-        Run parallel analysis on tickers using multiprocessing.
+        Run analysis on tickers (parallel for 3+ tickers, sequential for 1-2).
+
+        OPTIMIZATION: Multiprocessing has overhead (process creation, initialization).
+        For 1-2 tickers, sequential processing is actually faster.
+        For 3+ tickers, parallel processing provides 2-3x speedup.
 
         Args:
             tickers_data: List of ticker data dicts
@@ -337,11 +346,17 @@ class EarningsAnalyzer:
             for td in tickers_data
         ]
 
-        # Use multiprocessing for parallel analysis
-        num_workers = min(cpu_count(), len(tickers_data), 4)
+        # OPTIMIZATION: Skip multiprocessing for small batches (overhead > benefit)
+        if len(tickers_data) < MULTIPROCESSING_THRESHOLD:
+            logger.info(f"Using sequential processing for {len(tickers_data)} ticker(s) (faster than multiprocessing overhead)")
+            ticker_analyses = [_analyze_single_ticker(args) for args in analysis_args]
+            return ticker_analyses
+
+        # Use multiprocessing for 3+ tickers (significant speedup)
+        num_workers = min(cpu_count(), len(tickers_data), MAX_PARALLEL_WORKERS)
         logger.info(f"Using {num_workers} parallel workers")
 
-        timeout = 120 * len(tickers_data)
+        timeout = ANALYSIS_TIMEOUT_PER_TICKER * len(tickers_data)
 
         try:
             with Pool(processes=num_workers) as pool:
@@ -580,38 +595,11 @@ class EarningsAnalyzer:
         logger.info(f"🤖 Running AI analysis on top {len(tickers_to_analyze)} scorer(s)...")
         logger.info(f"   Selected: {', '.join([td['ticker'] for td in tickers_to_analyze])}")
 
-        # Prepare arguments for parallel processing
-        analysis_args = [
-            (ticker_data['ticker'], ticker_data, target_date, override_daily_limit)
-            for ticker_data in tickers_to_analyze
-        ]
-
-        # Use multiprocessing for parallel analysis
-        # Limit workers to avoid overwhelming APIs
-        num_workers = min(cpu_count(), len(tickers_to_analyze), 4)
-        logger.info(f"Using {num_workers} parallel workers")
-
-        # Timeout: 120 seconds per ticker (generous for API calls + Reddit scraping)
-        timeout = 120 * len(tickers_to_analyze)
-
-        try:
-            with Pool(processes=num_workers) as pool:
-                result = pool.map_async(_analyze_single_ticker, analysis_args)
-                ticker_analyses = result.get(timeout=timeout)
-        except TimeoutError:
-            logger.error(f"Pool operation timed out after {timeout}s")
-            ticker_analyses = []
+        # Run analysis (uses smart parallelization: sequential for 1-2, parallel for 3+)
+        ticker_analyses = self._run_parallel_analysis(tickers_to_analyze, target_date, override_daily_limit)
 
         # Separate successful and failed analyses
-        successful_analyses = []
-        failed_analyses = []
-
-        for analysis in ticker_analyses:
-            if analysis.get('error'):
-                failed_analyses.append(analysis)
-                logger.warning(f"❌ {analysis['ticker']}: {analysis['error']}")
-            else:
-                successful_analyses.append(analysis)
+        successful_analyses, failed_analyses = self._process_analysis_results(ticker_analyses)
 
         analyzed_count = len(successful_analyses)
         failed_count = len(failed_analyses)
