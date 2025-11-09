@@ -305,12 +305,16 @@ class EarningsAnalyzer:
                 # Use Eastern timezone for market date comparison
                 now_et = get_eastern_now()
 
+                # Make parsed_date timezone-aware to allow comparison
+                from src.core.timezone_utils import EASTERN
+                parsed_date_aware = EASTERN.localize(parsed_date)
+
                 # Warn if date is in the past
-                if parsed_date.date() < now_et.date():
+                if parsed_date_aware.date() < now_et.date():
                     logger.warning(f"Earnings date {earnings_date} is in the past")
 
                 # Warn if date is too far in future (>90 days)
-                days_out = (parsed_date - now_et).days
+                days_out = (parsed_date_aware - now_et).days
                 if days_out > 90:
                     logger.warning(f"Earnings date {earnings_date} is {days_out} days out - options may not exist")
 

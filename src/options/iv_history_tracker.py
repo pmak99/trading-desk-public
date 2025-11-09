@@ -245,5 +245,18 @@ class IVHistoryTracker:
     def close(self):
         """Close database connection."""
         if hasattr(self._local, 'conn') and self._local.conn:
-            self._local.conn.close()
-            self._local.conn = None
+            try:
+                self._local.conn.close()
+            except Exception as e:
+                logger.debug(f"Error closing connection: {e}")
+            finally:
+                self._local.conn = None
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensures connection is closed."""
+        self.close()
+        return False
