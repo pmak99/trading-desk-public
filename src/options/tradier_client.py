@@ -215,6 +215,24 @@ class TradierOptionsClient:
                 # Tradier returns IV as decimal (e.g., 1.23 = 123%, 0.50 = 50%)
                 current_iv = atm_call['greeks'].get('mid_iv', 0) * 100
 
+            # FIXED: Validate IV is in reasonable range (1-300%)
+            # Bad Tradier data (0%, 500%+) should not pass through
+            if current_iv > 0 and (current_iv < 1 or current_iv > 300):
+                logger.warning(f"{ticker}: Invalid ATM call IV {current_iv:.1f}% from Tradier (expected 1-300%)")
+
+                # Try ATM put as fallback
+                if atm_put and 'greeks' in atm_put:
+                    put_iv = atm_put['greeks'].get('mid_iv', 0) * 100
+                    if 1 <= put_iv <= 300:
+                        logger.info(f"{ticker}: Using ATM put IV {put_iv:.1f}% as fallback")
+                        current_iv = put_iv
+                    else:
+                        logger.warning(f"{ticker}: ATM put IV also invalid ({put_iv:.1f}%), skipping IV data")
+                        current_iv = 0
+                else:
+                    logger.warning(f"{ticker}: No valid ATM put fallback available")
+                    current_iv = 0
+
             # Calculate IV Rank from historical IV data
             iv_rank = 0
             if current_iv > 0:
@@ -223,6 +241,24 @@ class TradierOptionsClient:
 
                 # Calculate IV Rank (percentile in 52-week range)
                 iv_rank = self.iv_tracker.calculate_iv_rank(ticker, current_iv)
+
+                # FIXED: Auto-trigger backfill if IV rank = 0 (no historical data)
+                if iv_rank == 0:
+                    logger.info(f"{ticker}: No IV history detected (IV Rank = 0%), attempting backfill...")
+                    try:
+                        from src.options.iv_history_backfill import IVHistoryBackfill
+                        backfiller = IVHistoryBackfill(iv_tracker=self.iv_tracker)
+                        result = backfiller.backfill_ticker(ticker, lookback_days=180)  # 6 months faster than full year
+
+                        if result['success']:
+                            # Recalculate IV rank with backfilled data
+                            iv_rank = self.iv_tracker.calculate_iv_rank(ticker, current_iv)
+                            logger.info(f"{ticker}: ✓ Backfilled {result['data_points']} historical IVs, new IV Rank = {iv_rank:.1f}%")
+                        else:
+                            logger.warning(f"{ticker}: Backfill failed: {result['message']}")
+                    except Exception as e:
+                        logger.warning(f"{ticker}: Auto-backfill error: {e}")
+                        # Continue with IV rank = 0 (graceful degradation)
 
             return {
                 'iv_rank': iv_rank,
