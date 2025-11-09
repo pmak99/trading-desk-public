@@ -459,5 +459,78 @@ def __del__(self):
 
 ---
 
+## ✅ IMPLEMENTED: Enhanced AI Prompts with Source Validation
+
+**Priority**: HIGH
+**Effort**: 1 hour
+**Impact**: Eliminates AI hallucination, provides verifiable data
+**Cost**: $0 (same AI budget, better prompts)
+
+### Problem
+AI web search (Perplexity) may "hallucinate" unusual activity without reliable sources:
+- No verification of claims
+- Unclear where data comes from
+- Can't distinguish speculation from fact
+- No date/time stamps on flow data
+
+### Solution: Better Prompts, Not More APIs
+
+**Key Insight**: Perplexity already has access to professional flow data through web search (Unusual Whales, Barchart, MarketChameleon, etc.). The problem isn't missing data - it's that we don't force the AI to cite sources.
+
+### What Changed
+
+**BEFORE** (vague prompt):
+```
+"Any unusual options flow, dark pool activity, or notable positioning changes"
+```
+
+**AFTER** (specific, cited prompt):
+```
+Search for recent unusual options activity for {ticker} from:
+1. Barchart unusual options activity
+2. CBOE volume data
+3. Recent financial news about institutional positioning
+4. Options flow discussions (past 3 days)
+
+For each finding, you MUST provide:
+- Specific data point (e.g., "15K calls at $180 strike")
+- Source name (e.g., "Barchart Unusual Activity")
+- Date observed (e.g., "November 8, 2025")
+
+If no reliable sources found, respond: "No unusual activity detected from verified sources."
+
+DO NOT speculate or infer activity without citing a specific source.
+```
+
+### Benefits
+
+1. **Verifiable Claims**
+   - Every unusual activity claim has a source
+   - Can manually verify if suspicious
+   - Dates allow checking recency
+
+2. **No Hallucination**
+   - AI can't make up data
+   - "No data" is valid response
+   - Forces finding real published sources
+
+3. **Better Decision Making**
+   - Know confidence level (1 source vs 3 sources)
+   - Can judge source reliability
+   - Recency matters (flow from yesterday vs last week)
+
+4. **FREE**
+   - Same AI cost
+   - No new APIs
+   - No maintenance
+
+### Implementation
+
+Enhanced prompts in `src/ai/sentiment_analyzer.py` and `src/ai/strategy_generator.py`
+
+See IMPROVEMENTS_IMPLEMENTED.md for complete implementation details.
+
+---
+
 **Last Updated**: November 9, 2025
 **Next Review**: After implementing Week 1 improvements

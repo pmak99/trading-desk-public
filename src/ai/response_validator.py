@@ -185,7 +185,22 @@ class AIResponseValidator:
                 data['overall_sentiment'] = sentiment
 
         # Ensure optional fields have defaults
-        data.setdefault('unusual_activity', 'N/A')
+        # unusual_activity now expects nested structure with sources
+        if 'unusual_activity' not in data or not isinstance(data['unusual_activity'], dict):
+            data['unusual_activity'] = {
+                'detected': False,
+                'sources': [],
+                'findings': [],
+                'summary': 'No unusual activity data available'
+            }
+        else:
+            # Validate nested structure
+            activity = data['unusual_activity']
+            activity.setdefault('detected', False)
+            activity.setdefault('sources', [])
+            activity.setdefault('findings', [])
+            activity.setdefault('summary', 'No unusual activity detected from verified sources')
+
         data.setdefault('guidance_history', 'N/A')
         data.setdefault('macro_sector', 'N/A')
         data.setdefault('confidence', 'medium')

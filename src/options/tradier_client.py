@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from src.options.iv_history_tracker import IVHistoryTracker
 from src.options.expected_move_calculator import ExpectedMoveCalculator
 from src.options.option_selector import OptionSelector
+from src.core.timezone_utils import get_eastern_now
 
 # Load environment variables
 load_dotenv()
@@ -48,6 +49,10 @@ class TradierOptionsClient:
             'Accept': 'application/json'
         }
 
+        # Use requests.Session for connection pooling
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
+
         # Initialize IV history tracker for IV Rank calculation
         self.iv_tracker = IVHistoryTracker()
 
@@ -59,8 +64,7 @@ class TradierOptionsClient:
         """
         Get comprehensive options data including real IV Rank.
 
-        OPTIMIZED: Fetches options chain ONCE and extracts all needed metrics.
-        Previous version made 2 duplicate API calls for the same chain.
+        Fetches options chain once and extracts all needed metrics.
 
         Args:
             ticker: Stock ticker symbol
@@ -139,7 +143,8 @@ class TradierOptionsClient:
             url = f"{self.endpoint}/v1/markets/quotes"
             params = {'symbols': ticker}
 
-            response = requests.get(url, headers=self.headers, params=params, timeout=10)
+            # Use session for connection pooling
+            response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
 
             data = response.json()
@@ -174,7 +179,8 @@ class TradierOptionsClient:
                 'greeks': 'true'
             }
 
-            response = requests.get(url, headers=self.headers, params=params, timeout=15)
+            # Use session for connection pooling
+            response = self.session.get(url, params=params, timeout=15)
             response.raise_for_status()
 
             data = response.json()
@@ -215,6 +221,23 @@ class TradierOptionsClient:
                 # Tradier returns IV as decimal (e.g., 1.23 = 123%, 0.50 = 50%)
                 current_iv = atm_call['greeks'].get('mid_iv', 0) * 100
 
+            # Validate IV is in reasonable range (1-300%)
+            if current_iv > 0 and (current_iv < 1 or current_iv > 300):
+                logger.warning(f"{ticker}: Invalid ATM call IV {current_iv:.1f}% from Tradier (expected 1-300%)")
+
+                # Try ATM put as fallback
+                if atm_put and 'greeks' in atm_put:
+                    put_iv = atm_put['greeks'].get('mid_iv', 0) * 100
+                    if 1 <= put_iv <= 300:
+                        logger.info(f"{ticker}: Using ATM put IV {put_iv:.1f}% as fallback")
+                        current_iv = put_iv
+                    else:
+                        logger.warning(f"{ticker}: ATM put IV also invalid ({put_iv:.1f}%), skipping IV data")
+                        current_iv = 0
+                else:
+                    logger.warning(f"{ticker}: No valid ATM put fallback available")
+                    current_iv = 0
+
             # Calculate IV Rank from historical IV data
             iv_rank = 0
             if current_iv > 0:
@@ -223,6 +246,24 @@ class TradierOptionsClient:
 
                 # Calculate IV Rank (percentile in 52-week range)
                 iv_rank = self.iv_tracker.calculate_iv_rank(ticker, current_iv)
+
+                # Auto-trigger backfill if IV rank is 0 (no historical data)
+                if iv_rank == 0:
+                    logger.info(f"{ticker}: No IV history detected (IV Rank = 0%), attempting backfill...")
+                    try:
+                        from src.options.iv_history_backfill import IVHistoryBackfill
+                        backfiller = IVHistoryBackfill(iv_tracker=self.iv_tracker)
+                        result = backfiller.backfill_ticker(ticker, lookback_days=180)  # 6 months faster than full year
+
+                        if result['success']:
+                            # Recalculate IV rank with backfilled data
+                            iv_rank = self.iv_tracker.calculate_iv_rank(ticker, current_iv)
+                            logger.info(f"{ticker}: ✓ Backfilled {result['data_points']} historical IVs, new IV Rank = {iv_rank:.1f}%")
+                        else:
+                            logger.warning(f"{ticker}: Backfill failed: {result['message']}")
+                    except Exception as e:
+                        logger.warning(f"{ticker}: Auto-backfill error: {e}")
+                        # Continue with IV rank = 0 (graceful degradation)
 
             return {
                 'iv_rank': iv_rank,
@@ -285,14 +326,15 @@ class TradierOptionsClient:
             url = f"{self.endpoint}/v1/markets/options/expirations"
             params = {'symbol': ticker, 'includeAllRoots': 'true'}
 
-            response = requests.get(url, headers=self.headers, params=params, timeout=10)
+            # Use session for connection pooling
+            response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
 
             data = response.json()
 
             if 'expirations' in data and 'date' in data['expirations']:
                 dates = data['expirations']['date']
-                today = datetime.now().date()
+                today = get_eastern_now().date()
 
                 # Parse earnings date if provided
                 if earnings_date:
