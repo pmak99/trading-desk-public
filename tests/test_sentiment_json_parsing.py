@@ -6,6 +6,7 @@ Tests the new JSON-based parsing with fallback to legacy format.
 
 import json
 import pytest
+from unittest.mock import Mock, patch
 from src.ai.sentiment_analyzer import SentimentAnalyzer
 
 
@@ -14,8 +15,10 @@ class TestSentimentJSONParsing:
 
     @pytest.fixture
     def analyzer(self):
-        """Create sentiment analyzer instance."""
-        return SentimentAnalyzer()
+        """Create sentiment analyzer instance with mocked dependencies."""
+        with patch('src.ai.sentiment_analyzer.AIClient'):
+            with patch('src.ai.sentiment_analyzer.RedditScraper'):
+                return SentimentAnalyzer()
 
     def test_parse_valid_json_response(self, analyzer):
         """Test parsing a valid JSON response."""

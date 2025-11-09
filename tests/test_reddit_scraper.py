@@ -11,7 +11,7 @@ from src.data.reddit_scraper import RedditScraper
 class TestRedditScraperParallelSearch:
     """Test parallel subreddit search functionality."""
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_parallel_search_combines_results_from_all_subreddits(self, mock_reddit_class):
         """Test that parallel search aggregates posts from all subreddits."""
         # Setup mock
@@ -64,7 +64,7 @@ class TestRedditScraperParallelSearch:
         assert result['sentiment_score'] > 0  # Has positive sentiment
         assert result['total_comments'] == 40  # 4 posts * 10 comments
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_parallel_search_handles_subreddit_failures_gracefully(self, mock_reddit_class):
         """Test that failure in one subreddit doesn't break entire search."""
         scraper = RedditScraper()
@@ -112,7 +112,7 @@ class TestRedditScraperParallelSearch:
         assert result['posts_found'] == 2
         assert result['ticker'] == 'AAPL'
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_parallel_search_returns_empty_when_no_posts_found(self, mock_reddit_class):
         """Test graceful handling when no posts found in any subreddit."""
         scraper = RedditScraper()
@@ -134,7 +134,7 @@ class TestRedditScraperParallelSearch:
         assert result['total_comments'] == 0
         assert result['ticker'] == 'RARE'
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_sentiment_calculation_accuracy(self, mock_reddit_class):
         """Test that sentiment score is calculated correctly from posts."""
         scraper = RedditScraper()
@@ -168,7 +168,7 @@ class TestRedditScraperParallelSearch:
         assert result['avg_score'] == pytest.approx(566.67, rel=0.01)
         assert result['sentiment_score'] == 1.0  # Capped at 1.0
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_top_posts_sorted_by_score(self, mock_reddit_class):
         """Test that top_posts are sorted by score descending."""
         scraper = RedditScraper()
@@ -207,7 +207,7 @@ class TestRedditScraperParallelSearch:
 
     def test_search_subreddit_private_method(self):
         """Test the _search_subreddit helper method directly."""
-        with patch('src.reddit_scraper.praw.Reddit'):
+        with patch('src.data.reddit_scraper.praw.Reddit'):
             scraper = RedditScraper()
             mock_reddit = Mock()
             scraper.reddit = mock_reddit
@@ -241,7 +241,7 @@ class TestRedditScraperParallelSearch:
 
     def test_search_subreddit_error_handling(self):
         """Test that _search_subreddit handles exceptions gracefully."""
-        with patch('src.reddit_scraper.praw.Reddit'):
+        with patch('src.data.reddit_scraper.praw.Reddit'):
             scraper = RedditScraper()
             mock_reddit = Mock()
             scraper.reddit = mock_reddit
@@ -261,7 +261,7 @@ class TestRedditScraperParallelSearch:
 class TestRedditScraperIntegration:
     """Integration-style tests (still mocked but more realistic)."""
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_complete_workflow_with_mixed_sentiment(self, mock_reddit_class):
         """Test complete workflow with realistic mixed sentiment posts."""
         scraper = RedditScraper()
@@ -303,7 +303,7 @@ class TestRedditScraperIntegration:
 class TestRedditScraperCaching:
     """Test caching functionality for Reddit scraper."""
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_cache_initialized_on_init(self, mock_reddit_class):
         """Test that cache is initialized when scraper is created."""
         scraper = RedditScraper()
@@ -313,7 +313,7 @@ class TestRedditScraperCaching:
         assert scraper._cache.max_size == 100
         assert scraper._cache.ttl is not None
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_cache_hit_returns_cached_result(self, mock_reddit_class):
         """Test that cached results are returned without calling Reddit API."""
         scraper = RedditScraper()
@@ -350,7 +350,7 @@ class TestRedditScraperCaching:
         assert mock_subreddit.search.call_count == call_count_1, "API should not be called on cache hit"
         assert result2 == result1, "Cached result should match original"
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_cache_miss_fetches_new_data(self, mock_reddit_class):
         """Test that different parameters cause cache miss."""
         scraper = RedditScraper()
@@ -381,7 +381,7 @@ class TestRedditScraperCaching:
         # Verify API was called again
         assert mock_subreddit.search.call_count > call_count_1, "Different ticker should cause cache miss"
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_cache_key_includes_parameters(self, mock_reddit_class):
         """Test that cache key varies with different parameters."""
         scraper = RedditScraper()
@@ -411,7 +411,7 @@ class TestRedditScraperCaching:
         # Should have called API again
         assert mock_subreddit.search.call_count > call_count_1
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_empty_results_cached(self, mock_reddit_class):
         """Test that empty results are also cached."""
         scraper = RedditScraper()
@@ -435,7 +435,7 @@ class TestRedditScraperCaching:
         assert mock_subreddit.search.call_count == call_count_1, "Empty results should be cached"
         assert result2['posts_found'] == 0
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_cache_ttl_respected(self, mock_reddit_class):
         """Test that cache respects TTL (time-to-live)."""
         scraper = RedditScraper()
@@ -475,7 +475,7 @@ class TestRedditScraperCaching:
         # Verify API was called again
         assert mock_subreddit.search.call_count > call_count_1, "Expired cache should cause new API call"
 
-    @patch('src.reddit_scraper.praw.Reddit')
+    @patch('src.data.reddit_scraper.praw.Reddit')
     def test_cache_stats_tracking(self, mock_reddit_class):
         """Test that cache tracks hits and misses."""
         scraper = RedditScraper()

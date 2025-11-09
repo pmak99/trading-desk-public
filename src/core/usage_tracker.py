@@ -28,9 +28,9 @@ class UsageTracker(UsageTrackerSQLite):
     Maintains identical interface to old JSON-based implementation.
     """
 
-    def __init__(self, config_path: str = "config/budget.yaml"):
+    def __init__(self, config_path: str = "config/budget.yaml", db_path: str = "data/usage.db"):
         """Initialize usage tracker (delegates to SQLite backend)."""
-        super().__init__(config_path=config_path)
+        super().__init__(config_path=config_path, db_path=db_path)
 
     # Compatibility methods for legacy code
     def get_monthly_cost(self) -> float:
