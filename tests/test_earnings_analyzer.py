@@ -15,25 +15,30 @@ class TestGracefulDegradation:
             'price': 150.0,
             'score': 75.0,
             'options_data': {'current_iv': 80.0}
-        }, "2025-10-30", False)
+        }, "2025-10-30", False, "config/trading_config.yaml")
 
-        # Mock SentimentAnalyzer to raise daily limit error
-        with patch('src.analysis.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
-            mock_sentiment = Mock()
-            mock_sentiment.analyze_earnings_sentiment.side_effect = Exception("DAILY_LIMIT: Daily API call limit reached")
-            mock_sentiment_class.return_value = mock_sentiment
+        # Mock UsageTracker
+        with patch('src.core.usage_tracker.UsageTracker') as mock_tracker_class:
+            mock_tracker = Mock()
+            mock_tracker_class.return_value = mock_tracker
 
-            with patch('src.analysis.earnings_analyzer.StrategyGenerator') as mock_strategy_class:
-                mock_strategy = Mock()
-                mock_strategy.generate_strategies.return_value = {'strategies': []}
-                mock_strategy_class.return_value = mock_strategy
+            # Mock SentimentAnalyzer to raise daily limit error
+            with patch('src.analysis.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
+                mock_sentiment = Mock()
+                mock_sentiment.analyze_earnings_sentiment.side_effect = Exception("DAILY_LIMIT: Daily API call limit reached")
+                mock_sentiment_class.return_value = mock_sentiment
 
-                result = _analyze_single_ticker(args)
+                with patch('src.analysis.earnings_analyzer.StrategyGenerator') as mock_strategy_class:
+                    mock_strategy = Mock()
+                    mock_strategy.generate_strategies.return_value = {'strategies': []}
+                    mock_strategy_class.return_value = mock_strategy
+
+                    result = _analyze_single_ticker(args)
 
         # Should return partial result with note
         assert result['ticker'] == 'AAPL'
-        assert result['sentiment']['overall_sentiment'] == 'pending'
-        assert 'Daily API limit reached' in result['sentiment']['note']
+        assert result['sentiment']['overall_sentiment'] == 'unavailable'
+        assert 'note' in result['sentiment']
         assert 'error' not in result
 
     def test_daily_limit_strategy_returns_partial_result(self):
@@ -42,24 +47,29 @@ class TestGracefulDegradation:
             'price': 150.0,
             'score': 75.0,
             'options_data': {'current_iv': 80.0}
-        }, "2025-10-30", False)
+        }, "2025-10-30", False, "config/trading_config.yaml")
 
-        with patch('src.analysis.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
-            mock_sentiment = Mock()
-            mock_sentiment.analyze_earnings_sentiment.return_value = {'overall_sentiment': 'bullish'}
-            mock_sentiment_class.return_value = mock_sentiment
+        with patch('src.core.usage_tracker.UsageTracker') as mock_tracker_class:
+            mock_tracker = Mock()
+            mock_tracker_class.return_value = mock_tracker
 
-            with patch('src.analysis.earnings_analyzer.StrategyGenerator') as mock_strategy_class:
-                mock_strategy = Mock()
-                mock_strategy.generate_strategies.side_effect = Exception("DAILY_LIMIT: Daily API call limit reached")
-                mock_strategy_class.return_value = mock_strategy
+            with patch('src.analysis.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
+                mock_sentiment = Mock()
+                mock_sentiment.analyze_earnings_sentiment.return_value = {'overall_sentiment': 'bullish'}
+                mock_sentiment_class.return_value = mock_sentiment
 
-                result = _analyze_single_ticker(args)
+                with patch('src.analysis.earnings_analyzer.StrategyGenerator') as mock_strategy_class:
+                    mock_strategy = Mock()
+                    mock_strategy.generate_strategies.side_effect = Exception("DAILY_LIMIT: Daily API call limit reached")
+                    mock_strategy_class.return_value = mock_strategy
+
+                    result = _analyze_single_ticker(args)
 
         # Should return partial result with note
         assert result['ticker'] == 'AAPL'
         assert result['sentiment']['overall_sentiment'] == 'bullish'
-        assert result['strategies']['note'] == 'Daily API limit reached - strategy generation deferred'
+        assert 'note' in result['strategies']
+        assert 'API limits reached' in result['strategies']['note']
 
     def test_non_limit_error_propagates(self):
         """Test that non-limit errors are handled normally."""
@@ -67,19 +77,25 @@ class TestGracefulDegradation:
             'price': 150.0,
             'score': 75.0,
             'options_data': {'current_iv': 80.0}
-        }, "2025-10-30", False)
+        }, "2025-10-30", False, "config/trading_config.yaml")
 
-        with patch('src.analysis.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
-            mock_sentiment = Mock()
-            mock_sentiment.analyze_earnings_sentiment.side_effect = Exception("Network error")
-            mock_sentiment_class.return_value = mock_sentiment
+        with patch('src.core.usage_tracker.UsageTracker') as mock_tracker_class:
+            mock_tracker = Mock()
+            mock_tracker_class.return_value = mock_tracker
 
-            with patch('src.analysis.earnings_analyzer.StrategyGenerator'):
-                result = _analyze_single_ticker(args)
+            with patch('src.analysis.earnings_analyzer.SentimentAnalyzer') as mock_sentiment_class:
+                mock_sentiment = Mock()
+                mock_sentiment.analyze_earnings_sentiment.side_effect = Exception("Network error")
+                mock_sentiment_class.return_value = mock_sentiment
 
-        # Should return empty sentiment, not pending
+                with patch('src.analysis.earnings_analyzer.StrategyGenerator'):
+                    result = _analyze_single_ticker(args)
+
+        # Should return error details for non-limit errors
         assert result['ticker'] == 'AAPL'
-        assert result['sentiment'] == {}
+        assert result['sentiment']['overall_sentiment'] == 'unavailable'
+        assert 'error' in result['sentiment']
+        assert result['sentiment']['error'] == 'Network error'
 
 
 class TestAlreadyReportedFiltering:

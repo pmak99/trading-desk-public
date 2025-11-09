@@ -25,6 +25,8 @@ class TestAIClientRetryLogic:
         ]
 
         client = AIClient()
+        # Mock API keys to prevent environment check
+        client.perplexity_key = 'fake_key'
 
         # Mock usage tracker to allow call
         with patch.object(client.usage_tracker, 'get_available_model', return_value=('sonar-pro', 'perplexity')):
@@ -44,6 +46,8 @@ class TestAIClientRetryLogic:
         mock_post.side_effect = requests.exceptions.Timeout("Timeout")
 
         client = AIClient()
+        # Mock API keys to prevent environment check
+        client.perplexity_key = 'fake_key'
 
         with patch.object(client.usage_tracker, 'get_available_model', return_value=('sonar-pro', 'perplexity')):
             with pytest.raises(requests.exceptions.Timeout):
@@ -101,6 +105,8 @@ class TestAIClientFallback:
     def test_fallback_to_gemini_on_budget_limit(self, mock_post):
         """Test fallback to Gemini when Perplexity limit reached."""
         client = AIClient()
+        # Mock API keys to prevent environment check
+        client.google_key = 'fake_key'
 
         # Setup mock to trigger fallback
         with patch.object(client.usage_tracker, 'get_available_model') as mock_get_model:

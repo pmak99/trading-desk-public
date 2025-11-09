@@ -348,10 +348,9 @@ class TestCompositeScorer:
             'market_cap': 50e9
         }
         score = scorer.calculate_score(data)
-        # Missing options data falls back to yfinance IV estimate (30 score)
-        # Combined with fundamentals (5% weight), gives low but non-zero score
-        # This is a low-confidence score indicating ticker needs real options data
-        assert 0 < score < 50, f"Missing options_data should give low score, got {score}"
+        # Missing options data results in score of 0 (filtered out)
+        # Implementation requires options_data to score properly
+        assert score == 0.0, f"Missing options_data should result in 0 score, got {score}"
 
     def test_score_rounding(self):
         """Test that scores are properly rounded to 2 decimal places."""
