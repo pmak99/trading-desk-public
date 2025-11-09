@@ -1,16 +1,18 @@
 """
-Retry utilities with exponential backoff for API calls.
+Retry utilities with exponential backoff and circuit breaker for API calls.
 
 Provides decorators and functions to handle transient failures like:
 - Rate limiting (429 errors)
 - Network timeouts
 - Temporary API outages
+- Persistent failures (circuit breaker)
 """
 
 import time
 import logging
 from functools import wraps
-from typing import Callable, Optional, Tuple, Type
+from typing import Callable, Optional, Tuple, Type, Dict, Any
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +161,189 @@ def retry_with_backoff(
     raise RuntimeError(f"Retry logic failed after {max_retries} attempts")
 
 
+class CircuitBreakerOpenError(Exception):
+    """Raised when circuit breaker is open and prevents function execution."""
+    pass
+
+
+class CircuitBreaker:
+    """
+    Circuit breaker pattern for API calls.
+
+    Prevents cascading failures by opening the circuit after N consecutive failures.
+    When open, calls fail immediately without hitting the API.
+    After a timeout period, enters half-open state to test if service recovered.
+
+    States:
+        - CLOSED: Normal operation, all calls go through
+        - OPEN: Circuit is open, all calls fail immediately
+        - HALF_OPEN: Testing if service recovered, single call allowed
+
+    Example:
+        breaker = CircuitBreaker(failure_threshold=5, timeout_seconds=60)
+
+        @breaker.call
+        def fetch_data():
+            return api.get_data()
+
+        # Or use as context manager
+        with breaker:
+            result = api.get_data()
+    """
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        timeout_seconds: int = 60,
+        expected_exceptions: Tuple[Type[Exception], ...] = (Exception,)
+    ):
+        """
+        Initialize circuit breaker.
+
+        Args:
+            failure_threshold: Number of consecutive failures before opening circuit
+            timeout_seconds: Seconds to wait before attempting recovery (half-open)
+            expected_exceptions: Exceptions that count as failures
+        """
+        self.failure_threshold = failure_threshold
+        self.timeout = timedelta(seconds=timeout_seconds)
+        self.expected_exceptions = expected_exceptions
+
+        # State tracking
+        self.failure_count = 0
+        self.last_failure_time: Optional[datetime] = None
+        self.state = 'closed'  # closed, open, half_open
+        self.success_count = 0  # For half-open state
+
+    def call(self, func: Callable) -> Callable:
+        """
+        Decorator to wrap function with circuit breaker.
+
+        Args:
+            func: Function to protect with circuit breaker
+
+        Returns:
+            Wrapped function
+
+        Example:
+            breaker = CircuitBreaker()
+
+            @breaker.call
+            def api_request():
+                return requests.get('https://api.example.com')
+        """
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Check circuit state before calling
+            if self.state == 'open':
+                if self._should_attempt_reset():
+                    self.state = 'half_open'
+                    logger.info(f"Circuit breaker entering HALF_OPEN state for {func.__name__}")
+                else:
+                    time_remaining = (
+                        self.last_failure_time + self.timeout - datetime.now()
+                    ).total_seconds()
+                    raise CircuitBreakerOpenError(
+                        f"Circuit breaker OPEN for {func.__name__}. "
+                        f"Retry in {time_remaining:.0f}s. "
+                        f"({self.failure_count} consecutive failures)"
+                    )
+
+            # Execute function
+            try:
+                result = func(*args, **kwargs)
+                self._on_success()
+                return result
+
+            except self.expected_exceptions as e:
+                self._on_failure()
+                raise
+
+        return wrapper
+
+    def _should_attempt_reset(self) -> bool:
+        """Check if enough time has passed to attempt reset."""
+        if self.last_failure_time is None:
+            return True
+        return datetime.now() >= self.last_failure_time + self.timeout
+
+    def _on_success(self):
+        """Handle successful call."""
+        if self.state == 'half_open':
+            # Success in half-open state, close the circuit
+            logger.info("Circuit breaker CLOSED after successful recovery")
+            self.state = 'closed'
+
+        # Reset failure tracking
+        self.failure_count = 0
+        self.last_failure_time = None
+
+    def _on_failure(self):
+        """Handle failed call."""
+        self.failure_count += 1
+        self.last_failure_time = datetime.now()
+
+        if self.failure_count >= self.failure_threshold:
+            if self.state != 'open':
+                logger.error(
+                    f"Circuit breaker OPENED after {self.failure_count} consecutive failures. "
+                    f"Will retry in {self.timeout.total_seconds():.0f}s"
+                )
+            self.state = 'open'
+        else:
+            logger.warning(
+                f"Circuit breaker failure count: {self.failure_count}/{self.failure_threshold}"
+            )
+
+    def reset(self):
+        """Manually reset the circuit breaker to closed state."""
+        logger.info("Circuit breaker manually reset to CLOSED state")
+        self.failure_count = 0
+        self.last_failure_time = None
+        self.state = 'closed'
+
+    def get_state(self) -> Dict[str, Any]:
+        """
+        Get current circuit breaker state.
+
+        Returns:
+            Dictionary with state information
+        """
+        return {
+            'state': self.state,
+            'failure_count': self.failure_count,
+            'failure_threshold': self.failure_threshold,
+            'last_failure': self.last_failure_time.isoformat() if self.last_failure_time else None,
+            'timeout_seconds': self.timeout.total_seconds()
+        }
+
+    # Context manager support
+    def __enter__(self):
+        """Context manager entry."""
+        if self.state == 'open' and not self._should_attempt_reset():
+            time_remaining = (
+                self.last_failure_time + self.timeout - datetime.now()
+            ).total_seconds()
+            raise CircuitBreakerOpenError(
+                f"Circuit breaker OPEN. Retry in {time_remaining:.0f}s"
+            )
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        if exc_type is None:
+            # Success
+            self._on_success()
+            return False
+        elif isinstance(exc_val, self.expected_exceptions):
+            # Expected failure
+            self._on_failure()
+            return False  # Re-raise the exception
+        else:
+            # Unexpected exception, don't count as failure
+            return False
+
+
 # Example usage and testing
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
@@ -195,3 +380,45 @@ if __name__ == "__main__":
         result = example_api_call(fail_count=10)
     except Exception as e:
         print(f"Failed as expected: {e}")
+
+    # Circuit Breaker Tests
+    print("\n" + "="*60)
+    print("CIRCUIT BREAKER TESTS")
+    print("="*60)
+
+    breaker = CircuitBreaker(failure_threshold=3, timeout_seconds=2)
+
+    @breaker.call
+    def unstable_api(should_fail: bool = False):
+        """Simulates an unstable API."""
+        if should_fail:
+            raise Exception("API Error")
+        return "Success"
+
+    # Test 1: Normal operation (circuit closed)
+    print("\nTest 1: Circuit CLOSED - successful calls")
+    for i in range(2):
+        result = unstable_api(should_fail=False)
+        print(f"  Call {i+1}: {result}, State: {breaker.get_state()['state']}")
+
+    # Test 2: Trigger circuit breaker (3 failures)
+    print("\nTest 2: Triggering circuit breaker with failures")
+    for i in range(3):
+        try:
+            unstable_api(should_fail=True)
+        except Exception as e:
+            print(f"  Call {i+1} failed: {e}, State: {breaker.get_state()['state']}")
+
+    # Test 3: Circuit OPEN - calls fail immediately
+    print("\nTest 3: Circuit OPEN - immediate failures")
+    try:
+        unstable_api(should_fail=False)
+    except CircuitBreakerOpenError as e:
+        print(f"  Circuit open (as expected): {e}")
+
+    # Test 4: Wait for timeout and recovery
+    print("\nTest 4: Waiting for timeout (2 seconds)...")
+    time.sleep(2.1)
+    print("  Attempting call (circuit should enter HALF_OPEN)")
+    result = unstable_api(should_fail=False)
+    print(f"  Success! {result}, State: {breaker.get_state()['state']}")

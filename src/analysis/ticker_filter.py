@@ -110,7 +110,7 @@ class TickerFilter:
         Returns:
             Filtered list of tickers that meet basic criteria
         """
-        logger.info(f"🔍 Pre-filtering {len(tickers)} tickers (market cap ≥ ${min_market_cap/1e6:.0f}M, volume ≥ {min_avg_volume:,})...")
+        logger.info(f"Pre-filtering {len(tickers)} tickers (market cap ≥ ${min_market_cap/1e6:.0f}M, volume ≥ {min_avg_volume:,})...")
 
         if not tickers:
             return []
@@ -119,7 +119,6 @@ class TickerFilter:
 
         if use_batch:
             # OPTIMIZED: Batch fetch all tickers at once (30-50% faster than individual calls)
-            logger.debug(f"   Using batch fetch for {len(tickers)} tickers...")
             tickers_str = ' '.join(tickers)
 
             try:
@@ -129,7 +128,6 @@ class TickerFilter:
                     try:
                         stock = tickers_obj.tickers.get(ticker)
                         if not stock:
-                            logger.debug(f"  {ticker}: Filtered (not found in batch)")
                             continue
 
                         # Get info dict - needed for both market cap and volume
@@ -140,22 +138,18 @@ class TickerFilter:
 
                         # Check market cap
                         if market_cap < min_market_cap:
-                            logger.debug(f"  {ticker}: Filtered (market cap ${market_cap/1e6:.0f}M < ${min_market_cap/1e6:.0f}M)")
                             continue
 
                         # Check average volume
                         if avg_volume < min_avg_volume:
-                            logger.debug(f"  {ticker}: Filtered (volume {avg_volume:,} < {min_avg_volume:,})")
                             continue
 
                         # Cache the info dict to avoid re-fetching in get_ticker_data()
                         # This saves 75 duplicate API calls (one per ticker that passes pre-filter)
                         self._info_cache.set(ticker, info)
-                        logger.debug(f"  {ticker}: ✓ Passed pre-filter (${market_cap/1e6:.0f}M, {avg_volume:,} vol) [cached info]")
                         filtered.append(ticker)
 
                     except Exception as e:
-                        logger.debug(f"  {ticker}: Filtered (error: {e})")
                         continue
 
             except Exception as e:
@@ -165,7 +159,6 @@ class TickerFilter:
 
         else:
             # FALLBACK: Individual fetching (slower but more reliable for small batches)
-            logger.debug(f"   Using individual fetch for {len(tickers)} tickers...")
             for ticker in tickers:
                 try:
                     time.sleep(RATE_LIMIT_DELAY_SECONDS)  # Delay to avoid rate limits
@@ -179,27 +172,23 @@ class TickerFilter:
 
                     # Check market cap
                     if market_cap < min_market_cap:
-                        logger.debug(f"  {ticker}: Filtered (market cap ${market_cap/1e6:.0f}M < ${min_market_cap/1e6:.0f}M)")
                         continue
 
                     # Check average volume
                     if avg_volume < min_avg_volume:
-                        logger.debug(f"  {ticker}: Filtered (volume {avg_volume:,} < {min_avg_volume:,})")
                         continue
 
                     # Cache the info dict to avoid re-fetching in get_ticker_data()
                     self._info_cache.set(ticker, info)
-                    logger.debug(f"  {ticker}: ✓ Passed pre-filter (${market_cap/1e6:.0f}M, {avg_volume:,} vol) [cached info]")
                     filtered.append(ticker)
 
                 except Exception as e:
-                    logger.debug(f"  {ticker}: Filtered (error: {e})")
                     continue
 
-        logger.info(f"✅ Pre-filter: {len(filtered)}/{len(tickers)} tickers passed ({len(tickers) - len(filtered)} filtered out)")
+        logger.info(f"Pre-filter: {len(filtered)}/{len(tickers)} tickers passed ({len(tickers) - len(filtered)} filtered out)")
         # Each filtered ticker saves ~3 expensive calls (5d history, 2y history, options analysis)
         # We already paid 1 info call per ticker, but that info is cached for reuse
-        logger.info(f"   Saved {((len(tickers) - len(filtered)) * 3):.0f} expensive API calls (history + options analysis avoided)")
+        logger.info(f"Saved {((len(tickers) - len(filtered)) * 3):.0f} expensive API calls (history + options analysis avoided)")
 
         return filtered
 
