@@ -298,3 +298,215 @@ class TestRedditScraperIntegration:
         assert result['sentiment_score'] == 1.0  # Capped positive sentiment
         assert len(result['top_posts']) == 5
         assert result['top_posts'][0]['score'] == 500  # Highest score first
+
+
+class TestRedditScraperCaching:
+    """Test caching functionality for Reddit scraper."""
+
+    @patch('src.reddit_scraper.praw.Reddit')
+    def test_cache_initialized_on_init(self, mock_reddit_class):
+        """Test that cache is initialized when scraper is created."""
+        scraper = RedditScraper()
+
+        assert hasattr(scraper, '_cache')
+        assert scraper._cache is not None
+        assert scraper._cache.max_size == 100
+        assert scraper._cache.ttl is not None
+
+    @patch('src.reddit_scraper.praw.Reddit')
+    def test_cache_hit_returns_cached_result(self, mock_reddit_class):
+        """Test that cached results are returned without calling Reddit API."""
+        scraper = RedditScraper()
+        mock_reddit = mock_reddit_class.return_value
+        scraper.reddit = mock_reddit
+
+        def create_mock_post(title, score):
+            post = Mock()
+            post.title = title
+            post.score = score
+            post.num_comments = 10
+            post.created_utc = datetime.now().timestamp()
+            return post
+
+        # Mock Reddit API to return posts
+        mock_subreddit = Mock()
+        mock_subreddit.search.return_value = [
+            create_mock_post("First call post", 100),
+        ]
+        mock_reddit.subreddit.return_value = mock_subreddit
+
+        # First call - should hit Reddit API
+        result1 = scraper.get_ticker_sentiment('NVDA', subreddits=['wallstreetbets'])
+
+        # Verify API was called
+        assert mock_subreddit.search.called
+        assert result1['posts_found'] == 1
+        call_count_1 = mock_subreddit.search.call_count
+
+        # Second call - should use cache
+        result2 = scraper.get_ticker_sentiment('NVDA', subreddits=['wallstreetbets'])
+
+        # Verify API was NOT called again (cache hit)
+        assert mock_subreddit.search.call_count == call_count_1, "API should not be called on cache hit"
+        assert result2 == result1, "Cached result should match original"
+
+    @patch('src.reddit_scraper.praw.Reddit')
+    def test_cache_miss_fetches_new_data(self, mock_reddit_class):
+        """Test that different parameters cause cache miss."""
+        scraper = RedditScraper()
+        mock_reddit = mock_reddit_class.return_value
+        scraper.reddit = mock_reddit
+
+        def create_mock_post(title, score):
+            post = Mock()
+            post.title = title
+            post.score = score
+            post.num_comments = 10
+            post.created_utc = datetime.now().timestamp()
+            return post
+
+        mock_subreddit = Mock()
+        mock_subreddit.search.return_value = [
+            create_mock_post("Test post", 100),
+        ]
+        mock_reddit.subreddit.return_value = mock_subreddit
+
+        # First call with NVDA
+        result1 = scraper.get_ticker_sentiment('NVDA', subreddits=['wallstreetbets'])
+        call_count_1 = mock_subreddit.search.call_count
+
+        # Second call with different ticker - should cause cache miss
+        result2 = scraper.get_ticker_sentiment('TSLA', subreddits=['wallstreetbets'])
+
+        # Verify API was called again
+        assert mock_subreddit.search.call_count > call_count_1, "Different ticker should cause cache miss"
+
+    @patch('src.reddit_scraper.praw.Reddit')
+    def test_cache_key_includes_parameters(self, mock_reddit_class):
+        """Test that cache key varies with different parameters."""
+        scraper = RedditScraper()
+        mock_reddit = mock_reddit_class.return_value
+        scraper.reddit = mock_reddit
+
+        def create_mock_post(title, score):
+            post = Mock()
+            post.title = title
+            post.score = score
+            post.num_comments = 10
+            post.created_utc = datetime.now().timestamp()
+            return post
+
+        mock_subreddit = Mock()
+        mock_subreddit.search.return_value = [
+            create_mock_post("Test post", 100),
+        ]
+        mock_reddit.subreddit.return_value = mock_subreddit
+
+        # Same ticker but different subreddits should miss cache
+        result1 = scraper.get_ticker_sentiment('NVDA', subreddits=['wallstreetbets'])
+        call_count_1 = mock_subreddit.search.call_count
+
+        result2 = scraper.get_ticker_sentiment('NVDA', subreddits=['stocks'])
+
+        # Should have called API again
+        assert mock_subreddit.search.call_count > call_count_1
+
+    @patch('src.reddit_scraper.praw.Reddit')
+    def test_empty_results_cached(self, mock_reddit_class):
+        """Test that empty results are also cached."""
+        scraper = RedditScraper()
+        mock_reddit = mock_reddit_class.return_value
+        scraper.reddit = mock_reddit
+
+        # Mock empty results
+        mock_subreddit = Mock()
+        mock_subreddit.search.return_value = []
+        mock_reddit.subreddit.return_value = mock_subreddit
+
+        # First call - should hit API
+        result1 = scraper.get_ticker_sentiment('RARE', subreddits=['wallstreetbets'])
+        assert result1['posts_found'] == 0
+        call_count_1 = mock_subreddit.search.call_count
+
+        # Second call - should use cache
+        result2 = scraper.get_ticker_sentiment('RARE', subreddits=['wallstreetbets'])
+
+        # Verify API was NOT called again
+        assert mock_subreddit.search.call_count == call_count_1, "Empty results should be cached"
+        assert result2['posts_found'] == 0
+
+    @patch('src.reddit_scraper.praw.Reddit')
+    def test_cache_ttl_respected(self, mock_reddit_class):
+        """Test that cache respects TTL (time-to-live)."""
+        scraper = RedditScraper()
+        mock_reddit = mock_reddit_class.return_value
+        scraper.reddit = mock_reddit
+
+        def create_mock_post(title, score):
+            post = Mock()
+            post.title = title
+            post.score = score
+            post.num_comments = 10
+            post.created_utc = datetime.now().timestamp()
+            return post
+
+        mock_subreddit = Mock()
+        mock_subreddit.search.return_value = [
+            create_mock_post("Test post", 100),
+        ]
+        mock_reddit.subreddit.return_value = mock_subreddit
+
+        # First call
+        result1 = scraper.get_ticker_sentiment('NVDA', subreddits=['wallstreetbets'])
+        call_count_1 = mock_subreddit.search.call_count
+
+        # Mock cache to expire entry
+        cache_key = list(scraper._cache.cache.keys())[0]
+        old_value, old_timestamp = scraper._cache.cache[cache_key]
+
+        # Set timestamp to 61 minutes ago (beyond 60-min TTL)
+        from datetime import timedelta
+        expired_timestamp = old_timestamp - timedelta(minutes=61)
+        scraper._cache.cache[cache_key] = (old_value, expired_timestamp)
+
+        # Second call - should hit API again because cache expired
+        result2 = scraper.get_ticker_sentiment('NVDA', subreddits=['wallstreetbets'])
+
+        # Verify API was called again
+        assert mock_subreddit.search.call_count > call_count_1, "Expired cache should cause new API call"
+
+    @patch('src.reddit_scraper.praw.Reddit')
+    def test_cache_stats_tracking(self, mock_reddit_class):
+        """Test that cache tracks hits and misses."""
+        scraper = RedditScraper()
+        mock_reddit = mock_reddit_class.return_value
+        scraper.reddit = mock_reddit
+
+        def create_mock_post(title, score):
+            post = Mock()
+            post.title = title
+            post.score = score
+            post.num_comments = 10
+            post.created_utc = datetime.now().timestamp()
+            return post
+
+        mock_subreddit = Mock()
+        mock_subreddit.search.return_value = [
+            create_mock_post("Test post", 100),
+        ]
+        mock_reddit.subreddit.return_value = mock_subreddit
+
+        # Get initial stats
+        initial_stats = scraper._cache.stats()
+
+        # First call - cache miss
+        result1 = scraper.get_ticker_sentiment('NVDA', subreddits=['wallstreetbets'])
+
+        # Second call - cache hit
+        result2 = scraper.get_ticker_sentiment('NVDA', subreddits=['wallstreetbets'])
+
+        # Check stats
+        final_stats = scraper._cache.stats()
+
+        assert final_stats['hits'] > initial_stats['hits'], "Cache hits should increase"
+        assert final_stats['size'] > 0, "Cache should have entries"

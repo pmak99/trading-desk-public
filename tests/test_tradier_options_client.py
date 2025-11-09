@@ -403,3 +403,134 @@ class TestTradierOptionsClient:
         assert result['iv_rank'] == 0
         assert result['current_iv'] == 0
         assert result['expected_move_pct'] == 0
+
+
+class TestTradierConnectionPooling:
+    """Test connection pooling functionality."""
+
+    @pytest.fixture
+    def client(self):
+        """Create Tradier client with mocked environment."""
+        with patch.dict('os.environ', {
+            'TRADIER_ACCESS_TOKEN': 'test_token',
+            'TRADIER_ENDPOINT': 'https://sandbox.tradier.com'
+        }):
+            return TradierOptionsClient()
+
+    def test_session_initialized_on_init(self, client):
+        """Test that requests.Session is initialized."""
+        assert hasattr(client, 'session')
+        assert client.session is not None
+
+    def test_session_is_requests_session(self, client):
+        """Test that session is a requests.Session instance."""
+        import requests
+        assert isinstance(client.session, requests.Session)
+
+    def test_session_headers_configured(self, client):
+        """Test that session has headers configured."""
+        assert 'Authorization' in client.session.headers
+        assert client.session.headers['Authorization'] == 'Bearer test_token'
+        assert client.session.headers['Accept'] == 'application/json'
+
+    def test_get_quote_uses_session(self, client):
+        """Test that _get_quote uses session instead of requests.get."""
+        with patch.object(client.session, 'get') as mock_session_get:
+            mock_response = Mock()
+            mock_response.json.return_value = {
+                'quotes': {
+                    'quote': {
+                        'symbol': 'NVDA',
+                        'last': 195.50
+                    }
+                }
+            }
+            mock_response.raise_for_status = Mock()
+            mock_session_get.return_value = mock_response
+
+            price = client._get_quote('NVDA')
+
+            assert price == 195.50
+            mock_session_get.assert_called_once()
+            args, kwargs = mock_session_get.call_args
+            assert 'params' in kwargs
+            assert kwargs['params']['symbols'] == 'NVDA'
+
+    def test_fetch_options_chain_uses_session(self, client):
+        """Test that _fetch_options_chain uses session."""
+        with patch.object(client.session, 'get') as mock_session_get:
+            mock_response = Mock()
+            mock_response.json.return_value = {
+                'options': {
+                    'option': [
+                        {
+                            'symbol': 'NVDA241115C00195000',
+                            'option_type': 'call',
+                            'strike': 195.0,
+                            'bid': 8.50,
+                            'ask': 8.70
+                        }
+                    ]
+                }
+            }
+            mock_response.raise_for_status = Mock()
+            mock_session_get.return_value = mock_response
+
+            chain = client._fetch_options_chain('NVDA', '2024-11-15')
+
+            assert chain is not None
+            assert len(chain) == 1
+            mock_session_get.assert_called_once()
+
+    def test_get_nearest_weekly_expiration_uses_session(self, client):
+        """Test that _get_nearest_weekly_expiration uses session."""
+        with patch.object(client.session, 'get') as mock_session_get:
+            mock_response = Mock()
+            mock_response.json.return_value = {
+                'expirations': {
+                    'date': [
+                        (datetime.now().date() + timedelta(days=7)).strftime('%Y-%m-%d'),
+                        (datetime.now().date() + timedelta(days=14)).strftime('%Y-%m-%d'),
+                    ]
+                }
+            }
+            mock_response.raise_for_status = Mock()
+            mock_session_get.return_value = mock_response
+
+            expiration = client._get_nearest_weekly_expiration('NVDA')
+
+            assert expiration is not None
+            mock_session_get.assert_called_once()
+
+    def test_session_reused_across_multiple_calls(self, client):
+        """Test that the same session instance is reused."""
+        with patch.object(client.session, 'get') as mock_session_get:
+            mock_response = Mock()
+            mock_response.json.return_value = {
+                'quotes': {
+                    'quote': {
+                        'symbol': 'TEST',
+                        'last': 100.00
+                    }
+                }
+            }
+            mock_response.raise_for_status = Mock()
+            mock_session_get.return_value = mock_response
+
+            session_before = client.session
+
+            client._get_quote('TEST')
+            session_after1 = client.session
+
+            client._get_quote('TEST')
+            session_after2 = client.session
+
+            assert session_before is session_after1
+            assert session_after1 is session_after2
+            assert mock_session_get.call_count == 2
+
+    def test_session_has_connection_adapters(self, client):
+        """Test that session has HTTP adapters for connection pooling."""
+        assert hasattr(client.session, 'adapters')
+        assert len(client.session.adapters) > 0
+        assert 'http://' in client.session.adapters or 'https://' in client.session.adapters
