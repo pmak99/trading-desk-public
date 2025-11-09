@@ -158,6 +158,93 @@ class EarningsAnalyzer:
         5. Output formatted research report
     """
 
+    @staticmethod
+    def validate_ticker(ticker: str) -> str:
+        """
+        Validate ticker symbol format.
+
+        Args:
+            ticker: Ticker symbol to validate
+
+        Returns:
+            Uppercase, stripped ticker
+
+        Raises:
+            ValueError: If ticker format is invalid
+        """
+        ticker = ticker.upper().strip()
+
+        if not ticker:
+            raise ValueError("Ticker cannot be empty")
+
+        if not ticker.isalpha():
+            raise ValueError(
+                f"Invalid ticker format: '{ticker}'. "
+                f"Tickers must contain only letters (e.g., AAPL, MSFT, GOOGL)"
+            )
+
+        if len(ticker) > 5:
+            raise ValueError(
+                f"Invalid ticker format: '{ticker}'. "
+                f"Tickers must be 1-5 characters (got {len(ticker)})"
+            )
+
+        return ticker
+
+    @staticmethod
+    def validate_date(date_str: Optional[str]) -> Optional[str]:
+        """
+        Validate date format (YYYY-MM-DD).
+
+        Args:
+            date_str: Date string to validate, or None
+
+        Returns:
+            Valid date string or None
+
+        Raises:
+            ValueError: If date format is invalid
+        """
+        if date_str is None:
+            return None
+
+        try:
+            # Attempt to parse
+            datetime.strptime(date_str, '%Y-%m-%d')
+            return date_str
+        except ValueError:
+            raise ValueError(
+                f"Invalid date format: '{date_str}'. "
+                f"Expected format: YYYY-MM-DD (e.g., 2025-11-08)"
+            )
+
+    @staticmethod
+    def validate_max_analyze(max_analyze: int) -> int:
+        """
+        Validate max_analyze parameter.
+
+        Args:
+            max_analyze: Maximum number of tickers to analyze
+
+        Returns:
+            Validated max_analyze value
+
+        Raises:
+            ValueError: If value is invalid
+        """
+        if max_analyze < 1:
+            raise ValueError(
+                f"max_analyze must be >= 1 (got {max_analyze})"
+            )
+
+        if max_analyze > 50:
+            logger.warning(
+                f"max_analyze={max_analyze} is very high. "
+                f"This may be slow and expensive (~${0.05 * max_analyze:.2f})"
+            )
+
+        return max_analyze
+
     def __init__(
         self,
         earnings_calendar = None,
@@ -900,7 +987,14 @@ For more information, see README.md
     if '--tickers' in sys.argv:
         idx = sys.argv.index('--tickers')
         if idx + 1 < len(sys.argv):
-            ticker_list = sys.argv[idx + 1].upper().replace(' ', '').split(',')
+            raw_tickers = sys.argv[idx + 1].upper().replace(' ', '').split(',')
+            # Validate each ticker
+            try:
+                ticker_list = [EarningsAnalyzer.validate_ticker(t) for t in raw_tickers]
+            except ValueError as e:
+                logger.error(f"❌ {e}")
+                logger.info("💡 Example: python -m src.analysis.earnings_analyzer --tickers \"AAPL,MSFT,GOOGL\"")
+                exit(1)
 
     # Remove flags from args
     flags_to_remove = ['--yes', '-y', '--tickers', '--override', '--format']
@@ -925,6 +1019,14 @@ For more information, see README.md
     if ticker_list:
         earnings_date = args[0] if len(args) > 0 else None
 
+        # Validate date format
+        try:
+            earnings_date = EarningsAnalyzer.validate_date(earnings_date)
+        except ValueError as e:
+            logger.error(f"❌ {e}")
+            logger.info("💡 Example: python -m src.analysis.earnings_analyzer --tickers \"NVDA\" 2025-11-08")
+            exit(1)
+
         logger.info(f"\n📋 TICKER LIST MODE")
         logger.info(f"Tickers: {', '.join(ticker_list)}")
         logger.info(f"Earnings Date: {earnings_date or 'next trading day (default)'}")
@@ -947,12 +1049,28 @@ For more information, see README.md
     # CALENDAR SCANNING MODE (default)
     else:
         target_date = args[0] if len(args) > 0 else None
-        max_analyze = int(args[1]) if len(args) > 1 else 2
 
+        # Parse and validate max_analyze
+        try:
+            max_analyze = int(args[1]) if len(args) > 1 else 2
+            max_analyze = EarningsAnalyzer.validate_max_analyze(max_analyze)
+        except ValueError as e:
+            logger.error(f"❌ {e}")
+            logger.info("💡 max_analyze must be a positive integer (e.g., 2, 5, 10)")
+            exit(1)
+
+        # Validate date
         if target_date is None:
             # Use Eastern timezone for market date
             target_date = get_market_date()
             logger.info(f"No date specified, using today: {target_date}")
+        else:
+            try:
+                target_date = EarningsAnalyzer.validate_date(target_date)
+            except ValueError as e:
+                logger.error(f"❌ {e}")
+                logger.info("💡 Example: python -m src.analysis.earnings_analyzer 2025-11-08 5")
+                exit(1)
 
         logger.info(f"\nAnalyzing up to {max_analyze} tickers for {target_date}")
         if override_daily_limit:
