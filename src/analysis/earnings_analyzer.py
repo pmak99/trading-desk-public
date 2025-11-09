@@ -44,8 +44,8 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str, bool, str]) -> Dict:
     """
     Standalone function for multiprocessing - analyzes a single ticker.
 
-    FIXED: Now accepts shared config_path to ensure all workers use same SQLite DB
-    for budget tracking (prevents race condition).
+    Accepts shared config_path to ensure all workers use same SQLite DB
+    for budget tracking.
 
     Args:
         args: Tuple of (ticker, ticker_data, earnings_date, override_daily_limit, config_path)
@@ -58,8 +58,7 @@ def _analyze_single_ticker(args: Tuple[str, Dict, str, bool, str]) -> Dict:
     try:
         logger.info(f"📊 {ticker}: Starting analysis (Score: {ticker_data.get('score', 0):.1f}/100, IV: {ticker_data.get('options_data', {}).get('current_iv', 'N/A')}%)")
 
-        # FIXED: Use shared UsageTracker via config path (all workers share same SQLite DB)
-        # SQLite with WAL mode handles concurrent access safely
+        # Use shared UsageTracker via config path
         from src.core.usage_tracker import UsageTracker
         shared_tracker = UsageTracker(config_path=config_path)
 
@@ -214,7 +213,7 @@ class EarningsAnalyzer:
                 # Validate format YYYY-MM-DD
                 parsed_date = datetime.strptime(earnings_date, '%Y-%m-%d')
 
-                # FIXED: Use Eastern timezone for market date comparison
+                # Use Eastern timezone for market date comparison
                 now_et = get_eastern_now()
 
                 # Warn if date is in the past
@@ -232,7 +231,7 @@ class EarningsAnalyzer:
                 logger.error(f"Invalid earnings date format: {earnings_date}. Expected YYYY-MM-DD")
                 raise ValueError(f"Invalid earnings date format: {earnings_date}. Expected YYYY-MM-DD") from e
         else:
-            # FIXED: Default to next trading day in Eastern time
+            # Default to next trading day in Eastern time
             default_date = (get_eastern_now() + timedelta(days=1)).strftime('%Y-%m-%d')
             logger.info(f"No earnings date provided, using next trading day: {default_date}")
             return default_date
@@ -283,7 +282,7 @@ class EarningsAnalyzer:
         if not tickers:
             return tickers_data, failed_tickers
 
-        # FIXED: Batch fetch with error handling and fallback to individual fetching
+        # Batch fetch with error handling and fallback to individual fetching
         logger.info(f"📥 Batch fetching data for {len(tickers)} tickers...")
         tickers_str = ' '.join(tickers)
 
@@ -330,7 +329,7 @@ class EarningsAnalyzer:
                 failed_tickers.append(ticker)
                 continue
 
-        # STEP 2: OPTIMIZED - Fetch options data in PARALLEL (5-10x speedup)
+        # STEP 2 - Fetch options data in PARALLEL (5-10x speedup)
         logger.info(f"📊 Fetching options data for {len(basic_ticker_data)} tickers in parallel...")
         tickers_data = self._fetch_options_parallel(basic_ticker_data, earnings_date, failed_tickers)
 
@@ -425,7 +424,7 @@ class EarningsAnalyzer:
         """
         logger.info(f"Running full analysis on {len(tickers_data)} tickers...")
 
-        # FIXED: Pass shared config path for budget tracking across workers
+        # Pass shared config path for budget tracking across workers
         config_path = "config/budget.yaml"
 
         # Prepare arguments for parallel processing
@@ -589,7 +588,7 @@ class EarningsAnalyzer:
             - ticker_analyses: List of full analyses for top tickers
         """
         if target_date is None:
-            # FIXED: Use Eastern timezone for market date
+            # Use Eastern timezone for market date
             target_date = get_market_date()
 
         logger.info(f"Analyzing earnings for {target_date}...")
@@ -610,7 +609,7 @@ class EarningsAnalyzer:
                 'error': 'No earnings found'
             }
 
-        # FIXED: Filter out already-reported earnings using timezone utility
+        # Filter out already-reported earnings using timezone utility
         now_et = get_eastern_now()
 
         earnings_list_unfiltered = week_earnings[target_date]
@@ -911,7 +910,7 @@ For more information, see README.md
         max_analyze = int(args[1]) if len(args) > 1 else 2
 
         if target_date is None:
-            # FIXED: Use Eastern timezone for market date
+            # Use Eastern timezone for market date
             target_date = get_market_date()
             logger.info(f"No date specified, using today: {target_date}")
 

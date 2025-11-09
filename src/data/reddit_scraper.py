@@ -30,8 +30,7 @@ class RedditScraper:
             user_agent='earnings-bot/1.0'
         )
 
-        # OPTIMIZED: Cache Reddit results (60-min TTL, instant repeat tickers)
-        # Prevents duplicate scraping within same hour
+        # Cache Reddit results with 60-minute TTL
         self._cache = LRUCache(max_size=100, ttl_minutes=60)
 
     def _search_subreddit(
@@ -102,8 +101,7 @@ class RedditScraper:
         """
         subreddits = subreddits or ['wallstreetbets', 'stocks', 'options']
 
-        # OPTIMIZED: Check cache first (60-min TTL)
-        # Build cache key that includes parameters
+        # Check cache first
         cache_key = f"reddit_{ticker}_{'-'.join(sorted(subreddits))}_{limit}_{analyze_content}"
         cached_result = self._cache.get(cache_key)
         if cached_result:
@@ -171,7 +169,7 @@ class RedditScraper:
             except Exception as e:
                 logger.warning(f"{ticker}: AI content analysis failed, using score-based: {e}")
 
-        # OPTIMIZED: Cache result for 60 minutes
+        # Cache result
         self._cache.set(cache_key, result)
 
         return result

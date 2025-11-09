@@ -49,8 +49,7 @@ class TradierOptionsClient:
             'Accept': 'application/json'
         }
 
-        # OPTIMIZED: Use requests.Session for connection pooling (10-20% speedup)
-        # Reuses TCP connections instead of creating new ones for each request
+        # Use requests.Session for connection pooling
         self.session = requests.Session()
         self.session.headers.update(self.headers)
 
@@ -65,8 +64,7 @@ class TradierOptionsClient:
         """
         Get comprehensive options data including real IV Rank.
 
-        OPTIMIZED: Fetches options chain ONCE and extracts all needed metrics.
-        Previous version made 2 duplicate API calls for the same chain.
+        Fetches options chain once and extracts all needed metrics.
 
         Args:
             ticker: Stock ticker symbol
@@ -223,8 +221,7 @@ class TradierOptionsClient:
                 # Tradier returns IV as decimal (e.g., 1.23 = 123%, 0.50 = 50%)
                 current_iv = atm_call['greeks'].get('mid_iv', 0) * 100
 
-            # FIXED: Validate IV is in reasonable range (1-300%)
-            # Bad Tradier data (0%, 500%+) should not pass through
+            # Validate IV is in reasonable range (1-300%)
             if current_iv > 0 and (current_iv < 1 or current_iv > 300):
                 logger.warning(f"{ticker}: Invalid ATM call IV {current_iv:.1f}% from Tradier (expected 1-300%)")
 
@@ -250,7 +247,7 @@ class TradierOptionsClient:
                 # Calculate IV Rank (percentile in 52-week range)
                 iv_rank = self.iv_tracker.calculate_iv_rank(ticker, current_iv)
 
-                # FIXED: Auto-trigger backfill if IV rank = 0 (no historical data)
+                # Auto-trigger backfill if IV rank is 0 (no historical data)
                 if iv_rank == 0:
                     logger.info(f"{ticker}: No IV history detected (IV Rank = 0%), attempting backfill...")
                     try:
@@ -337,7 +334,6 @@ class TradierOptionsClient:
 
             if 'expirations' in data and 'date' in data['expirations']:
                 dates = data['expirations']['date']
-                # FIXED: Use Eastern timezone for market date
                 today = get_eastern_now().date()
 
                 # Parse earnings date if provided
