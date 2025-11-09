@@ -26,6 +26,8 @@ import yaml
 from src.data.calendars.factory import EarningsCalendarFactory
 from src.analysis.ticker_filter import TickerFilter
 from src.analysis.report_formatter import ReportFormatter
+from src.analysis.formatters.json_formatter import JSONFormatter
+from src.analysis.formatters.csv_formatter import CSVFormatter
 from src.ai.sentiment_analyzer import SentimentAnalyzer
 from src.ai.strategy_generator import StrategyGenerator
 from src.core.timezone_utils import get_eastern_now, get_market_date
@@ -715,17 +717,23 @@ class EarningsAnalyzer:
             'failed_analyses': failed_analyses
         }
 
-    def generate_report(self, analysis_result: Dict) -> str:
+    def generate_report(self, analysis_result: Dict, format: str = 'text') -> str:
         """
         Generate formatted research report.
 
         Args:
             analysis_result: Result from analyze_daily_earnings() or analyze_specific_tickers()
+            format: Output format - 'text', 'json', or 'csv' (default: 'text')
 
         Returns:
-            Formatted text report
+            Formatted report in specified format
         """
-        return ReportFormatter.format_analysis_report(analysis_result)
+        if format == 'json':
+            return JSONFormatter.format(analysis_result)
+        elif format == 'csv':
+            return CSVFormatter.format(analysis_result)
+        else:  # default to text
+            return ReportFormatter.format_analysis_report(analysis_result)
 
     @staticmethod
     def cleanup_old_reports(days: int = 15) -> None:
@@ -810,6 +818,7 @@ OPTIONS:
   -h, --help            Show this help message and exit
   -y, --yes             Skip confirmation prompt
   --override            Bypass daily API limits (hard caps still enforced)
+  --format FORMAT       Output format: text, json, or csv (default: text)
 
 EXAMPLES:
   # Analyze specific tickers with confirmation
@@ -823,6 +832,12 @@ EXAMPLES:
 
   # Use override mode to bypass daily limits
   python -m src.analysis.earnings_analyzer --tickers "NVDA,META" 2025-11-05 --yes --override
+
+  # Export as JSON for automation
+  python -m src.analysis.earnings_analyzer --tickers "NVDA" 2025-11-05 --yes --format json > output.json
+
+  # Export as CSV for Excel
+  python -m src.analysis.earnings_analyzer --tickers "NVDA,META" 2025-11-05 --yes --format csv > output.csv
 
 MODES:
   Ticker List Mode:
@@ -869,6 +884,17 @@ For more information, see README.md
     skip_confirm = '--yes' in sys.argv or '-y' in sys.argv
     override_daily_limit = '--override' in sys.argv
 
+    # Parse output format
+    output_format = 'text'  # default
+    if '--format' in sys.argv:
+        idx = sys.argv.index('--format')
+        if idx + 1 < len(sys.argv):
+            output_format = sys.argv[idx + 1].lower()
+            if output_format not in ['text', 'json', 'csv']:
+                logger.error(f"❌ Invalid format: {output_format}")
+                logger.info("💡 Valid formats: text, json, csv")
+                exit(1)
+
     # Check for ticker list mode
     ticker_list = None
     if '--tickers' in sys.argv:
@@ -877,7 +903,21 @@ For more information, see README.md
             ticker_list = sys.argv[idx + 1].upper().replace(' ', '').split(',')
 
     # Remove flags from args
-    args = [arg for arg in sys.argv[1:] if arg not in ['--yes', '-y', '--tickers', '--override'] and not (ticker_list and arg.upper().replace(' ', '') == ','.join(ticker_list))]
+    flags_to_remove = ['--yes', '-y', '--tickers', '--override', '--format']
+    args = []
+    skip_next = False
+    for i, arg in enumerate(sys.argv[1:]):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in flags_to_remove:
+            skip_next = True  # Skip the next arg if it's a flag value
+            continue
+        if ticker_list and arg.upper().replace(' ', '') == ','.join(ticker_list):
+            continue
+        if arg == output_format and i > 0 and sys.argv[i] == '--format':
+            continue
+        args.append(arg)
 
     analyzer = EarningsAnalyzer()
 
@@ -932,13 +972,17 @@ For more information, see README.md
         result = analyzer.analyze_daily_earnings(target_date, max_analyze, override_daily_limit)
 
     # Generate and display report
-    report = analyzer.generate_report(result)
-    logger.info("\n\n")
-    logger.info(report)
+    report = analyzer.generate_report(result, format=output_format)
+
+    # Only display to console for text format
+    if output_format == 'text':
+        logger.info("\n\n")
+        logger.info(report)
 
     # Save to file with timestamp to avoid overwriting
     timestamp = datetime.now().strftime('%H%M%S')
-    output_file = f"data/earnings_analysis_{result['date']}_{timestamp}.txt"
+    file_extension = {'text': 'txt', 'json': 'json', 'csv': 'csv'}[output_format]
+    output_file = f"data/earnings_analysis_{result['date']}_{timestamp}.{file_extension}"
     with open(output_file, 'w') as f:
         f.write(report)
 
