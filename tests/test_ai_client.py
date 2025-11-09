@@ -10,8 +10,8 @@ from src.core.usage_tracker import UsageTracker, BudgetExceededError
 class TestAIClientRetryLogic:
     """Test retry logic with exponential backoff."""
 
-    @patch('src.ai_client.requests.post')
-    @patch('src.ai_client.time.sleep')
+    @patch('src.ai.client.requests.post')
+    @patch('src.ai.client.time.sleep')
     def test_retry_on_timeout(self, mock_sleep, mock_post):
         """Test that client retries on timeout errors."""
         # Setup: first 2 calls timeout, 3rd succeeds
@@ -36,8 +36,8 @@ class TestAIClientRetryLogic:
         assert mock_sleep.call_count == 2  # 2 retries
         assert result['content'] == 'Success'
 
-    @patch('src.ai_client.requests.post')
-    @patch('src.ai_client.time.sleep')
+    @patch('src.ai.client.requests.post')
+    @patch('src.ai.client.time.sleep')
     def test_exponential_backoff(self, mock_sleep, mock_post):
         """Test exponential backoff timing."""
         # Setup: timeout on all calls
@@ -53,7 +53,7 @@ class TestAIClientRetryLogic:
         sleep_calls = [call[0][0] for call in mock_sleep.call_args_list]
         assert sleep_calls == [1, 2]  # 2^0, 2^1
 
-    @patch('src.ai_client.requests.post')
+    @patch('src.ai.client.requests.post')
     def test_no_retry_on_budget_error(self, mock_post):
         """Test that budget errors are not retried."""
         client = AIClient()
@@ -79,7 +79,7 @@ class TestAIClientModelSelection:
             with patch.object(client, '_call_perplexity', return_value={'content': 'test', 'model': 'sonar-pro'}):
                 client.chat_completion("test", preferred_model="sonar-pro", use_case="sentiment")
 
-            mock_get_model.assert_called_with("sonar-pro", "sentiment")
+            mock_get_model.assert_called_with("sonar-pro", "sentiment", False)
 
     def test_strategy_uses_gpt4o_mini(self):
         """Test that strategy generation can use gpt-4o-mini."""
@@ -91,13 +91,13 @@ class TestAIClientModelSelection:
             with patch.object(client, '_call_perplexity', return_value={'content': 'test', 'model': 'gpt-4o-mini'}):
                 client.chat_completion("test", preferred_model="gpt-4o-mini", use_case="strategy")
 
-            mock_get_model.assert_called_with("gpt-4o-mini", "strategy")
+            mock_get_model.assert_called_with("gpt-4o-mini", "strategy", False)
 
 
 class TestAIClientFallback:
     """Test automatic fallback to Gemini."""
 
-    @patch('src.ai_client.requests.post')
+    @patch('src.ai.client.requests.post')
     def test_fallback_to_gemini_on_budget_limit(self, mock_post):
         """Test fallback to Gemini when Perplexity limit reached."""
         client = AIClient()

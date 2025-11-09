@@ -318,7 +318,8 @@ Focus on actionable intelligence for an options trader looking to sell premium (
                 return text[start:end].strip()
             else:
                 return text[start:].strip()
-        except:
+        except (AttributeError, TypeError, ValueError) as e:
+            logger.debug(f"Failed to extract section with markers '{start_marker}'...'{end_marker}': {e}")
             return "N/A"
 
     def _extract_list(self, text: str, start_marker: str, end_marker: str) -> list:
@@ -337,7 +338,8 @@ Focus on actionable intelligence for an options trader looking to sell premium (
                     items.append(line.lstrip('-*').strip())
 
             return items
-        except:
+        except (AttributeError, TypeError, ValueError) as e:
+            logger.debug(f"Failed to extract list with markers '{start_marker}'...'{end_marker}': {e}")
             return []
 
     def _get_empty_result(self, ticker: str) -> Dict:

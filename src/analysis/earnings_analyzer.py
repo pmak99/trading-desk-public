@@ -27,6 +27,7 @@ from src.analysis.ticker_filter import TickerFilter
 from src.analysis.report_formatter import ReportFormatter
 from src.ai.sentiment_analyzer import SentimentAnalyzer
 from src.ai.strategy_generator import StrategyGenerator
+from src.core.startup_validator import StartupValidator
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -768,6 +769,14 @@ For more information, see README.md
     logger.info('='*80)
     logger.info('EARNINGS TRADE ANALYZER - AUTOMATED RESEARCH SYSTEM')
     logger.info('='*80)
+    logger.info("")
+
+    # Validate environment before proceeding
+    logger.info("Validating environment...")
+    if not StartupValidator.check_and_exit_on_errors(mode='full', strict=True):
+        logger.error("\n❌ Startup validation failed. Fix the errors above and try again.")
+        logger.info("See README.md for setup instructions.")
+        exit(1)
     logger.info("")
 
     # Parse arguments
