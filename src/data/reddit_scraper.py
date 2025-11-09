@@ -73,21 +73,27 @@ class RedditScraper:
         self,
         ticker: str,
         subreddits: List[str] = None,
-        limit: int = 20
+        limit: int = 20,
+        analyze_content: bool = False,
+        ai_client = None
     ) -> Dict:
         """
         Get sentiment for ticker from Reddit.
 
         Performance: Searches subreddits in parallel (3x faster than sequential).
 
+        Enhancement: Optional AI content analysis using free Gemini (vs just upvote scores).
+
         Args:
             ticker: Ticker symbol
             subreddits: List of subreddits to check
             limit: Max posts to analyze per subreddit
+            analyze_content: If True, use AI to analyze post content (recommended)
+            ai_client: Optional AIClient instance for content analysis
 
         Returns:
             Dict with sentiment summary including posts_found, sentiment_score,
-            avg_score, total_comments, and top_posts
+            avg_score, total_comments, top_posts, and optionally content_sentiment
         """
         subreddits = subreddits or ['wallstreetbets', 'stocks', 'options']
 
@@ -130,7 +136,7 @@ class RedditScraper:
         avg_score = total_score / len(posts)
         sentiment_score = min(max(avg_score / 100, -1.0), 1.0)
 
-        return {
+        result = {
             'ticker': ticker,
             'posts_found': len(posts),
             'sentiment_score': sentiment_score,
@@ -138,6 +144,92 @@ class RedditScraper:
             'total_comments': total_comments,
             'top_posts': sorted(posts, key=lambda x: x['score'], reverse=True)[:5]
         }
+
+        # ENHANCED: Analyze post content with AI (FREE Gemini)
+        if analyze_content and ai_client and posts:
+            try:
+                content_sentiment = self._analyze_post_content(ticker, posts[:10], ai_client)
+                result['content_sentiment'] = content_sentiment
+                result['sentiment_score'] = content_sentiment  # Use AI sentiment as primary
+                logger.info(f"{ticker}: Enhanced sentiment with AI content analysis")
+            except Exception as e:
+                logger.warning(f"{ticker}: AI content analysis failed, using score-based: {e}")
+
+        return result
+
+    def _analyze_post_content(self, ticker: str, posts: List[Dict], ai_client) -> float:
+        """
+        Analyze Reddit post content using AI (free Gemini).
+
+        Understands sarcasm, memes, and actual arguments (vs just upvotes).
+
+        Args:
+            ticker: Stock ticker
+            posts: List of Reddit posts
+            ai_client: AIClient instance
+
+        Returns:
+            Sentiment score: -1.0 (bearish) to 1.0 (bullish)
+        """
+        try:
+            # Build content summary
+            post_texts = []
+            for post in posts[:10]:  # Top 10 posts
+                text = f"[{post['score']} upvotes] {post['title']}"
+                post_texts.append(text)
+
+            content_summary = "\n".join(post_texts)
+
+            prompt = f"""Analyze Reddit sentiment for ${ticker} based on these posts:
+
+{content_summary}
+
+Consider:
+- Actual content and arguments (not just upvotes)
+- Sarcasm and memes (WSB culture)
+- Bullish vs bearish tone
+- Quality of discussion
+
+Return ONLY a number between -1.0 and 1.0:
+- 1.0 = Very bullish
+- 0.5 = Moderately bullish
+- 0.0 = Neutral
+- -0.5 = Moderately bearish
+- -1.0 = Very bearish
+
+Response (number only):"""
+
+            # Use free Gemini for this (no cost!)
+            response = ai_client.chat_completion(
+                prompt=prompt,
+                preferred_model="gemini-2.0-flash",
+                use_case="sentiment",
+                ticker=ticker,
+                max_tokens=50
+            )
+
+            # Parse response
+            sentiment_str = response['content'].strip()
+            sentiment = float(sentiment_str)
+
+            # Clamp to valid range
+            sentiment = max(-1.0, min(1.0, sentiment))
+
+            logger.debug(f"{ticker}: AI content sentiment = {sentiment:.2f}")
+            return sentiment
+
+        except Exception as e:
+            logger.warning(f"{ticker}: Failed to parse AI sentiment: {e}")
+            # Fallback to score-based
+            return self._calculate_score_based_sentiment(posts)
+
+    def _calculate_score_based_sentiment(self, posts: List[Dict]) -> float:
+        """Fallback: Calculate sentiment from scores only."""
+        if not posts:
+            return 0.0
+
+        avg_score = sum(p['score'] for p in posts) / len(posts)
+        return min(max(avg_score / 100, -1.0), 1.0)
 
 
 # CLI for testing
