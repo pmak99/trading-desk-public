@@ -459,5 +459,282 @@ def __del__(self):
 
 ---
 
+## 🆕 NEW ENHANCEMENT: TD Ameritrade Options Flow Integration
+
+**Priority**: MEDIUM-HIGH
+**Effort**: 4-6 hours
+**Impact**: Significantly better options flow data vs AI hallucination
+**Cost**: FREE (with TD Ameritrade/Schwab account)
+
+### Problem
+Currently, unusual options activity and institutional positioning rely on:
+- AI web search (Perplexity) - may hallucinate data
+- No real-time options flow data
+- Missing dark pool activity information
+
+### Solution: TD Ameritrade API Integration
+
+TD Ameritrade offers FREE API access with account (now part of Charles Schwab).
+
+**Features Available**:
+- Real-time option quotes and Greeks
+- Unusual options activity
+- Options volume and open interest changes
+- Multi-leg option strategies
+- Historical option data
+
+### Implementation Plan
+
+#### 1. Create TD Ameritrade Client
+**File**: `src/data/tdameritrade_client.py`
+
+```python
+"""
+TD Ameritrade API client for options flow and unusual activity.
+
+FREE with TD Ameritrade/Schwab account.
+Provides real options flow data vs AI hallucination.
+"""
+
+import requests
+import os
+from typing import Dict, List, Optional
+from dotenv import load_dotenv
+import logging
+
+logger = logging.getLogger(__name__)
+
+class TDAmeritradeClient:
+    """Client for TD Ameritrade API - options flow and unusual activity."""
+
+    def __init__(self):
+        """
+        Initialize TD Ameritrade client.
+
+        Requires:
+        - TD_AMERITRADE_API_KEY in .env
+        - TD_AMERITRADE_REFRESH_TOKEN in .env (for OAuth)
+        """
+        load_dotenv()
+        self.api_key = os.getenv('TD_AMERITRADE_API_KEY')
+        self.refresh_token = os.getenv('TD_AMERITRADE_REFRESH_TOKEN')
+
+        self.base_url = 'https://api.tdameritrade.com/v1'
+        self.access_token = None
+
+        if self.api_key:
+            self._refresh_access_token()
+
+    def is_available(self) -> bool:
+        """Check if TD Ameritrade API is configured."""
+        return bool(self.api_key and self.access_token)
+
+    def get_unusual_activity(self, ticker: str, lookback_days: int = 5) -> Dict:
+        """
+        Get unusual options activity for ticker.
+
+        Detects:
+        - Unusual volume vs open interest
+        - Large block trades
+        - Sweep orders (aggressive fills)
+        - Unusual call/put ratio changes
+
+        Args:
+            ticker: Stock symbol
+            lookback_days: Days to look back (default: 5)
+
+        Returns:
+            Dict with:
+            - unusual_calls: List of unusual call activity
+            - unusual_puts: List of unusual put activity
+            - sweep_orders: List of sweep orders detected
+            - volume_spikes: Strikes with volume spikes
+            - sentiment: 'bullish', 'bearish', 'neutral' based on flow
+        """
+        pass
+
+    def get_option_chain_detailed(self, ticker: str,
+                                   expiration_date: str) -> Dict:
+        """
+        Get detailed option chain with Greeks and volume.
+
+        Better than yfinance - includes:
+        - Real-time bid/ask
+        - Volume and OI with % changes
+        - Full Greeks (delta, gamma, theta, vega, rho)
+        - Theoretical values
+
+        Args:
+            ticker: Stock symbol
+            expiration_date: Target expiration (YYYY-MM-DD)
+
+        Returns:
+            Detailed option chain dict
+        """
+        pass
+
+    def get_dark_pool_activity(self, ticker: str) -> Dict:
+        """
+        Get dark pool and block trade activity.
+
+        Note: TD Ameritrade doesn't directly provide dark pool data,
+        but we can infer from:
+        - Large trades during market hours
+        - Trades at midpoint (typical dark pool indicator)
+        - Volume discrepancies
+
+        Args:
+            ticker: Stock symbol
+
+        Returns:
+            Dict with inferred dark pool metrics
+        """
+        pass
+```
+
+#### 2. Integration Points
+
+**A. Sentiment Analyzer Enhancement**
+**File**: `src/ai/sentiment_analyzer.py`
+
+```python
+class SentimentAnalyzer:
+    def __init__(self, preferred_model: str = None,
+                 usage_tracker: Optional[UsageTracker] = None):
+        self.ai_client = AIClient(usage_tracker=usage_tracker)
+        self.reddit_scraper = RedditScraper()
+
+        # NEW: TD Ameritrade for real options flow
+        try:
+            from src.data.tdameritrade_client import TDAmeritradeClient
+            self.td_client = TDAmeritradeClient()
+            if self.td_client.is_available():
+                logger.info("TD Ameritrade API available for options flow")
+            else:
+                self.td_client = None
+        except Exception as e:
+            logger.info(f"TD Ameritrade not configured: {e}")
+            self.td_client = None
+
+    def analyze_earnings_sentiment(self, ticker: str,
+                                   earnings_date: Optional[str] = None,
+                                   override_daily_limit: bool = False) -> Dict:
+        # ... existing code ...
+
+        # NEW: Get real options flow if TD Ameritrade available
+        unusual_activity = {}
+        if self.td_client and self.td_client.is_available():
+            try:
+                unusual_activity = self.td_client.get_unusual_activity(ticker)
+                logger.info(f"{ticker}: Got real options flow from TD Ameritrade")
+            except Exception as e:
+                logger.warning(f"{ticker}: TD Ameritrade flow failed: {e}")
+
+        # Build prompt with REAL data instead of asking AI to hallucinate
+        prompt = self._build_sentiment_prompt(
+            ticker,
+            earnings_date,
+            reddit_data,
+            unusual_activity  # NEW: Real data
+        )
+```
+
+**B. Report Enhancement**
+Add unusual activity section to reports:
+```
+UNUSUAL OPTIONS ACTIVITY (TD Ameritrade):
+  • Unusual Calls: 3 strikes with 5x normal volume
+    - $180 Call (Nov 10): 15,000 contracts (10x avg)
+    - $185 Call (Nov 10): 8,500 contracts (6x avg)
+  • Sweep Orders: 2 detected
+    - $180 Call: $2.5M sweep at ask (bullish)
+  • Flow Sentiment: BULLISH (70% calls, aggressive buying)
+```
+
+#### 3. Setup Instructions
+
+**Step 1: Get API Access**
+1. Have a TD Ameritrade or Charles Schwab account
+2. Register app at: https://developer.tdameritrade.com/
+3. Get API key (Consumer Key)
+4. Set up OAuth refresh token
+
+**Step 2: Configure .env**
+```bash
+# Add to .env
+TD_AMERITRADE_API_KEY=your_consumer_key_here
+TD_AMERITRADE_REFRESH_TOKEN=your_refresh_token_here
+```
+
+**Step 3: Test Connection**
+```bash
+python -m src.data.tdameritrade_client AAPL
+```
+
+### Benefits
+
+1. **Real Data vs AI Hallucination**
+   - Current: AI guesses unusual activity (unreliable)
+   - With TDA: Real institutional order flow
+
+2. **Better Trade Timing**
+   - Detect smart money positioning
+   - See when institutions are loading up
+   - Identify sweep orders (aggressive buying/selling)
+
+3. **Confirmation Signal**
+   - High IV + Unusual call activity = strong bullish setup
+   - High IV + Unusual put activity = bearish positioning
+
+4. **FREE**
+   - No additional cost with TD/Schwab account
+   - Alternative paid services: $50-200/month
+
+### Alternatives Considered
+
+| Service | Cost | Data Quality | Verdict |
+|---------|------|--------------|---------|
+| **TD Ameritrade** | FREE* | Excellent | **RECOMMENDED** |
+| Unusual Whales | $50-100/mo | Good | Too expensive |
+| FlowAlgo | $100-200/mo | Excellent | Too expensive |
+| CBOE Livevol | Enterprise | Professional | Overkill |
+| Webull (scraping) | Free | Limited | Unreliable |
+
+*Free with account
+
+### Risk Assessment
+
+**Pros**:
+- ✅ FREE with account
+- ✅ Professional-grade data
+- ✅ Real-time updates
+- ✅ Official API (reliable)
+
+**Cons**:
+- ⚠️ Requires TD Ameritrade/Schwab account
+- ⚠️ OAuth setup complexity
+- ⚠️ API rate limits (120 calls/min)
+- ⚠️ Token refresh required
+
+**Mitigation**:
+- Make TD Ameritrade optional (fallback to AI)
+- Cache results (1-hour TTL)
+- Clear setup documentation
+
+### Implementation Priority
+
+**Recommend**: MEDIUM-HIGH
+- Significant value if user has TD/Schwab account
+- Optional enhancement (doesn't block core functionality)
+- 4-6 hours implementation time
+- FREE cost
+
+**When to Implement**:
+- After fixing critical bugs (multiprocessing, yfinance errors)
+- Before adding advanced features (ML, web dashboard)
+- Good "next enhancement" after current improvements
+
+---
+
 **Last Updated**: November 9, 2025
 **Next Review**: After implementing Week 1 improvements
