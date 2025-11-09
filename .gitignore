@@ -56,6 +56,11 @@ src/data/cache/
 # Documentation (personal research notes)
 docs/
 
+# Profiling results (keep summary docs, ignore binary .prof files)
+profiling/results/*.prof
+profiling/results/*.txt
+benchmarks/results/*.json
+
 # Jupyter
 .ipynb_checkpoints
 
