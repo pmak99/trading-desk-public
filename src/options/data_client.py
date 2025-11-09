@@ -116,8 +116,12 @@ class OptionsDataClient:
         """
         Calculate IV Rank and IV Percentile.
 
-        This method fetches historical data. Use _calculate_iv_rank_from_hist()
-        if you already have the historical data.
+        .. deprecated::
+            This method is deprecated and makes an unnecessary API call.
+            Use _calculate_iv_rank_from_hist() instead, passing already-fetched history.
+
+        DEPRECATED: Fetches historical data unnecessarily.
+        Prefer _calculate_iv_rank_from_hist() with already-fetched data.
 
         Args:
             stock: yfinance Ticker object
@@ -126,6 +130,14 @@ class OptionsDataClient:
         Returns:
             Dict with iv_rank, iv_percentile, current_iv
         """
+        import warnings
+        warnings.warn(
+            f"{ticker}: _calculate_iv_rank() is deprecated. "
+            "Use _calculate_iv_rank_from_hist() with pre-fetched history to avoid duplicate API calls.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+
         try:
             hist = stock.history(period='1y')
             if hist.empty:
