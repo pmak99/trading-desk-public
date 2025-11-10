@@ -6,7 +6,6 @@ Tracks API calls, token usage, and enforces budget limits.
 Uses SQLite WAL mode for concurrent read/write access (no file lock bottleneck).
 """
 
-import sqlite3
 import os
 import yaml
 import json
@@ -14,7 +13,8 @@ from datetime import datetime, date
 from typing import Dict, Optional, Tuple
 from pathlib import Path
 import logging
-import threading
+
+from src.core.sqlite_base import SQLiteBase
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class BudgetExceededError(Exception):
     pass
 
 
-class UsageTrackerSQLite:
+class UsageTrackerSQLite(SQLiteBase):
     """
     Thread-safe AND process-safe usage tracker using SQLite with WAL mode.
 
@@ -43,33 +43,18 @@ class UsageTrackerSQLite:
             config_path: Path to budget configuration file
             db_path: Path to SQLite database file
         """
+        # Initialize base class (handles connection management)
+        super().__init__(db_path)
+
+        # Load configuration
         self.config_path = config_path
         self.config = self._load_config()
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Thread-local connections for thread safety
-        self._local = threading.local()
 
         # Initialize database schema
         self._init_database()
 
         # Migrate from JSON if exists
         self._migrate_from_json_if_needed()
-
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get thread-local database connection."""
-        if not hasattr(self._local, 'conn') or self._local.conn is None:
-            self._local.conn = sqlite3.connect(
-                self.db_path,
-                check_same_thread=False,
-                timeout=30.0  # 30 second timeout for locks
-            )
-            # Enable WAL mode for concurrent access
-            self._local.conn.execute("PRAGMA journal_mode=WAL")
-            self._local.conn.execute("PRAGMA busy_timeout=30000")  # 30 second busy timeout
-            self._local.conn.row_factory = sqlite3.Row
-        return self._local.conn
 
     def _load_config(self) -> Dict:
         """Load budget configuration from YAML file."""
@@ -551,21 +536,4 @@ class UsageTrackerSQLite:
             logger.error(f"Failed to log API call: {e}")
             raise
 
-    def close(self):
-        """Close database connection."""
-        if hasattr(self._local, 'conn') and self._local.conn:
-            try:
-                self._local.conn.close()
-            except Exception as e:
-                logger.debug(f"Error closing connection: {e}")
-            finally:
-                self._local.conn = None
-
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit - ensures connection is closed."""
-        self.close()
-        return False
+    # Note: close(), __enter__(), __exit__() inherited from SQLiteBase
