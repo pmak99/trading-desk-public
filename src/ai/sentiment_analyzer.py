@@ -24,6 +24,7 @@ from src.ai.client import AIClient
 from src.core.usage_tracker import UsageTracker, BudgetExceededError
 from src.data.reddit_scraper import RedditScraper
 from src.ai.response_validator import AIResponseValidator
+from src.core.json_utils import parse_json_safely
 
 logger = logging.getLogger(__name__)
 
@@ -252,25 +253,8 @@ Focus on actionable intelligence for an options trader looking to sell premium (
         """
         # Try JSON parsing first
         try:
-            # Extract JSON from response (may have markdown code blocks)
-            json_str = response.strip()
-
-            # Remove markdown code blocks if present
-            if json_str.startswith('```'):
-                # Find the actual JSON content between ```json and ```
-                lines = json_str.split('\n')
-                json_lines = []
-                in_json = False
-                for line in lines:
-                    if line.startswith('```'):
-                        in_json = not in_json
-                        continue
-                    if in_json:
-                        json_lines.append(line)
-                json_str = '\n'.join(json_lines)
-
-            # Parse JSON
-            data = json.loads(json_str)
+            # Parse JSON (handles markdown code blocks automatically)
+            data = parse_json_safely(response, context=f"{ticker} sentiment")
 
             # Validate and sanitize using validator
             data = AIResponseValidator.validate_and_sanitize_sentiment(data, ticker)

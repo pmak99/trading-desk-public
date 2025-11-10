@@ -109,6 +109,19 @@ class SQLiteBase:
             finally:
                 self._local.conn = None
 
+    def __del__(self):
+        """
+        Destructor - ensures connection cleanup when object is garbage collected.
+
+        Called automatically by Python when the object is destroyed.
+        Provides a safety net for unclosed connections.
+        """
+        try:
+            self.close()
+        except Exception:
+            # Suppress any errors during cleanup - we're being destroyed anyway
+            pass
+
     def __enter__(self):
         """Context manager entry."""
         return self
