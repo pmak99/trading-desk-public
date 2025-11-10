@@ -215,6 +215,66 @@ class IVHistoryTracker(SQLiteBase):
 
         return round(iv_rank, 1)
 
+    def get_weekly_iv_change(self, ticker: str, current_iv: float) -> Optional[float]:
+        """
+        Calculate weekly IV percentage change (for IV expansion detection).
+
+        This is the PRIMARY metric for 1-2 day pre-earnings entries.
+        Measures recent IV velocity rather than 52-week percentile.
+
+        Formula: ((current_iv - iv_7_days_ago) / iv_7_days_ago) * 100
+
+        Args:
+            ticker: Ticker symbol
+            current_iv: Current IV percentage
+
+        Returns:
+            Weekly IV % change (e.g., 85.0 means IV increased 85% in a week),
+            or None if insufficient data
+
+        Examples:
+            - IV went 40% → 74%: returns 85.0 (premium building - GOOD!)
+            - IV went 80% → 72%: returns -10.0 (premium leaking - BAD!)
+            - IV went 50% → 50%: returns 0.0 (no change)
+        """
+        if current_iv <= 0:
+            return None
+
+        conn = self._get_connection()
+
+        # Get IV from 7 days ago
+        lookback_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+
+        # Try to get exact 7-day-ago value, or closest within ±2 days
+        cursor = conn.execute(
+            """SELECT iv_value, date FROM iv_history
+               WHERE ticker = ? AND date <= ? AND date >= ?
+               ORDER BY date DESC LIMIT 1""",
+            (ticker, lookback_date, (datetime.now() - timedelta(days=9)).strftime('%Y-%m-%d'))
+        )
+
+        row = cursor.fetchone()
+
+        if not row:
+            logger.debug(f"{ticker}: Insufficient IV history for weekly change (need 7+ days)")
+            return None
+
+        old_iv = row['iv_value']
+        actual_date = row['date']
+
+        if old_iv <= 0:
+            return None
+
+        # Calculate percentage change
+        pct_change = ((current_iv - old_iv) / old_iv) * 100
+
+        logger.debug(
+            f"{ticker}: Weekly IV change = {pct_change:+.1f}% "
+            f"({old_iv:.1f}% on {actual_date} → {current_iv:.1f}% now)"
+        )
+
+        return round(pct_change, 1)
+
     def get_iv_stats(self, ticker: str) -> dict:
         """
         Get IV statistics for a ticker (52-week range).

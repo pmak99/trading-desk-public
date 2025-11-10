@@ -9,6 +9,7 @@ import os
 import requests
 import logging
 import time
+import threading
 from typing import Dict, Optional
 from dotenv import load_dotenv
 from src.core.usage_tracker import UsageTracker, BudgetExceededError
@@ -17,6 +18,11 @@ from src.core.usage_tracker import UsageTracker, BudgetExceededError
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Global rate limiting for API calls (shared across all instances)
+_google_api_lock = threading.Lock()
+_google_last_call_time = 0
+_GOOGLE_MIN_INTERVAL = 0.5  # Minimum 0.5 seconds between Google API calls
 
 
 class AIClient:
@@ -98,6 +104,21 @@ class AIClient:
             except BudgetExceededError:
                 # Don't retry budget errors
                 raise
+            except requests.exceptions.HTTPError as e:
+                # Handle 429 rate limit errors with exponential backoff
+                if e.response is not None and e.response.status_code == 429:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        # Exponential backoff with jitter for rate limits: 2s, 6s, 14s
+                        wait_time = (2 ** (attempt + 1)) + (attempt * 2)
+                        logger.warning(f"⚠️  Rate limit (429) - Retry {attempt + 1}/{max_retries} after {wait_time}s")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"❌ All {max_retries} retries exhausted for rate limit")
+                        raise
+                else:
+                    # Don't retry other HTTP errors
+                    raise
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 last_error = e
                 if attempt < max_retries - 1:
@@ -180,7 +201,9 @@ class AIClient:
         ticker: Optional[str],
         max_tokens: int
     ) -> Dict:
-        """Call Google Gemini API."""
+        """Call Google Gemini API with rate limiting."""
+        global _google_last_call_time
+
         if not self.google_key:
             raise ValueError("GOOGLE_API_KEY not set in environment")
 
@@ -200,41 +223,50 @@ class AIClient:
             }
         }
 
-        try:
-            response = requests.post(
-                url,
-                params=params,
-                json=data,
-                timeout=60
-            )
-            response.raise_for_status()
+        # Rate limiting: ensure minimum interval between API calls
+        with _google_api_lock:
+            time_since_last_call = time.time() - _google_last_call_time
+            if time_since_last_call < _GOOGLE_MIN_INTERVAL:
+                sleep_time = _GOOGLE_MIN_INTERVAL - time_since_last_call
+                logger.debug(f"Rate limiting: sleeping {sleep_time:.2f}s before Google API call")
+                time.sleep(sleep_time)
 
-            result = response.json()
+            try:
+                response = requests.post(
+                    url,
+                    params=params,
+                    json=data,
+                    timeout=60
+                )
+                _google_last_call_time = time.time()  # Update after successful call
+                response.raise_for_status()
 
-            # Extract content
-            content = result['candidates'][0]['content']['parts'][0]['text']
+                result = response.json()
 
-            # Gemini free tier doesn't charge, estimate tokens for logging
-            tokens_used = len(prompt.split()) * 1.3 + len(content.split()) * 1.3
-            cost = 0.0  # Free tier
+                # Extract content
+                content = result['candidates'][0]['content']['parts'][0]['text']
 
-            # Log usage
-            self.usage_tracker.log_api_call(model, int(tokens_used), cost, ticker, success=True)
+                # Gemini free tier doesn't charge, estimate tokens for logging
+                tokens_used = len(prompt.split()) * 1.3 + len(content.split()) * 1.3
+                cost = 0.0  # Free tier
 
-            logger.info(f"✓ Gemini response: {len(content)} chars (FREE)")
+                # Log usage
+                self.usage_tracker.log_api_call(model, int(tokens_used), cost, ticker, success=True)
 
-            return {
-                'content': content,
-                'model': model,
-                'provider': 'google',
-                'tokens_used': int(tokens_used),
-                'cost': cost
-            }
+                logger.info(f"✓ Gemini response: {len(content)} chars (FREE)")
 
-        except Exception as e:
-            logger.error(f"Google Gemini API error: {e}")
-            self.usage_tracker.log_api_call(model, 0, 0, ticker, success=False)
-            raise
+                return {
+                    'content': content,
+                    'model': model,
+                    'provider': 'google',
+                    'tokens_used': int(tokens_used),
+                    'cost': cost
+                }
+
+            except Exception as e:
+                logger.error(f"Google Gemini API error: {e}")
+                self.usage_tracker.log_api_call(model, 0, 0, ticker, success=False)
+                raise
 
 
 # CLI for testing

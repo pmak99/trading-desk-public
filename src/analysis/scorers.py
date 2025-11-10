@@ -51,32 +51,32 @@ class TickerScorer(ABC):
 
 class IVScorer(TickerScorer):
     """
-    Score based on implied volatility (IV) levels.
+    Score based on ABSOLUTE implied volatility level (current IV %).
 
-    PRIMARY FILTER - 40% weight
-    - IV >= minimum required (60% for IV, 50% for IV Rank from config)
-    - 60-80% IV: Good (score 60-80)
-    - 80-100% IV: Excellent (score 80-100)
-    - 100%+ IV: Premium (score 100)
+    SIMPLIFIED - 25% weight (reduced from 40%)
+    Answers: "Is there enough premium to crush?" (absolute level)
+
+    This is a FILTER + LEVEL SCORE:
+    - IV < 60%: Filtered out (score 0) - not enough premium
+    - 60-80% IV: Good level (score 60-80)
+    - 80-100% IV: Excellent level (score 80-100)
+    - 100%+ IV: Extreme level (score 100)
+
+    Note: This focuses purely on CURRENT IV level, not historical context.
+    Use IVExpansionScorer for timing (is premium building NOW?).
     """
 
     def __init__(self, weight: Optional[float] = None, min_iv: Optional[int] = None) -> None:
         # Load from config or use defaults
         if _TRADING_CRITERIA:
-            weight = weight or _TRADING_CRITERIA['scoring_weights']['iv_score']
+            weight = weight or _TRADING_CRITERIA['scoring_weights'].get('current_iv_level', 0.25)
             min_iv = min_iv or _TRADING_CRITERIA['iv_thresholds']['minimum']
-            self.iv_rank_min: float = _TRADING_CRITERIA['iv_rank_thresholds']['minimum']
-            self.iv_rank_good: float = _TRADING_CRITERIA['iv_rank_thresholds']['good']
-            self.iv_rank_excellent: float = _TRADING_CRITERIA['iv_rank_thresholds']['excellent']
             self.iv_excellent: float = _TRADING_CRITERIA['iv_thresholds']['excellent']
             self.iv_extreme: float = _TRADING_CRITERIA['iv_thresholds']['extreme']
         else:
             # Fallback to hardcoded defaults
-            weight = weight or 0.50
+            weight = weight or 0.25
             min_iv = min_iv or 60
-            self.iv_rank_min = 50
-            self.iv_rank_good = 60
-            self.iv_rank_excellent = 75
             self.iv_excellent = 80
             self.iv_extreme = 100
 
@@ -84,7 +84,7 @@ class IVScorer(TickerScorer):
         self.min_iv: int = min_iv
 
     def score(self, data: TickerData) -> float:
-        """Score based on actual IV % or IV Rank."""
+        """Score based on absolute current IV percentage."""
         options_data = data.get('options_data', {})
         ticker = data.get('ticker', 'UNKNOWN')
 
@@ -92,11 +92,6 @@ class IVScorer(TickerScorer):
         current_iv = options_data.get('current_iv')
         if current_iv is not None and current_iv > 0:
             return self._score_from_current_iv(current_iv, ticker)
-
-        # Fallback to IV Rank
-        iv_rank = options_data.get('iv_rank')
-        if iv_rank is not None and iv_rank > 0:
-            return self._score_from_iv_rank(iv_rank, ticker)
 
         # Fallback to yfinance IV estimate
         return self._score_from_yf_iv(data.get('iv', 0))
@@ -108,26 +103,13 @@ class IVScorer(TickerScorer):
             logger.info(f"{ticker}: IV {current_iv}% < {self.min_iv}% - SKIPPING")
             return 0.0
 
-        # Score based on IV level
+        # Score based on absolute IV level (linear scaling)
         if current_iv >= self.iv_extreme:  # Premium IV - exceptional
             return 100.0
         elif current_iv >= self.iv_excellent:  # Excellent IV
             return 80.0 + (current_iv - self.iv_excellent) * 1.0
         else:  # min_iv to iv_excellent - good IV
             return 60.0 + (current_iv - self.min_iv) * 1.0
-
-    def _score_from_iv_rank(self, iv_rank: float, ticker: str) -> float:
-        """Score from IV Rank (percentile)."""
-        if iv_rank < self.iv_rank_min:
-            logger.info(f"{ticker}: IV Rank {iv_rank}% < {self.iv_rank_min}% - SKIPPING")
-            return 0.0
-
-        if iv_rank >= self.iv_rank_excellent:  # 75%+
-            return 100.0
-        elif iv_rank >= self.iv_rank_good:  # 60-75%
-            return 70.0 + (iv_rank - self.iv_rank_good) * 2
-        else:  # 50-60%
-            return 50.0 + (iv_rank - self.iv_rank_min) * 2
 
     def _score_from_yf_iv(self, iv: float) -> float:
         """Score from yfinance IV estimate (least reliable)."""
@@ -139,6 +121,79 @@ class IVScorer(TickerScorer):
             return 60.0
         else:
             return 30.0  # Low confidence
+
+
+class IVExpansionScorer(TickerScorer):
+    """
+    Score based on recent IV expansion velocity (weekly % change).
+
+    PRIMARY METRIC for 1-2 day pre-earnings entries - 35% weight
+
+    Measures whether premium is BUILDING (good) or LEAKING (bad):
+    - Weekly IV +80%+: Excellent expansion (score 100) - premium building fast!
+    - Weekly IV +40-80%: Good expansion (score 80) - solid buildup
+    - Weekly IV +20-40%: Moderate expansion (score 60) - some buildup
+    - Weekly IV 0-20%: Weak expansion (score 40) - minimal buildup
+    - Weekly IV negative: Premium leaking (score 0) - avoid!
+
+    This answers: "Is NOW the right time to enter?" (tactical timing)
+    Unlike IV Rank which answers: "Is this stock expensive vs history?" (structural)
+    """
+
+    def __init__(self, weight: Optional[float] = None) -> None:
+        # Load from config or use defaults
+        if _TRADING_CRITERIA:
+            weight = weight or _TRADING_CRITERIA['scoring_weights'].get('iv_expansion_velocity', 0.35)
+            exp = _TRADING_CRITERIA.get('iv_expansion_thresholds', {})
+            self.excellent: float = exp.get('excellent', 80)
+            self.good: float = exp.get('good', 40)
+            self.moderate: float = exp.get('moderate', 20)
+            self.minimum: float = exp.get('minimum', 0)
+        else:
+            weight = weight or 0.35
+            self.excellent = 80  # +80% weekly change
+            self.good = 40       # +40% weekly change
+            self.moderate = 20   # +20% weekly change
+            self.minimum = 0     # Any positive change
+
+        super().__init__(weight)
+
+    def score(self, data: TickerData) -> float:
+        """Score based on weekly IV percentage change."""
+        from src.options.iv_history_tracker import IVHistoryTracker
+
+        options_data = data.get('options_data', {})
+        ticker = data.get('ticker', 'UNKNOWN')
+        current_iv = options_data.get('current_iv')
+
+        if current_iv is None or current_iv <= 0:
+            # No current IV data - return neutral score (don't filter out)
+            return 50.0
+
+        # Calculate weekly IV % change
+        tracker = IVHistoryTracker()
+        try:
+            weekly_change = tracker.get_weekly_iv_change(ticker, current_iv)
+        finally:
+            tracker.close()
+
+        if weekly_change is None:
+            # No historical data yet - return neutral score (don't filter out)
+            return 50.0
+
+        # Score based on IV expansion velocity
+        if weekly_change >= self.excellent:  # +80%+ (e.g., 40% → 72%)
+            return 100.0
+        elif weekly_change >= self.good:  # +40-80% (e.g., 50% → 70%)
+            return 80.0
+        elif weekly_change >= self.moderate:  # +20-40% (e.g., 60% → 72%)
+            return 60.0
+        elif weekly_change >= self.minimum:  # 0-20% (weak buildup)
+            return 40.0
+        else:  # Negative (premium leaking)
+            # CRITICAL: Don't completely filter out (return 0), just heavily penalize
+            # Some stocks have slow IV buildup patterns
+            return 20.0
 
 
 class IVCrushEdgeScorer(TickerScorer):
@@ -393,12 +448,15 @@ class CompositeScorer:
             min_iv: Minimum IV percentage for filtering (loads from config if None)
         """
         if scorers is None:
-            # Default scoring strategy - weights and thresholds from config or defaults
+            # NEW scoring strategy optimized for 1-2 day pre-earnings entries
+            # Weights: Expansion 35%, Liquidity 30%, Crush Edge 25%, Current IV 25%, Fundamentals 5%
+            # Total = 120% (will be normalized by individual weights)
             self.scorers: List[TickerScorer] = [
-                IVScorer(min_iv=min_iv),  # Loads weight and min_iv from config
-                IVCrushEdgeScorer(),       # Loads weight from config
-                LiquidityScorer(),         # Loads weight from config
-                FundamentalsScorer()       # Loads weight from config
+                IVExpansionScorer(),       # 35% - Is premium building NOW? (tactical timing)
+                LiquidityScorer(),         # 30% - Can we execute efficiently? (critical)
+                IVCrushEdgeScorer(),       # 25% - Historical crush edge (strategy fit)
+                IVScorer(min_iv=min_iv),   # 25% - Absolute IV level (filter + sizing)
+                FundamentalsScorer()       # 5% - Market cap/price (minor factor)
             ]
         else:
             self.scorers = scorers
