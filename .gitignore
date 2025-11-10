@@ -1,5 +1,6 @@
 # Environment variables - NEVER COMMIT API KEYS
 .env
+.env.backup*
 
 # Python
 __pycache__/
