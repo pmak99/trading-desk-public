@@ -334,6 +334,12 @@ class TradierOptionsClient:
 
             if 'expirations' in data and 'date' in data['expirations']:
                 dates = data['expirations']['date']
+
+                # Defensive check: Validate dates before iteration
+                if not dates or not isinstance(dates, (list, tuple)):
+                    logger.warning(f"{ticker}: No valid expiration dates returned (got {type(dates).__name__})")
+                    return None
+
                 today = get_eastern_now().date()
 
                 # Parse earnings date if provided
