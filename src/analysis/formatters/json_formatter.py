@@ -3,6 +3,7 @@
 import json
 from datetime import datetime, date
 from typing import Dict, Any
+import numpy as np
 
 
 class JSONFormatter:
@@ -22,9 +23,21 @@ class JSONFormatter:
         return json.dumps(analysis_result, indent=2, default=JSONFormatter._json_serializer)
 
     @staticmethod
-    def _json_serializer(obj: Any) -> str:
-        """Custom JSON serializer for non-serializable types."""
-        if isinstance(obj, (datetime, date)):
+    def _json_serializer(obj: Any) -> Any:
+        """
+        Custom JSON serializer for non-serializable types.
+
+        Handles:
+        - numpy int64/float64 types (from pandas/yfinance)
+        - datetime/date objects
+        - Custom objects with __dict__
+        """
+        # Handle numpy scalar types (int64, float64, etc.)
+        if isinstance(obj, (np.integer, np.floating)):
+            return obj.item()  # Convert to native Python type
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()  # Convert arrays to lists
+        elif isinstance(obj, (datetime, date)):
             return obj.isoformat()
         elif hasattr(obj, '__dict__'):
             return str(obj)
