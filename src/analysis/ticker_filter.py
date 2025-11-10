@@ -451,7 +451,7 @@ class TickerFilter:
         # PERFORMANCE: Use set for O(1) membership testing
         if use_batch_prefetch and len(tickers_to_process) > BATCH_PREFETCH_THRESHOLD:
             # Convert to set for faster membership testing (O(1) vs O(n))
-            cached_ticker_set = set(self._info_cache._cache.keys())
+            cached_ticker_set = set(self._info_cache.cache.keys())
             uncached_tickers = [
                 t for t in tickers_to_process
                 if t not in cached_ticker_set
