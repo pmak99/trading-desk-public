@@ -6,9 +6,11 @@ manageable, testable components.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, List, Optional
 import logging
 from src.config.config_loader import ConfigLoader
+from src.core.types import TickerData, OptionsData
+from src.core.memoization import memoize_with_dict_key
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,7 @@ class TickerScorer(ABC):
         self.weight = weight
 
     @abstractmethod
-    def score(self, data: Dict) -> float:
+    def score(self, data: TickerData) -> float:
         """
         Calculate score for ticker data.
 
@@ -42,7 +44,7 @@ class TickerScorer(ABC):
         """
         pass
 
-    def weighted_score(self, data: Dict) -> float:
+    def weighted_score(self, data: TickerData) -> float:
         """Get weighted score."""
         return self.score(data) * self.weight
 
@@ -58,16 +60,16 @@ class IVScorer(TickerScorer):
     - 100%+ IV: Premium (score 100)
     """
 
-    def __init__(self, weight: float = None, min_iv: int = None):
+    def __init__(self, weight: Optional[float] = None, min_iv: Optional[int] = None) -> None:
         # Load from config or use defaults
         if _TRADING_CRITERIA:
             weight = weight or _TRADING_CRITERIA['scoring_weights']['iv_score']
             min_iv = min_iv or _TRADING_CRITERIA['iv_thresholds']['minimum']
-            self.iv_rank_min = _TRADING_CRITERIA['iv_rank_thresholds']['minimum']
-            self.iv_rank_good = _TRADING_CRITERIA['iv_rank_thresholds']['good']
-            self.iv_rank_excellent = _TRADING_CRITERIA['iv_rank_thresholds']['excellent']
-            self.iv_excellent = _TRADING_CRITERIA['iv_thresholds']['excellent']
-            self.iv_extreme = _TRADING_CRITERIA['iv_thresholds']['extreme']
+            self.iv_rank_min: float = _TRADING_CRITERIA['iv_rank_thresholds']['minimum']
+            self.iv_rank_good: float = _TRADING_CRITERIA['iv_rank_thresholds']['good']
+            self.iv_rank_excellent: float = _TRADING_CRITERIA['iv_rank_thresholds']['excellent']
+            self.iv_excellent: float = _TRADING_CRITERIA['iv_thresholds']['excellent']
+            self.iv_extreme: float = _TRADING_CRITERIA['iv_thresholds']['extreme']
         else:
             # Fallback to hardcoded defaults
             weight = weight or 0.50
@@ -79,9 +81,9 @@ class IVScorer(TickerScorer):
             self.iv_extreme = 100
 
         super().__init__(weight)
-        self.min_iv = min_iv
+        self.min_iv: int = min_iv
 
-    def score(self, data: Dict) -> float:
+    def score(self, data: TickerData) -> float:
         """Score based on actual IV % or IV Rank."""
         options_data = data.get('options_data', {})
         ticker = data.get('ticker', 'UNKNOWN')
@@ -150,14 +152,14 @@ class IVCrushEdgeScorer(TickerScorer):
     - Ratio < 1.0: No edge (score 0)
     """
 
-    def __init__(self, weight: float = None):
+    def __init__(self, weight: Optional[float] = None) -> None:
         # Load from config or use defaults
         if _TRADING_CRITERIA:
             weight = weight or _TRADING_CRITERIA['scoring_weights']['iv_crush_edge']
-            self.excellent = _TRADING_CRITERIA['iv_crush_thresholds']['excellent']
-            self.better = _TRADING_CRITERIA['iv_crush_thresholds']['better']
-            self.good = _TRADING_CRITERIA['iv_crush_thresholds']['good']
-            self.minimum = _TRADING_CRITERIA['iv_crush_thresholds']['minimum']
+            self.excellent: float = _TRADING_CRITERIA['iv_crush_thresholds']['excellent']
+            self.better: float = _TRADING_CRITERIA['iv_crush_thresholds']['better']
+            self.good: float = _TRADING_CRITERIA['iv_crush_thresholds']['good']
+            self.minimum: float = _TRADING_CRITERIA['iv_crush_thresholds']['minimum']
         else:
             weight = weight or 0.30
             self.excellent = 1.3
@@ -167,7 +169,7 @@ class IVCrushEdgeScorer(TickerScorer):
 
         super().__init__(weight)
 
-    def score(self, data: Dict) -> float:
+    def score(self, data: TickerData) -> float:
         """Score based on IV crush ratio."""
         options_data = data.get('options_data', {})
         iv_crush_ratio = options_data.get('iv_crush_ratio')
@@ -203,24 +205,24 @@ class LiquidityScorer(TickerScorer):
     Stock volume is stored separately in data['volume'] but NOT used for scoring.
     """
 
-    def __init__(self, weight: float = None):
+    def __init__(self, weight: Optional[float] = None) -> None:
         # Load from config or use defaults
         if _TRADING_CRITERIA:
             weight = weight or _TRADING_CRITERIA['scoring_weights']['options_liquidity']
             liq = _TRADING_CRITERIA['liquidity_thresholds']
-            self.min_volume = liq.get('minimum_volume', 100)
-            self.min_oi = liq.get('minimum_open_interest', 500)
-            self.vol_very_high = liq['volume']['very_high']
-            self.vol_high = liq['volume']['high']
-            self.vol_good = liq['volume']['good']
-            self.vol_acceptable = liq['volume']['acceptable']
-            self.oi_very_liquid = liq['open_interest']['very_liquid']
-            self.oi_liquid = liq['open_interest']['liquid']
-            self.oi_good = liq['open_interest']['good']
-            self.oi_acceptable = liq['open_interest']['acceptable']
-            self.spread_excellent = liq['spread']['excellent']
-            self.spread_good = liq['spread']['good']
-            self.spread_okay = liq['spread']['okay']
+            self.min_volume: int = liq.get('minimum_volume', 100)
+            self.min_oi: int = liq.get('minimum_open_interest', 500)
+            self.vol_very_high: int = liq['volume']['very_high']
+            self.vol_high: int = liq['volume']['high']
+            self.vol_good: int = liq['volume']['good']
+            self.vol_acceptable: int = liq['volume']['acceptable']
+            self.oi_very_liquid: int = liq['open_interest']['very_liquid']
+            self.oi_liquid: int = liq['open_interest']['liquid']
+            self.oi_good: int = liq['open_interest']['good']
+            self.oi_acceptable: int = liq['open_interest']['acceptable']
+            self.spread_excellent: float = liq['spread']['excellent']
+            self.spread_good: float = liq['spread']['good']
+            self.spread_okay: float = liq['spread']['okay']
         else:
             weight = weight or 0.15
             self.min_volume = 100
@@ -239,7 +241,7 @@ class LiquidityScorer(TickerScorer):
 
         super().__init__(weight)
 
-    def score(self, data: Dict) -> float:
+    def score(self, data: TickerData) -> float:
         """Score based on OPTIONS liquidity metrics (not stock volume)."""
         options_data = data.get('options_data', {})
         ticker = data.get('ticker', 'UNKNOWN')
@@ -290,7 +292,7 @@ class LiquidityScorer(TickerScorer):
         else:
             return 20.0
 
-    def _score_bid_ask_spread(self, spread_pct: float) -> float:
+    def _score_bid_ask_spread(self, spread_pct: Optional[float]) -> float:
         """Score bid-ask spread (lower is better)."""
         if spread_pct is None:
             return 50.0  # No data
@@ -315,18 +317,18 @@ class FundamentalsScorer(TickerScorer):
     - Stock price range (50%)
     """
 
-    def __init__(self, weight: float = None):
+    def __init__(self, weight: Optional[float] = None) -> None:
         # Load from config or use defaults
         if _TRADING_CRITERIA:
             weight = weight or _TRADING_CRITERIA['scoring_weights']['fundamentals']
             fund = _TRADING_CRITERIA['fundamentals']
-            self.mega_cap = fund['market_cap']['mega_cap'] * 1e9
-            self.large_cap = fund['market_cap']['large_cap'] * 1e9
-            self.mid_cap = fund['market_cap']['mid_cap'] * 1e9
-            self.price_min_ideal = fund['price']['min_ideal']
-            self.price_max_ideal = fund['price']['max_ideal']
-            self.price_min_acceptable = fund['price']['min_acceptable']
-            self.price_max_acceptable = fund['price']['max_acceptable']
+            self.mega_cap: float = fund['market_cap']['mega_cap'] * 1e9
+            self.large_cap: float = fund['market_cap']['large_cap'] * 1e9
+            self.mid_cap: float = fund['market_cap']['mid_cap'] * 1e9
+            self.price_min_ideal: float = fund['price']['min_ideal']
+            self.price_max_ideal: float = fund['price']['max_ideal']
+            self.price_min_acceptable: float = fund['price']['min_acceptable']
+            self.price_max_acceptable: float = fund['price']['max_acceptable']
         else:
             weight = weight or 0.05
             self.mega_cap = 200e9
@@ -339,7 +341,7 @@ class FundamentalsScorer(TickerScorer):
 
         super().__init__(weight)
 
-    def score(self, data: Dict) -> float:
+    def score(self, data: TickerData) -> float:
         """Score based on fundamentals."""
         market_cap = data.get('market_cap', 0)
         price = data.get('price', 0)
@@ -380,9 +382,9 @@ class CompositeScorer:
 
     def __init__(
         self,
-        scorers: list[TickerScorer] = None,
-        min_iv: int = None
-    ):
+        scorers: Optional[List[TickerScorer]] = None,
+        min_iv: Optional[int] = None
+    ) -> None:
         """
         Initialize composite scorer.
 
@@ -392,7 +394,7 @@ class CompositeScorer:
         """
         if scorers is None:
             # Default scoring strategy - weights and thresholds from config or defaults
-            self.scorers = [
+            self.scorers: List[TickerScorer] = [
                 IVScorer(min_iv=min_iv),  # Loads weight and min_iv from config
                 IVCrushEdgeScorer(),       # Loads weight from config
                 LiquidityScorer(),         # Loads weight from config
@@ -401,9 +403,13 @@ class CompositeScorer:
         else:
             self.scorers = scorers
 
-    def calculate_score(self, data: Dict) -> float:
+    @memoize_with_dict_key(maxsize=256)
+    def calculate_score(self, data: TickerData) -> float:
         """
         Calculate composite score for ticker.
+
+        Memoized to avoid recalculating scores for the same ticker data.
+        Cache size: 256 tickers (typical daily analysis volume).
 
         Args:
             data: Ticker data dict
