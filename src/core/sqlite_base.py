@@ -10,9 +10,10 @@ Provides common functionality for SQLite-backed trackers:
 Used by UsageTrackerSQLite and IVHistoryTracker to eliminate code duplication.
 """
 
+# Standard library imports
+import logging
 import sqlite3
 import threading
-import logging
 from pathlib import Path
 from typing import Optional
 

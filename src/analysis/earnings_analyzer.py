@@ -12,27 +12,30 @@ Usage:
 Output: Research report ready for manual execution
 """
 
-import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple
-import sys
-from multiprocessing import Pool, cpu_count
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import pytz
-import os
+# Standard library imports
 import glob
+import logging
+import os
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
+from multiprocessing import Pool, cpu_count
+from typing import Dict, List, Optional, Tuple
+
+# Third-party imports
+import pytz
 import yaml
 
-from src.data.calendars.factory import EarningsCalendarFactory
-from src.analysis.ticker_filter import TickerFilter
-from src.analysis.report_formatter import ReportFormatter
-from src.analysis.formatters.json_formatter import JSONFormatter
-from src.analysis.formatters.csv_formatter import CSVFormatter
+# Local application imports
 from src.ai.sentiment_analyzer import SentimentAnalyzer
 from src.ai.strategy_generator import StrategyGenerator
-from src.core.timezone_utils import get_eastern_now, get_market_date
+from src.analysis.formatters.csv_formatter import CSVFormatter
+from src.analysis.formatters.json_formatter import JSONFormatter
+from src.analysis.report_formatter import ReportFormatter
+from src.analysis.ticker_filter import TickerFilter
 from src.core.startup_validator import StartupValidator
-from typing import Optional
+from src.core.timezone_utils import get_eastern_now, get_market_date
+from src.data.calendars.factory import EarningsCalendarFactory
 
 logger = logging.getLogger(__name__)
 
