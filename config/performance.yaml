@@ -1,0 +1,111 @@
+# Performance and optimization configuration
+# Extracted magic numbers and tunable parameters for easy adjustment
+
+# API Rate Limiting
+rate_limiting:
+  # Delay between individual API calls (seconds)
+  request_delay: 0.3
+
+  # Token bucket rate limiters (requests per second)
+  tradier:
+    rate: 120  # 120 requests per minute = 2/sec
+    burst_capacity: 200
+
+  yfinance:
+    rate: 5  # Conservative 5/sec for yfinance
+    burst_capacity: 10
+
+  alpha_vantage:
+    rate: 5  # 5 calls per minute for free tier
+    burst_capacity: 5
+
+# Batch Processing
+batch_processing:
+  # Optimal chunk size for yfinance batch API
+  yfinance_chunk_size: 50
+
+  # Minimum tickers before using batch prefetch
+  batch_prefetch_threshold: 5
+
+  # Maximum tickers to process in parallel
+  max_parallel_workers: 4
+
+  # Threshold for using multiprocessing vs sequential
+  multiprocessing_threshold: 3
+
+# Caching
+caching:
+  # LRU cache sizes
+  ticker_cache_size: 500
+  info_cache_size: 1000
+  score_cache_size: 256
+
+  # Cache TTL (minutes)
+  ticker_cache_ttl: 15
+  info_cache_ttl: 15
+  iv_history_ttl: 60
+
+# Circuit Breaker
+circuit_breaker:
+  # Number of failures before opening circuit
+  failure_threshold: 5
+
+  # Seconds to wait before attempting recovery
+  recovery_timeout: 60
+
+  # Per-service configuration
+  services:
+    tradier:
+      failure_threshold: 5
+      recovery_timeout: 60
+
+    yfinance:
+      failure_threshold: 3
+      recovery_timeout: 30
+
+    reddit:
+      failure_threshold: 3
+      recovery_timeout: 120
+
+# Memory Management
+memory:
+  # Use generators for large result sets
+  use_generators: true
+
+  # Maximum results to hold in memory before yielding
+  generator_chunk_size: 50
+
+  # Enable streaming for ticker processing
+  enable_streaming: true
+
+# Timeouts
+timeouts:
+  # Per-ticker analysis timeout (seconds)
+  analysis_timeout: 120
+
+  # API request timeout (seconds)
+  api_request_timeout: 30
+
+  # Database query timeout (seconds)
+  db_query_timeout: 10
+
+# Filtering Thresholds
+filtering:
+  # Pre-filter criteria
+  min_market_cap: 500_000_000  # $500M
+  min_daily_volume: 100_000     # 100K shares
+
+  # Options liquidity minimums
+  min_options_volume: 100
+  min_open_interest: 500
+
+# Logging
+logging:
+  # Log progress every N items
+  progress_log_frequency: 10
+
+  # Enable performance metrics logging
+  enable_performance_metrics: true
+
+  # Log slow operations (seconds)
+  slow_operation_threshold: 5.0

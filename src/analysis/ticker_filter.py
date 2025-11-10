@@ -19,22 +19,25 @@ import yfinance as yf
 from src.analysis.scorers import CompositeScorer
 from src.core.lru_cache import LRUCache
 from src.core.retry_utils import retry_on_rate_limit
+from src.core.types import TickerData, OptionsData
+from src.core.generators import chunked
 from src.options.data_client import OptionsDataClient
 from src.options.tradier_client import TradierOptionsClient
 
 logger = logging.getLogger(__name__)
 
-# Constants for filtering and rate limiting
+# Constants for filtering and rate limiting (see config/performance.yaml for tuning)
 RATE_LIMIT_DELAY_SECONDS = 0.3  # Delay between individual API requests
 MIN_MARKET_CAP_DOLLARS = 500_000_000  # $500M minimum for tradeable options
 MIN_DAILY_VOLUME = 100_000  # 100K shares/day minimum for liquidity
 BATCH_PREFETCH_THRESHOLD = 5  # Only batch prefetch for 5+ tickers
+CHUNK_SIZE = 50  # Optimal chunk size for batch API calls
 
 
 class TickerFilter:
     """Filter and score earnings candidates."""
 
-    def __init__(self, cache_ttl_minutes: int = 15):
+    def __init__(self, cache_ttl_minutes: int = 15) -> None:
         """
         Initialize ticker filter for IV crush strategies.
 
@@ -48,38 +51,37 @@ class TickerFilter:
         Args:
             cache_ttl_minutes: Cache TTL in minutes (default: 15)
         """
-        self.weights = {
+        self.weights: Dict[str, float] = {
             'iv_score': 0.40,          # IV level and rank
             'options_liquidity': 0.30,  # Volume, OI, spreads
             'iv_crush_edge': 0.25,     # Historical IV > actual
             'fundamentals': 0.05       # Market cap, price
         }
 
-        self.IV_RANK_MIN = 50
-        self.IV_RANK_GOOD = 60
-        self.IV_RANK_EXCELLENT = 75
+        self.IV_RANK_MIN: int = 50
+        self.IV_RANK_GOOD: int = 60
+        self.IV_RANK_EXCELLENT: int = 75
 
         # LRU caches (bounded memory, automatic eviction)
-        self._ticker_cache = LRUCache(max_size=500, ttl_minutes=cache_ttl_minutes)
-        self._info_cache = LRUCache(max_size=1000, ttl_minutes=cache_ttl_minutes)
-        self._cache_ttl = timedelta(minutes=cache_ttl_minutes)
+        self._ticker_cache: LRUCache = LRUCache(max_size=500, ttl_minutes=cache_ttl_minutes)
+        self._info_cache: LRUCache = LRUCache(max_size=1000, ttl_minutes=cache_ttl_minutes)
+        self._cache_ttl: timedelta = timedelta(minutes=cache_ttl_minutes)
 
-        self.scorer = CompositeScorer()
+        self.scorer: CompositeScorer = CompositeScorer()
 
         # Initialize Tradier (real IV) with fallback to yfinance (RV proxy)
-        self.tradier_client = None
+        self.tradier_client: Optional[TradierOptionsClient] = None
         try:
-            self.tradier_client = TradierOptionsClient()
-            if self.tradier_client.is_available():
+            tradier = TradierOptionsClient()
+            if tradier.is_available():
                 logger.info("Using Tradier API for real IV data")
-            else:
-                self.tradier_client = None
+                self.tradier_client = tradier
         except (ValueError, KeyError, OSError) as e:
             logger.info(f"Tradier client not configured: {e}")
         except Exception as e:
             logger.warning(f"Unexpected error initializing Tradier: {e}", exc_info=True)
 
-        self.options_client = None
+        self.options_client: Optional[OptionsDataClient] = None
         try:
             self.options_client = OptionsDataClient()
             logger.debug("yfinance fallback initialized")
@@ -197,7 +199,7 @@ class TickerFilter:
 
         return filtered
 
-    def _calculate_iv_crush_ratio(self, options_data: Dict) -> None:
+    def _calculate_iv_crush_ratio(self, options_data: OptionsData) -> None:
         """
         Calculate IV crush ratio in-place.
 
@@ -215,7 +217,7 @@ class TickerFilter:
             options_data['iv_crush_ratio'] = round(iv_crush_ratio, 2)
 
     @retry_on_rate_limit(max_retries=3, initial_backoff=2.0, backoff_multiplier=2.0)
-    def get_ticker_data(self, ticker: str, use_cache: bool = True) -> Optional[Dict]:
+    def get_ticker_data(self, ticker: str, use_cache: bool = True) -> Optional[TickerData]:
         """
         Get market data for a ticker including options data.
 
@@ -353,7 +355,7 @@ class TickerFilter:
             logger.error(f"Error fetching data for {ticker}: {e}")
             return None
 
-    def calculate_score(self, data: Dict) -> float:
+    def calculate_score(self, data: TickerData) -> float:
         """
         Calculate ticker score for IV crush strategy.
 
@@ -374,7 +376,7 @@ class TickerFilter:
         """
         return self.scorer.calculate_score(data)
 
-    def _process_single_ticker(self, ticker: str, add_delay: bool = True) -> Optional[Dict]:
+    def _process_single_ticker(self, ticker: str, add_delay: bool = True) -> Optional[TickerData]:
         """
         Process a single ticker: fetch data and calculate score.
 
@@ -417,7 +419,7 @@ class TickerFilter:
         parallel: bool = True,
         max_workers: int = 2,  # Reduced from 5 to avoid rate limits
         use_batch_prefetch: bool = True  # New: batch prefetch for speed
-    ) -> List[Dict]:
+    ) -> List[TickerData]:
         """
         Filter and score a list of tickers.
 
@@ -446,29 +448,36 @@ class TickerFilter:
 
         # OPTIMIZATION: Batch prefetch ticker info if not already cached
         # This is especially beneficial when pre_filter wasn't run
+        # PERFORMANCE: Use set for O(1) membership testing
         if use_batch_prefetch and len(tickers_to_process) > BATCH_PREFETCH_THRESHOLD:
-            # LRU cache handles TTL internally, just check if ticker is in cache
+            # Convert to set for faster membership testing (O(1) vs O(n))
+            cached_ticker_set = set(self._info_cache._cache.keys())
             uncached_tickers = [
                 t for t in tickers_to_process
-                if t not in self._info_cache
+                if t not in cached_ticker_set
             ]
 
             if uncached_tickers:
                 logger.debug(f"   Batch prefetching {len(uncached_tickers)} uncached tickers...")
-                try:
-                    tickers_str = ' '.join(uncached_tickers)
-                    tickers_obj = yf.Tickers(tickers_str)
+                # PERFORMANCE: Use generator-based chunking for memory efficiency
+                total_chunks = (len(uncached_tickers) - 1) // CHUNK_SIZE + 1
+                for chunk_num, chunk in enumerate(chunked(uncached_tickers, CHUNK_SIZE), 1):
+                    logger.debug(f"   Processing chunk {chunk_num}/{total_chunks} ({len(chunk)} tickers)")
 
-                    for ticker in uncached_tickers:
-                        try:
-                            stock = tickers_obj.tickers.get(ticker)
-                            if stock:
-                                info = stock.info
-                                self._info_cache.set(ticker, info)
-                        except Exception as e:
-                            logger.debug(f"  {ticker}: Prefetch failed: {e}")
-                except Exception as e:
-                    logger.debug(f"Batch prefetch failed ({e}), continuing without prefetch")
+                    try:
+                        tickers_str = ' '.join(chunk)
+                        tickers_obj = yf.Tickers(tickers_str)
+
+                        for ticker in chunk:
+                            try:
+                                stock = tickers_obj.tickers.get(ticker)
+                                if stock:
+                                    info = stock.info
+                                    self._info_cache.set(ticker, info)
+                            except Exception as e:
+                                logger.debug(f"  {ticker}: Prefetch failed: {e}")
+                    except Exception as e:
+                        logger.debug(f"Chunk prefetch failed ({e}), continuing without prefetch")
 
         if parallel and len(tickers_to_process) > 1:
             # Parallel processing (much faster for I/O-bound operations)
@@ -508,7 +517,7 @@ class TickerFilter:
         earnings_by_timing: Dict[str, List[str]],
         pre_market_count: int = 2,
         after_hours_count: int = 3
-    ) -> Dict[str, List[Dict]]:
+    ) -> Dict[str, List[TickerData]]:
         """
         Select best candidates for the day.
 

@@ -19,7 +19,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 from multiprocessing import Pool, cpu_count
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 # Third-party imports
 import pytz
@@ -36,6 +36,7 @@ from src.analysis.ticker_filter import TickerFilter
 from src.core.input_validator import InputValidator
 from src.core.startup_validator import StartupValidator
 from src.core.timezone_utils import get_eastern_now, get_market_date
+from src.core.types import TickerData, AnalysisResult, SentimentData, StrategyData
 from src.data.calendars.factory import EarningsCalendarFactory
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ MAX_PARALLEL_WORKERS = 4  # Maximum workers for multiprocessing
 MULTIPROCESSING_THRESHOLD = 3  # Use sequential processing for fewer than 3 tickers
 
 
-def _analyze_single_ticker(args: Tuple[str, Dict, str, bool, str]) -> Dict:
+def _analyze_single_ticker(args: Tuple[str, TickerData, str, bool, str]) -> AnalysisResult:
     """
     Standalone function for multiprocessing - analyzes a single ticker.
 
@@ -182,10 +183,10 @@ class EarningsAnalyzer:
 
     def __init__(
         self,
-        earnings_calendar = None,
+        earnings_calendar: Optional[Any] = None,
         ticker_filter: Optional[TickerFilter] = None,
         earnings_source: Optional[str] = None
-    ):
+    ) -> None:
         """
         Initialize earnings analyzer components.
 
@@ -220,7 +221,7 @@ class EarningsAnalyzer:
         # Note: Sentiment analyzer and strategy generator are initialized
         # in worker processes for thread-safe parallel processing
 
-    def _validate_earnings_date(self, earnings_date: str = None) -> str:
+    def _validate_earnings_date(self, earnings_date: Optional[str] = None) -> str:
         """
         Validate and normalize earnings date.
 
@@ -288,7 +289,7 @@ class EarningsAnalyzer:
             }
         return None
 
-    def _fetch_tickers_data(self, tickers: List[str], earnings_date: str) -> Tuple[List[Dict], List[str]]:
+    def _fetch_tickers_data(self, tickers: List[str], earnings_date: str) -> Tuple[List[TickerData], List[str]]:
         """
         Fetch basic ticker data from yfinance and options data from Tradier.
 
@@ -307,10 +308,10 @@ class EarningsAnalyzer:
 
     def _run_parallel_analysis(
         self,
-        tickers_data: List[Dict],
+        tickers_data: List[TickerData],
         earnings_date: str,
         override_daily_limit: bool
-    ) -> List[Dict]:
+    ) -> List[AnalysisResult]:
         """
         Run analysis on tickers (parallel for 3+ tickers, sequential for 1-2).
 

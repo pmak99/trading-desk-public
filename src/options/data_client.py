@@ -11,9 +11,10 @@ Note: Free tier. RV proxy adequate for filtering, Tradier preferred for accuracy
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
 import yfinance as yf
+from src.core.types import OptionsData
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +22,11 @@ logger = logging.getLogger(__name__)
 class OptionsDataClient:
     """Client for options data using yfinance (free)."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize options data client (no API key needed for yfinance)."""
-        self.calls_made = 0
+        self.calls_made: int = 0
 
-    def get_options_data(self, ticker: str) -> Dict:
+    def get_options_data(self, ticker: str) -> OptionsData:
         """
         Get comprehensive options data for a ticker.
 
@@ -53,11 +54,11 @@ class OptionsDataClient:
 
     def get_options_data_from_stock(
         self,
-        stock,
+        stock: Any,
         ticker: str,
-        hist,
+        hist: Any,
         current_price: float
-    ) -> Dict:
+    ) -> OptionsData:
         """
         Get comprehensive options data from already-fetched yfinance objects.
 
@@ -110,7 +111,7 @@ class OptionsDataClient:
             return {}
 
 
-    def _calculate_iv_rank_from_hist(self, hist, stock, ticker: str) -> Dict:
+    def _calculate_iv_rank_from_hist(self, hist: Any, stock: Any, ticker: str) -> Dict:
         """
         Calculate IV Rank from already-fetched historical data.
 
