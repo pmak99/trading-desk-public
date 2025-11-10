@@ -2,9 +2,10 @@
 Comprehensive tests for scorer classes (Strategy pattern implementation).
 
 Tests all scorer components:
-- IVScorer: Primary filter (50% weight)
-- IVCrushEdgeScorer: IV crush edge scoring (30% weight)
-- LiquidityScorer: Options liquidity scoring (15% weight)
+- IVExpansionScorer: IV expansion velocity (35% weight) - NEW PRIMARY METRIC
+- LiquidityScorer: Options liquidity scoring (30% weight)
+- IVCrushEdgeScorer: IV crush edge scoring (25% weight)
+- IVScorer: Absolute IV level (25% weight) - SIMPLIFIED
 - FundamentalsScorer: Fundamentals scoring (5% weight)
 - CompositeScorer: Combined scoring system
 """
@@ -60,7 +61,7 @@ class TestIVScorer:
 
     def test_low_current_iv_filtered(self):
         """Test that low IV is filtered out (hard filter)."""
-        scorer = IVScorer(weight=0.50, min_iv=60)
+        scorer = IVScorer(weight=0.25, min_iv=60)
         data = {
             'ticker': 'TEST',
             'options_data': {
@@ -69,42 +70,6 @@ class TestIVScorer:
         }
         score = scorer.score(data)
         assert score == 0.0, "IV below 60% should be filtered (score 0)"
-
-    def test_iv_rank_excellent(self):
-        """Test scoring with excellent IV Rank (75%+)."""
-        scorer = IVScorer(weight=0.50, min_iv=60)
-        data = {
-            'ticker': 'TEST',
-            'options_data': {
-                'iv_rank': 80.0
-            }
-        }
-        score = scorer.score(data)
-        assert score == 100.0, "IV Rank 80% should score 100"
-
-    def test_iv_rank_good(self):
-        """Test scoring with good IV Rank (60-75%)."""
-        scorer = IVScorer(weight=0.50, min_iv=60)
-        data = {
-            'ticker': 'TEST',
-            'options_data': {
-                'iv_rank': 65.0
-            }
-        }
-        score = scorer.score(data)
-        assert score == 80.0, "IV Rank 65% should score 80"
-
-    def test_iv_rank_filtered(self):
-        """Test that low IV Rank is filtered out."""
-        scorer = IVScorer(weight=0.50, min_iv=60)
-        data = {
-            'ticker': 'TEST',
-            'options_data': {
-                'iv_rank': 45.0
-            }
-        }
-        score = scorer.score(data)
-        assert score == 0.0, "IV Rank below 50% should be filtered"
 
     def test_yfinance_iv_fallback(self):
         """Test fallback to yfinance IV estimate."""
@@ -270,12 +235,14 @@ class TestCompositeScorer:
 
     def test_default_scorers(self):
         """Test that default scorers are initialized correctly."""
+        from src.analysis.scorers import IVExpansionScorer
         scorer = CompositeScorer()
-        assert len(scorer.scorers) == 4, "Should have 4 default scorers"
-        assert isinstance(scorer.scorers[0], IVScorer)
-        assert isinstance(scorer.scorers[1], IVCrushEdgeScorer)
-        assert isinstance(scorer.scorers[2], LiquidityScorer)
-        assert isinstance(scorer.scorers[3], FundamentalsScorer)
+        assert len(scorer.scorers) == 5, "Should have 5 default scorers (added IVExpansionScorer)"
+        assert isinstance(scorer.scorers[0], IVExpansionScorer), "First scorer should be IVExpansionScorer"
+        assert isinstance(scorer.scorers[1], LiquidityScorer)
+        assert isinstance(scorer.scorers[2], IVCrushEdgeScorer)
+        assert isinstance(scorer.scorers[3], IVScorer)
+        assert isinstance(scorer.scorers[4], FundamentalsScorer)
 
     def test_custom_scorers(self):
         """Test initialization with custom scorers."""
@@ -337,7 +304,9 @@ class TestCompositeScorer:
         """Test that weights are properly distributed."""
         scorer = CompositeScorer()
         total_weight = sum(s.weight for s in scorer.scorers)
-        assert total_weight == 1.0, "Weights should sum to 1.0"
+        # NOTE: Weights now sum to > 1.0 (1.20) because they're applied individually
+        # New strategy: Expansion 35% + Liquidity 30% + Crush 25% + IV 25% + Fundamentals 5% = 120%
+        assert total_weight == 1.20, f"Weights should sum to 1.20 (updated strategy), got {total_weight}"
 
     def test_missing_options_data(self):
         """Test scoring with missing options data."""

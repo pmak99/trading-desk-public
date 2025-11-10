@@ -8,7 +8,7 @@ Automated research system for earnings options trading with real-time IV data an
 
 Analyzes earnings candidates using IV crush strategy:
 
-1. **Filters** tickers by IV Rank (>50%), liquidity, and historical performance
+1. **Filters** tickers by IV expansion velocity (weekly %), absolute IV level, liquidity, and historical performance
 2. **Analyzes** sentiment from retail/institutional sources (Reddit + AI)
 3. **Generates** 3-4 trade strategies with position sizing ($20K budget)
 4. **Outputs** formatted research reports ready for manual execution
@@ -140,19 +140,23 @@ iv_thresholds:
   minimum: 60      # Hard filter
   excellent: 80
 
-iv_rank_thresholds:
-  minimum: 50      # Hard filter
-  excellent: 75
+# NEW: IV expansion thresholds (weekly % change)
+iv_expansion_thresholds:
+  excellent: 80    # +80% weekly change (e.g., 40% → 72%)
+  good: 40         # +40% weekly change
+  moderate: 20     # +20% weekly change
 
+# Optimized for 1-2 day pre-earnings entries
 scoring_weights:
-  iv_score: 0.40           # IV level/rank
-  options_liquidity: 0.30  # Volume, OI, spreads
-  iv_crush_edge: 0.25      # Historical implied > actual
-  fundamentals: 0.05       # Market cap, price
+  iv_expansion_velocity: 0.35  # PRIMARY: Weekly IV % change (tactical timing)
+  options_liquidity: 0.30      # Volume, OI, spreads (execution quality)
+  iv_crush_edge: 0.25          # Historical implied > actual (strategy fit)
+  current_iv_level: 0.25       # Absolute IV level (premium size)
+  fundamentals: 0.05           # Market cap, price
 
 liquidity_thresholds:
-  minimum_volume: 100
-  minimum_open_interest: 500
+  minimum_volume: 100          # Hard filter
+  minimum_open_interest: 500   # Hard filter
 ```
 
 ---
@@ -206,16 +210,25 @@ pytest tests/ -v
 
 ## 📈 Strategy
 
-**IV Crush Trading:**
-1. Sell premium **before** earnings when IV is elevated (Rank >75%)
-2. Buy back **after** earnings when IV crashes
-3. Profit from IV crush regardless of price direction
+**IV Crush Trading (Optimized for 1-2 Day Pre-Earnings Entries):**
+1. Identify tickers with **strong IV expansion** (weekly IV +40%+ = premium building)
+2. Sell premium **1-2 days before** earnings when IV peaks
+3. Buy back **after** earnings when IV crashes
+4. Profit from IV crush regardless of price direction
 
-**Filters:**
-- IV Rank >50% (prefer 75%+)
-- Liquid options (tight spreads, high OI/volume)
-- Historical implied > actual moves
-- Market cap >$500M, daily volume >100K
+**Primary Filters:**
+- **Weekly IV expansion** >+40% (premium building NOW - tactical timing)
+- **Absolute IV level** >60% (enough premium to crush)
+- **Liquid options** (tight spreads, high OI/volume - execution quality)
+- **Historical crush edge** (implied > actual moves)
+- **Market cap** >$500M, **daily volume** >100K
+
+**Scoring Breakdown:**
+- 35%: IV Expansion Velocity (is premium building right now?)
+- 30%: Options Liquidity (can we execute efficiently?)
+- 25%: IV Crush Edge (does it historically over-price moves?)
+- 25%: Current IV Level (is there enough premium?)
+- 5%: Fundamentals (market cap, price range)
 
 **Output:** Research reports with scores, sentiment, and 3-4 trade strategies (strikes, sizing, risk/reward).
 

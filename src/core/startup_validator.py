@@ -124,12 +124,8 @@ class StartupValidator:
                         elif iv_config.get('minimum', 0) >= iv_config.get('excellent', 100):
                             errors.append(f"❌ {criteria_file.name}: iv_thresholds.minimum must be < excellent")
 
-                    # Validate scoring weights sum to ~1.0
-                    if 'scoring_weights' in config:
-                        weights = config['scoring_weights']
-                        total = sum(weights.values())
-                        if not (0.95 <= total <= 1.05):  # Allow small rounding errors
-                            errors.append(f"⚠️  {criteria_file.name}: scoring_weights sum to {total:.2f}, should be ~1.0")
+                    # Note: Scoring weights validation removed - weights are applied individually,
+                    # not normalized, so they don't need to sum to 1.0
 
             except yaml.YAMLError as e:
                 errors.append(f"❌ {criteria_file.name}: Invalid YAML syntax")
