@@ -9,6 +9,13 @@ pandas==2.3.3
 numpy==2.3.4
 pytz==2025.2
 
+# Security - Secrets Management
+keyring==25.6.0
+jaraco.classes==3.4.0
+jaraco.context==6.0.1
+jaraco.functools==4.3.0
+more-itertools==10.8.0
+
 # Testing
 pytest==8.4.2
 pytest-cov==7.0.0
