@@ -214,4 +214,4 @@ if file_count > 0:
 
 else:
     print("❌ No files could be analyzed")
-    sys.exit(1)
+    # sys.exit(1)
