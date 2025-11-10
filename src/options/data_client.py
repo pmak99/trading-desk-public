@@ -109,43 +109,6 @@ class OptionsDataClient:
             logger.error(f"Error calculating options metrics for {ticker}: {e}")
             return {}
 
-    def _calculate_iv_rank(self, stock, ticker: str) -> Dict:
-        """
-        Calculate IV Rank and IV Percentile.
-
-        .. deprecated::
-            This method is deprecated and makes an unnecessary API call.
-            Use _calculate_iv_rank_from_hist() instead, passing already-fetched history.
-
-        DEPRECATED: Fetches historical data unnecessarily.
-        Prefer _calculate_iv_rank_from_hist() with already-fetched data.
-
-        Args:
-            stock: yfinance Ticker object
-            ticker: Ticker symbol
-
-        Returns:
-            Dict with iv_rank, iv_percentile, current_iv
-        """
-        import warnings
-        warnings.warn(
-            f"{ticker}: _calculate_iv_rank() is deprecated. "
-            "Use _calculate_iv_rank_from_hist() with pre-fetched history to avoid duplicate API calls.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-
-        try:
-            hist = stock.history(period='1y')
-            if hist.empty:
-                logger.warning(f"{ticker}: No historical data for IV calculation")
-                return {'iv_rank': None, 'iv_percentile': None, 'current_iv': None}
-
-            return self._calculate_iv_rank_from_hist(hist, stock, ticker)
-
-        except Exception as e:
-            logger.error(f"{ticker}: Error calculating IV Rank: {e}")
-            return {'iv_rank': None, 'iv_percentile': None, 'current_iv': None}
 
     def _calculate_iv_rank_from_hist(self, hist, stock, ticker: str) -> Dict:
         """
