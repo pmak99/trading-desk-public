@@ -21,12 +21,22 @@ iv_crush_thresholds:
   better: 1.2    # Implied 20%+ higher
   excellent: 1.3  # Implied 30%+ higher
 
-# Scoring weights (must sum to 1.0)
+# IV Expansion velocity thresholds (weekly % change)
+# Primary metric for 1-2 day pre-earnings entries
+iv_expansion_thresholds:
+  minimum: 0     # Any positive change
+  moderate: 20   # +20% weekly change (e.g., 60% → 72%)
+  good: 40       # +40% weekly change (e.g., 50% → 70%)
+  excellent: 80  # +80% weekly change (e.g., 40% → 72%)
+
+# Scoring weights (optimized for 1-2 day pre-earnings entries)
+# Note: Total can exceed 1.0 - individual weights are applied, not normalized
 scoring_weights:
-  iv_score: 0.40           # 40% - IV level (PRIMARY factor)
-  options_liquidity: 0.30  # 30% - Liquidity (CRITICAL for execution - tighter spreads!)
-  iv_crush_edge: 0.25      # 25% - IV crush potential
-  fundamentals: 0.05       # 5% - Market cap/price
+  iv_expansion_velocity: 0.35  # 35% - Weekly IV % change (PRIMARY - is premium building NOW?)
+  options_liquidity: 0.30      # 30% - Liquidity (CRITICAL for execution)
+  iv_crush_edge: 0.25          # 25% - Historical crush ratio (does it over-price moves?)
+  current_iv_level: 0.25       # 25% - Absolute IV level (is there enough premium?)
+  fundamentals: 0.05           # 5% - Market cap/price (minor factor)
 
 # Options liquidity thresholds
 liquidity_thresholds:
