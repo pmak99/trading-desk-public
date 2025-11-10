@@ -5,17 +5,22 @@ Filters tickers by IV metrics, liquidity, and historical performance.
 Uses LRU caching and batch fetching for optimal performance.
 """
 
-import yfinance as yf
-from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+# Standard library imports
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+
+# Third-party imports
+import yfinance as yf
+
+# Local application imports
+from src.analysis.scorers import CompositeScorer
+from src.core.lru_cache import LRUCache
+from src.core.retry_utils import retry_on_rate_limit
 from src.options.data_client import OptionsDataClient
 from src.options.tradier_client import TradierOptionsClient
-from src.analysis.scorers import CompositeScorer
-from src.core.retry_utils import retry_on_rate_limit
-from src.core.lru_cache import LRUCache
 
 logger = logging.getLogger(__name__)
 
