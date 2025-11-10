@@ -33,6 +33,7 @@ from src.analysis.formatters.csv_formatter import CSVFormatter
 from src.analysis.formatters.json_formatter import JSONFormatter
 from src.analysis.report_formatter import ReportFormatter
 from src.analysis.ticker_filter import TickerFilter
+from src.core.input_validator import InputValidator
 from src.core.startup_validator import StartupValidator
 from src.core.timezone_utils import get_eastern_now, get_market_date
 from src.data.calendars.factory import EarningsCalendarFactory
@@ -161,92 +162,23 @@ class EarningsAnalyzer:
         5. Output formatted research report
     """
 
+    # Validation methods delegated to InputValidator
+    # (kept as static methods for backward compatibility)
+
     @staticmethod
     def validate_ticker(ticker: str) -> str:
-        """
-        Validate ticker symbol format.
-
-        Args:
-            ticker: Ticker symbol to validate
-
-        Returns:
-            Uppercase, stripped ticker
-
-        Raises:
-            ValueError: If ticker format is invalid
-        """
-        ticker = ticker.upper().strip()
-
-        if not ticker:
-            raise ValueError("Ticker cannot be empty")
-
-        if not ticker.isalpha():
-            raise ValueError(
-                f"Invalid ticker format: '{ticker}'. "
-                f"Tickers must contain only letters (e.g., AAPL, MSFT, GOOGL)"
-            )
-
-        if len(ticker) > 5:
-            raise ValueError(
-                f"Invalid ticker format: '{ticker}'. "
-                f"Tickers must be 1-5 characters (got {len(ticker)})"
-            )
-
-        return ticker
+        """Validate ticker symbol format. Delegates to InputValidator."""
+        return InputValidator.validate_ticker(ticker)
 
     @staticmethod
     def validate_date(date_str: Optional[str]) -> Optional[str]:
-        """
-        Validate date format (YYYY-MM-DD).
-
-        Args:
-            date_str: Date string to validate, or None
-
-        Returns:
-            Valid date string or None
-
-        Raises:
-            ValueError: If date format is invalid
-        """
-        if date_str is None:
-            return None
-
-        try:
-            # Attempt to parse
-            datetime.strptime(date_str, '%Y-%m-%d')
-            return date_str
-        except ValueError:
-            raise ValueError(
-                f"Invalid date format: '{date_str}'. "
-                f"Expected format: YYYY-MM-DD (e.g., 2025-11-08)"
-            )
+        """Validate date format (YYYY-MM-DD). Delegates to InputValidator."""
+        return InputValidator.validate_date(date_str)
 
     @staticmethod
     def validate_max_analyze(max_analyze: int) -> int:
-        """
-        Validate max_analyze parameter.
-
-        Args:
-            max_analyze: Maximum number of tickers to analyze
-
-        Returns:
-            Validated max_analyze value
-
-        Raises:
-            ValueError: If value is invalid
-        """
-        if max_analyze < 1:
-            raise ValueError(
-                f"max_analyze must be >= 1 (got {max_analyze})"
-            )
-
-        if max_analyze > 50:
-            logger.warning(
-                f"max_analyze={max_analyze} is very high. "
-                f"This may be slow and expensive (~${0.05 * max_analyze:.2f})"
-            )
-
-        return max_analyze
+        """Validate max_analyze parameter. Delegates to InputValidator."""
+        return InputValidator.validate_max_analyze(max_analyze)
 
     def __init__(
         self,
