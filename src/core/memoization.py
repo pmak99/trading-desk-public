@@ -10,10 +10,25 @@ import hashlib
 import json
 import logging
 from typing import Any, Callable, Dict, Optional, TypeVar, cast
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 F = TypeVar('F', bound=Callable[..., Any])
+
+
+def _json_serializer(obj: Any) -> Any:
+    """
+    Custom JSON serializer for memoization key generation.
+
+    Handles numpy types from pandas/yfinance data.
+    """
+    if isinstance(obj, (np.integer, np.floating)):
+        return obj.item()  # Convert to native Python type
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()  # Convert arrays to lists
+    else:
+        return str(obj)
 
 
 def memoize(maxsize: int = 128) -> Callable[[F], F]:
@@ -152,16 +167,18 @@ def _make_cache_key(args: tuple, kwargs: Dict[str, Any]) -> str:
         for arg in args:
             if isinstance(arg, dict):
                 # Sort dict keys for consistent hashing
-                key_parts.append(json.dumps(arg, sort_keys=True))
+                # Use custom serializer to handle numpy types
+                key_parts.append(json.dumps(arg, sort_keys=True, default=_json_serializer))
             elif hasattr(arg, '__dict__'):
                 # Handle objects with __dict__
-                key_parts.append(json.dumps(arg.__dict__, sort_keys=True, default=str))
+                key_parts.append(json.dumps(arg.__dict__, sort_keys=True, default=_json_serializer))
             else:
                 key_parts.append(str(arg))
 
         for key, value in sorted(kwargs.items()):
             if isinstance(value, dict):
-                key_parts.append(f"{key}:{json.dumps(value, sort_keys=True)}")
+                # Use custom serializer to handle numpy types
+                key_parts.append(f"{key}:{json.dumps(value, sort_keys=True, default=_json_serializer)}")
             else:
                 key_parts.append(f"{key}:{value}")
 
