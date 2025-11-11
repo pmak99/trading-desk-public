@@ -93,7 +93,8 @@ class TickerFilter:
         min_market_cap: int = MIN_MARKET_CAP_DOLLARS,
         min_avg_volume: int = MIN_DAILY_VOLUME,
         min_price: float = MIN_STOCK_PRICE,
-        use_batch: bool = True  # Use batch fetching (30-50% faster)
+        use_batch: bool = True,  # Use batch fetching (30-50% faster)
+        require_weekly_options: bool = True  # Filter out tickers without weekly options
     ) -> List[str]:
         """
         Pre-filter tickers by basic criteria before expensive API calls.
@@ -102,6 +103,7 @@ class TickerFilter:
         - Small-cap stocks (< $2B market cap)
         - Low-volume stocks (< 100K shares/day)
         - Penny stocks (< $5 per share - wide option spreads)
+        - Tickers without weekly options (optional, default: True)
         - Problematic tickers (API errors, missing data)
 
         PERFORMANCE: Uses batch fetching via yf.Tickers() for 30-50% speed improvement.
@@ -113,11 +115,16 @@ class TickerFilter:
             min_avg_volume: Minimum average daily volume (default: 100K)
             min_price: Minimum stock price (default: $5)
             use_batch: Use batch fetching (default: True, faster)
+            require_weekly_options: Filter out tickers without weekly options (default: True)
 
         Returns:
             Filtered list of tickers that meet basic criteria
         """
-        logger.info(f"Pre-filtering {len(tickers)} tickers (market cap ≥ ${min_market_cap/1e9:.1f}B, volume ≥ {min_avg_volume:,}, price ≥ ${min_price:.2f})...")
+        filter_msg = f"Pre-filtering {len(tickers)} tickers (market cap ≥ ${min_market_cap/1e9:.1f}B, volume ≥ {min_avg_volume:,}, price ≥ ${min_price:.2f}"
+        if require_weekly_options:
+            filter_msg += ", weekly options required"
+        filter_msg += ")..."
+        logger.info(filter_msg)
 
         if not tickers:
             return []
@@ -155,6 +162,12 @@ class TickerFilter:
                         # Check minimum price (filter out penny stocks)
                         if price < min_price:
                             continue
+
+                        # Check weekly options availability (if required)
+                        if require_weekly_options and self.tradier_client:
+                            if not self.tradier_client.has_weekly_options(ticker):
+                                logger.debug(f"{ticker}: No weekly options available")
+                                continue
 
                         # Cache the info dict to avoid re-fetching in get_ticker_data()
                         # This saves 75 duplicate API calls (one per ticker that passes pre-filter)
@@ -196,6 +209,12 @@ class TickerFilter:
                     # Check minimum price (filter out penny stocks)
                     if price < min_price:
                         continue
+
+                    # Check weekly options availability (if required)
+                    if require_weekly_options and self.tradier_client:
+                        if not self.tradier_client.has_weekly_options(ticker):
+                            logger.debug(f"{ticker}: No weekly options available")
+                            continue
 
                     # Cache the info dict to avoid re-fetching in get_ticker_data()
                     self._info_cache.set(ticker, info)
