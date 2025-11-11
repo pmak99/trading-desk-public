@@ -9,6 +9,7 @@ from collections import OrderedDict
 from typing import Any, Optional, Tuple
 from datetime import datetime, timedelta
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class LRUCache:
         self._hits = 0
         self._misses = 0
         self._evictions = 0
+        self._lock = threading.Lock()  # Thread-safety for concurrent access
 
     def get(self, key: Any) -> Optional[Any]:
         """
@@ -54,22 +56,23 @@ class LRUCache:
         Returns:
             Cached value or None if not found/expired
         """
-        if key not in self.cache:
-            self._misses += 1
-            return None
+        with self._lock:
+            if key not in self.cache:
+                self._misses += 1
+                return None
 
-        # Check TTL if enabled
-        value, timestamp = self.cache[key]
-        if self.ttl and (datetime.now() - timestamp) > self.ttl:
-            # Entry expired - remove it
-            del self.cache[key]
-            self._misses += 1
-            return None
+            # Check TTL if enabled
+            value, timestamp = self.cache[key]
+            if self.ttl and (datetime.now() - timestamp) > self.ttl:
+                # Entry expired - remove it
+                del self.cache[key]
+                self._misses += 1
+                return None
 
-        # Move to end (mark as recently used)
-        self.cache.move_to_end(key)
-        self._hits += 1
-        return value
+            # Move to end (mark as recently used)
+            self.cache.move_to_end(key)
+            self._hits += 1
+            return value
 
     def set(self, key: Any, value: Any) -> None:
         """
@@ -79,34 +82,37 @@ class LRUCache:
             key: Cache key
             value: Value to cache
         """
-        timestamp = datetime.now()
+        with self._lock:
+            timestamp = datetime.now()
 
-        # Update existing entry
-        if key in self.cache:
-            self.cache.move_to_end(key)
+            # Update existing entry
+            if key in self.cache:
+                self.cache.move_to_end(key)
+                self.cache[key] = (value, timestamp)
+                return
+
+            # Add new entry
             self.cache[key] = (value, timestamp)
-            return
 
-        # Add new entry
-        self.cache[key] = (value, timestamp)
-
-        # Evict oldest entry if over limit
-        if len(self.cache) > self.max_size:
-            evicted_key = next(iter(self.cache))
-            del self.cache[evicted_key]
-            self._evictions += 1
-            logger.debug(f"LRU cache evicted key: {evicted_key} (size: {len(self.cache)}/{self.max_size})")
+            # Evict oldest entry if over limit
+            if len(self.cache) > self.max_size:
+                evicted_key = next(iter(self.cache))
+                del self.cache[evicted_key]
+                self._evictions += 1
+                logger.debug(f"LRU cache evicted key: {evicted_key} (size: {len(self.cache)}/{self.max_size})")
 
     def clear(self) -> None:
         """Clear all cache entries."""
-        self.cache.clear()
-        self._hits = 0
-        self._misses = 0
-        self._evictions = 0
+        with self._lock:
+            self.cache.clear()
+            self._hits = 0
+            self._misses = 0
+            self._evictions = 0
 
     def size(self) -> int:
         """Get current cache size."""
-        return len(self.cache)
+        with self._lock:
+            return len(self.cache)
 
     def stats(self) -> dict:
         """
@@ -115,34 +121,37 @@ class LRUCache:
         Returns:
             Dict with hits, misses, evictions, size, hit_rate
         """
-        total = self._hits + self._misses
-        hit_rate = (self._hits / total * 100) if total > 0 else 0
+        with self._lock:
+            total = self._hits + self._misses
+            hit_rate = (self._hits / total * 100) if total > 0 else 0
 
-        return {
-            'size': len(self.cache),
-            'max_size': self.max_size,
-            'hits': self._hits,
-            'misses': self._misses,
-            'evictions': self._evictions,
-            'hit_rate': round(hit_rate, 1)
-        }
+            return {
+                'size': len(self.cache),
+                'max_size': self.max_size,
+                'hits': self._hits,
+                'misses': self._misses,
+                'evictions': self._evictions,
+                'hit_rate': round(hit_rate, 1)
+            }
 
     def __contains__(self, key: Any) -> bool:
         """Check if key exists in cache (without updating LRU order)."""
-        if key not in self.cache:
-            return False
-
-        # Check TTL if enabled
-        if self.ttl:
-            _, timestamp = self.cache[key]
-            if (datetime.now() - timestamp) > self.ttl:
+        with self._lock:
+            if key not in self.cache:
                 return False
 
-        return True
+            # Check TTL if enabled
+            if self.ttl:
+                _, timestamp = self.cache[key]
+                if (datetime.now() - timestamp) > self.ttl:
+                    return False
+
+            return True
 
     def __len__(self) -> int:
         """Get cache size."""
-        return len(self.cache)
+        with self._lock:
+            return len(self.cache)
 
     def __repr__(self) -> str:
         stats = self.stats()

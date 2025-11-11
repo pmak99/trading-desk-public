@@ -9,6 +9,7 @@ import functools
 import hashlib
 import json
 import logging
+import threading
 from typing import Any, Callable, Dict, Optional, TypeVar, cast
 import numpy as np
 
@@ -95,6 +96,7 @@ def memoize_with_dict_key(maxsize: int = 128) -> Callable[[F], F]:
     def decorator(func: F) -> F:
         cache: Dict[str, Any] = {}
         cache_order: list = []  # Track insertion order for LRU
+        cache_lock = threading.Lock()  # Thread-safety for concurrent access
 
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -102,39 +104,43 @@ def memoize_with_dict_key(maxsize: int = 128) -> Callable[[F], F]:
             cache_key = _make_cache_key(args, kwargs)
 
             # Check cache
-            if cache_key in cache:
-                # Move to end (most recently used)
-                cache_order.remove(cache_key)
-                cache_order.append(cache_key)
-                return cache[cache_key]
+            with cache_lock:
+                if cache_key in cache:
+                    # Move to end (most recently used)
+                    cache_order.remove(cache_key)
+                    cache_order.append(cache_key)
+                    return cache[cache_key]
 
-            # Compute result
+            # Compute result (outside lock to allow concurrent computation)
             result = func(*args, **kwargs)
 
             # Store in cache
-            cache[cache_key] = result
-            cache_order.append(cache_key)
+            with cache_lock:
+                cache[cache_key] = result
+                cache_order.append(cache_key)
 
-            # Evict oldest if over maxsize
-            if maxsize is not None and len(cache) > maxsize:
-                oldest_key = cache_order.pop(0)
-                del cache[oldest_key]
+                # Evict oldest if over maxsize
+                if maxsize is not None and len(cache) > maxsize:
+                    oldest_key = cache_order.pop(0)
+                    del cache[oldest_key]
 
             return result
 
         def cache_info() -> Dict[str, int]:
             """Get cache statistics."""
-            return {
-                'size': len(cache),
-                'maxsize': maxsize or -1,
-                'hits': 0,  # Would need additional tracking
-                'misses': 0
-            }
+            with cache_lock:
+                return {
+                    'size': len(cache),
+                    'maxsize': maxsize or -1,
+                    'hits': 0,  # Would need additional tracking
+                    'misses': 0
+                }
 
         def cache_clear() -> None:
             """Clear the cache."""
-            cache.clear()
-            cache_order.clear()
+            with cache_lock:
+                cache.clear()
+                cache_order.clear()
 
         wrapper.cache_info = cache_info  # type: ignore
         wrapper.cache_clear = cache_clear  # type: ignore
@@ -245,6 +251,7 @@ def cache_result_by_ticker(maxsize: int = 100) -> Callable[[F], F]:
     def decorator(func: F) -> F:
         cache: Dict[str, Any] = {}
         cache_order: list = []
+        cache_lock = threading.Lock()  # Thread-safety for concurrent access
 
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -257,33 +264,38 @@ def cache_result_by_ticker(maxsize: int = 100) -> Callable[[F], F]:
             # Create cache key with ticker + other args
             cache_key = f"{ticker}:{_make_cache_key(args[1:], kwargs)}"
 
-            if cache_key in cache:
-                cache_order.remove(cache_key)
-                cache_order.append(cache_key)
-                logger.debug(f"Cache hit for ticker: {ticker}")
-                return cache[cache_key]
+            # Check cache
+            with cache_lock:
+                if cache_key in cache:
+                    cache_order.remove(cache_key)
+                    cache_order.append(cache_key)
+                    logger.debug(f"Cache hit for ticker: {ticker}")
+                    return cache[cache_key]
 
-            # Compute result
+            # Compute result (outside lock to allow concurrent computation)
             result = func(*args, **kwargs)
 
             # Store in cache
-            cache[cache_key] = result
-            cache_order.append(cache_key)
+            with cache_lock:
+                cache[cache_key] = result
+                cache_order.append(cache_key)
 
-            # Evict oldest if over maxsize
-            if len(cache) > maxsize:
-                oldest_key = cache_order.pop(0)
-                del cache[oldest_key]
-                logger.debug(f"Evicted oldest entry from ticker cache")
+                # Evict oldest if over maxsize
+                if len(cache) > maxsize:
+                    oldest_key = cache_order.pop(0)
+                    del cache[oldest_key]
+                    logger.debug(f"Evicted oldest entry from ticker cache")
 
             return result
 
         def cache_info() -> Dict[str, int]:
-            return {'size': len(cache), 'maxsize': maxsize}
+            with cache_lock:
+                return {'size': len(cache), 'maxsize': maxsize}
 
         def cache_clear() -> None:
-            cache.clear()
-            cache_order.clear()
+            with cache_lock:
+                cache.clear()
+                cache_order.clear()
 
         wrapper.cache_info = cache_info  # type: ignore
         wrapper.cache_clear = cache_clear  # type: ignore

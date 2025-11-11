@@ -19,6 +19,7 @@ from src.options.iv_history_tracker import IVHistoryTracker
 from src.options.expected_move_calculator import ExpectedMoveCalculator
 from src.options.option_selector import OptionSelector
 from src.core.timezone_utils import get_eastern_now
+from src.core.lru_cache import LRUCache
 
 # Load environment variables
 load_dotenv()
@@ -55,6 +56,23 @@ class TradierOptionsClient:
 
         # Initialize IV history tracker for IV Rank calculation
         self.iv_tracker = IVHistoryTracker()
+
+        # Initialize LRU caches for API responses (thread-safe)
+        # Options chains cache: 15 min TTL, max 200 tickers
+        # Eliminates redundant API calls for same ticker/expiration within analysis window
+        self._options_chain_cache = LRUCache(max_size=200, ttl_minutes=15)
+
+        # Stock quotes cache: 1 min TTL, max 500 tickers
+        # Short TTL since prices change frequently during trading hours
+        self._quote_cache = LRUCache(max_size=500, ttl_minutes=1)
+
+        # Options expirations cache: 24 hour TTL, max 500 tickers
+        # Expirations don't change intraday, safe to cache longer
+        self._expirations_cache = LRUCache(max_size=500, ttl_minutes=60*24)
+
+        # Weekly options check cache: 24 hour TTL, max 500 tickers
+        # Weekly options status doesn't change for months
+        self._weekly_options_cache = LRUCache(max_size=500, ttl_minutes=60*24)
 
     def is_available(self) -> bool:
         """Check if Tradier API is configured and accessible."""
@@ -136,7 +154,13 @@ class TradierOptionsClient:
             return None
 
     def _get_quote(self, ticker: str) -> Optional[float]:
-        """Get current stock price from Tradier."""
+        """Get current stock price from Tradier (with caching)."""
+        # Check cache first (1 minute TTL)
+        cached_price = self._quote_cache.get(ticker)
+        if cached_price is not None:
+            logger.debug(f"{ticker}: Quote cache hit (price: ${cached_price:.2f})")
+            return cached_price
+
         try:
             url = f"{self.endpoint}/v1/markets/quotes"
             params = {'symbols': ticker}
@@ -150,7 +174,14 @@ class TradierOptionsClient:
             # Extract price from response
             if 'quotes' in data and 'quote' in data['quotes']:
                 quote = data['quotes']['quote']
-                return quote.get('last') or quote.get('close')
+                price = quote.get('last') or quote.get('close')
+
+                # Cache the price
+                if price is not None:
+                    self._quote_cache.set(ticker, price)
+                    logger.debug(f"{ticker}: Quote cached (price: ${price:.2f})")
+
+                return price
 
             return None
 
@@ -160,7 +191,7 @@ class TradierOptionsClient:
 
     def _fetch_options_chain(self, ticker: str, expiration: str) -> Optional[list]:
         """
-        Fetch options chain from Tradier API (single API call).
+        Fetch options chain from Tradier API with caching (15 min TTL).
 
         Args:
             ticker: Stock symbol
@@ -169,6 +200,15 @@ class TradierOptionsClient:
         Returns:
             List of option contracts with Greeks, or None if failed
         """
+        # Create cache key from ticker + expiration
+        cache_key = f"{ticker}:{expiration}"
+
+        # Check cache first (15 minute TTL)
+        cached_chain = self._options_chain_cache.get(cache_key)
+        if cached_chain is not None:
+            logger.debug(f"{ticker}: Options chain cache hit (expiration: {expiration})")
+            return cached_chain
+
         try:
             url = f"{self.endpoint}/v1/markets/options/chains"
             params = {
@@ -187,7 +227,13 @@ class TradierOptionsClient:
                 logger.warning(f"{ticker}: No options data in response")
                 return None
 
-            return data['options']['option']
+            options_chain = data['options']['option']
+
+            # Cache the options chain
+            self._options_chain_cache.set(cache_key, options_chain)
+            logger.debug(f"{ticker}: Options chain cached (expiration: {expiration}, contracts: {len(options_chain)})")
+
+            return options_chain
 
         except Exception as e:
             logger.error(f"{ticker}: Failed to fetch options chain: {e}")
@@ -283,7 +329,7 @@ class TradierOptionsClient:
 
     def _get_nearest_weekly_expiration(self, ticker: str, earnings_date: Optional[str] = None) -> Optional[str]:
         """
-        Get the weekly options expiration for earnings trade.
+        Get the weekly options expiration for earnings trade (with caching).
 
         Strategy:
         - If earnings date provided: Find expiration in same week or next week if Friday
@@ -296,86 +342,97 @@ class TradierOptionsClient:
         Returns:
             Expiration date string (YYYY-MM-DD) or None
         """
-        try:
-            url = f"{self.endpoint}/v1/markets/options/expirations"
-            params = {'symbol': ticker, 'includeAllRoots': 'true'}
+        # Check cache first (24 hour TTL) - expirations don't change intraday
+        cached_dates = self._expirations_cache.get(ticker)
+        if cached_dates is not None:
+            logger.debug(f"{ticker}: Expirations cache hit")
+            dates = cached_dates
+        else:
+            try:
+                url = f"{self.endpoint}/v1/markets/options/expirations"
+                params = {'symbol': ticker, 'includeAllRoots': 'true'}
 
-            # Use session for connection pooling
-            response = self.session.get(url, params=params, timeout=10)
-            response.raise_for_status()
+                # Use session for connection pooling
+                response = self.session.get(url, params=params, timeout=10)
+                response.raise_for_status()
 
-            data = response.json()
+                data = response.json()
 
-            # Defensive check: Ensure data and expirations are not None
-            if not data or 'expirations' not in data:
-                logger.warning(f"{ticker}: No expirations data in response")
+                # Defensive check: Ensure data and expirations are not None
+                if not data or 'expirations' not in data:
+                    logger.warning(f"{ticker}: No expirations data in response")
+                    return None
+
+                expirations = data['expirations']
+                if expirations is None or 'date' not in expirations:
+                    logger.warning(f"{ticker}: No date field in expirations")
+                    return None
+
+                dates = expirations['date']
+
+                # Defensive check: Validate dates before iteration
+                if not dates or not isinstance(dates, (list, tuple)):
+                    logger.warning(f"{ticker}: No valid expiration dates returned (got {type(dates).__name__})")
+                    return None
+
+                # Cache the expiration dates
+                self._expirations_cache.set(ticker, dates)
+                logger.debug(f"{ticker}: Expirations cached ({len(dates)} dates)")
+
+            except Exception as e:
+                logger.error(f"{ticker}: Failed to get expirations: {e}")
                 return None
 
-            expirations = data['expirations']
-            if expirations is None or 'date' not in expirations:
-                logger.warning(f"{ticker}: No date field in expirations")
-                return None
+        # Process expiration dates (whether from cache or API)
+        today = get_eastern_now().date()
 
-            dates = expirations['date']
+        # Parse earnings date if provided
+        if earnings_date:
+            earnings_dt = datetime.strptime(earnings_date, '%Y-%m-%d').date()
 
-            # Defensive check: Validate dates before iteration
-            if not dates or not isinstance(dates, (list, tuple)):
-                logger.warning(f"{ticker}: No valid expiration dates returned (got {type(dates).__name__})")
-                return None
-
-            today = get_eastern_now().date()
-
-            # Parse earnings date if provided
-            if earnings_date:
-                earnings_dt = datetime.strptime(earnings_date, '%Y-%m-%d').date()
-
-                # Determine target week
-                # If today is Thursday or Friday, look for next week expiration
-                # Otherwise, look for same week as earnings
-                if today.weekday() >= 3:  # Thursday = 3, Friday = 4
-                    # Look for expiration in following week
-                    target_start = today + timedelta(days=7)
-                    target_end = today + timedelta(days=14)
-                else:
-                    # Look for expiration in same week as earnings
-                    # Find Friday of earnings week
-                    days_until_friday = (4 - earnings_dt.weekday()) % 7
-                    if days_until_friday == 0 and earnings_dt.weekday() != 4:
-                        days_until_friday = 7
-                    target_friday = earnings_dt + timedelta(days=days_until_friday)
-
-                    # Allow +/- 3 days from Friday of earnings week
-                    target_start = target_friday - timedelta(days=3)
-                    target_end = target_friday + timedelta(days=3)
-
-            else:
-                # No earnings date - use original logic (7-14 days out)
+            # Determine target week
+            # If today is Thursday or Friday, look for next week expiration
+            # Otherwise, look for same week as earnings
+            if today.weekday() >= 3:  # Thursday = 3, Friday = 4
+                # Look for expiration in following week
                 target_start = today + timedelta(days=7)
                 target_end = today + timedelta(days=14)
+            else:
+                # Look for expiration in same week as earnings
+                # Find Friday of earnings week
+                days_until_friday = (4 - earnings_dt.weekday()) % 7
+                if days_until_friday == 0 and earnings_dt.weekday() != 4:
+                    days_until_friday = 7
+                target_friday = earnings_dt + timedelta(days=days_until_friday)
 
-            # Find first expiration in target range
-            for date_str in dates:
-                exp_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                if target_start <= exp_date <= target_end:
-                    logger.debug(f"{ticker}: Using weekly expiration {date_str}")
-                    return date_str
+                # Allow +/- 3 days from Friday of earnings week
+                target_start = target_friday - timedelta(days=3)
+                target_end = target_friday + timedelta(days=3)
 
-            # Fallback: return nearest future expiration
-            for date_str in dates:
-                exp_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                if exp_date >= today:
-                    logger.warning(f"{ticker}: Using fallback expiration {date_str}")
-                    return date_str
+        else:
+            # No earnings date - use original logic (7-14 days out)
+            target_start = today + timedelta(days=7)
+            target_end = today + timedelta(days=14)
 
-            return None
+        # Find first expiration in target range
+        for date_str in dates:
+            exp_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            if target_start <= exp_date <= target_end:
+                logger.debug(f"{ticker}: Using weekly expiration {date_str}")
+                return date_str
 
-        except Exception as e:
-            logger.error(f"{ticker}: Failed to get expirations: {e}")
-            return None
+        # Fallback: return nearest future expiration
+        for date_str in dates:
+            exp_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            if exp_date >= today:
+                logger.warning(f"{ticker}: Using fallback expiration {date_str}")
+                return date_str
+
+        return None
 
     def has_weekly_options(self, ticker: str) -> bool:
         """
-        Check if ticker has weekly options available.
+        Check if ticker has weekly options available (with caching).
 
         Weekly options are options that expire every week (typically on Fridays),
         as opposed to monthly options that only expire on the third Friday.
@@ -386,29 +443,50 @@ class TradierOptionsClient:
         Returns:
             True if ticker has weekly options, False otherwise
         """
+        # Check cache first (24 hour TTL) - weekly options status doesn't change frequently
+        cached_result = self._weekly_options_cache.get(ticker)
+        if cached_result is not None:
+            logger.debug(f"{ticker}: Weekly options cache hit (result: {cached_result})")
+            return cached_result
+
         try:
-            url = f"{self.endpoint}/v1/markets/options/expirations"
-            params = {'symbol': ticker, 'includeAllRoots': 'true'}
+            # Reuse expirations cache if available (24 hour TTL)
+            dates = self._expirations_cache.get(ticker)
 
-            response = self.session.get(url, params=params, timeout=10)
-            response.raise_for_status()
+            if dates is None:
+                # Need to fetch expirations
+                url = f"{self.endpoint}/v1/markets/options/expirations"
+                params = {'symbol': ticker, 'includeAllRoots': 'true'}
 
-            data = response.json()
+                response = self.session.get(url, params=params, timeout=10)
+                response.raise_for_status()
 
-            # Check if we have valid expirations data
-            if not data or 'expirations' not in data:
-                logger.debug(f"{ticker}: No expirations data")
-                return False
+                data = response.json()
 
-            expirations = data['expirations']
-            if expirations is None or 'date' not in expirations:
-                logger.debug(f"{ticker}: No date field in expirations")
-                return False
+                # Check if we have valid expirations data
+                if not data or 'expirations' not in data:
+                    logger.debug(f"{ticker}: No expirations data")
+                    result = False
+                    self._weekly_options_cache.set(ticker, result)
+                    return result
 
-            dates = expirations['date']
-            if not dates or not isinstance(dates, (list, tuple)):
-                logger.debug(f"{ticker}: No valid expiration dates")
-                return False
+                expirations = data['expirations']
+                if expirations is None or 'date' not in expirations:
+                    logger.debug(f"{ticker}: No date field in expirations")
+                    result = False
+                    self._weekly_options_cache.set(ticker, result)
+                    return result
+
+                dates = expirations['date']
+                if not dates or not isinstance(dates, (list, tuple)):
+                    logger.debug(f"{ticker}: No valid expiration dates")
+                    result = False
+                    self._weekly_options_cache.set(ticker, result)
+                    return result
+
+                # Cache the expiration dates for future use
+                self._expirations_cache.set(ticker, dates)
+                logger.debug(f"{ticker}: Expirations cached from has_weekly_options ({len(dates)} dates)")
 
             # Convert to date objects
             today = get_eastern_now().date()
@@ -423,7 +501,9 @@ class TradierOptionsClient:
 
             if len(exp_dates) < 2:
                 logger.debug(f"{ticker}: Not enough future expirations ({len(exp_dates)})")
-                return False
+                result = False
+                self._weekly_options_cache.set(ticker, result)
+                return result
 
             # Check if there are consecutive weekly expirations (Fridays 7 days apart)
             # Weekly options typically expire every Friday
@@ -445,11 +525,17 @@ class TradierOptionsClient:
             if not has_weeklies:
                 logger.debug(f"{ticker}: Only {fridays_found} Friday expirations in next 3 weeks (needs 2+ for weeklies)")
 
+            # Cache the result (24 hour TTL)
+            self._weekly_options_cache.set(ticker, has_weeklies)
+            logger.debug(f"{ticker}: Weekly options check cached (result: {has_weeklies})")
+
             return has_weeklies
 
         except Exception as e:
             logger.debug(f"{ticker}: Failed to check for weekly options: {e}")
-            return False
+            result = False
+            self._weekly_options_cache.set(ticker, result)
+            return result
 
     def _find_atm_options(self, options: list, current_price: float) -> tuple:
         """
