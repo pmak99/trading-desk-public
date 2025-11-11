@@ -19,10 +19,29 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+
+def _sanitize_error_message(error_msg: str) -> str:
+    """
+    Sanitize error messages to remove API keys from URLs.
+
+    Args:
+        error_msg: Error message that may contain URLs with API keys
+
+    Returns:
+        Sanitized error message with API keys masked
+    """
+    import re
+    # Mask API keys in URLs (key=xxx or apikey=xxx)
+    sanitized = re.sub(r'(key=|apikey=)[A-Za-z0-9_-]+', r'\1***REDACTED***', str(error_msg))
+    # Also mask Bearer tokens if present
+    sanitized = re.sub(r'Bearer [A-Za-z0-9_-]+', 'Bearer ***REDACTED***', sanitized)
+    return sanitized
+
+
 # Global rate limiting for API calls (shared across all instances)
 _google_api_lock = threading.Lock()
 _google_last_call_time = 0
-_GOOGLE_MIN_INTERVAL = 0.5  # Minimum 0.5 seconds between Google API calls
+_GOOGLE_MIN_INTERVAL = 4.5  # Minimum 4.5 seconds between calls (Gemini free: 15 RPM = 4s/req)
 
 
 class AIClient:
@@ -214,7 +233,7 @@ class AIClient:
             }
 
         except Exception as e:
-            logger.error(f"Perplexity API error: {e}")
+            logger.error(f"Perplexity API error: {_sanitize_error_message(str(e))}")
             # Log failed call
             self.usage_tracker.log_api_call(model, 0, 0, ticker, success=False)
             raise
@@ -249,11 +268,13 @@ class AIClient:
         }
 
         # Rate limiting: ensure minimum interval between API calls
+        # Gemini free tier: 15 RPM (requests per minute) = max 1 request per 4 seconds
+        # Using 4.5s interval to provide safety margin and prevent 429 errors
         with _google_api_lock:
             time_since_last_call = time.time() - _google_last_call_time
             if time_since_last_call < _GOOGLE_MIN_INTERVAL:
                 sleep_time = _GOOGLE_MIN_INTERVAL - time_since_last_call
-                logger.debug(f"Rate limiting: sleeping {sleep_time:.2f}s before Google API call")
+                logger.debug(f"Rate limiting: sleeping {sleep_time:.2f}s before Google API call (15 RPM limit)")
                 time.sleep(sleep_time)
 
             try:
@@ -299,7 +320,7 @@ class AIClient:
                 }
 
             except Exception as e:
-                logger.error(f"Google Gemini API error: {e}")
+                logger.error(f"Google Gemini API error: {_sanitize_error_message(str(e))}")
                 self.usage_tracker.log_api_call(model, 0, 0, ticker, success=False)
                 raise
 
