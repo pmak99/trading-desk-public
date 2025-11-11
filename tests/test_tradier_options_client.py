@@ -497,8 +497,14 @@ class TestTradierConnectionPooling:
 
             session_before = client.session
 
+            # Clear cache before testing to ensure we make actual API calls
+            client._quote_cache.clear()
+
             client._get_quote('TEST')
             session_after1 = client.session
+
+            # Clear cache again to force second API call
+            client._quote_cache.clear()
 
             client._get_quote('TEST')
             session_after2 = client.session
@@ -512,3 +518,143 @@ class TestTradierConnectionPooling:
         assert hasattr(client.session, 'adapters')
         assert len(client.session.adapters) > 0
         assert 'http://' in client.session.adapters or 'https://' in client.session.adapters
+
+
+class TestTradierCaching:
+    """Test caching functionality."""
+
+    @pytest.fixture
+    def client(self):
+        """Create Tradier client with mocked environment."""
+        with patch.dict('os.environ', {
+            'TRADIER_ACCESS_TOKEN': 'test_token',
+            'TRADIER_ENDPOINT': 'https://sandbox.tradier.com'
+        }):
+            return TradierOptionsClient()
+
+    def test_quote_caching(self, client):
+        """Test that quotes are cached and API is only called once."""
+        with patch.object(client.session, 'get') as mock_session_get:
+            mock_response = Mock()
+            mock_response.json.return_value = {
+                'quotes': {
+                    'quote': {
+                        'symbol': 'TEST',
+                        'last': 100.00
+                    }
+                }
+            }
+            mock_response.raise_for_status = Mock()
+            mock_session_get.return_value = mock_response
+
+            # Clear cache
+            client._quote_cache.clear()
+
+            # First call - should hit API
+            price1 = client._get_quote('TEST')
+            assert price1 == 100.00
+            assert mock_session_get.call_count == 1
+
+            # Second call - should hit cache, no additional API call
+            price2 = client._get_quote('TEST')
+            assert price2 == 100.00
+            assert mock_session_get.call_count == 1  # Still 1, not 2!
+
+    def test_options_chain_caching(self, client):
+        """Test that options chains are cached with composite keys."""
+        with patch.object(client.session, 'get') as mock_session_get:
+            mock_response = Mock()
+            mock_response.json.return_value = {
+                'options': {
+                    'option': [
+                        {'symbol': 'TEST241115C00100000', 'strike': 100.0}
+                    ]
+                }
+            }
+            mock_response.raise_for_status = Mock()
+            mock_session_get.return_value = mock_response
+
+            # Clear cache
+            client._options_chain_cache.clear()
+
+            # First call - should hit API
+            chain1 = client._fetch_options_chain('TEST', '2024-11-15')
+            assert chain1 is not None
+            assert len(chain1) == 1
+            assert mock_session_get.call_count == 1
+
+            # Second call with same params - should hit cache
+            chain2 = client._fetch_options_chain('TEST', '2024-11-15')
+            assert chain2 is not None
+            assert mock_session_get.call_count == 1  # Still 1!
+
+            # Call with different expiration - should hit API again
+            chain3 = client._fetch_options_chain('TEST', '2024-11-22')
+            assert mock_session_get.call_count == 2  # Now 2
+
+    def test_expirations_caching(self, client):
+        """Test that expirations are cached for 24 hours."""
+        with patch.object(client.session, 'get') as mock_session_get:
+            mock_response = Mock()
+            mock_response.json.return_value = {
+                'expirations': {
+                    'date': [
+                        (datetime.now().date() + timedelta(days=7)).strftime('%Y-%m-%d'),
+                        (datetime.now().date() + timedelta(days=14)).strftime('%Y-%m-%d'),
+                    ]
+                }
+            }
+            mock_response.raise_for_status = Mock()
+            mock_session_get.return_value = mock_response
+
+            # Clear cache
+            client._expirations_cache.clear()
+
+            # First call - should hit API
+            exp1 = client._get_nearest_weekly_expiration('TEST')
+            assert exp1 is not None
+            assert mock_session_get.call_count == 1
+
+            # Second call - should hit cache
+            exp2 = client._get_nearest_weekly_expiration('TEST')
+            assert exp2 is not None
+            assert mock_session_get.call_count == 1  # Still 1!
+
+    def test_cache_stats(self, client):
+        """Test that cache statistics work correctly."""
+        # Clear all caches
+        client._quote_cache.clear()
+        client._options_chain_cache.clear()
+
+        # Check initial stats
+        quote_stats = client._quote_cache.stats()
+        assert quote_stats['size'] == 0
+        assert quote_stats['hits'] == 0
+        assert quote_stats['misses'] == 0
+
+        # Mock a quote call
+        with patch.object(client.session, 'get') as mock_session_get:
+            mock_response = Mock()
+            mock_response.json.return_value = {
+                'quotes': {
+                    'quote': {
+                        'symbol': 'TEST',
+                        'last': 100.00
+                    }
+                }
+            }
+            mock_response.raise_for_status = Mock()
+            mock_session_get.return_value = mock_response
+
+            # First call - cache miss
+            client._get_quote('TEST')
+            stats1 = client._quote_cache.stats()
+            assert stats1['size'] == 1
+            assert stats1['misses'] == 1
+
+            # Second call - cache hit
+            client._get_quote('TEST')
+            stats2 = client._quote_cache.stats()
+            assert stats2['size'] == 1
+            assert stats2['hits'] == 1
+            assert stats2['hit_rate'] == 50.0  # 1 hit out of 2 total (1 hit + 1 miss)
