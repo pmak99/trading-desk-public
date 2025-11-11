@@ -38,19 +38,27 @@ def temp_config():
         'perplexity_monthly_limit': 5.0,
         'models': {
             'perplexity:sonar-pro': {
-                'cost_per_1k_tokens': 0.003,
+                'input_cost_per_1k': 0.003,
+                'output_cost_per_1k': 0.003,
+                'per_request_fee': 0.0,
                 'provider': 'perplexity'
             },
             'perplexity:sonar': {
-                'cost_per_1k_tokens': 0.001,
+                'input_cost_per_1k': 0.001,
+                'output_cost_per_1k': 0.001,
+                'per_request_fee': 0.0,
                 'provider': 'perplexity'
             },
             'openai:gpt-4': {
-                'cost_per_1k_tokens': 0.03,
+                'input_cost_per_1k': 0.03,
+                'output_cost_per_1k': 0.03,
+                'per_request_fee': 0.0,
                 'provider': 'openai'
             },
             'openai:gpt-3.5-turbo': {
-                'cost_per_1k_tokens': 0.001,
+                'input_cost_per_1k': 0.001,
+                'output_cost_per_1k': 0.001,
+                'per_request_fee': 0.0,
                 'provider': 'openai'
             }
         },
@@ -267,12 +275,6 @@ class TestEnforceAPICall:
         except BudgetExceededError:
             pytest.fail("Should not raise exception under budget")
 
-    @pytest.mark.skip(reason="override_daily_limit parameter not supported by get_available_model")
-    def test_enforce_respects_bypass(self, tracker):
-        """Test that get_available_model respects override mode."""
-        # This functionality is not implemented in get_available_model
-        pass
-
 
 class TestUsageSummary:
     """Test usage summary retrieval."""
@@ -417,22 +419,6 @@ class TestPerformance:
 
         # Should be able to check 100 times in < 0.5 seconds
         assert elapsed < 0.5, f"100 budget checks should take < 0.5s, took {elapsed:.2f}s"
-
-
-class TestDataCleanup:
-    """Test data cleanup functionality."""
-
-    @pytest.mark.skip(reason="cleanup_old_data method not implemented in current version")
-    def test_cleanup_old_months(self, tracker):
-        """Test cleanup of old monthly data."""
-        # cleanup_old_data method doesn't exist in the implementation
-        pass
-
-    @pytest.mark.skip(reason="cleanup_old_data method not implemented in current version")
-    def test_cleanup_preserves_recent_data(self, tracker):
-        """Test that cleanup preserves recent months."""
-        # cleanup_old_data method doesn't exist in the implementation
-        pass
 
 
 class TestErrorHandling:

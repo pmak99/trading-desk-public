@@ -63,7 +63,9 @@ def _analyze_single_ticker(args: Tuple[str, TickerData, str, bool, str]) -> Anal
     ticker, ticker_data, earnings_date, override_daily_limit, config_path = args
 
     try:
-        logger.info(f"📊 {ticker}: Starting analysis (Score: {ticker_data.get('score', 0):.1f}/100, IV: {ticker_data.get('options_data', {}).get('current_iv', 'N/A')}%)")
+        current_iv = ticker_data.get('options_data', {}).get('current_iv')
+        iv_str = f"{current_iv:.2f}" if isinstance(current_iv, (int, float)) else 'N/A'
+        logger.info(f"📊 {ticker}: Starting analysis (Score: {ticker_data.get('score', 0):.1f}/100, IV: {iv_str}%)")
 
         # Use shared UsageTracker via config path
         from src.core.usage_tracker import UsageTracker

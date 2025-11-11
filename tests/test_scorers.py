@@ -286,7 +286,7 @@ class TestCompositeScorer:
         assert score == 0.0, "Ticker with IV < 60% should be filtered (score 0)"
 
     def test_medium_score_ticker(self):
-        """Test scoring for medium-quality ticker."""
+        """Test scoring for medium-quality ticker (no historical IV data)."""
         scorer = CompositeScorer(min_iv=60)
         data = {
             'ticker': 'TEST',

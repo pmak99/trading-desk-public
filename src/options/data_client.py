@@ -101,7 +101,9 @@ class OptionsDataClient:
                 **earnings_data
             }
 
-            logger.info(f"{ticker}: Current IV={result.get('current_iv', 'N/A')}%, "
+            current_iv = result.get('current_iv')
+            iv_str = f"{current_iv:.2f}" if current_iv is not None and current_iv > 0 else 'N/A'
+            logger.info(f"{ticker}: Current IV={iv_str}%, "
                        f"Expected Move={result.get('expected_move_pct', 'N/A')}%")
 
             return result
@@ -163,19 +165,22 @@ class OptionsDataClient:
                     ]
 
                     if not atm_calls.empty and 'impliedVolatility' in atm_calls.columns:
-                        current_iv = atm_calls['impliedVolatility'].mean()
+                        # yfinance returns IV as decimal (e.g., 0.5683 = 56.83%)
+                        # Multiply by 100 to match Tradier format (percentage)
+                        current_iv = atm_calls['impliedVolatility'].mean() * 100
                     else:
-                        current_iv = current_rv
+                        # Realized volatility is also a decimal, convert to percentage
+                        current_iv = current_rv * 100
                 else:
-                    current_iv = current_rv
+                    current_iv = current_rv * 100
             except Exception as e:
                 logger.debug(f"{ticker}: Using realized vol as IV: {e}")
-                current_iv = current_rv
+                current_iv = current_rv * 100
 
             return {
                 'iv_rank': round(iv_rank, 1),
                 'iv_percentile': round(iv_rank, 1),  # Same as IV Rank for this calculation
-                'current_iv': round(current_iv, 4)
+                'current_iv': round(current_iv, 2)  # Round to 2 decimals (e.g., 56.83%)
             }
 
         except Exception as e:

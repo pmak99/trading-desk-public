@@ -100,7 +100,7 @@ class IVScorer(TickerScorer):
         """Score from actual IV percentage."""
         # HARD FILTER: Must be >= min_iv
         if current_iv < self.min_iv:
-            logger.info(f"{ticker}: IV {current_iv}% < {self.min_iv}% - SKIPPING")
+            logger.info(f"{ticker}: IV {current_iv:.2f}% < {self.min_iv}% - SKIPPING")
             return 0.0
 
         # Score based on absolute IV level

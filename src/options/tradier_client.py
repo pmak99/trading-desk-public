@@ -122,7 +122,7 @@ class TradierOptionsClient:
                 'open_interest': liquidity_data.get('open_interest', 0),
             }
 
-            logger.info(f"{ticker}: Current IV = {result['current_iv']:.1f}% (real Tradier data)")
+            logger.info(f"{ticker}: Current IV = {result['current_iv']:.2f}% (real Tradier data)")
 
             return result
 
@@ -221,16 +221,16 @@ class TradierOptionsClient:
 
             # Validate IV is in reasonable range (1-300%)
             if current_iv > 0 and (current_iv < 1 or current_iv > 300):
-                logger.warning(f"{ticker}: Invalid ATM call IV {current_iv:.1f}% from Tradier (expected 1-300%)")
+                logger.warning(f"{ticker}: Invalid ATM call IV {current_iv:.2f}% from Tradier (expected 1-300%)")
 
                 # Try ATM put as fallback
                 if atm_put and 'greeks' in atm_put:
                     put_iv = atm_put['greeks'].get('mid_iv', 0) * 100
                     if 1 <= put_iv <= 300:
-                        logger.info(f"{ticker}: Using ATM put IV {put_iv:.1f}% as fallback")
+                        logger.info(f"{ticker}: Using ATM put IV {put_iv:.2f}% as fallback")
                         current_iv = put_iv
                     else:
-                        logger.warning(f"{ticker}: ATM put IV also invalid ({put_iv:.1f}%), skipping IV data")
+                        logger.warning(f"{ticker}: ATM put IV also invalid ({put_iv:.2f}%), skipping IV data")
                         current_iv = 0
                 else:
                     logger.warning(f"{ticker}: No valid ATM put fallback available")
@@ -444,7 +444,9 @@ if __name__ == "__main__":
         logger.info("OPTIONS DATA:")
         logger.info(f"  IV Rank: {data.get('iv_rank', 'N/A')}%")
         logger.info(f"  IV Percentile: {data.get('iv_percentile', 'N/A')}%")
-        logger.info(f"  Current IV: {data.get('current_iv', 'N/A')}%")
+        current_iv = data.get('current_iv')
+        iv_str = f"{current_iv:.2f}" if isinstance(current_iv, (int, float)) else 'N/A'
+        logger.info(f"  Current IV: {iv_str}%")
         logger.info(f"  Expected Move: {data.get('expected_move_pct', 'N/A')}%")
         logger.info(f"  Options Volume: {data.get('options_volume', 0):,}")
         logger.info(f"  Open Interest: {data.get('open_interest', 0):,}")

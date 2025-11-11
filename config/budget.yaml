@@ -36,25 +36,35 @@ models:
     input_cost_per_1k: 0.003   # $3 per 1M input tokens
     output_cost_per_1k: 0.015  # $15 per 1M output tokens (5x input!)
     per_request_fee: 0.005     # $5 per 1K requests
-    cost_per_1k_tokens: 0.005  # DEPRECATED - kept for backward compatibility
     timeout: 20  # seconds
     use_case: "daily"  # Daily routine analysis
 
   # GPT models via Perplexity API (uses same PERPLEXITY_API_KEY)
   gpt-4o:
-    cost_per_1k_tokens: 0.001  # $1 per 1M tokens via Perplexity
+    # Perplexity pricing: $1 per 1M tokens (blended)
+    # Estimated split: input/output ratio ~1:3
+    input_cost_per_1k: 0.00025   # $0.25 per 1M input tokens
+    output_cost_per_1k: 0.00075  # $0.75 per 1M output tokens
+    per_request_fee: 0.0         # No per-request fee for GPT models
     timeout: 30  # seconds
     use_case: "daily"  # Good for strategy generation
 
   gpt-4o-mini:
-    cost_per_1k_tokens: 0.0002  # $0.20 per 1M tokens via Perplexity
+    # Perplexity pricing: $0.20 per 1M tokens (blended)
+    # Estimated split: input/output ratio ~1:3
+    input_cost_per_1k: 0.00005   # $0.05 per 1M input tokens
+    output_cost_per_1k: 0.00015  # $0.15 per 1M output tokens
+    per_request_fee: 0.0         # No per-request fee for GPT models
     timeout: 30  # seconds
     use_case: "daily"  # Cheaper alternative
 
   # Google Gemini models (fallback)
   gemini-2.0-flash:
     provider: "google"
-    cost_per_1k_tokens: 0.0  # Free tier: 1500 RPD
+    # Free tier pricing
+    input_cost_per_1k: 0.0   # Free tier
+    output_cost_per_1k: 0.0  # Free tier
+    per_request_fee: 0.0     # Free tier
     timeout: 30
     use_case: "fallback"
     api_key_env: "GOOGLE_API_KEY"

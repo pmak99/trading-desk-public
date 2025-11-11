@@ -322,7 +322,7 @@ class TickerFilter:
 
                         self._calculate_iv_crush_ratio(options_data)
                         options_data['data_source'] = 'tradier'
-                        logger.debug(f"{ticker}: Using Tradier (IV: {options_data.get('current_iv')}%)")
+                        logger.debug(f"{ticker}: Using Tradier (IV: {options_data.get('current_iv', 0):.2f}%)")
 
                 except Exception as e:
                     logger.warning(f"{ticker}: Tradier failed: {e}")

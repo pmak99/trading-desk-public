@@ -354,23 +354,18 @@ class TestTradierOptionsClient:
         chain_response.json.return_value = sample_options_chain
         chain_response.raise_for_status = Mock()
 
-        quote_response = Mock()
-        quote_response.json.return_value = sample_quote_response
-        quote_response.raise_for_status = Mock()
-
-        # Mock session.get with multiple responses
+        # When current_price is provided, only 2 API calls are needed:
+        # 1. Get expirations
+        # 2. Get options chain
         client.session.get = Mock(side_effect=[
             exp_response,  # Get expirations
             chain_response,  # Get chain
-            quote_response,  # Get quote
-            exp_response,  # Get expirations again
-            chain_response  # Get chain again
         ])
 
         result = client.get_options_data('NVDA', 195.50)
 
-        assert result is not None
-        assert 'iv_rank' in result or 'current_iv' in result  # At least some IV data
+        assert result is not None, f"Expected result but got None"
+        assert 'current_iv' in result, f"Expected current_iv in result, got {result.keys() if result else 'None'}"  # At least some IV data
 
     def test_get_options_data_unavailable_client(self, client_no_token):
         """Test options data returns None when client unavailable."""

@@ -292,12 +292,14 @@ python3 -c "import yaml; yaml.safe_load(open('config/budget.yaml'))"
 # ❌ Wrong - inconsistent indentation
 models:
   sonar-pro:
-  cost_per_1k_tokens: 5.0
+  input_cost_per_1k: 0.003
 
 # ✅ Correct
 models:
   sonar-pro:
-    cost_per_1k_tokens: 5.0
+    input_cost_per_1k: 0.003
+    output_cost_per_1k: 0.015
+    per_request_fee: 0.005
 ```
 
 **Use online validator**: https://www.yamllint.com/

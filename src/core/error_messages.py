@@ -236,7 +236,7 @@ def iv_criteria_not_met_error(
     """Error message for IV criteria not met."""
     context = {"Ticker": ticker}
     if current_iv:
-        context["Current IV"] = f"{current_iv:.1f}% (min: {min_iv:.0f}%)"
+        context["Current IV"] = f"{current_iv:.2f}% (min: {min_iv:.0f}%)"
     if iv_rank:
         context["IV Rank"] = f"{iv_rank:.1f}% (min: {min_iv_rank:.0f}%)"
 
