@@ -132,20 +132,26 @@ class ReportFormatter:
             iv_note = '(HIGH - Good for IV crush)' if current_iv >= min_iv else ''
             lines.append(f"  Current IV: {current_iv}% {iv_note}")
 
-        # Show Weekly IV Change (primary timing metric) instead of IV Rank
+        # Show Weekly IV Change (primary timing metric for 1-2 day pre-earnings entries)
         weekly_change = options.get('weekly_iv_change')
         if weekly_change is not None:
-            if weekly_change >= 40:
-                change_note = '(Strong buildup - GOOD entry timing!)'
+            # Provide actionable guidance based on IV expansion/contraction
+            if weekly_change >= 80:
+                change_note = '🚀 (EXCELLENT expansion - premium building fast!)'
+            elif weekly_change >= 40:
+                change_note = '📈 (STRONG expansion - good entry timing!)'
             elif weekly_change >= 20:
-                change_note = '(Moderate buildup)'
+                change_note = '→ (Moderate expansion)'
             elif weekly_change >= 0:
-                change_note = '(Weak buildup)'
+                change_note = '⚪ (Weak expansion - minimal buildup)'
             else:
-                change_note = '(Premium leaking - AVOID!)'
+                change_note = '⚠️  (LEAKING - premium falling, risky setup!)'
             lines.append(f"  Weekly IV Change: {weekly_change:+.1f}% {change_note}")
         else:
-            lines.append(f"  Weekly IV Change: N/A (insufficient history)")
+            # Data missing - provide diagnostic info
+            lines.append(f"  Weekly IV Change: N/A ⚠️  (No IV data 5-9 days ago)")
+            lines.append(f"                    → Using neutral score (50.0) for IV Expansion (35% weight)")
+            lines.append(f"                    → Score may be inaccurate - run again for backfill")
 
         lines.append(f"  Expected Move: {options.get('expected_move_pct', 'N/A')}%")
         lines.append(f"  Avg Actual Move: {options.get('avg_actual_move_pct', 'N/A')}%")
