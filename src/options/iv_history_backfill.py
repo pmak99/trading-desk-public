@@ -116,6 +116,46 @@ class IVHistoryBackfill:
                 'message': f'Backfill error: {str(e)[:100]}'
             }
 
+    def backfill_recent(self, ticker: str, days: int = 14) -> Dict:
+        """
+        Backfill recent IV data (lightweight - just last 2 weeks).
+
+        Used when weekly IV change calculation fails due to missing data.
+        Much faster than full 365-day backfill since it only needs 14 days.
+
+        Args:
+            ticker: Stock ticker symbol
+            days: Days to backfill (default: 14 for 2 weeks)
+
+        Returns:
+            Dict with success, data_points, message
+        """
+        logger.info(f"{ticker}: Backfilling recent {days} days for weekly IV change")
+
+        try:
+            # Use existing backfill_ticker with shorter window
+            # Sample daily for accuracy (interval=1)
+            result = self.backfill_ticker(
+                ticker,
+                lookback_days=days,
+                sample_interval_days=1  # Daily samples for recent period
+            )
+
+            if result['success']:
+                logger.info(f"{ticker}: ✓ Recent backfill successful ({result['data_points']} points)")
+            else:
+                logger.warning(f"{ticker}: Recent backfill failed: {result['message']}")
+
+            return result
+
+        except Exception as e:
+            logger.warning(f"{ticker}: Recent backfill error: {e}")
+            return {
+                'success': False,
+                'data_points': 0,
+                'message': str(e)
+            }
+
     def _generate_sample_dates(self, lookback_days: int,
                               interval_days: int) -> List[datetime]:
         """

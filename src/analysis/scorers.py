@@ -159,7 +159,7 @@ class IVExpansionScorer(TickerScorer):
         super().__init__(weight)
 
     def score(self, data: TickerData) -> float:
-        """Score based on weekly IV percentage change."""
+        """Score based on weekly IV percentage change with on-demand backfill."""
         from src.options.iv_history_tracker import IVHistoryTracker
 
         options_data = data.get('options_data', {})
@@ -174,11 +174,30 @@ class IVExpansionScorer(TickerScorer):
         tracker = IVHistoryTracker()
         try:
             weekly_change = tracker.get_weekly_iv_change(ticker, current_iv)
+
+            # Self-healing: Auto-backfill if no data available
+            if weekly_change is None:
+                logger.info(f"{ticker}: No weekly IV data, attempting recent backfill...")
+                from src.options.iv_history_backfill import IVHistoryBackfill
+
+                backfiller = IVHistoryBackfill(iv_tracker=tracker)
+                result = backfiller.backfill_recent(ticker, days=14)
+
+                if result['success'] and result['data_points'] > 0:
+                    # Retry calculation with backfilled data
+                    weekly_change = tracker.get_weekly_iv_change(ticker, current_iv)
+                    if weekly_change is not None:
+                        logger.info(f"{ticker}: ✓ Backfilled {result['data_points']} points, weekly change = {weekly_change:+.1f}%")
+                    else:
+                        logger.warning(f"{ticker}: Backfill succeeded but still no weekly data (may need more history)")
+                else:
+                    logger.warning(f"{ticker}: Backfill failed: {result.get('message', 'Unknown error')}")
         finally:
             tracker.close()
 
         if weekly_change is None:
-            # No historical data yet - return neutral score (don't filter out)
+            # No historical data and backfill failed - return neutral score (don't filter out)
+            logger.debug(f"{ticker}: No weekly IV data available after backfill attempt")
             return 50.0
 
         # Score based on IV expansion velocity
