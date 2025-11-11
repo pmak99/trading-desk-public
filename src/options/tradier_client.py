@@ -108,23 +108,21 @@ class TradierOptionsClient:
             if not options_chain:
                 return None
 
-            # Extract IV rank from the chain
-            iv_data = self._extract_iv_rank(options_chain, current_price, ticker)
+            # Extract current IV from the chain
+            iv_data = self._extract_current_iv(options_chain, current_price, ticker)
 
             # Extract liquidity metrics from the SAME chain
             liquidity_data = self._extract_liquidity_metrics(options_chain, current_price)
 
             # Combine data
             result = {
-                'iv_rank': iv_data.get('iv_rank', 0),
-                'iv_percentile': iv_data.get('iv_percentile', 0),
                 'current_iv': iv_data.get('current_iv', 0),
                 'expected_move_pct': liquidity_data.get('expected_move_pct', 0),
                 'options_volume': liquidity_data.get('options_volume', 0),
                 'open_interest': liquidity_data.get('open_interest', 0),
             }
 
-            logger.info(f"{ticker}: IV Rank = {result['iv_rank']:.1f}% (real ORATS data)")
+            logger.info(f"{ticker}: Current IV = {result['current_iv']:.1f}% (real Tradier data)")
 
             return result
 
@@ -197,7 +195,7 @@ class TradierOptionsClient:
 
     def _extract_iv_rank(self, options_chain: list, current_price: float, ticker: str) -> Dict:
         """
-        Extract IV Rank from already-fetched options chain.
+        Extract current IV from already-fetched options chain.
 
         Args:
             options_chain: List of option contracts from Tradier
@@ -205,11 +203,11 @@ class TradierOptionsClient:
             ticker: Stock ticker (for logging)
 
         Returns:
-            Dict with iv_rank, iv_percentile, current_iv
+            Dict with current_iv
         """
         try:
             if not options_chain or not current_price:
-                return {'iv_rank': 0, 'iv_percentile': 0, 'current_iv': 0}
+                return {'current_iv': 0}
 
             # Find ATM options to get current IV
             atm_call, atm_put = self._find_atm_options(options_chain, current_price)
