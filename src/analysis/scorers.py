@@ -181,7 +181,8 @@ class IVExpansionScorer(TickerScorer):
                 from src.options.iv_history_backfill import IVHistoryBackfill
 
                 backfiller = IVHistoryBackfill(iv_tracker=tracker)
-                result = backfiller.backfill_recent(ticker, days=14)
+                # Backfill last 10 days (enough for 5-9 day lookback window)
+                result = backfiller.backfill_recent(ticker, days=10)
 
                 if result['success'] and result['data_points'] > 0:
                     # Retry calculation with backfilled data
