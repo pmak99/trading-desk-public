@@ -24,7 +24,7 @@ class CSVFormatter:
 
         # Write header
         writer.writerow([
-            'Ticker', 'IV', 'IV Rank', 'Score', 'Sentiment',
+            'Ticker', 'IV', 'Weekly IV Change', 'Score', 'Sentiment',
             'Confidence', 'Price Target', 'Risk Level',
             'Primary Strategy', 'Strategy Details', 'Status'
         ])
@@ -48,8 +48,10 @@ class CSVFormatter:
 
         # IV metrics
         iv_metrics = ticker_data.get('iv_metrics', {})
-        iv = iv_metrics.get('current_iv', 0)
-        iv_rank = iv_metrics.get('iv_rank', 0)
+        # Also check options_data (used in newer structure)
+        options_data = ticker_data.get('options_data', {})
+        iv = iv_metrics.get('current_iv') or options_data.get('current_iv', 0)
+        weekly_change = iv_metrics.get('weekly_iv_change') or options_data.get('weekly_iv_change')
 
         # Score
         score = ticker_data.get('score', 0)
@@ -73,8 +75,9 @@ class CSVFormatter:
             primary_strategy = 'N/A'
             strategy_details = 'N/A'
 
+        weekly_str = f"{weekly_change:+.1f}%" if weekly_change is not None else "N/A"
         writer.writerow([
-            ticker, f"{iv:.1f}%", f"{iv_rank:.1f}%", f"{score:.1f}",
+            ticker, f"{iv:.1f}%", weekly_str, f"{score:.1f}",
             sentiment, confidence, price_target, risk_level,
             primary_strategy, strategy_details, status
         ])
@@ -115,7 +118,7 @@ if __name__ == "__main__":
                 'ticker': 'NVDA',
                 'iv_metrics': {
                     'current_iv': 65.5,
-                    'iv_rank': 75.0
+                    'weekly_iv_change': 45.2
                 },
                 'score': 82.3,
                 'sentiment': {
