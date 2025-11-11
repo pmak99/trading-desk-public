@@ -85,8 +85,8 @@ class OptionsDataClient:
         logger.info(f"Calculating options metrics for {ticker}...")
 
         try:
-            # Get current IV and calculate IV Rank (using historical data already fetched)
-            iv_data = self._calculate_iv_rank_from_hist(hist, stock, ticker)
+            # Get current IV from historical realized volatility (proxy)
+            iv_data = self._calculate_current_iv_from_hist(hist, stock, ticker)
 
             # Get options chain for liquidity and expected move
             options_data = self._get_options_chain_data(stock, current_price)
@@ -101,7 +101,7 @@ class OptionsDataClient:
                 **earnings_data
             }
 
-            logger.info(f"{ticker}: IV Rank={result.get('iv_rank', 'N/A')}%, "
+            logger.info(f"{ticker}: Current IV={result.get('current_iv', 'N/A')}%, "
                        f"Expected Move={result.get('expected_move_pct', 'N/A')}%")
 
             return result
@@ -111,9 +111,9 @@ class OptionsDataClient:
             return {}
 
 
-    def _calculate_iv_rank_from_hist(self, hist: Any, stock: Any, ticker: str) -> Dict:
+    def _calculate_current_iv_from_hist(self, hist: Any, stock: Any, ticker: str) -> Dict:
         """
-        Calculate IV Rank from already-fetched historical data.
+        Calculate current IV proxy from already-fetched historical data.
 
         NOTE: This uses REALIZED VOLATILITY as a proxy for IMPLIED VOLATILITY.
         Real IV Rank requires historical IV data which is not available in free APIs.
@@ -131,7 +131,7 @@ class OptionsDataClient:
         try:
             if hist.empty:
                 logger.warning(f"{ticker}: No historical data for IV calculation")
-                return {'iv_rank': None, 'iv_percentile': None, 'current_iv': None}
+                return {'current_iv': None}
 
             # Calculate 30-day realized volatility for each day
             # Use explicit copy to avoid SettingWithCopyWarning
@@ -179,8 +179,8 @@ class OptionsDataClient:
             }
 
         except Exception as e:
-            logger.error(f"{ticker}: Error calculating IV Rank: {e}")
-            return {'iv_rank': None, 'iv_percentile': None, 'current_iv': None}
+            logger.error(f"{ticker}: Error calculating current IV: {e}")
+            return {'current_iv': None}
 
     def _get_options_chain_data(self, stock, current_price: float) -> Dict:
         """

@@ -312,11 +312,10 @@ class TickerFilter:
                                 options_data['last_earnings_move'] = yf_data.get('last_earnings_move')
                                 options_data['earnings_beat_rate'] = yf_data.get('earnings_beat_rate')
 
-                                # Use yfinance IV Rank if Tradier doesn't provide it
-                                if options_data.get('iv_rank', 0) == 0 and yf_data.get('iv_rank', 0) > 0:
-                                    options_data['iv_rank'] = yf_data['iv_rank']
-                                    options_data['iv_rank_source'] = 'yfinance_rv_proxy'
-                                    logger.debug(f"{ticker}: Using yfinance RV Rank proxy")
+                                # Supplement with yfinance IV if Tradier IV is missing
+                                if options_data.get('current_iv', 0) == 0 and yf_data.get('current_iv', 0) > 0:
+                                    options_data['current_iv'] = yf_data['current_iv']
+                                    logger.debug(f"{ticker}: Using yfinance IV as fallback")
 
                             except Exception as e:
                                 logger.warning(f"{ticker}: yfinance supplement failed: {e}")
