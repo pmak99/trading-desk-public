@@ -1,0 +1,28 @@
+{
+  "data_fetching": {
+    "elapsed": 1.01951003074646,
+    "tickers_processed": 3,
+    "failed": 0,
+    "time_per_ticker": 0.33983667691548664
+  },
+  "api_calls": {
+    "elapsed": 0.18806886672973633,
+    "success": true
+  },
+  "caching": {
+    "cache_stats": {
+      "size": 50,
+      "max_size": 100,
+      "hits": 50,
+      "misses": 50,
+      "evictions": 0,
+      "hit_rate": 50.0
+    },
+    "hit_time_us": 1.7404556274414062,
+    "miss_time_us": 0.400543212890625
+  },
+  "memory": {
+    "rss_mb": 120.03125,
+    "cache_growth_mb": 0.984375
+  }
+}
