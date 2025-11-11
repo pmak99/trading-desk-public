@@ -161,7 +161,7 @@ class IVExpansionScorer(TickerScorer):
         self.db_path = db_path  # Optional database path for testing
 
     def score(self, data: TickerData) -> float:
-        """Score based on weekly IV percentage change with on-demand backfill."""
+        """Score based on recent IV percentage change (flexible 1-7 day lookback) with on-demand backfill."""
         from src.options.iv_history_tracker import IVHistoryTracker
 
         options_data = data.get('options_data', {})
@@ -172,10 +172,11 @@ class IVExpansionScorer(TickerScorer):
             # No current IV data - return conservative score (don't filter out)
             return 30.0
 
-        # Calculate weekly IV % change
+        # Calculate recent IV % change (uses most recent data in past 1-7 days)
         tracker = IVHistoryTracker(db_path=self.db_path) if self.db_path else IVHistoryTracker()
         try:
-            weekly_change = tracker.get_weekly_iv_change(ticker, current_iv)
+            # Try to get recent IV change (most recent data in past 1-7 days)
+            weekly_change = tracker.get_recent_iv_change(ticker, current_iv, max_lookback_days=7)
 
             # Self-healing: Auto-backfill if no data available
             if weekly_change is None:

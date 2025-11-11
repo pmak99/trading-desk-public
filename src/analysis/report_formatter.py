@@ -132,7 +132,8 @@ class ReportFormatter:
             iv_note = '(HIGH - Good for IV crush)' if current_iv >= min_iv else ''
             lines.append(f"  Current IV: {current_iv}% {iv_note}")
 
-        # Show Weekly IV Change (primary timing metric for 1-2 day pre-earnings entries)
+        # Show Recent IV Change (primary timing metric for same-day entries)
+        # Uses most recent IV data in past 1-7 days (flexible lookback)
         weekly_change = options.get('weekly_iv_change')
         if weekly_change is not None:
             # Provide actionable guidance based on IV expansion/contraction
@@ -146,12 +147,12 @@ class ReportFormatter:
                 change_note = '⚪ (Weak expansion - minimal buildup)'
             else:
                 change_note = '⚠️  (LEAKING - premium falling, risky setup!)'
-            lines.append(f"  Weekly IV Change: {weekly_change:+.1f}% {change_note}")
+            lines.append(f"  Recent IV Change: {weekly_change:+.1f}% {change_note} (from most recent data)")
         else:
             # Data missing - provide diagnostic info
-            lines.append(f"  Weekly IV Change: N/A ⚠️  (No historical IV data - heavily penalized)")
+            lines.append(f"  Recent IV Change: N/A ⚠️  (No historical IV data - heavily penalized)")
             lines.append(f"                    → Score: 10.0 for IV Expansion (35% weight)")
-            lines.append(f"                    → Typically indicates small-cap or low-liquidity ticker")
+            lines.append(f"                    → No IV data in past 7 days (backfill failed or new ticker)")
 
         lines.append(f"  Expected Move: {options.get('expected_move_pct', 'N/A')}%")
         lines.append(f"  Avg Actual Move: {options.get('avg_actual_move_pct', 'N/A')}%")
