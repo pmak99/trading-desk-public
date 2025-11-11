@@ -45,7 +45,7 @@ class TestIVScorer:
             }
         }
         score = scorer.score(data)
-        assert score == 85.0, "IV 85% should score 85"
+        assert score == 100.0, "IV 85% should score 100 (optimized for 1-2 day pre-earnings)"
 
     def test_high_current_iv_good(self):
         """Test scoring with good IV (60-80%)."""
@@ -298,7 +298,8 @@ class TestCompositeScorer:
             }
         }
         score = scorer.calculate_score(data)
-        assert 40.0 <= score <= 60.0, f"Medium ticker should score 40-60, got {score}"
+        # Updated range: Conservative expansion score (30) + moderate fundamentals = 55-65
+        assert 55.0 <= score <= 65.0, f"Medium ticker should score 55-65, got {score}"
 
     def test_weight_distribution(self):
         """Test that weights are properly distributed."""
