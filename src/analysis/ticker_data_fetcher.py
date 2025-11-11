@@ -175,6 +175,18 @@ class TickerDataFetcher:
                     # Add options data to ticker_data
                     ticker_data['options_data'] = options_data
 
+                    # Calculate and add weekly IV change to options_data (for reporting)
+                    current_iv = options_data.get('current_iv')
+                    if current_iv and current_iv > 0:
+                        from src.options.iv_history_tracker import IVHistoryTracker
+                        tracker = IVHistoryTracker()
+                        try:
+                            weekly_change = tracker.get_weekly_iv_change(ticker, current_iv)
+                            if weekly_change is not None:
+                                options_data['weekly_iv_change'] = weekly_change
+                        finally:
+                            tracker.close()
+
                     # Calculate score
                     ticker_data['score'] = self.ticker_filter.calculate_score(ticker_data)
 

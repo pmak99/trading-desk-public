@@ -132,7 +132,21 @@ class ReportFormatter:
             iv_note = '(HIGH - Good for IV crush)' if current_iv >= min_iv else ''
             lines.append(f"  Current IV: {current_iv}% {iv_note}")
 
-        lines.append(f"  IV Rank: {options.get('iv_rank', 'N/A')}%")
+        # Show Weekly IV Change (primary timing metric) instead of IV Rank
+        weekly_change = options.get('weekly_iv_change')
+        if weekly_change is not None:
+            if weekly_change >= 40:
+                change_note = '(Strong buildup - GOOD entry timing!)'
+            elif weekly_change >= 20:
+                change_note = '(Moderate buildup)'
+            elif weekly_change >= 0:
+                change_note = '(Weak buildup)'
+            else:
+                change_note = '(Premium leaking - AVOID!)'
+            lines.append(f"  Weekly IV Change: {weekly_change:+.1f}% {change_note}")
+        else:
+            lines.append(f"  Weekly IV Change: N/A (insufficient history)")
+
         lines.append(f"  Expected Move: {options.get('expected_move_pct', 'N/A')}%")
         lines.append(f"  Avg Actual Move: {options.get('avg_actual_move_pct', 'N/A')}%")
         lines.append(f"  IV Crush Ratio: {options.get('iv_crush_ratio', 'N/A')}x")
@@ -222,7 +236,7 @@ class ReportFormatter:
         lines.append("")
 
         # Header
-        lines.append(f"{'Ticker':<10} {'IV %':<10} {'IV Rank %':<12} {'Open Interest':<15} {'Score':<10}")
+        lines.append(f"{'Ticker':<10} {'IV %':<10} {'Weekly Δ %':<12} {'Open Interest':<15} {'Score':<10}")
         lines.append("-" * 80)
 
         # Rows
@@ -230,11 +244,12 @@ class ReportFormatter:
             ticker = analysis['ticker']
             options = analysis.get('options_data', {})
             iv = options.get('current_iv', 0)
-            iv_rank = options.get('iv_rank', 0)
+            weekly_change = options.get('weekly_iv_change')
+            weekly_str = f"{weekly_change:+.1f}" if weekly_change is not None else "N/A"
             oi = options.get('open_interest', 0)
             score = analysis.get('score', 0)
 
-            lines.append(f"{ticker:<10} {iv:<10.2f} {iv_rank:<12.1f} {oi:<15,} {score:<10.1f}")
+            lines.append(f"{ticker:<10} {iv:<10.2f} {weekly_str:<12} {oi:<15,} {score:<10.1f}")
 
         return "\n".join(lines)
 
