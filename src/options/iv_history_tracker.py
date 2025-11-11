@@ -215,6 +215,75 @@ class IVHistoryTracker(SQLiteBase):
 
         return round(iv_rank, 1)
 
+    def get_recent_iv_change(self, ticker: str, current_iv: float, max_lookback_days: int = 7) -> Optional[float]:
+        """
+        Calculate IV percentage change from most recent available data (flexible lookback).
+
+        OPTIMIZED FOR SAME-DAY ENTRIES (3-4pm on earnings day).
+        Uses MOST RECENT IV data point within past 1-7 days (no daily snapshots needed).
+
+        Formula: ((current_iv - most_recent_iv) / most_recent_iv) * 100
+
+        Args:
+            ticker: Ticker symbol
+            current_iv: Current IV percentage
+            max_lookback_days: Maximum days to look back (default: 7)
+                              Finds the MOST RECENT data point within this window
+
+        Returns:
+            Recent IV % change (e.g., -26.6 means IV dropped 26.6% since last data point),
+            or None if no recent data exists
+
+        Examples:
+            - 3 days ago: IV = 133%, Today: IV = 98% → returns -26.6 (leaking BADLY!)
+            - 1 day ago: IV = 80%, Today: IV = 95% → returns +18.75 (building nicely!)
+            - 2 days ago: IV = 60%, Today: IV = 60% → returns 0.0 (flat)
+
+        Key difference from get_weekly_iv_change():
+            - Weekly: Looks for data exactly 5-9 days ago (rigid)
+            - Recent: Uses MOST RECENT data in past 1-7 days (flexible)
+        """
+        if current_iv <= 0:
+            return None
+
+        conn = self._get_connection()
+
+        # Find MOST RECENT IV data within past max_lookback_days
+        lookback_start = (datetime.now() - timedelta(days=max_lookback_days)).strftime('%Y-%m-%d')
+        today = datetime.now().strftime('%Y-%m-%d')
+
+        cursor = conn.execute(
+            """SELECT iv_value, date FROM iv_history
+               WHERE ticker = ? AND date >= ? AND date < ?
+               ORDER BY date DESC LIMIT 1""",
+            (ticker, lookback_start, today)
+        )
+
+        row = cursor.fetchone()
+
+        if not row:
+            logger.debug(f"{ticker}: No IV data in past {max_lookback_days} days")
+            return None
+
+        old_iv = row['iv_value']
+        actual_date = row['date']
+
+        if old_iv <= 0:
+            return None
+
+        # Calculate percentage change
+        pct_change = ((current_iv - old_iv) / old_iv) * 100
+
+        # Calculate actual days difference for transparency
+        days_ago = (datetime.now() - datetime.strptime(actual_date, '%Y-%m-%d')).days
+
+        logger.debug(
+            f"{ticker}: IV change over {days_ago} days: "
+            f"{old_iv:.1f}% ({actual_date}) → {current_iv:.1f}% (today) = {pct_change:+.1f}%"
+        )
+
+        return round(pct_change, 2)
+
     def get_weekly_iv_change(self, ticker: str, current_iv: float, tolerance_days: int = 2) -> Optional[float]:
         """
         Calculate weekly IV percentage change (for IV expansion detection).
