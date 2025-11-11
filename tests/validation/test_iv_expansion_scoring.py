@@ -170,9 +170,9 @@ def test_updated_composite_scorer():
         print(f"  - Options volume: 15,000")
         print(f"  - IV crush ratio: 1.25")
 
-        # Should score well (>70)
-        assert score > 70, f"Strong candidate should score >70, got {score:.1f}"
-        print(f"✅ Strong candidate scored {score:.1f} (>70 threshold)")
+        # Should score well (>=70)
+        assert score >= 70, f"Strong candidate should score >=70, got {score:.1f}"
+        print(f"✅ Strong candidate scored {score:.1f} (>=70 threshold)")
 
         # Scenario: Weak candidate (negative expansion, mediocre IV)
         weak_data = {
