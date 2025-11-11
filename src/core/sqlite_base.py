@@ -42,16 +42,20 @@ class SQLiteBase:
                 conn.commit()
     """
 
-    def __init__(self, db_path: str, timeout: float = 30.0):
+    def __init__(self, db_path: str, timeout: float = 30.0, safe_mode: bool = True):
         """
         Initialize SQLite base.
 
         Args:
             db_path: Path to SQLite database file
             timeout: Connection timeout in seconds (default: 30.0)
+            safe_mode: If True, uses PRAGMA synchronous=FULL (safer, slower)
+                      If False, uses PRAGMA synchronous=NORMAL (faster, small risk)
+                      Default: True for financial/trading data safety
         """
         self.db_path = Path(db_path)
         self.timeout = timeout
+        self.safe_mode = safe_mode
 
         # Ensure parent directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,7 +63,7 @@ class SQLiteBase:
         # Thread-local storage for connections
         self._local = threading.local()
 
-        logger.debug(f"Initialized SQLiteBase for {self.db_path}")
+        logger.debug(f"Initialized SQLiteBase for {self.db_path} (safe_mode={safe_mode})")
 
     def _get_connection(self) -> sqlite3.Connection:
         """
@@ -84,13 +88,32 @@ class SQLiteBase:
             # WAL = Write-Ahead Logging, allows multiple readers + 1 writer
             self._local.conn.execute("PRAGMA journal_mode=WAL")
 
+            # OPTIMIZATION: Performance tuning pragmas
+            # synchronous mode - configurable based on data criticality
+            if self.safe_mode:
+                # FULL: Maximum safety, slower writes
+                # Best for critical financial/trading data
+                self._local.conn.execute("PRAGMA synchronous=FULL")
+                logger.debug("Using PRAGMA synchronous=FULL (safe mode)")
+            else:
+                # NORMAL: Faster writes, small corruption risk on power loss
+                # With WAL mode, generally safe for crashes but not power loss
+                self._local.conn.execute("PRAGMA synchronous=NORMAL")
+                logger.debug("Using PRAGMA synchronous=NORMAL (fast mode)")
+
+            # cache_size - larger cache (8MB instead of 2MB default) for better performance
+            self._local.conn.execute("PRAGMA cache_size=-8000")  # negative = KB
+
+            # temp_store=MEMORY - use memory for temp tables (faster)
+            self._local.conn.execute("PRAGMA temp_store=MEMORY")
+
             # Set busy timeout (in milliseconds)
             self._local.conn.execute(f"PRAGMA busy_timeout={int(self.timeout * 1000)}")
 
             # Enable dict-like row access
             self._local.conn.row_factory = sqlite3.Row
 
-            logger.debug(f"Created new connection for thread {threading.current_thread().name}")
+            logger.debug(f"Created optimized connection for thread {threading.current_thread().name}")
 
         return self._local.conn
 

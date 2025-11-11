@@ -145,13 +145,14 @@ class PerformanceBenchmark:
         return ((baseline - current) / baseline) * 100
 
 
-def run_benchmark(tickers: List[str], earnings_date: str) -> Dict:
+def run_benchmark(tickers: List[str], earnings_date: str, with_profiling: bool = False) -> Dict:
     """
     Run earnings analyzer and track performance.
 
     Args:
         tickers: List of ticker symbols
         earnings_date: Earnings date (YYYY-MM-DD)
+        with_profiling: If True, run with cProfile for detailed analysis
 
     Returns:
         Performance metrics dict
@@ -161,7 +162,20 @@ def run_benchmark(tickers: List[str], earnings_date: str) -> Dict:
     benchmark = PerformanceBenchmark()
     benchmark.start()
 
-    # Run analyzer
+    # Track CPU usage
+    import psutil
+    process = psutil.Process(os.getpid())
+    cpu_start = process.cpu_percent()
+
+    # Run analyzer (with optional profiling)
+    if with_profiling:
+        import cProfile
+        import pstats
+        import io
+
+        profiler = cProfile.Profile()
+        profiler.enable()
+
     analyzer = EarningsAnalyzer()
     result = analyzer.analyze_specific_tickers(
         tickers=tickers,
@@ -169,8 +183,26 @@ def run_benchmark(tickers: List[str], earnings_date: str) -> Dict:
         override_daily_limit=False
     )
 
+    if with_profiling:
+        profiler.disable()
+
+        # Save profile stats
+        stats_file = Path('profiling/results') / f'profile_benchmark_{datetime.now().strftime("%Y%m%d_%H%M%S")}.prof'
+        stats_file.parent.mkdir(parents=True, exist_ok=True)
+        profiler.dump_stats(str(stats_file))
+        logger.info(f"📊 Profile saved to: {stats_file}")
+
+        # Get top functions
+        s = io.StringIO()
+        ps = pstats.Stats(profiler, stream=s).sort_stats('cumulative')
+        ps.print_stats(10)
+        top_functions = s.getvalue()
+
     # Stop benchmark
     metrics = benchmark.stop()
+
+    # CPU usage
+    cpu_end = process.cpu_percent()
 
     # Add analyzer-specific metrics
     metrics.update({
@@ -178,8 +210,14 @@ def run_benchmark(tickers: List[str], earnings_date: str) -> Dict:
         'tickers': tickers,
         'earnings_date': earnings_date,
         'analyzed_count': result.get('analyzed_count', 0),
-        'failed_count': result.get('failed_count', 0)
+        'failed_count': result.get('failed_count', 0),
+        'time_per_ticker': round(metrics['elapsed_seconds'] / len(tickers), 2),
+        'cpu_usage_pct': round((cpu_start + cpu_end) / 2, 1),
+        'profiled': with_profiling
     })
+
+    logger.info(f"📈 Performance: {metrics['time_per_ticker']}s per ticker")
+    logger.info(f"💻 CPU Usage: {metrics['cpu_usage_pct']}%")
 
     return metrics
 
@@ -246,10 +284,11 @@ def show_history():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Performance Benchmark Tool")
     parser.add_argument('--tickers', type=str, help='Comma-separated ticker list')
-    parser.add_argument('--date', type=str, default='2025-11-08', help='Earnings date (YYYY-MM-DD)')
+    parser.add_argument('--date', type=str, default='2025-11-15', help='Earnings date (YYYY-MM-DD)')
     parser.add_argument('--baseline', action='store_true', help='Create baseline benchmark')
     parser.add_argument('--compare', action='store_true', help='Run and compare with baseline')
     parser.add_argument('--history', action='store_true', help='Show benchmark history')
+    parser.add_argument('--profile', action='store_true', help='Run with detailed profiling')
 
     args = parser.parse_args()
 
@@ -259,15 +298,31 @@ if __name__ == "__main__":
         tickers = [t.strip() for t in args.tickers.split(',')]
 
         if args.baseline:
-            create_baseline(tickers, args.date)
+            logger.info("🎯 Creating baseline benchmark...")
+            metrics = run_benchmark(tickers, args.date, with_profiling=args.profile)
+            benchmark = PerformanceBenchmark()
+            benchmark.save_results(metrics, label="baseline")
+            logger.info("\n✅ Baseline created successfully!")
         else:
-            run_comparison(tickers, args.date)
+            logger.info("🏃 Running performance benchmark...")
+            metrics = run_benchmark(tickers, args.date, with_profiling=args.profile)
+            benchmark = PerformanceBenchmark()
+            benchmark.save_results(metrics, label="benchmark")
+
+            # Compare with baseline
+            comparison = benchmark.compare_with_baseline(metrics)
+
+            if comparison:
+                if comparison['time_improvement'] < -5:
+                    logger.warning(f"⚠️  PERFORMANCE REGRESSION: {abs(comparison['time_improvement']):.1f}% slower!")
+                elif comparison['time_improvement'] > 5:
+                    logger.info(f"🎉 PERFORMANCE IMPROVEMENT: {comparison['time_improvement']:.1f}% faster!")
     else:
         parser.print_help()
         print("\nExamples:")
         print("  # Create baseline:")
         print("  python benchmarks/performance_tracker.py --tickers 'AAPL,MSFT,GOOGL' --baseline")
-        print("\n  # Run benchmark and compare:")
-        print("  python benchmarks/performance_tracker.py --tickers 'AAPL,MSFT,GOOGL' --compare")
+        print("\n  # Run benchmark with profiling:")
+        print("  python benchmarks/performance_tracker.py --tickers 'AAPL,MSFT,GOOGL' --compare --profile")
         print("\n  # View history:")
         print("  python benchmarks/performance_tracker.py --history")
