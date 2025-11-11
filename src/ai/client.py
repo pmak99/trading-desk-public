@@ -196,20 +196,15 @@ class AIClient:
             completion_tokens = usage.get('completion_tokens', 0)
             total_tokens = usage.get('total_tokens', prompt_tokens + completion_tokens)
 
-            # Calculate cost with CORRECT Perplexity pricing model
+            # Calculate cost with accurate pricing model
             config = self.usage_tracker.config
             model_config = config['models'].get(model, {})
 
-            # Use new pricing structure if available, fallback to old flat rate
-            if 'input_cost_per_1k' in model_config and 'output_cost_per_1k' in model_config:
-                input_cost = (prompt_tokens / 1000) * model_config['input_cost_per_1k']
-                output_cost = (completion_tokens / 1000) * model_config['output_cost_per_1k']
-                per_request_fee = model_config.get('per_request_fee', 0.0)
-                cost = input_cost + output_cost + per_request_fee
-            else:
-                # Backward compatibility: use flat rate (DEPRECATED)
-                cost_per_1k = model_config.get('cost_per_1k_tokens', 0.005)
-                cost = (total_tokens / 1000) * cost_per_1k
+            # All models use the new pricing structure (input/output/per-request)
+            input_cost = (prompt_tokens / 1000) * model_config.get('input_cost_per_1k', 0.0)
+            output_cost = (completion_tokens / 1000) * model_config.get('output_cost_per_1k', 0.0)
+            per_request_fee = model_config.get('per_request_fee', 0.0)
+            cost = input_cost + output_cost + per_request_fee
 
             # Log usage with detailed token breakdown
             self.usage_tracker.log_api_call(

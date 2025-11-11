@@ -69,3 +69,4 @@ benchmarks/results/*.json
 .mypy_cache/
 .dmypy.json
 dmypy.json
+PR_DESCRIPTION.md

@@ -102,14 +102,18 @@ class TestBudgetConfiguration:
         """Test that model costs are configured correctly."""
         tracker = UsageTracker()
 
-        # Verify sonar-pro cost
-        assert tracker.config['models']['sonar-pro']['cost_per_1k_tokens'] == 0.005
+        # Verify sonar-pro has new pricing structure
+        assert tracker.config['models']['sonar-pro']['input_cost_per_1k'] == 0.003
+        assert tracker.config['models']['sonar-pro']['output_cost_per_1k'] == 0.015
+        assert tracker.config['models']['sonar-pro']['per_request_fee'] == 0.005
 
-        # Verify gpt-4o-mini cost (60% cheaper)
-        assert tracker.config['models']['gpt-4o-mini']['cost_per_1k_tokens'] == 0.0002
+        # Verify gpt-4o-mini has new pricing structure
+        assert tracker.config['models']['gpt-4o-mini']['input_cost_per_1k'] == 0.00005
+        assert tracker.config['models']['gpt-4o-mini']['output_cost_per_1k'] == 0.00015
 
         # Verify gemini is free
-        assert tracker.config['models']['gemini-2.0-flash']['cost_per_1k_tokens'] == 0.0
+        assert tracker.config['models']['gemini-2.0-flash']['input_cost_per_1k'] == 0.0
+        assert tracker.config['models']['gemini-2.0-flash']['output_cost_per_1k'] == 0.0
 
     def test_default_models_are_configured(self):
         """Test that default models are set correctly."""

@@ -208,7 +208,7 @@ class TestCompleteAnalysisFlow:
                         report = analyzer.generate_report(result)
                         assert 'EARNINGS TRADE RESEARCH REPORT' in report
                         assert 'NVDA' in report
-                        assert 'Current IV: 85.5%' in report
+                        assert 'Current IV: 85.50%' in report
                         # Sentiment and strategies may vary based on API availability
 
     def test_multiple_tickers_analysis(
@@ -469,7 +469,7 @@ class TestCompleteAnalysisFlow:
                         assert 'Price: $500.00' in report
                         assert 'Score: 85.0/100' in report
                         assert 'OPTIONS METRICS:' in report
-                        assert 'Current IV: 85.5%' in report
+                        assert 'Current IV: 85.50%' in report
                         assert 'SENTIMENT:' in report
                         # Sentiment could be any sentiment value or 'unknown'/'unavailable' if API fails
                         assert any(s in report for s in ['BULLISH', 'NEUTRAL', 'BEARISH', 'UNKNOWN', 'UNAVAILABLE', 'Unknown', 'Unavailable'])

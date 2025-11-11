@@ -91,8 +91,8 @@ class TickerData(TypedDict, total=False):
     volume: int  # Stock volume (not options volume)
 
     # Options Data
-    options_data: OptionsData  # Options metrics
-    iv: Optional[float]  # yfinance IV fallback (decimal format, not percentage)
+    options_data: OptionsData  # Options metrics (primary source: current_iv field)
+    iv: Optional[float]  # Fallback IV from yfinance when options_data unavailable (decimal: 0.65 = 65%)
 
     # Analysis Results
     score: float  # Composite score (0-100)

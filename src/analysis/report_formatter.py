@@ -130,7 +130,7 @@ class ReportFormatter:
         if current_iv is not None and current_iv > 0:
             min_iv = _TRADING_CRITERIA['iv_thresholds']['minimum'] if _TRADING_CRITERIA else 60
             iv_note = '(HIGH - Good for IV crush)' if current_iv >= min_iv else ''
-            lines.append(f"  Current IV: {current_iv}% {iv_note}")
+            lines.append(f"  Current IV: {current_iv:.2f}% {iv_note}")
 
         # Show Recent IV Change (primary timing metric for same-day entries)
         # Uses most recent IV data in past 1-7 days (flexible lookback)
