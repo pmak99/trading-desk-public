@@ -267,8 +267,9 @@ class TickerFilter:
             Dict with market data and options_data or None if error
         """
         if use_cache:
-            cached_data = self._ticker_cache.get(ticker)
-            if cached_data is not None:
+            # Check if key exists in cache (handles None values correctly)
+            if ticker in self._ticker_cache.cache:
+                cached_data = self._ticker_cache.get(ticker)
                 logger.debug(f"{ticker}: Cache hit")
                 return cached_data
 
@@ -385,6 +386,9 @@ class TickerFilter:
 
         except Exception as e:
             logger.error(f"Error fetching data for {ticker}: {e}")
+            # Cache None results to avoid repeated failed API calls
+            if use_cache:
+                self._ticker_cache.set(ticker, None)
             return None
 
     def calculate_score(self, data: TickerData) -> float:
