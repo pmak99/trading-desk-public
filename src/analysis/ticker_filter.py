@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 RATE_LIMIT_DELAY_SECONDS = 0.3  # Delay between individual API requests
 MIN_MARKET_CAP_DOLLARS = 2_000_000_000  # $2B minimum - filters out small caps with poor liquidity
 MIN_DAILY_VOLUME = 100_000  # 100K shares/day minimum for liquidity
+MIN_STOCK_PRICE = 5.00  # $5 minimum - filters out penny stocks with wide option spreads
 BATCH_PREFETCH_THRESHOLD = 5  # Only batch prefetch for 5+ tickers
 CHUNK_SIZE = 50  # Optimal chunk size for batch API calls
 
@@ -91,6 +92,7 @@ class TickerFilter:
         tickers: List[str],
         min_market_cap: int = MIN_MARKET_CAP_DOLLARS,
         min_avg_volume: int = MIN_DAILY_VOLUME,
+        min_price: float = MIN_STOCK_PRICE,
         use_batch: bool = True  # Use batch fetching (30-50% faster)
     ) -> List[str]:
         """
@@ -99,21 +101,23 @@ class TickerFilter:
         This SIGNIFICANTLY reduces API usage by filtering out:
         - Small-cap stocks (< $2B market cap)
         - Low-volume stocks (< 100K shares/day)
+        - Penny stocks (< $5 per share - wide option spreads)
         - Problematic tickers (API errors, missing data)
 
         PERFORMANCE: Uses batch fetching via yf.Tickers() for 30-50% speed improvement.
-        Typical reduction: 265 tickers → ~30 tickers (90% reduction)
+        Typical reduction: 265 tickers → ~20 tickers (92% reduction)
 
         Args:
             tickers: List of ticker symbols to pre-filter
             min_market_cap: Minimum market cap in dollars (default: $2B)
             min_avg_volume: Minimum average daily volume (default: 100K)
+            min_price: Minimum stock price (default: $5)
             use_batch: Use batch fetching (default: True, faster)
 
         Returns:
             Filtered list of tickers that meet basic criteria
         """
-        logger.info(f"Pre-filtering {len(tickers)} tickers (market cap ≥ ${min_market_cap/1e9:.1f}B, volume ≥ {min_avg_volume:,})...")
+        logger.info(f"Pre-filtering {len(tickers)} tickers (market cap ≥ ${min_market_cap/1e9:.1f}B, volume ≥ {min_avg_volume:,}, price ≥ ${min_price:.2f})...")
 
         if not tickers:
             return []
@@ -133,11 +137,12 @@ class TickerFilter:
                         if not stock:
                             continue
 
-                        # Get info dict - needed for both market cap and volume
+                        # Get info dict - needed for market cap, volume, and price
                         info = stock.info
                         # Ensure we get numeric values, never None (prevents TypeError in division)
                         market_cap = info.get('marketCap') or 0
                         avg_volume = info.get('averageVolume') or 0
+                        price = info.get('currentPrice') or info.get('regularMarketPrice') or 0
 
                         # Check market cap
                         if market_cap < min_market_cap:
@@ -145,6 +150,10 @@ class TickerFilter:
 
                         # Check average volume
                         if avg_volume < min_avg_volume:
+                            continue
+
+                        # Check minimum price (filter out penny stocks)
+                        if price < min_price:
                             continue
 
                         # Cache the info dict to avoid re-fetching in get_ticker_data()
@@ -160,7 +169,7 @@ class TickerFilter:
             except Exception as e:
                 logger.warning(f"Batch fetch failed ({e}), falling back to individual fetches")
                 # Fall back to individual fetching
-                return self.pre_filter_tickers(tickers, min_market_cap, min_avg_volume, use_batch=False)
+                return self.pre_filter_tickers(tickers, min_market_cap, min_avg_volume, min_price, use_batch=False)
 
         else:
             # FALLBACK: Individual fetching (slower but more reliable for small batches)
@@ -169,11 +178,12 @@ class TickerFilter:
                     time.sleep(RATE_LIMIT_DELAY_SECONDS)  # Delay to avoid rate limits
                     stock = yf.Ticker(ticker)
 
-                    # Get info dict - needed for both market cap and volume
+                    # Get info dict - needed for market cap, volume, and price
                     info = stock.info
                     # Ensure we get numeric values, never None (prevents TypeError in division)
                     market_cap = info.get('marketCap') or 0
                     avg_volume = info.get('averageVolume') or 0
+                    price = info.get('currentPrice') or info.get('regularMarketPrice') or 0
 
                     # Check market cap
                     if market_cap < min_market_cap:
@@ -181,6 +191,10 @@ class TickerFilter:
 
                     # Check average volume
                     if avg_volume < min_avg_volume:
+                        continue
+
+                    # Check minimum price (filter out penny stocks)
+                    if price < min_price:
                         continue
 
                     # Cache the info dict to avoid re-fetching in get_ticker_data()
