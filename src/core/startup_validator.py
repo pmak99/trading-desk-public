@@ -89,8 +89,15 @@ class StartupValidator:
                         for model_name, model_config in config['models'].items():
                             if not isinstance(model_config, dict):
                                 errors.append(f"❌ {budget_file.name}: Model '{model_name}' config must be a dictionary")
-                            elif 'cost_per_1k_tokens' not in model_config:
-                                errors.append(f"❌ {budget_file.name}: Model '{model_name}' missing 'cost_per_1k_tokens'")
+                            else:
+                                # Check for new pricing structure
+                                required_fields = ['input_cost_per_1k', 'output_cost_per_1k', 'per_request_fee']
+                                missing_fields = [f for f in required_fields if f not in model_config]
+                                if missing_fields:
+                                    errors.append(
+                                        f"❌ {budget_file.name}: Model '{model_name}' missing required pricing fields: "
+                                        f"{', '.join(missing_fields)}"
+                                    )
 
             except yaml.YAMLError as e:
                 errors.append(f"❌ {budget_file.name}: Invalid YAML syntax")

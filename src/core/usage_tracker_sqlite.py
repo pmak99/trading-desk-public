@@ -351,10 +351,15 @@ class UsageTrackerSQLite(SQLiteBase):
         total_cost = summary['total_cost'] if summary else 0.0
         perplexity_cost = summary['perplexity_cost'] if summary else 0.0
 
-        # Calculate estimated cost
+        # Calculate estimated cost using new pricing structure
+        # Use blended rate (input + output average) for estimation
         model_config = self.config.get('models', {}).get(model, {})
-        cost_per_1k = model_config.get('cost_per_1k_tokens', 0.0)
-        estimated_cost = (estimated_tokens / 1000) * cost_per_1k
+        input_cost_per_1k = model_config.get('input_cost_per_1k', 0.0)
+        output_cost_per_1k = model_config.get('output_cost_per_1k', 0.0)
+        per_request_fee = model_config.get('per_request_fee', 0.0)
+        # Assume 50/50 input/output split for estimation
+        blended_rate = (input_cost_per_1k + output_cost_per_1k) / 2
+        estimated_cost = (estimated_tokens / 1000) * blended_rate + per_request_fee
 
         # Check hard caps
         monthly_budget = self.config.get('monthly_budget', 5.0)

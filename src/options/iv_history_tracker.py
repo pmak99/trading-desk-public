@@ -210,7 +210,7 @@ class IVHistoryTracker(SQLiteBase):
 
         logger.debug(
             f"{ticker}: IV Rank = {iv_rank:.1f}% "
-            f"(current {current_iv}% vs {len(iv_values)}-day history)"
+            f"(current {current_iv:.2f}% vs {len(iv_values)}-day history)"
         )
 
         return round(iv_rank, 1)
@@ -279,7 +279,7 @@ class IVHistoryTracker(SQLiteBase):
 
         logger.debug(
             f"{ticker}: IV change over {days_ago} days: "
-            f"{old_iv:.1f}% ({actual_date}) → {current_iv:.1f}% (today) = {pct_change:+.1f}%"
+            f"{old_iv:.2f}% ({actual_date}) → {current_iv:.2f}% (today) = {pct_change:+.1f}%"
         )
 
         return round(pct_change, 2)
@@ -349,7 +349,7 @@ class IVHistoryTracker(SQLiteBase):
 
         logger.debug(
             f"{ticker}: Weekly IV change = {pct_change:+.1f}% "
-            f"({old_iv:.1f}% {days_diff} days ago [{actual_date}] → {current_iv:.1f}% now)"
+            f"({old_iv:.2f}% {days_diff} days ago [{actual_date}] → {current_iv:.2f}% now)"
         )
 
         return round(pct_change, 1)
