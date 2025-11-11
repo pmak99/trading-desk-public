@@ -298,8 +298,9 @@ class TestCompositeScorer:
             }
         }
         score = scorer.calculate_score(data)
-        # Updated range: Conservative expansion score (30) + moderate fundamentals = 55-65
-        assert 55.0 <= score <= 65.0, f"Medium ticker should score 55-65, got {score}"
+        # Updated range after normalization (120% → 100%): 46-54
+        # Conservative expansion score (30) + moderate fundamentals, normalized
+        assert 46.0 <= score <= 54.0, f"Medium ticker should score 46-54, got {score}"
 
     def test_weight_distribution(self):
         """Test that weights are properly distributed."""
