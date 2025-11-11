@@ -29,7 +29,14 @@ model_cascade:
 models:
   # Perplexity models
   sonar-pro:
-    cost_per_1k_tokens: 0.005  # $5 per 1M tokens
+    # CORRECT PRICING (as of 2025):
+    # - Input: $3 per 1M tokens = $0.003/1K
+    # - Output: $15 per 1M tokens = $0.015/1K
+    # - Per-request: $5 per 1K requests = $0.005/call
+    input_cost_per_1k: 0.003   # $3 per 1M input tokens
+    output_cost_per_1k: 0.015  # $15 per 1M output tokens (5x input!)
+    per_request_fee: 0.005     # $5 per 1K requests
+    cost_per_1k_tokens: 0.005  # DEPRECATED - kept for backward compatibility
     timeout: 20  # seconds
     use_case: "daily"  # Daily routine analysis
 

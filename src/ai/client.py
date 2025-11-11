@@ -170,21 +170,46 @@ class AIClient:
 
             # Extract content and usage
             content = result['choices'][0]['message']['content']
-            tokens_used = result['usage']['total_tokens']
+            usage = result['usage']
 
-            # Calculate cost
+            # Get token breakdown (input vs output)
+            prompt_tokens = usage.get('prompt_tokens', 0)
+            completion_tokens = usage.get('completion_tokens', 0)
+            total_tokens = usage.get('total_tokens', prompt_tokens + completion_tokens)
+
+            # Calculate cost with CORRECT Perplexity pricing model
             config = self.usage_tracker.config
-            cost_per_1k = config['models'][model]['cost_per_1k_tokens']
-            cost = (tokens_used / 1000) * cost_per_1k
+            model_config = config['models'].get(model, {})
 
-            # Log usage
-            self.usage_tracker.log_api_call(model, tokens_used, cost, ticker, success=True)
+            # Use new pricing structure if available, fallback to old flat rate
+            if 'input_cost_per_1k' in model_config and 'output_cost_per_1k' in model_config:
+                input_cost = (prompt_tokens / 1000) * model_config['input_cost_per_1k']
+                output_cost = (completion_tokens / 1000) * model_config['output_cost_per_1k']
+                per_request_fee = model_config.get('per_request_fee', 0.0)
+                cost = input_cost + output_cost + per_request_fee
+            else:
+                # Backward compatibility: use flat rate (DEPRECATED)
+                cost_per_1k = model_config.get('cost_per_1k_tokens', 0.005)
+                cost = (total_tokens / 1000) * cost_per_1k
+
+            # Log usage with detailed token breakdown
+            self.usage_tracker.log_api_call(
+                model=model,
+                tokens_used=total_tokens,
+                cost=cost,
+                ticker=ticker,
+                success=True,
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens
+            )
 
             return {
                 'content': content,
                 'model': model,
                 'provider': 'perplexity',
-                'tokens_used': tokens_used,
+                'tokens_used': total_tokens,
+                'input_tokens': prompt_tokens,
+                'output_tokens': completion_tokens,
                 'cost': cost
             }
 
@@ -247,11 +272,21 @@ class AIClient:
                 content = result['candidates'][0]['content']['parts'][0]['text']
 
                 # Gemini free tier doesn't charge, estimate tokens for logging
-                tokens_used = len(prompt.split()) * 1.3 + len(content.split()) * 1.3
+                prompt_tokens_est = int(len(prompt.split()) * 1.3)
+                completion_tokens_est = int(len(content.split()) * 1.3)
+                tokens_used = prompt_tokens_est + completion_tokens_est
                 cost = 0.0  # Free tier
 
-                # Log usage
-                self.usage_tracker.log_api_call(model, int(tokens_used), cost, ticker, success=True)
+                # Log usage with estimated token breakdown
+                self.usage_tracker.log_api_call(
+                    model=model,
+                    tokens_used=tokens_used,
+                    cost=cost,
+                    ticker=ticker,
+                    success=True,
+                    input_tokens=prompt_tokens_est,
+                    output_tokens=completion_tokens_est
+                )
 
                 logger.info(f"✓ Gemini response: {len(content)} chars (FREE)")
 
