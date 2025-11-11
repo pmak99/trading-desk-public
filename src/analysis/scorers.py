@@ -484,10 +484,12 @@ class CompositeScorer:
     @memoize_with_dict_key(maxsize=256)
     def calculate_score(self, data: TickerData) -> float:
         """
-        Calculate composite score for ticker.
+        Calculate composite score for ticker with earnings proximity boost.
 
         Memoized to avoid recalculating scores for the same ticker data.
         Cache size: 256 tickers (typical daily analysis volume).
+
+        Strategy: Enter 1-2 days before earnings, so prioritize imminent earnings.
 
         Args:
             data: Ticker data dict
@@ -501,7 +503,7 @@ class CompositeScorer:
             score = scorer.score(data)
 
             # Hard filter: If IVScorer or LiquidityScorer returns 0, filter out the ticker
-            # IVScorer: IV < 50% or IV Rank < 50%
+            # IVScorer: IV < 60%
             # LiquidityScorer: Volume < 100 or OI < 500
             if score == 0 and isinstance(scorer, (IVScorer, LiquidityScorer)):
                 return 0.0
@@ -511,4 +513,38 @@ class CompositeScorer:
         # Total weighted score
         total = sum(scores)
 
-        return round(total, 2)
+        # Normalize from 120% to 100% (weights sum to 120%)
+        # This ensures scores don't exceed 100
+        normalized_score = (total / 120.0) * 100.0
+
+        # Apply earnings proximity boost (strategy: enter 1-2 days before)
+        earnings_date = data.get('earnings_date')
+        if earnings_date:
+            from datetime import datetime
+            try:
+                earnings_dt = datetime.strptime(earnings_date, '%Y-%m-%d')
+                days_until = (earnings_dt.date() - datetime.now().date()).days
+
+                # Proximity multiplier based on urgency
+                if days_until <= 0:
+                    # Today or past - maximum urgency
+                    proximity_boost = 1.15
+                elif days_until <= 2:
+                    # 1-2 days - high urgency (optimal entry window)
+                    proximity_boost = 1.10
+                elif days_until <= 5:
+                    # 3-5 days - normal urgency
+                    proximity_boost = 1.0
+                elif days_until <= 10:
+                    # 6-10 days - lower urgency
+                    proximity_boost = 0.95
+                else:
+                    # 10+ days - too early, deprioritize
+                    proximity_boost = 0.85
+
+                normalized_score *= proximity_boost
+            except (ValueError, TypeError):
+                # Invalid date format, skip proximity boost
+                pass
+
+        return round(min(normalized_score, 100.0), 2)
