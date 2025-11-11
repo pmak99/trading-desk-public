@@ -215,7 +215,7 @@ class IVHistoryTracker(SQLiteBase):
 
         return round(iv_rank, 1)
 
-    def get_weekly_iv_change(self, ticker: str, current_iv: float) -> Optional[float]:
+    def get_weekly_iv_change(self, ticker: str, current_iv: float, tolerance_days: int = 2) -> Optional[float]:
         """
         Calculate weekly IV percentage change (for IV expansion detection).
 
@@ -227,6 +227,8 @@ class IVHistoryTracker(SQLiteBase):
         Args:
             ticker: Ticker symbol
             current_iv: Current IV percentage
+            tolerance_days: Expand search window by ±N days (default: 2)
+                          Searches for data in range [7-tolerance, 7+tolerance] days ago
 
         Returns:
             Weekly IV % change (e.g., 85.0 means IV increased 85% in a week),
@@ -242,21 +244,25 @@ class IVHistoryTracker(SQLiteBase):
 
         conn = self._get_connection()
 
-        # Get IV from 7 days ago
-        lookback_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        # Ideal target: 7 days ago
+        # Actual search: (7-tolerance) to (7+tolerance) days ago
+        # Default: 5-9 days ago (7 ± 2 days)
+        ideal_lookback = 7
+        lookback_start = (datetime.now() - timedelta(days=ideal_lookback + tolerance_days)).strftime('%Y-%m-%d')
+        lookback_end = (datetime.now() - timedelta(days=ideal_lookback - tolerance_days)).strftime('%Y-%m-%d')
 
-        # Try to get exact 7-day-ago value, or closest within ±2 days
+        # Find closest date to ideal within tolerance window
         cursor = conn.execute(
             """SELECT iv_value, date FROM iv_history
-               WHERE ticker = ? AND date <= ? AND date >= ?
+               WHERE ticker = ? AND date >= ? AND date <= ?
                ORDER BY date DESC LIMIT 1""",
-            (ticker, lookback_date, (datetime.now() - timedelta(days=9)).strftime('%Y-%m-%d'))
+            (ticker, lookback_start, lookback_end)
         )
 
         row = cursor.fetchone()
 
         if not row:
-            logger.debug(f"{ticker}: Insufficient IV history for weekly change (need 7+ days)")
+            logger.debug(f"{ticker}: No IV data in {ideal_lookback}±{tolerance_days} day window (searched {lookback_start} to {lookback_end})")
             return None
 
         old_iv = row['iv_value']
@@ -268,9 +274,13 @@ class IVHistoryTracker(SQLiteBase):
         # Calculate percentage change
         pct_change = ((current_iv - old_iv) / old_iv) * 100
 
+        # Calculate actual days difference for transparency
+        old_date_obj = datetime.strptime(actual_date, '%Y-%m-%d')
+        days_diff = (datetime.now() - old_date_obj).days
+
         logger.debug(
             f"{ticker}: Weekly IV change = {pct_change:+.1f}% "
-            f"({old_iv:.1f}% on {actual_date} → {current_iv:.1f}% now)"
+            f"({old_iv:.1f}% {days_diff} days ago [{actual_date}] → {current_iv:.1f}% now)"
         )
 
         return round(pct_change, 1)
