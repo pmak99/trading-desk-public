@@ -171,24 +171,24 @@ Return your analysis as valid JSON with this EXACT structure:
 
 {{
   "overall_sentiment": "bullish|neutral|bearish",
-  "sentiment_summary": "1-2 sentence summary of overall outlook",
-  "retail_sentiment": "Analysis of retail trader positioning and sentiment",
-  "institutional_sentiment": "Analysis of institutional investor positioning and sentiment",
-  "hedge_fund_sentiment": "Analysis of hedge fund positioning and sentiment",
-  "tailwinds": ["positive factor 1", "positive factor 2", "..."],
-  "headwinds": ["negative factor 1", "negative factor 2", "..."],
+  "sentiment_summary": "1 sentence max",
+  "retail_sentiment": "Max 100 chars - only key positioning",
+  "institutional_sentiment": "Max 100 chars - only key positioning",
+  "hedge_fund_sentiment": "Max 100 chars - only key positioning",
+  "tailwinds": ["max 50 chars each", "..."],
+  "headwinds": ["max 50 chars each", "..."],
   "unusual_activity": {{
     "detected": true|false,
     "sources": ["source 1", "source 2"],
     "findings": ["finding 1 with date", "finding 2 with date"],
-    "summary": "Brief summary OR 'No unusual activity detected from verified sources'"
+    "summary": "Max 80 chars OR 'No unusual activity detected from verified sources'"
   }},
-  "guidance_history": "Recent earnings results, guidance beats/misses, and management commentary",
-  "macro_sector": "Relevant macro trends and sector-specific impacts",
+  "guidance_history": "Max 120 chars - only recent beat/miss pattern",
+  "macro_sector": "Max 120 chars - only most relevant trend",
   "confidence": "low|medium|high"
 }}
 
-Focus on actionable intelligence for an options trader looking to sell premium (IV crush strategy). Keep each text field concise."""
+BE SUCCINCT: Focus on actionable intelligence for IV crush strategy. Use abbreviations (e.g., "inst" for institutional, "bullish on tech" vs "bullish sentiment on technology sector"). Each sentiment field must fit character limits - prioritize key info only."""
 
         return prompt
 

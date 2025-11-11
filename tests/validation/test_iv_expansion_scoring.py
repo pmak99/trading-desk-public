@@ -37,8 +37,9 @@ def test_weekly_iv_change_calculation():
         today = datetime.now()
 
         # Scenario 1: Strong expansion (40% → 72% = +80% change)
+        # Note: Only record data at day -7 within the flexible window (5-9 days ago)
+        # to ensure predictable weekly change calculation
         tracker.record_iv("NVDA", 40.0, (today - timedelta(days=7)).strftime('%Y-%m-%d'))
-        tracker.record_iv("NVDA", 45.0, (today - timedelta(days=6)).strftime('%Y-%m-%d'))
         tracker.record_iv("NVDA", 55.0, (today - timedelta(days=3)).strftime('%Y-%m-%d'))
         tracker.record_iv("NVDA", 72.0, today.strftime('%Y-%m-%d'))
 
@@ -97,7 +98,7 @@ def test_iv_expansion_scorer():
             ("LEAKING", 80.0, 70.0, 20.0),     # -12.5% change → score 20
         ]
 
-        scorer = IVExpansionScorer()
+        scorer = IVExpansionScorer(db_path=db_path)
 
         for ticker, old_iv, current_iv, expected_score in scenarios:
             # Record historical data

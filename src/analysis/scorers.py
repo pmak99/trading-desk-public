@@ -103,12 +103,13 @@ class IVScorer(TickerScorer):
             logger.info(f"{ticker}: IV {current_iv}% < {self.min_iv}% - SKIPPING")
             return 0.0
 
-        # Score based on absolute IV level (linear scaling)
-        if current_iv >= self.iv_extreme:  # Premium IV - exceptional
+        # Score based on absolute IV level
+        if current_iv >= self.iv_extreme:  # Premium IV - exceptional (100%+)
             return 100.0
-        elif current_iv >= self.iv_excellent:  # Excellent IV
-            return 80.0 + (current_iv - self.iv_excellent) * 1.0
-        else:  # min_iv to iv_excellent - good IV
+        elif current_iv >= self.iv_excellent:  # Excellent IV (80%+)
+            # UPDATED: Anything >= 80% scores 100 (for 1-2 day pre-earnings entries)
+            return 100.0
+        else:  # min_iv to iv_excellent - good IV (60-80%)
             return 60.0 + (current_iv - self.min_iv) * 1.0
 
     def _score_from_yf_iv(self, iv: float) -> float:
@@ -140,7 +141,7 @@ class IVExpansionScorer(TickerScorer):
     Unlike IV Rank which answers: "Is this stock expensive vs history?" (structural)
     """
 
-    def __init__(self, weight: Optional[float] = None) -> None:
+    def __init__(self, weight: Optional[float] = None, db_path: Optional[str] = None) -> None:
         # Load from config or use defaults
         if _TRADING_CRITERIA:
             weight = weight or _TRADING_CRITERIA['scoring_weights'].get('iv_expansion_velocity', 0.35)
@@ -157,6 +158,7 @@ class IVExpansionScorer(TickerScorer):
             self.minimum = 0     # Any positive change
 
         super().__init__(weight)
+        self.db_path = db_path  # Optional database path for testing
 
     def score(self, data: TickerData) -> float:
         """Score based on weekly IV percentage change with on-demand backfill."""
@@ -167,11 +169,11 @@ class IVExpansionScorer(TickerScorer):
         current_iv = options_data.get('current_iv')
 
         if current_iv is None or current_iv <= 0:
-            # No current IV data - return neutral score (don't filter out)
-            return 50.0
+            # No current IV data - return conservative score (don't filter out)
+            return 30.0
 
         # Calculate weekly IV % change
-        tracker = IVHistoryTracker()
+        tracker = IVHistoryTracker(db_path=self.db_path) if self.db_path else IVHistoryTracker()
         try:
             weekly_change = tracker.get_weekly_iv_change(ticker, current_iv)
 
@@ -197,9 +199,10 @@ class IVExpansionScorer(TickerScorer):
             tracker.close()
 
         if weekly_change is None:
-            # No historical data and backfill failed - return neutral score (don't filter out)
+            # No historical data and backfill failed - return conservative score (don't filter out)
+            # Lower than neutral (30 vs 50) since expansion is PRIMARY METRIC (35% weight)
             logger.debug(f"{ticker}: No weekly IV data available after backfill attempt")
-            return 50.0
+            return 30.0
 
         # Score based on IV expansion velocity
         if weekly_change >= self.excellent:  # +80%+ (e.g., 40% → 72%)

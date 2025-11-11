@@ -194,14 +194,14 @@ Return your analysis as valid JSON with this EXACT structure:
       "contract_count": "<NUM_CONTRACTS> contracts (for $20K position)",
       "profitability_score": "1-10",
       "risk_score": "1-10",
-      "rationale": "2-3 sentences on why this fits the setup"
+      "rationale": "Max 80 chars - key edge only (e.g., 'High IV crush + support at 175')"
     }}
   ],
   "recommended_strategy": 0,
-  "recommendation_rationale": "2-3 sentence rationale covering risk/reward, edge, and fit with user's criteria"
+  "recommendation_rationale": "Max 160 chars - best risk/reward & edge (e.g., 'Iron Condor optimal: IV>75%, defined risk, wide profit zone outside expected move')"
 }}
 
-Include 3-4 strategies in the array. Be specific with numbers."""
+BE SUCCINCT: Include 3-4 strategies. Use abbreviations. Keep rationales brief but meaningful."""
 
         return prompt
 
