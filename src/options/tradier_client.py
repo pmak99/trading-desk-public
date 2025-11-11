@@ -238,32 +238,19 @@ class TradierOptionsClient:
                     logger.warning(f"{ticker}: No valid ATM put fallback available")
                     current_iv = 0
 
-            # Calculate IV Rank from historical IV data
+            # Calculate IV Rank from historical IV data (if available)
+            # Note: IV Rank is nice-to-have but not critical for 1-2 day pre-earnings entries
+            # Weekly IV Change (expansion) is the PRIMARY timing metric
             iv_rank = 0
             if current_iv > 0:
-                # Record current IV for history
+                # Record current IV for history (used for weekly IV change calculation)
                 self.iv_tracker.record_iv(ticker, current_iv)
 
-                # Calculate IV Rank (percentile in 52-week range)
+                # Calculate IV Rank if historical data exists (no backfill trigger)
                 iv_rank = self.iv_tracker.calculate_iv_rank(ticker, current_iv)
 
-                # Auto-trigger backfill if IV rank is 0 (no historical data)
-                if iv_rank == 0:
-                    logger.info(f"{ticker}: No IV history detected (IV Rank = 0%), attempting backfill...")
-                    try:
-                        from src.options.iv_history_backfill import IVHistoryBackfill
-                        backfiller = IVHistoryBackfill(iv_tracker=self.iv_tracker)
-                        result = backfiller.backfill_ticker(ticker, lookback_days=180)  # 6 months faster than full year
-
-                        if result['success']:
-                            # Recalculate IV rank with backfilled data
-                            iv_rank = self.iv_tracker.calculate_iv_rank(ticker, current_iv)
-                            logger.info(f"{ticker}: ✓ Backfilled {result['data_points']} historical IVs, new IV Rank = {iv_rank:.1f}%")
-                        else:
-                            logger.warning(f"{ticker}: Backfill failed: {result['message']}")
-                    except Exception as e:
-                        logger.warning(f"{ticker}: Auto-backfill error: {e}")
-                        # Continue with IV rank = 0 (graceful degradation)
+                # Note: We don't auto-backfill for IV Rank (expensive, low value)
+                # Weekly IV Change scorer will trigger lightweight backfill if needed
 
             return {
                 'iv_rank': iv_rank,

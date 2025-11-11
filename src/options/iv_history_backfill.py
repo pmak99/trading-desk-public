@@ -116,16 +116,19 @@ class IVHistoryBackfill:
                 'message': f'Backfill error: {str(e)[:100]}'
             }
 
-    def backfill_recent(self, ticker: str, days: int = 14) -> Dict:
+    def backfill_recent(self, ticker: str, days: int = 10) -> Dict:
         """
-        Backfill recent IV data (lightweight - just last 2 weeks).
+        Backfill recent IV data (lightweight - just last 10 days).
 
         Used when weekly IV change calculation fails due to missing data.
-        Much faster than full 365-day backfill since it only needs 14 days.
+        Much faster than full 365-day backfill since it only needs 10 days.
+
+        Strategy: 1-2 day pre-earnings entries only need ~7-10 days of IV history
+        to calculate weekly IV change (5-9 day lookback window).
 
         Args:
             ticker: Stock ticker symbol
-            days: Days to backfill (default: 14 for 2 weeks)
+            days: Days to backfill (default: 10, optimized for weekly change calc)
 
         Returns:
             Dict with success, data_points, message
