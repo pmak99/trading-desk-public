@@ -15,6 +15,9 @@ from typing import Dict, List, Optional
 # Third-party imports
 import yfinance as yf
 
+# Suppress yfinance INFO/ERROR logs for invalid tickers (404s are expected during pre-filtering)
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
+
 # Local application imports
 from src.analysis.scorers import CompositeScorer
 from src.core.lru_cache import LRUCache
@@ -150,6 +153,8 @@ class TickerFilter:
                         filtered.append(ticker)
 
                     except Exception as e:
+                        # Skip invalid/delisted tickers silently (e.g., yfinance 404 errors)
+                        logger.debug(f"{ticker}: Skipped in pre-filter ({type(e).__name__})")
                         continue
 
             except Exception as e:
@@ -183,6 +188,8 @@ class TickerFilter:
                     filtered.append(ticker)
 
                 except Exception as e:
+                    # Skip invalid/delisted tickers silently (e.g., yfinance 404 errors)
+                    logger.debug(f"{ticker}: Skipped in pre-filter ({type(e).__name__})")
                     continue
 
         logger.info(f"Pre-filter: {len(filtered)}/{len(tickers)} tickers passed ({len(tickers) - len(filtered)} filtered out)")
