@@ -41,26 +41,19 @@ class TickerFilter:
         """
         Initialize ticker filter for IV crush strategies.
 
-        Strategy: Sell premium before earnings when IV is high, buy back after IV crush.
+        Strategy: Sell premium 1-2 days before earnings when IV is spiking, buy back after IV crush.
 
-        Filters:
-            - IV Rank >50% (prefer 75%+)
+        Filters (optimized for 1-2 day pre-earnings entries):
+            - Weekly IV expansion >40% (premium building - tactical timing)
+            - Absolute IV level >60% (enough premium to crush)
             - Liquid options (tight spreads, high OI/volume)
             - Historical implied > actual moves
 
         Args:
             cache_ttl_minutes: Cache TTL in minutes (default: 15)
         """
-        self.weights: Dict[str, float] = {
-            'iv_score': 0.40,          # IV level and rank
-            'options_liquidity': 0.30,  # Volume, OI, spreads
-            'iv_crush_edge': 0.25,     # Historical IV > actual
-            'fundamentals': 0.05       # Market cap, price
-        }
-
-        self.IV_RANK_MIN: int = 50
-        self.IV_RANK_GOOD: int = 60
-        self.IV_RANK_EXCELLENT: int = 75
+        # Note: Scoring weights now defined in CompositeScorer using config/trading_criteria.yaml
+        # See: config/trading_criteria.yaml for current weights and thresholds
 
         # LRU caches (bounded memory, automatic eviction)
         self._ticker_cache: LRUCache = LRUCache(max_size=500, ttl_minutes=cache_ttl_minutes)
@@ -362,14 +355,22 @@ class TickerFilter:
         REFACTORED: Now delegates to CompositeScorer (Strategy pattern).
         Previous 172-line implementation broken into separate scorer classes.
 
-        Scoring based on Trading Research Prompt.pdf and trading_criteria.yaml:
-        - IV >= 60% OR IV Rank >= 50% required (uses actual IV from Tradier/options)
-        - 60-80% IV is good, 80-100% excellent, 100%+ premium for IV crush trades
+        Scoring optimized for 1-2 day pre-earnings entries:
+        - Weekly IV expansion >40% preferred (premium building - tactical timing)
+        - Absolute IV >= 60% required (enough premium to crush)
+        - 60-80% IV is good, 80-100% excellent, 100%+ premium
         - Historical implied move > actual move (IV overpricing edge)
         - Options liquidity (volume, OI, bid-ask spreads)
 
+        Weighting (from config/trading_criteria.yaml):
+        - 35%: IV Expansion Velocity (is premium building NOW?)
+        - 30%: Options Liquidity (can we execute?)
+        - 25%: IV Crush Edge (does it over-price moves?)
+        - 25%: Current IV Level (is there enough premium?)
+        - 5%: Fundamentals (market cap, price)
+
         Args:
-            data: Ticker data dict (with optional options_data from Tradier)
+            data: Ticker data dict (with options_data from Tradier)
 
         Returns:
             Score (0-100), or 0 if filtered out by hard filters
@@ -400,9 +401,9 @@ class TickerFilter:
 
             score = self.calculate_score(data)
 
-            # HARD FILTER: Skip if IV Rank < 50% (score = 0)
+            # HARD FILTER: Skip if IV < 60% or liquidity too low (score = 0)
             if score == 0:
-                logger.info(f"{ticker}: Filtered out (IV Rank < 50%)")
+                logger.info(f"{ticker}: Filtered out (IV < 60% or insufficient liquidity)")
                 return None
 
             data['score'] = score
@@ -424,9 +425,15 @@ class TickerFilter:
         Filter and score a list of tickers.
 
         FILTERS OUT:
-        - Tickers with IV Rank < 50% (score = 0)
+        - Tickers with IV < 60% (score = 0)
         - Tickers with liquidity below minimums (volume < 100, OI < 500)
         - Tickers with insufficient data
+
+        SCORING PRIORITIZES:
+        - Strong IV expansion (weekly IV % change >40%)
+        - High absolute IV (>80%)
+        - Good liquidity (tight spreads, high volume/OI)
+        - Historical IV crush edge (implied > actual moves)
 
         PERFORMANCE: Optionally batch prefetches all ticker info to speed up parallel processing.
 

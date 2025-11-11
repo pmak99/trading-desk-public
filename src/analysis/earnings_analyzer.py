@@ -155,12 +155,15 @@ class EarningsAnalyzer:
     """
     Orchestrates earnings trade research for IV crush strategies.
 
+    Optimized for 1-2 day pre-earnings entries with IV expansion detection.
+
     Workflow:
         1. Get upcoming earnings from calendar
-        2. Filter by IV/liquidity criteria (IV Rank >50%)
-        3. Analyze sentiment (retail/institutional)
-        4. Generate trade strategies with position sizing
-        5. Output formatted research report
+        2. Filter by IV expansion (>40% weekly) & absolute IV (>60%)
+        3. Score based on expansion velocity, liquidity, and crush edge
+        4. Analyze sentiment (retail/institutional)
+        5. Generate trade strategies with position sizing
+        6. Output formatted research report
     """
 
     # Validation methods delegated to InputValidator
@@ -438,11 +441,11 @@ class EarningsAnalyzer:
         filtered_out = [td for td in tickers_data if td.get('score', 0) == 0]
 
         if filtered_out:
-            logger.warning(f"❌ {len(filtered_out)} ticker(s) filtered out (IV/IV Rank too low): {', '.join([td['ticker'] for td in filtered_out])}")
+            logger.warning(f"❌ {len(filtered_out)} ticker(s) filtered out (IV too low or insufficient liquidity): {', '.join([td['ticker'] for td in filtered_out])}")
             failed_tickers.extend([td['ticker'] for td in filtered_out])
 
         if not filtered_tickers:
-            logger.warning("❌ No tickers passed IV filter (IV >= 60% OR IV Rank >= 50% required)")
+            logger.warning("❌ No tickers passed IV filter (IV >= 60% required)")
             logger.info("💡 Try tickers with higher IV or adjust filter thresholds in config/trading_criteria.yaml")
             return {
                 'date': earnings_date,
@@ -488,7 +491,7 @@ class EarningsAnalyzer:
             Dict with:
             - date: Analysis date
             - total_earnings: Total companies reporting
-            - filtered_count: Companies passing IV Rank filter
+            - filtered_count: Companies passing IV filters (expansion + level)
             - analyzed_count: Companies fully analyzed
             - ticker_analyses: List of full analyses for top tickers
         """

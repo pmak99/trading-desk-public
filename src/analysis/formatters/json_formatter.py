@@ -55,7 +55,7 @@ if __name__ == "__main__":
         'tickers': [
             {
                 'ticker': 'NVDA',
-                'iv_rank': 75.5,
+                'weekly_iv_change': 45.2,
                 'score': 82.3,
                 'sentiment': {
                     'overall': 'bullish',
