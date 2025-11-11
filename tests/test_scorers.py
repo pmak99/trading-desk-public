@@ -167,18 +167,21 @@ class TestLiquidityScorer:
         assert score == 100.0, "High liquidity should score 100"
 
     def test_low_liquidity(self):
-        """Test scoring with low liquidity."""
+        """Test scoring with low liquidity (but above minimum thresholds)."""
         scorer = LiquidityScorer(weight=0.15)
         data = {
             'options_data': {
-                'options_volume': 500,
-                'open_interest': 2000,
+                'options_volume': 1000,  # Above minimum (500), at 'acceptable' level
+                'open_interest': 5500,   # Above minimum (5000), at 'acceptable' level
                 'bid_ask_spread_pct': 0.15  # Wide spread
             }
         }
         score = scorer.score(data)
-        # (20 * 0.4) + (20 * 0.4) + (20 * 0.2) = 20
-        assert score == 20.0, "Low liquidity should score 20"
+        # volume: 1000 >= vol_acceptable (1000) → 40.0
+        # OI: 5500 >= oi_acceptable (5000) → 40.0
+        # spread: 0.15 > spread_okay (0.10) → 20.0
+        # (40 * 0.4) + (40 * 0.4) + (20 * 0.2) = 36.0
+        assert score == 36.0, "Low liquidity (but above thresholds) should score 36"
 
     def test_missing_spread_data(self):
         """Test scoring with missing spread data."""
@@ -298,9 +301,14 @@ class TestCompositeScorer:
             }
         }
         score = scorer.calculate_score(data)
-        # Updated range after normalization (120% → 100%): 46-54
-        # Conservative expansion score (30) + moderate fundamentals, normalized
-        assert 46.0 <= score <= 54.0, f"Medium ticker should score 46-54, got {score}"
+        # Breakdown (normalized from 120% → 100%):
+        # - IV expansion (no history): 10.0 * 0.35 = 3.5
+        # - Liquidity (moderate): 60.0 * 0.30 = 18.0
+        # - IV crush edge (slight): 40.0 * 0.25 = 10.0
+        # - IV level (65%): 65.0 * 0.25 = 16.25
+        # - Fundamentals (mid-cap): 80.0 * 0.05 = 4.0
+        # Total: 51.75 → normalized: 43.12
+        assert 42.0 <= score <= 45.0, f"Medium ticker should score 42-45, got {score}"
 
     def test_weight_distribution(self):
         """Test that weights are properly distributed."""

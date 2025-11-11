@@ -109,7 +109,7 @@ class TradierOptionsClient:
                 return None
 
             # Extract current IV from the chain
-            iv_data = self._extract_current_iv(options_chain, current_price, ticker)
+            iv_data = self._extract_iv_rank(options_chain, current_price, ticker)
 
             # Extract liquidity metrics from the SAME chain
             liquidity_data = self._extract_liquidity_metrics(options_chain, current_price)
@@ -306,57 +306,66 @@ class TradierOptionsClient:
 
             data = response.json()
 
-            if 'expirations' in data and 'date' in data['expirations']:
-                dates = data['expirations']['date']
+            # Defensive check: Ensure data and expirations are not None
+            if not data or 'expirations' not in data:
+                logger.warning(f"{ticker}: No expirations data in response")
+                return None
 
-                # Defensive check: Validate dates before iteration
-                if not dates or not isinstance(dates, (list, tuple)):
-                    logger.warning(f"{ticker}: No valid expiration dates returned (got {type(dates).__name__})")
-                    return None
+            expirations = data['expirations']
+            if expirations is None or 'date' not in expirations:
+                logger.warning(f"{ticker}: No date field in expirations")
+                return None
 
-                today = get_eastern_now().date()
+            dates = expirations['date']
 
-                # Parse earnings date if provided
-                if earnings_date:
-                    earnings_dt = datetime.strptime(earnings_date, '%Y-%m-%d').date()
+            # Defensive check: Validate dates before iteration
+            if not dates or not isinstance(dates, (list, tuple)):
+                logger.warning(f"{ticker}: No valid expiration dates returned (got {type(dates).__name__})")
+                return None
 
-                    # Determine target week
-                    # If today is Thursday or Friday, look for next week expiration
-                    # Otherwise, look for same week as earnings
-                    if today.weekday() >= 3:  # Thursday = 3, Friday = 4
-                        # Look for expiration in following week
-                        target_start = today + timedelta(days=7)
-                        target_end = today + timedelta(days=14)
-                    else:
-                        # Look for expiration in same week as earnings
-                        # Find Friday of earnings week
-                        days_until_friday = (4 - earnings_dt.weekday()) % 7
-                        if days_until_friday == 0 and earnings_dt.weekday() != 4:
-                            days_until_friday = 7
-                        target_friday = earnings_dt + timedelta(days=days_until_friday)
+            today = get_eastern_now().date()
 
-                        # Allow +/- 3 days from Friday of earnings week
-                        target_start = target_friday - timedelta(days=3)
-                        target_end = target_friday + timedelta(days=3)
+            # Parse earnings date if provided
+            if earnings_date:
+                earnings_dt = datetime.strptime(earnings_date, '%Y-%m-%d').date()
 
-                else:
-                    # No earnings date - use original logic (7-14 days out)
+                # Determine target week
+                # If today is Thursday or Friday, look for next week expiration
+                # Otherwise, look for same week as earnings
+                if today.weekday() >= 3:  # Thursday = 3, Friday = 4
+                    # Look for expiration in following week
                     target_start = today + timedelta(days=7)
                     target_end = today + timedelta(days=14)
+                else:
+                    # Look for expiration in same week as earnings
+                    # Find Friday of earnings week
+                    days_until_friday = (4 - earnings_dt.weekday()) % 7
+                    if days_until_friday == 0 and earnings_dt.weekday() != 4:
+                        days_until_friday = 7
+                    target_friday = earnings_dt + timedelta(days=days_until_friday)
 
-                # Find first expiration in target range
-                for date_str in dates:
-                    exp_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    if target_start <= exp_date <= target_end:
-                        logger.debug(f"{ticker}: Using weekly expiration {date_str}")
-                        return date_str
+                    # Allow +/- 3 days from Friday of earnings week
+                    target_start = target_friday - timedelta(days=3)
+                    target_end = target_friday + timedelta(days=3)
 
-                # Fallback: return nearest future expiration
-                for date_str in dates:
-                    exp_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                    if exp_date >= today:
-                        logger.warning(f"{ticker}: Using fallback expiration {date_str}")
-                        return date_str
+            else:
+                # No earnings date - use original logic (7-14 days out)
+                target_start = today + timedelta(days=7)
+                target_end = today + timedelta(days=14)
+
+            # Find first expiration in target range
+            for date_str in dates:
+                exp_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                if target_start <= exp_date <= target_end:
+                    logger.debug(f"{ticker}: Using weekly expiration {date_str}")
+                    return date_str
+
+            # Fallback: return nearest future expiration
+            for date_str in dates:
+                exp_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                if exp_date >= today:
+                    logger.warning(f"{ticker}: Using fallback expiration {date_str}")
+                    return date_str
 
             return None
 
