@@ -96,6 +96,8 @@ class UsageTrackerSQLite(SQLiteBase):
                 model TEXT PRIMARY KEY,
                 calls INTEGER DEFAULT 0,
                 tokens INTEGER DEFAULT 0,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
                 cost REAL DEFAULT 0.0
             );
 
@@ -117,6 +119,8 @@ class UsageTrackerSQLite(SQLiteBase):
                 timestamp TEXT NOT NULL,
                 model TEXT NOT NULL,
                 tokens INTEGER NOT NULL,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
                 cost REAL NOT NULL,
                 ticker TEXT,
                 success INTEGER NOT NULL,
@@ -135,6 +139,38 @@ class UsageTrackerSQLite(SQLiteBase):
             (current_month,)
         )
         conn.commit()
+
+        # Migrate schema if needed (add new columns to existing tables)
+        self._migrate_schema()
+
+    def _migrate_schema(self):
+        """Add new columns to existing tables if they don't exist."""
+        conn = self._get_connection()
+
+        try:
+            # Check if input_tokens column exists in api_calls
+            cursor = conn.execute("PRAGMA table_info(api_calls)")
+            columns = [row['name'] for row in cursor.fetchall()]
+
+            if 'input_tokens' not in columns:
+                logger.info("Migrating api_calls schema: adding input_tokens and output_tokens columns")
+                conn.execute("ALTER TABLE api_calls ADD COLUMN input_tokens INTEGER DEFAULT 0")
+                conn.execute("ALTER TABLE api_calls ADD COLUMN output_tokens INTEGER DEFAULT 0")
+                conn.commit()
+
+            # Check if input_tokens column exists in model_usage
+            cursor = conn.execute("PRAGMA table_info(model_usage)")
+            columns = [row['name'] for row in cursor.fetchall()]
+
+            if 'input_tokens' not in columns:
+                logger.info("Migrating model_usage schema: adding input_tokens and output_tokens columns")
+                conn.execute("ALTER TABLE model_usage ADD COLUMN input_tokens INTEGER DEFAULT 0")
+                conn.execute("ALTER TABLE model_usage ADD COLUMN output_tokens INTEGER DEFAULT 0")
+                conn.commit()
+
+        except Exception as e:
+            logger.error(f"Schema migration error: {e}")
+            # Don't raise - schema might already be correct
 
     def _migrate_from_json_if_needed(self):
         """Migrate data from old JSON file if it exists and DB is empty."""
@@ -425,17 +461,21 @@ class UsageTrackerSQLite(SQLiteBase):
         tokens_used: int,
         cost: float,
         ticker: Optional[str] = None,
-        success: bool = True
+        success: bool = True,
+        input_tokens: int = 0,
+        output_tokens: int = 0
     ):
         """
         Log an API call (process-safe with SQLite ACID transactions).
 
         Args:
             model: Model name
-            tokens_used: Number of tokens used
+            tokens_used: Total number of tokens used (for backward compatibility)
             cost: Cost of the call
             ticker: Ticker symbol (if applicable)
             success: Whether call was successful
+            input_tokens: Number of input/prompt tokens (optional, for detailed tracking)
+            output_tokens: Number of output/completion tokens (optional, for detailed tracking)
         """
         self._reset_if_new_month()
 
@@ -498,23 +538,28 @@ class UsageTrackerSQLite(SQLiteBase):
 
             # Update model usage
             conn.execute(
-                """INSERT INTO model_usage (model, calls, tokens, cost)
-                   VALUES (?, 1, ?, ?)
+                """INSERT INTO model_usage (model, calls, tokens, input_tokens, output_tokens, cost)
+                   VALUES (?, 1, ?, ?, ?, ?)
                    ON CONFLICT(model) DO UPDATE SET
                        calls = calls + 1,
                        tokens = tokens + ?,
+                       input_tokens = input_tokens + ?,
+                       output_tokens = output_tokens + ?,
                        cost = cost + ?""",
-                (model, tokens_used, cost, tokens_used, cost)
+                (model, tokens_used, input_tokens, output_tokens, cost,
+                 tokens_used, input_tokens, output_tokens, cost)
             )
 
             # Log call record
             conn.execute(
-                """INSERT INTO api_calls (timestamp, model, tokens, cost, ticker, success, date)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO api_calls (timestamp, model, tokens, input_tokens, output_tokens, cost, ticker, success, date)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     datetime.now().isoformat(),
                     model,
                     tokens_used,
+                    input_tokens,
+                    output_tokens,
                     cost,
                     ticker,
                     1 if success else 0,
@@ -526,10 +571,17 @@ class UsageTrackerSQLite(SQLiteBase):
             conn.commit()
 
             if success:
-                logger.info(
-                    f"API call logged: {model} - {tokens_used} tokens - ${cost:.4f} "
-                    f"[{ticker or 'no ticker'}]"
-                )
+                if input_tokens > 0 or output_tokens > 0:
+                    logger.info(
+                        f"API call logged: {model} - {tokens_used} tokens "
+                        f"(in:{input_tokens}, out:{output_tokens}) - ${cost:.4f} "
+                        f"[{ticker or 'no ticker'}]"
+                    )
+                else:
+                    logger.info(
+                        f"API call logged: {model} - {tokens_used} tokens - ${cost:.4f} "
+                        f"[{ticker or 'no ticker'}]"
+                    )
 
         except Exception as e:
             conn.rollback()
