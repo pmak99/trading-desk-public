@@ -1,338 +1,170 @@
-"""
-Comprehensive tests for scorer classes (Strategy pattern implementation).
-
-Tests all scorer components:
-- IVExpansionScorer: IV expansion velocity (35% weight) - NEW PRIMARY METRIC
-- LiquidityScorer: Options liquidity scoring (30% weight)
-- IVCrushEdgeScorer: IV crush edge scoring (25% weight)
-- IVScorer: Absolute IV level (25% weight) - SIMPLIFIED
-- FundamentalsScorer: Fundamentals scoring (5% weight)
-- CompositeScorer: Combined scoring system
-"""
+"""Tests for scorer classes using Strategy pattern."""
 
 import pytest
 from src.analysis.scorers import (
-    IVScorer,
-    IVCrushEdgeScorer,
-    LiquidityScorer,
-    FundamentalsScorer,
-    CompositeScorer
+    IVScorer, IVCrushEdgeScorer, LiquidityScorer,
+    FundamentalsScorer, CompositeScorer, IVExpansionScorer
 )
 
 
 class TestIVScorer:
-    """Test IV (Implied Volatility) scoring."""
+    """Test IV scoring."""
 
-    def test_high_current_iv_premium(self):
-        """Test scoring with premium IV (100%+)."""
+    @pytest.mark.parametrize("current_iv,expected_score", [
+        (110.5, 100.0),  # Premium IV
+        (85.0, 100.0),   # Excellent IV
+        (70.0, 70.0),    # Good IV
+        (50.0, 0.0),     # Filtered out
+    ])
+    def test_iv_scoring(self, current_iv, expected_score):
         scorer = IVScorer(weight=0.50, min_iv=60)
-        data = {
-            'ticker': 'TEST',
-            'options_data': {
-                'current_iv': 110.5
-            }
-        }
-        score = scorer.score(data)
-        assert score == 100.0, "Premium IV (100%+) should score 100"
+        data = {'ticker': 'TEST', 'options_data': {'current_iv': current_iv}}
+        assert scorer.score(data) == expected_score
 
-    def test_high_current_iv_excellent(self):
-        """Test scoring with excellent IV (80-100%)."""
+    def test_yfinance_fallback(self):
         scorer = IVScorer(weight=0.50, min_iv=60)
-        data = {
-            'ticker': 'TEST',
-            'options_data': {
-                'current_iv': 85.0
-            }
-        }
-        score = scorer.score(data)
-        assert score == 100.0, "IV 85% should score 100 (optimized for 1-2 day pre-earnings)"
-
-    def test_high_current_iv_good(self):
-        """Test scoring with good IV (60-80%)."""
-        scorer = IVScorer(weight=0.50, min_iv=60)
-        data = {
-            'ticker': 'TEST',
-            'options_data': {
-                'current_iv': 70.0
-            }
-        }
-        score = scorer.score(data)
-        assert score == 70.0, "IV 70% should score 70"
-
-    def test_low_current_iv_filtered(self):
-        """Test that low IV is filtered out (hard filter)."""
-        scorer = IVScorer(weight=0.25, min_iv=60)
-        data = {
-            'ticker': 'TEST',
-            'options_data': {
-                'current_iv': 50.0
-            }
-        }
-        score = scorer.score(data)
-        assert score == 0.0, "IV below 60% should be filtered (score 0)"
-
-    def test_yfinance_iv_fallback(self):
-        """Test fallback to yfinance IV estimate."""
-        scorer = IVScorer(weight=0.50, min_iv=60)
-        data = {
-            'ticker': 'TEST',
-            'iv': 0.65  # yfinance format (0.65 = 65%)
-        }
-        score = scorer.score(data)
-        assert score == 80.0, "yfinance IV 0.65 should score 80"
+        data = {'ticker': 'TEST', 'iv': 0.65}
+        assert scorer.score(data) == 80.0
 
     def test_weighted_score(self):
-        """Test weighted score calculation."""
         scorer = IVScorer(weight=0.50, min_iv=60)
-        data = {
-            'ticker': 'TEST',
-            'options_data': {
-                'current_iv': 100.0
-            }
-        }
-        weighted = scorer.weighted_score(data)
-        assert weighted == 50.0, "100 score * 0.50 weight = 50"
+        data = {'ticker': 'TEST', 'options_data': {'current_iv': 100.0}}
+        assert scorer.weighted_score(data) == 50.0
 
 
 class TestIVCrushEdgeScorer:
     """Test IV crush edge scoring."""
 
-    def test_excellent_edge(self):
-        """Test excellent IV crush edge (1.3+ ratio)."""
+    @pytest.mark.parametrize("ratio,expected_score", [
+        (1.4, 100.0),   # Excellent
+        (1.25, 80.0),   # Good
+        (1.15, 60.0),   # Moderate
+        (1.05, 40.0),   # Slight
+        (0.9, 0.0),     # No edge
+        (None, 50.0),   # Missing data
+    ])
+    def test_crush_edge_scoring(self, ratio, expected_score):
         scorer = IVCrushEdgeScorer(weight=0.30)
-        data = {
-            'options_data': {
-                'iv_crush_ratio': 1.4  # Implied 40% higher than actual
-            }
-        }
-        score = scorer.score(data)
-        assert score == 100.0, "Ratio 1.4 should score 100"
-
-    def test_good_edge(self):
-        """Test good IV crush edge (1.2-1.3 ratio)."""
-        scorer = IVCrushEdgeScorer(weight=0.30)
-        data = {
-            'options_data': {
-                'iv_crush_ratio': 1.25
-            }
-        }
-        score = scorer.score(data)
-        assert score == 80.0, "Ratio 1.25 should score 80"
-
-    def test_moderate_edge(self):
-        """Test moderate IV crush edge (1.1-1.2 ratio)."""
-        scorer = IVCrushEdgeScorer(weight=0.30)
-        data = {
-            'options_data': {
-                'iv_crush_ratio': 1.15
-            }
-        }
-        score = scorer.score(data)
-        assert score == 60.0, "Ratio 1.15 should score 60"
-
-    def test_no_edge(self):
-        """Test no IV crush edge (ratio < 1.0)."""
-        scorer = IVCrushEdgeScorer(weight=0.30)
-        data = {
-            'options_data': {
-                'iv_crush_ratio': 0.9
-            }
-        }
-        score = scorer.score(data)
-        assert score == 0.0, "Ratio < 1.0 should score 0"
-
-    def test_missing_data(self):
-        """Test scoring with missing IV crush data."""
-        scorer = IVCrushEdgeScorer(weight=0.30)
-        data = {'options_data': {}}
-        score = scorer.score(data)
-        assert score == 50.0, "Missing data should return neutral score (50)"
+        options_data = {'iv_crush_ratio': ratio} if ratio is not None else {}
+        data = {'options_data': options_data}
+        assert scorer.score(data) == expected_score
 
 
 class TestLiquidityScorer:
     """Test liquidity scoring."""
 
     def test_high_liquidity(self):
-        """Test scoring with high liquidity."""
         scorer = LiquidityScorer(weight=0.15)
-        data = {
-            'options_data': {
-                'options_volume': 60000,  # Very high
-                'open_interest': 120000,  # Very liquid
-                'bid_ask_spread_pct': 0.015  # Excellent spread
-            }
-        }
-        score = scorer.score(data)
-        # (100 * 0.4) + (100 * 0.4) + (100 * 0.2) = 100
-        assert score == 100.0, "High liquidity should score 100"
+        data = {'options_data': {
+            'options_volume': 60000,
+            'open_interest': 120000,
+            'bid_ask_spread_pct': 0.015
+        }}
+        assert scorer.score(data) == 100.0
 
     def test_low_liquidity(self):
-        """Test scoring with low liquidity (but above minimum thresholds)."""
         scorer = LiquidityScorer(weight=0.15)
-        data = {
-            'options_data': {
-                'options_volume': 1000,  # Above minimum (500), at 'acceptable' level
-                'open_interest': 5500,   # Above minimum (5000), at 'acceptable' level
-                'bid_ask_spread_pct': 0.15  # Wide spread
-            }
-        }
-        score = scorer.score(data)
-        # volume: 1000 >= vol_acceptable (1000) → 40.0
-        # OI: 5500 >= oi_acceptable (5000) → 40.0
-        # spread: 0.15 > spread_okay (0.10) → 20.0
-        # (40 * 0.4) + (40 * 0.4) + (20 * 0.2) = 36.0
-        assert score == 36.0, "Low liquidity (but above thresholds) should score 36"
+        data = {'options_data': {
+            'options_volume': 1000,
+            'open_interest': 5500,
+            'bid_ask_spread_pct': 0.15
+        }}
+        assert scorer.score(data) == 36.0
 
-    def test_missing_spread_data(self):
-        """Test scoring with missing spread data."""
+    def test_missing_spread(self):
         scorer = LiquidityScorer(weight=0.15)
-        data = {
-            'options_data': {
-                'options_volume': 10000,
-                'open_interest': 50000
-            }
-        }
-        score = scorer.score(data)
-        # (80 * 0.4) + (80 * 0.4) + (50 * 0.2) = 74
-        assert score == 74.0, "Missing spread should use neutral score (50)"
+        data = {'options_data': {
+            'options_volume': 10000,
+            'open_interest': 50000
+        }}
+        assert scorer.score(data) == 74.0
 
 
 class TestFundamentalsScorer:
     """Test fundamentals scoring."""
 
-    def test_mega_cap_ideal_price(self):
-        """Test mega cap with ideal price."""
+    @pytest.mark.parametrize("market_cap,price,expected_score", [
+        (250e9, 150.0, 100.0),  # Mega cap, ideal price
+        (75e9, 450.0, 80.0),    # Large cap, acceptable price
+        (15e9, 10.0, 55.0),     # Mid cap, low price
+    ])
+    def test_fundamentals_scoring(self, market_cap, price, expected_score):
         scorer = FundamentalsScorer(weight=0.05)
-        data = {
-            'market_cap': 250e9,  # $250B mega cap
-            'price': 150.0  # Ideal range
-        }
-        score = scorer.score(data)
-        assert score == 100.0, "Mega cap with ideal price should score 100"
-
-    def test_large_cap_acceptable_price(self):
-        """Test large cap with acceptable price."""
-        scorer = FundamentalsScorer(weight=0.05)
-        data = {
-            'market_cap': 75e9,  # $75B large cap
-            'price': 450.0  # Acceptable
-        }
-        score = scorer.score(data)
-        # (80 + 80) / 2 = 80
-        assert score == 80.0, "Large cap acceptable price should score 80"
-
-    def test_mid_cap_low_price(self):
-        """Test mid cap with low price."""
-        scorer = FundamentalsScorer(weight=0.05)
-        data = {
-            'market_cap': 15e9,  # $15B mid cap
-            'price': 10.0  # Low
-        }
-        score = scorer.score(data)
-        # (60 + 50) / 2 = 55
-        assert score == 55.0, "Mid cap low price should score 55"
+        data = {'market_cap': market_cap, 'price': price}
+        assert scorer.score(data) == expected_score
 
 
 class TestCompositeScorer:
-    """Test composite scoring system."""
+    """Test composite scoring."""
 
-    def test_default_scorers(self):
-        """Test that default scorers are initialized correctly."""
-        from src.analysis.scorers import IVExpansionScorer
+    def test_default_scorers_initialized(self):
         scorer = CompositeScorer()
-        assert len(scorer.scorers) == 5, "Should have 5 default scorers (added IVExpansionScorer)"
-        assert isinstance(scorer.scorers[0], IVExpansionScorer), "First scorer should be IVExpansionScorer"
+        assert len(scorer.scorers) == 5
+        assert isinstance(scorer.scorers[0], IVExpansionScorer)
         assert isinstance(scorer.scorers[1], LiquidityScorer)
         assert isinstance(scorer.scorers[2], IVCrushEdgeScorer)
         assert isinstance(scorer.scorers[3], IVScorer)
         assert isinstance(scorer.scorers[4], FundamentalsScorer)
 
     def test_custom_scorers(self):
-        """Test initialization with custom scorers."""
         custom_scorers = [IVScorer(weight=1.0)]
         scorer = CompositeScorer(scorers=custom_scorers)
-        assert len(scorer.scorers) == 1, "Should have 1 custom scorer"
+        assert len(scorer.scorers) == 1
 
-    def test_high_score_ticker(self):
-        """Test scoring for high-quality ticker."""
+    def test_high_quality_ticker(self):
         scorer = CompositeScorer(min_iv=60)
         data = {
             'ticker': 'NVDA',
             'price': 150.0,
             'market_cap': 500e9,
             'options_data': {
-                'current_iv': 95.0,  # Excellent IV
-                'iv_crush_ratio': 1.35,  # Excellent edge
-                'options_volume': 80000,  # High liquidity
+                'current_iv': 95.0,
+                'iv_crush_ratio': 1.35,
+                'options_volume': 80000,
                 'open_interest': 150000,
                 'bid_ask_spread_pct': 0.01
             }
         }
-        score = scorer.calculate_score(data)
-        assert score >= 90.0, f"High-quality ticker should score >= 90, got {score}"
+        assert scorer.calculate_score(data) >= 90.0
 
-    def test_filtered_ticker(self):
-        """Test that low IV ticker is filtered out."""
+    def test_low_iv_filtered(self):
         scorer = CompositeScorer(min_iv=60)
         data = {
             'ticker': 'TEST',
             'price': 100.0,
             'market_cap': 50e9,
-            'options_data': {
-                'current_iv': 40.0  # Below minimum
-            }
+            'options_data': {'current_iv': 40.0}
         }
-        score = scorer.calculate_score(data)
-        assert score == 0.0, "Ticker with IV < 60% should be filtered (score 0)"
+        assert scorer.calculate_score(data) == 0.0
 
-    def test_medium_score_ticker(self):
-        """Test scoring for medium-quality ticker (no historical IV data)."""
+    def test_medium_quality_ticker(self):
         scorer = CompositeScorer(min_iv=60)
         data = {
             'ticker': 'TEST',
             'price': 75.0,
             'market_cap': 20e9,
             'options_data': {
-                'current_iv': 65.0,  # Barely above minimum
-                'iv_crush_ratio': 1.05,  # Slight edge
-                'options_volume': 5000,  # Moderate liquidity
+                'current_iv': 65.0,
+                'iv_crush_ratio': 1.05,
+                'options_volume': 5000,
                 'open_interest': 10000,
                 'bid_ask_spread_pct': 0.08
             }
         }
         score = scorer.calculate_score(data)
-        # Breakdown (normalized from 120% → 100%):
-        # - IV expansion (no history): 10.0 * 0.35 = 3.5
-        # - Liquidity (moderate): 60.0 * 0.30 = 18.0
-        # - IV crush edge (slight): 40.0 * 0.25 = 10.0
-        # - IV level (65%): 65.0 * 0.25 = 16.25
-        # - Fundamentals (mid-cap): 80.0 * 0.05 = 4.0
-        # Total: 51.75 → normalized: 43.12
-        assert 42.0 <= score <= 45.0, f"Medium ticker should score 42-45, got {score}"
+        assert 42.0 <= score <= 45.0
 
     def test_weight_distribution(self):
-        """Test that weights are properly distributed."""
         scorer = CompositeScorer()
         total_weight = sum(s.weight for s in scorer.scorers)
-        # NOTE: Weights now sum to > 1.0 (1.20) because they're applied individually
-        # New strategy: Expansion 35% + Liquidity 30% + Crush 25% + IV 25% + Fundamentals 5% = 120%
-        assert total_weight == 1.20, f"Weights should sum to 1.20 (updated strategy), got {total_weight}"
+        assert total_weight == 1.20
 
     def test_missing_options_data(self):
-        """Test scoring with missing options data."""
         scorer = CompositeScorer(min_iv=60)
-        data = {
-            'ticker': 'TEST',
-            'price': 100.0,
-            'market_cap': 50e9
-        }
-        score = scorer.calculate_score(data)
-        # Missing options data results in score of 0 (filtered out)
-        # Implementation requires options_data to score properly
-        assert score == 0.0, f"Missing options_data should result in 0 score, got {score}"
+        data = {'ticker': 'TEST', 'price': 100.0, 'market_cap': 50e9}
+        assert scorer.calculate_score(data) == 0.0
 
     def test_score_rounding(self):
-        """Test that scores are properly rounded to 2 decimal places."""
         scorer = CompositeScorer(min_iv=60)
         data = {
             'ticker': 'TEST',
@@ -347,20 +179,18 @@ class TestCompositeScorer:
             }
         }
         score = scorer.calculate_score(data)
-        # Check that it's rounded to 2 decimal places
-        assert score == round(score, 2), "Score should be rounded to 2 decimals"
+        assert score == round(score, 2)
 
 
 class TestScorerIntegration:
-    """Integration tests for scorer system."""
+    """Integration tests."""
 
-    def test_real_world_scenario_nvda(self):
-        """Test with realistic NVDA-like data."""
+    def test_nvda_like_ticker(self):
         scorer = CompositeScorer(min_iv=60)
         data = {
             'ticker': 'NVDA',
             'price': 450.0,
-            'market_cap': 1.1e12,  # $1.1T
+            'market_cap': 1.1e12,
             'options_data': {
                 'current_iv': 88.5,
                 'iv_rank': 72.0,
@@ -371,31 +201,26 @@ class TestScorerIntegration:
                 'expected_move_pct': 7.5
             }
         }
-        score = scorer.calculate_score(data)
-        assert score > 85.0, f"NVDA-like ticker should score > 85, got {score}"
+        assert scorer.calculate_score(data) > 85.0
 
-    def test_real_world_scenario_low_iv(self):
-        """Test with realistic low-IV ticker."""
+    def test_low_iv_filtered(self):
         scorer = CompositeScorer(min_iv=60)
         data = {
-            'ticker': 'KO',  # Coca-Cola - typically low IV
+            'ticker': 'KO',
             'price': 58.0,
             'market_cap': 250e9,
             'options_data': {
-                'current_iv': 18.5,  # Low IV
+                'current_iv': 18.5,
                 'options_volume': 35000,
                 'open_interest': 120000
             }
         }
-        score = scorer.calculate_score(data)
-        assert score == 0.0, "Low IV ticker should be filtered"
+        assert scorer.calculate_score(data) == 0.0
 
-    def test_performance_with_many_tickers(self):
-        """Test that scoring is fast enough for batch processing."""
+    def test_performance(self):
         import time
-
         scorer = CompositeScorer(min_iv=60)
-        sample_data = {
+        data = {
             'ticker': 'TEST',
             'price': 100.0,
             'market_cap': 50e9,
@@ -407,10 +232,7 @@ class TestScorerIntegration:
                 'bid_ask_spread_pct': 0.05
             }
         }
-
         start = time.time()
         for _ in range(1000):
-            scorer.calculate_score(sample_data)
-        elapsed = time.time() - start
-
-        assert elapsed < 1.0, f"Scoring 1000 tickers should take < 1s, took {elapsed:.2f}s"
+            scorer.calculate_score(data)
+        assert time.time() - start < 1.0
