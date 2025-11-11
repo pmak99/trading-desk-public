@@ -373,6 +373,84 @@ class TradierOptionsClient:
             logger.error(f"{ticker}: Failed to get expirations: {e}")
             return None
 
+    def has_weekly_options(self, ticker: str) -> bool:
+        """
+        Check if ticker has weekly options available.
+
+        Weekly options are options that expire every week (typically on Fridays),
+        as opposed to monthly options that only expire on the third Friday.
+
+        Args:
+            ticker: Stock ticker
+
+        Returns:
+            True if ticker has weekly options, False otherwise
+        """
+        try:
+            url = f"{self.endpoint}/v1/markets/options/expirations"
+            params = {'symbol': ticker, 'includeAllRoots': 'true'}
+
+            response = self.session.get(url, params=params, timeout=10)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Check if we have valid expirations data
+            if not data or 'expirations' not in data:
+                logger.debug(f"{ticker}: No expirations data")
+                return False
+
+            expirations = data['expirations']
+            if expirations is None or 'date' not in expirations:
+                logger.debug(f"{ticker}: No date field in expirations")
+                return False
+
+            dates = expirations['date']
+            if not dates or not isinstance(dates, (list, tuple)):
+                logger.debug(f"{ticker}: No valid expiration dates")
+                return False
+
+            # Convert to date objects
+            today = get_eastern_now().date()
+            exp_dates = []
+            for date_str in dates:
+                try:
+                    exp_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    if exp_date >= today:  # Only consider future expirations
+                        exp_dates.append(exp_date)
+                except ValueError:
+                    continue
+
+            if len(exp_dates) < 2:
+                logger.debug(f"{ticker}: Not enough future expirations ({len(exp_dates)})")
+                return False
+
+            # Check if there are consecutive weekly expirations (Fridays 7 days apart)
+            # Weekly options typically expire every Friday
+            exp_dates.sort()
+
+            # Look for at least 2 consecutive Friday expirations within the next 3 weeks
+            fridays_found = 0
+            for exp_date in exp_dates[:10]:  # Check first 10 expirations
+                # Check if it's a Friday (weekday() returns 4 for Friday)
+                if exp_date.weekday() == 4:
+                    # Check if it's within the next 3 weeks
+                    days_out = (exp_date - today).days
+                    if 0 <= days_out <= 21:
+                        fridays_found += 1
+
+            # If we have at least 2 Fridays in the next 3 weeks, likely has weekly options
+            has_weeklies = fridays_found >= 2
+
+            if not has_weeklies:
+                logger.debug(f"{ticker}: Only {fridays_found} Friday expirations in next 3 weeks (needs 2+ for weeklies)")
+
+            return has_weeklies
+
+        except Exception as e:
+            logger.debug(f"{ticker}: Failed to check for weekly options: {e}")
+            return False
+
     def _find_atm_options(self, options: list, current_price: float) -> tuple:
         """
         Find ATM (at-the-money) call and put options.
