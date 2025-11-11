@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Constants for filtering and rate limiting (see config/performance.yaml for tuning)
 RATE_LIMIT_DELAY_SECONDS = 0.3  # Delay between individual API requests
-MIN_MARKET_CAP_DOLLARS = 500_000_000  # $500M minimum for tradeable options
+MIN_MARKET_CAP_DOLLARS = 2_000_000_000  # $2B minimum - filters out small caps with poor liquidity
 MIN_DAILY_VOLUME = 100_000  # 100K shares/day minimum for liquidity
 BATCH_PREFETCH_THRESHOLD = 5  # Only batch prefetch for 5+ tickers
 CHUNK_SIZE = 50  # Optimal chunk size for batch API calls
@@ -94,23 +94,23 @@ class TickerFilter:
         Pre-filter tickers by basic criteria before expensive API calls.
 
         This SIGNIFICANTLY reduces API usage by filtering out:
-        - Micro-cap stocks (< $500M market cap)
+        - Small-cap stocks (< $2B market cap)
         - Low-volume stocks (< 100K shares/day)
         - Problematic tickers (API errors, missing data)
 
         PERFORMANCE: Uses batch fetching via yf.Tickers() for 30-50% speed improvement.
-        Typical reduction: 265 tickers → ~50 tickers (80% reduction)
+        Typical reduction: 265 tickers → ~30 tickers (90% reduction)
 
         Args:
             tickers: List of ticker symbols to pre-filter
-            min_market_cap: Minimum market cap in dollars (default: $500M)
+            min_market_cap: Minimum market cap in dollars (default: $2B)
             min_avg_volume: Minimum average daily volume (default: 100K)
             use_batch: Use batch fetching (default: True, faster)
 
         Returns:
             Filtered list of tickers that meet basic criteria
         """
-        logger.info(f"Pre-filtering {len(tickers)} tickers (market cap ≥ ${min_market_cap/1e6:.0f}M, volume ≥ {min_avg_volume:,})...")
+        logger.info(f"Pre-filtering {len(tickers)} tickers (market cap ≥ ${min_market_cap/1e9:.1f}B, volume ≥ {min_avg_volume:,})...")
 
         if not tickers:
             return []

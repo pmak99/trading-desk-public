@@ -149,9 +149,9 @@ class ReportFormatter:
             lines.append(f"  Weekly IV Change: {weekly_change:+.1f}% {change_note}")
         else:
             # Data missing - provide diagnostic info
-            lines.append(f"  Weekly IV Change: N/A ⚠️  (No historical options data available)")
-            lines.append(f"                    → Using conservative score (30.0) for IV Expansion (35% weight)")
-            lines.append(f"                    → Historical options data often unavailable for small-cap tickers")
+            lines.append(f"  Weekly IV Change: N/A ⚠️  (No historical IV data - heavily penalized)")
+            lines.append(f"                    → Score: 10.0 for IV Expansion (35% weight)")
+            lines.append(f"                    → Typically indicates small-cap or low-liquidity ticker")
 
         lines.append(f"  Expected Move: {options.get('expected_move_pct', 'N/A')}%")
         lines.append(f"  Avg Actual Move: {options.get('avg_actual_move_pct', 'N/A')}%")

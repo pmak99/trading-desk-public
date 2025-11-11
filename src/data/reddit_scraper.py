@@ -236,7 +236,9 @@ Response (number only):"""
             return sentiment
 
         except Exception as e:
-            logger.warning(f"{ticker}: Failed to parse AI sentiment: {e}")
+            # Sanitize error to avoid exposing API keys in URLs
+            from src.ai.client import _sanitize_error_message
+            logger.warning(f"{ticker}: Failed to parse AI sentiment: {_sanitize_error_message(str(e))}")
             # Fallback to score-based
             return self._calculate_score_based_sentiment(posts)
 

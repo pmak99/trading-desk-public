@@ -248,7 +248,9 @@ BE SUCCINCT: Include 3-4 strategies. Use abbreviations. Keep rationales brief bu
             logger.error(f"{ticker}: All models exhausted - {e}")
             raise
         except Exception as e:
-            logger.error(f"{ticker}: API request failed - {e}")
+            # Sanitize error to avoid exposing API keys in URLs
+            from src.ai.client import _sanitize_error_message
+            logger.error(f"{ticker}: API request failed - {_sanitize_error_message(str(e))}")
             raise
 
     def _parse_strategy_response(self, response: str, ticker: str) -> Dict:
