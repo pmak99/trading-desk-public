@@ -115,11 +115,14 @@ class AlphaVantageCalendar:
         """
         Fetch earnings calendar from Alpha Vantage API.
 
+        Note: API requires minimum 3-month horizon, but we filter to only keep
+        the next 14 days (aligned with 1-2 day pre-earnings entry strategy).
+
         Args:
             horizon: Time horizon ('3month', '6month', '12month')
 
         Returns:
-            List of earnings dicts
+            List of earnings dicts (filtered to 14 days)
         """
         # Check cache first
         if self._is_cache_valid() and horizon in self._cache:
@@ -190,8 +193,21 @@ class AlphaVantageCalendar:
 
             logger.info(f"Fetched {len(earnings)} earnings from Alpha Vantage")
 
-            # Update cache in memory
-            self._cache[horizon] = earnings
+            # Filter to only keep current week's earnings (1-2 day pre-earnings strategy)
+            # Keep 14 days to cover ~7 trading days + weekends/holidays
+            today = datetime.now().date()
+            cutoff_date = today + timedelta(days=14)
+
+            filtered_earnings = [
+                e for e in earnings
+                if datetime.strptime(e['date'], '%Y-%m-%d').date() <= cutoff_date
+            ]
+
+            if len(filtered_earnings) < len(earnings):
+                logger.info(f"Filtered to {len(filtered_earnings)} earnings within 14 days (discarded {len(earnings) - len(filtered_earnings)} distant earnings)")
+
+            # Update cache in memory (only store current week)
+            self._cache[horizon] = filtered_earnings
             self._cache_timestamp = datetime.now()
 
             # Save cache to persistent file
