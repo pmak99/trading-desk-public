@@ -199,10 +199,11 @@ class IVExpansionScorer(TickerScorer):
             tracker.close()
 
         if weekly_change is None:
-            # No historical data and backfill failed - return conservative score (don't filter out)
-            # Lower than neutral (30 vs 50) since expansion is PRIMARY METRIC (35% weight)
-            logger.debug(f"{ticker}: No weekly IV data available after backfill attempt")
-            return 30.0
+            # No historical data and backfill failed - heavily penalize (10.0 instead of 30.0)
+            # This is PRIMARY METRIC (35% weight), so missing data should significantly hurt score
+            # Helps filter out small caps and thinly-traded options with no IV history
+            logger.debug(f"{ticker}: No weekly IV data available after backfill attempt - heavily penalizing score")
+            return 10.0
 
         # Score based on IV expansion velocity
         if weekly_change >= self.excellent:  # +80%+ (e.g., 40% → 72%)
