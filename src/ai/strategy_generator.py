@@ -141,28 +141,28 @@ class StrategyGenerator:
             Prompt string requesting JSON format
         """
         current_price = ticker_data.get('price', 0)
-        iv_rank = options_data.get('iv_rank', 'N/A')
         expected_move = options_data.get('expected_move_pct', 'N/A')
         iv_crush_ratio = options_data.get('iv_crush_ratio', 'N/A')
+        current_iv = options_data.get('current_iv', 'N/A')
         overall_sentiment = sentiment_data.get('overall_sentiment', 'unknown')
 
         prompt = f"""You are a highly experienced options trader. Generate 3-4 optimal earnings trade strategies for {ticker}.
 
 TICKER DATA:
 - Current Price: ${current_price}
-- IV Rank: {iv_rank}%
+- Current IV: {current_iv}%
 - Expected Move: {expected_move}%
 - IV Crush Ratio: {iv_crush_ratio}x (implied/actual historical)
 - Overall Sentiment: {overall_sentiment}
 
 TRADING CRITERIA (from Trading Research Prompt.pdf):
-1. Prefer DEFINED RISK (spreads), but consider undefined risk if edge is strong
+1. Prefer DEFINED RISK (vertical spreads) - mainly trade directional
 2. Sell 20-30 delta strikes when selling premium
 3. Position strikes OUTSIDE expected move range
 4. Hold through earnings (not scalp ahead)
 5. Risk budget: $20K per trade (calculate contract count)
-6. IV Rank >75%: Prefer defined-risk spreads over iron condors
-7. IV Rank 50-75%: Iron condors attractive for broader profit zones
+6. High IV (>80%): Excellent premium to capture
+7. Strategy: Enter 1-2 days before earnings for optimal timing
 
 SENTIMENT CONTEXT:
 - Retail: {sentiment_data.get('retail_sentiment', 'N/A')[:200]}

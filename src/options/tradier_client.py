@@ -238,29 +238,18 @@ class TradierOptionsClient:
                     logger.warning(f"{ticker}: No valid ATM put fallback available")
                     current_iv = 0
 
-            # Calculate IV Rank from historical IV data (if available)
-            # Note: IV Rank is nice-to-have but not critical for 1-2 day pre-earnings entries
-            # Weekly IV Change (expansion) is the PRIMARY timing metric
-            iv_rank = 0
+            # Record current IV for history (used for weekly IV change calculation)
+            # Weekly IV Change (expansion) is the PRIMARY timing metric for 1-2 day pre-earnings strategy
             if current_iv > 0:
-                # Record current IV for history (used for weekly IV change calculation)
                 self.iv_tracker.record_iv(ticker, current_iv)
 
-                # Calculate IV Rank if historical data exists (no backfill trigger)
-                iv_rank = self.iv_tracker.calculate_iv_rank(ticker, current_iv)
-
-                # Note: We don't auto-backfill for IV Rank (expensive, low value)
-                # Weekly IV Change scorer will trigger lightweight backfill if needed
-
             return {
-                'iv_rank': iv_rank,
-                'iv_percentile': iv_rank,  # Same as IV Rank
                 'current_iv': round(current_iv, 2)
             }
 
         except Exception as e:
-            logger.error(f"{ticker}: Failed to extract IV rank: {e}")
-            return {'iv_rank': 0, 'iv_percentile': 0, 'current_iv': 0}
+            logger.error(f"{ticker}: Failed to extract IV data: {e}")
+            return {'current_iv': 0}
 
     def _extract_liquidity_metrics(self, options_chain: list, current_price: float) -> Dict:
         """
