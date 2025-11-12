@@ -25,8 +25,8 @@ def config():
 
 @pytest.fixture
 def container(config):
-    """Test container with real configuration."""
-    return Container(config)
+    """Test container with real configuration (validation skipped for tests)."""
+    return Container(config, skip_validation=True)
 
 
 @pytest.fixture

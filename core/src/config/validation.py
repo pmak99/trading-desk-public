@@ -39,8 +39,9 @@ def validate_configuration(config: Config) -> None:
     if errors:
         for error in errors:
             logger.error(f"Configuration error: {error}")
+        error_summary = "\n".join(f"  - {error}" for error in errors)
         raise ConfigurationError(
-            f"{len(errors)} configuration error(s). See logs for details."
+            f"{len(errors)} configuration error(s):\n{error_summary}"
         )
 
     logger.info("✓ Configuration validated successfully")
