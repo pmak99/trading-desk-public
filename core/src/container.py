@@ -10,12 +10,17 @@ from pathlib import Path
 from typing import Optional
 from src.config.config import Config
 from src.infrastructure.api.tradier import TradierAPI
+from src.infrastructure.api.alpha_vantage import AlphaVantageAPI
 from src.infrastructure.cache.memory_cache import MemoryCache, CachedOptionsDataProvider
 from src.infrastructure.database.repositories.earnings_repository import (
     EarningsRepository,
 )
+from src.infrastructure.database.repositories.prices_repository import (
+    PricesRepository,
+)
 from src.application.metrics.implied_move import ImpliedMoveCalculator
 from src.application.metrics.vrp import VRPCalculator
+from src.utils.rate_limiter import create_alpha_vantage_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +40,11 @@ class Container:
     def __init__(self, config: Config):
         self.config = config
         self._tradier: Optional[TradierAPI] = None
+        self._alphavantage: Optional[AlphaVantageAPI] = None
         self._cache: Optional[MemoryCache] = None
         self._cached_options_provider: Optional[CachedOptionsDataProvider] = None
         self._earnings_repo: Optional[EarningsRepository] = None
+        self._prices_repo: Optional[PricesRepository] = None
         self._implied_move_calc: Optional[ImpliedMoveCalculator] = None
         self._vrp_calc: Optional[VRPCalculator] = None
 
@@ -77,6 +84,19 @@ class Container:
         return self._cached_options_provider
 
     @property
+    def alphavantage(self) -> AlphaVantageAPI:
+        """Get Alpha Vantage API client."""
+        if self._alphavantage is None:
+            rate_limiter = create_alpha_vantage_limiter()
+            self._alphavantage = AlphaVantageAPI(
+                api_key=self.config.api.alpha_vantage_key,
+                base_url=self.config.api.alpha_vantage_base_url,
+                rate_limiter=rate_limiter.limiters[0],  # Use per-minute limiter
+            )
+            logger.debug("Created AlphaVantageAPI client")
+        return self._alphavantage
+
+    @property
     def earnings_repository(self) -> EarningsRepository:
         """Get earnings repository."""
         if self._earnings_repo is None:
@@ -85,6 +105,16 @@ class Container:
             )
             logger.debug("Created EarningsRepository")
         return self._earnings_repo
+
+    @property
+    def prices_repository(self) -> PricesRepository:
+        """Get prices repository."""
+        if self._prices_repo is None:
+            self._prices_repo = PricesRepository(
+                db_path=str(self.config.database.path)
+            )
+            logger.debug("Created PricesRepository")
+        return self._prices_repo
 
     # ========================================================================
     # Application Layer - Calculators
