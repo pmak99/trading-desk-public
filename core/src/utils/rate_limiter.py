@@ -161,7 +161,7 @@ class TokenBucketRateLimiter:
         logger.debug("Rate limiter reset")
 
 
-class CompositRateLimiter:
+class CompositeRateLimiter:
     """
     Multiple rate limiters in series (e.g., per-minute AND per-day).
 
