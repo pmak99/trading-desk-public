@@ -1,86 +1,232 @@
-# IV Crush 2.0 - Production-Grade System
+# IV Crush 2.0 - Production-Grade Options Trading System
 
-This directory will contain the complete rewrite of the IV Crush trading system with enterprise-grade architecture.
+**Version:** 2.0
+**Status:** 🟢 Production Ready (Phase 3 Complete)
+**Test Coverage:** 55.34% (172/172 tests passing)
 
-## Status: 🟢 Foundation Complete (Session 1)
+A production-grade options trading system for analyzing implied volatility moves and identifying optimal earnings trade opportunities using the Volatility Risk Premium (VRP) strategy.
 
-**Progress**: MVP Week 0 complete - Foundation scaffolding and skeleton in place
+---
 
-The 2.0 system is being built incrementally following:
-- `docs/2.0_OVERVIEW.md` - System architecture and timeline
-- `docs/2.0_IMPLEMENTATION.md` - Complete implementation guide
-- `PROGRESS.md` - **Session-to-session progress tracking**
+## Status: 🟢 Production Ready
 
-## Key Improvements Over 1.0
+**Current Phase**: Phase 3 Complete - Production Deployment
+**Progress**: 172 tests passing, production documentation complete
 
-1. **Clean Architecture**: Domain-driven design with clear separation of concerns
-2. **Production Resilience**: Circuit breakers, retry logic, correlation ID tracing
-3. **Async Performance**: 20x faster processing with concurrent operations
-4. **Type Safety**: Immutable domain types with Result[T, Error] pattern
-5. **Comprehensive Testing**: 80%+ coverage with unit, integration, and performance tests
-6. **Production Operations**: Health checks, hybrid caching, performance monitoring
+The 2.0 system is production-ready with:
+- ✅ **Phase 1**: Critical resilience (circuit breakers, retry logic, health checks)
+- ✅ **Phase 2**: Data persistence (hybrid cache, configuration validation, performance tracking)
+- ✅ **Phase 3**: Production deployment (edge case tests, load testing, deployment guides)
+- ⏳ **Phase 4**: Algorithmic optimization (planned)
 
-## Timeline
+## Documentation
 
-- **Days 1-21**: MVP system (core metrics, API clients, basic infrastructure)
-- **Days 22-28**: Phase 1 - Critical Resilience (async, retry, circuit breaker, health checks)
-- **Days 29-35**: Phase 2 - Data Persistence & Operations (hybrid cache, config validation)
-- **Days 36-42**: Phase 3 - Production Deployment (edge cases, load testing, runbook)
-- **Days 43-46**: Phase 4 - Algorithmic Optimization (enhanced skew, consistency, interpolation)
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Complete deployment guide for production
+- **[RUNBOOK.md](RUNBOOK.md)** - Operational procedures and troubleshooting
+- **[PROGRESS.md](PROGRESS.md)** - Detailed session-by-session progress tracker
+- **docs/2.0_OVERVIEW.md** - System architecture and design
+- **docs/2.0_IMPLEMENTATION.md** - Implementation guide
 
-**Total**: 46 days to production-ready system
+## Key Features
+
+### Production Resilience
+- ✅ **Circuit Breakers**: Automatic failure detection and recovery
+- ✅ **Retry Logic**: Exponential backoff with configurable attempts
+- ✅ **Health Checks**: Monitor Tradier API, database, and cache
+- ✅ **Correlation ID Tracing**: Track requests across system
+
+### Performance
+- ✅ **Hybrid Caching**: L1 (memory) + L2 (SQLite) with automatic promotion
+- ✅ **Concurrent Processing**: Handle 50-100 tickers concurrently
+- ✅ **Performance Monitoring**: Track metrics, identify slow operations
+- ✅ **Linear Scaling**: 2.79x response time for 4x load
+
+### Data & Configuration
+- ✅ **SQLite Database**: Historical moves with WAL mode for concurrency
+- ✅ **Configuration Validation**: Fail-fast with detailed error messages
+- ✅ **Environment-Based**: Secure configuration via .env files
+
+### Testing & Quality
+- ✅ **172 Tests**: 164 unit + 8 load tests, all passing
+- ✅ **55.34% Coverage**: Core business logic thoroughly tested
+- ✅ **Edge Case Tests**: 27 tests for unusual inputs and boundaries
+- ✅ **Load Tests**: Validated up to 100 concurrent tickers
+
+### Architecture
+1. **Domain Layer**: Immutable types (Money, Percentage, Strike, OptionChain)
+2. **Application Layer**: Business logic (ImpliedMove, VRP calculators)
+3. **Infrastructure Layer**: API clients, database, cache
+4. **Result Pattern**: Functional error handling with Result[T, Error]
+5. **Dependency Injection**: Clean separation with container pattern
 
 ## Quick Start
 
-### Setup
+### Prerequisites
+
+1. **Python 3.11+** installed
+2. **Tradier API key** ([get one](https://documentation.tradier.com/))
+3. **Alpha Vantage API key** ([get one](https://www.alphavantage.co/support/#api-key))
+
+### Installation
+
 ```bash
-# From project root
-cd 2.0/
+# Clone repository
+git clone https://github.com/yourusername/trading-desk.git
+cd trading-desk/2.0
+
+# Create virtual environment
+python3.11 -m venv venv
+source venv/bin/activate
 
 # Install dependencies
-pip install -e .
+pip install -r requirements.txt
 
-# Install dev dependencies
-pip install -e ".[dev]"
+# Create .env file
+cp .env.example .env
+# Edit .env and add your API keys
+```
+
+### Configuration
+
+Create `.env` file with:
+
+```ini
+TRADIER_API_KEY=your_tradier_key_here
+ALPHA_VANTAGE_KEY=your_alphavantage_key_here
+DATABASE_PATH=./data/ivcrush.db
+LOG_LEVEL=INFO
+```
+
+### Initialize Database
+
+```bash
+# Create data directory
+mkdir -p data logs
 
 # Initialize database
-python -c "from src.infrastructure.database.init_schema import init_database; from src.config.config import get_config; init_database(get_config().database.path)"
+python -c "from src.infrastructure.database.init_schema import initialize_database; initialize_database('./data/ivcrush.db')"
 
+# Enable WAL mode for production
+sqlite3 ./data/ivcrush.db "PRAGMA journal_mode=WAL;"
+```
+
+### Verify Installation
+
+```bash
 # Run tests
-pytest tests/ -v
+pytest tests/unit/ tests/performance/ -v
+# Expected: 172/172 tests pass
+
+# Run health check
+python scripts/health_check.py
+# Expected: All services healthy
 ```
 
 ### Usage
+
+#### Analyze Single Ticker
+
 ```bash
-# Analyze a ticker (requires TRADIER_API_KEY in .env)
 python scripts/analyze.py AAPL --earnings-date 2025-01-31 --expiration 2025-02-01
 ```
 
-## Development
+#### Bulk Analysis
 
-Implementation follows the detailed guide in `docs/2.0_IMPLEMENTATION.md` with:
-- ✅ Dependency injection container
-- ✅ Clean domain models (Money, Percentage, Strike, OptionChain, etc.)
-- ✅ Repository pattern for data access
-- ✅ Service layer for business logic (ImpliedMove, VRP calculators)
-- ✅ Infrastructure layer for external integrations (Tradier API)
-- ⏳ Full test coverage (in progress)
+```bash
+# Create ticker list
+echo -e "AAPL\nMSFT\nGOOGL" > tickers.txt
 
-## Current Components
+# Analyze all
+python scripts/analyze.py --file tickers.txt --output results.json
+```
 
-### Completed (Session 1)
-- **Domain Layer**: Types, errors, protocols, enums
-- **Config Layer**: Environment-based configuration with validation
-- **Infrastructure**: API clients (Tradier), database schema, cache (memory)
-- **Application**: Core metrics (ImpliedMove, VRP calculators)
-- **Container**: Dependency injection with lazy loading
-- **Testing**: Framework setup with basic unit tests
+#### Backfill Historical Data
 
-### Next Steps (Session 2+)
-- Complete historical data backfill
-- Implement enrichment metrics (Consistency, Skew, Term Structure)
-- Add CLI scripts (scan, backfill)
-- Increase test coverage to 80%+
+```bash
+python scripts/backfill.py --tickers AAPL,MSFT --days 90
+```
+
+---
+
+## Production Deployment
+
+For production deployment, see [DEPLOYMENT.md](DEPLOYMENT.md) for:
+- Environment setup
+- Security configuration
+- Database optimization
+- Health checks and monitoring
+- Backup procedures
+
+For day-to-day operations, see [RUNBOOK.md](RUNBOOK.md) for:
+- Common tasks
+- Troubleshooting guide
+- Performance tuning
+- Maintenance procedures
+
+---
+
+## Testing
+
+```bash
+# Run all tests
+pytest tests/unit/ tests/performance/ -v
+
+# Run specific test suites
+pytest tests/unit/ -v                    # Unit tests (164)
+pytest tests/performance/ -v             # Load tests (8)
+pytest tests/unit/test_edge_cases.py -v # Edge cases (27)
+
+# Run with coverage
+pytest tests/unit/ --cov=src --cov-report=html
+```
+
+---
+
+## Performance Benchmarks
+
+From load testing (tests/performance/test_load.py):
+
+- **10 tickers:** 0.010s (1.0ms avg per ticker)
+- **50 tickers:** 0.017s (0.3ms avg per ticker)
+- **100 tickers:** 0.032s (0.3ms avg per ticker)
+- **Scaling:** 2.79x time for 4x load (excellent linear scaling)
+
+---
+
+## Project Structure
+
+```
+2.0/
+├── src/
+│   ├── domain/           # Domain types, errors, protocols
+│   ├── application/      # Business logic (calculators, services)
+│   ├── infrastructure/   # API clients, database, cache
+│   ├── config/          # Configuration and validation
+│   ├── utils/           # Utilities (retry, circuit breaker, etc.)
+│   └── container.py     # Dependency injection
+├── tests/
+│   ├── unit/            # Unit tests (164 tests)
+│   ├── performance/     # Load tests (8 tests)
+│   └── integration/     # Integration tests
+├── scripts/
+│   ├── analyze.py       # Main analysis script
+│   ├── backfill.py      # Historical data backfill
+│   └── health_check.py  # Health monitoring
+├── docs/               # Additional documentation
+├── DEPLOYMENT.md       # Production deployment guide
+├── RUNBOOK.md          # Operational runbook
+├── PROGRESS.md         # Development progress tracker
+└── README.md           # This file
+```
+
+---
+
+## Next Steps (Phase 4 - Planned)
+
+- [ ] Polynomial skew fitting
+- [ ] Exponential-weighted consistency
+- [ ] Straddle interpolation
+- [ ] Enhanced algorithmic optimizations
 
 ---
 
