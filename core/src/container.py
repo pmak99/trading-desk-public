@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 from src.config.config import Config
+from src.config.validation import validate_configuration
 from src.infrastructure.api.tradier import TradierAPI
 from src.infrastructure.api.alpha_vantage import AlphaVantageAPI
 from src.infrastructure.cache.memory_cache import MemoryCache, CachedOptionsDataProvider
@@ -45,7 +46,17 @@ class Container:
     - No circular dependencies
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, skip_validation: bool = False):
+        """
+        Initialize container with configuration.
+
+        Args:
+            config: Configuration instance
+            skip_validation: If True, skip configuration validation (useful for testing)
+        """
+        if not skip_validation:
+            validate_configuration(config)
+
         self.config = config
         self._tradier: Optional[TradierAPI] = None
         self._alphavantage: Optional[AlphaVantageAPI] = None
