@@ -1,6 +1,22 @@
-# Trading Desk - Earnings IV Crush Analyzer
+# Trading Desk - Earnings IV Crush Trading System
 
 Automated research system for earnings options trading with real-time IV data and AI-powered analysis.
+
+## 📁 Project Structure
+
+This repository contains two versions of the IV Crush trading system:
+
+- **`1.0/`** - Current production system (fully functional)
+  - Optimized IV crush analyzer with 80% performance improvements
+  - Real-time IV data from Tradier/ORATS
+  - AI-powered sentiment and strategy generation
+  - See `1.0/src/` for implementation
+
+- **`2.0/`** - Next-generation rewrite (in development)
+  - Clean architecture with domain-driven design
+  - Production-grade resilience (circuit breakers, retry logic, async processing)
+  - 80%+ test coverage, health checks, monitoring
+  - See `docs/2.0_OVERVIEW.md` and `docs/2.0_IMPLEMENTATION.md`
 
 ---
 
@@ -41,17 +57,19 @@ REDDIT_CLIENT_ID=xxx
 REDDIT_CLIENT_SECRET=xxx
 ```
 
-### Run Analysis
+### Run Analysis (1.0 System)
 ```bash
 # Analyze specific tickers
-python -m src.analysis.earnings_analyzer --tickers "NVDA,META,GOOGL" 2025-11-08 --yes
+python -m 1.0.src.analysis.earnings_analyzer --tickers "NVDA,META,GOOGL" 2025-11-08 --yes
 
 # Scan earnings calendar
-python -m src.analysis.earnings_analyzer 2025-11-08 10 --yes
+python -m 1.0.src.analysis.earnings_analyzer 2025-11-08 10 --yes
 
 # Override daily limits (uses free Gemini fallback)
-python -m src.analysis.earnings_analyzer --tickers "AAPL,MSFT" 2025-11-08 --yes --override
+python -m 1.0.src.analysis.earnings_analyzer --tickers "AAPL,MSFT" 2025-11-08 --yes --override
 ```
+
+> **Note**: The 1.0 system is located in the `1.0/` directory. All import paths now start with `1.0.src`
 
 ---
 
@@ -84,39 +102,40 @@ python -m src.analysis.earnings_analyzer --tickers "AAPL,MSFT" 2025-11-08 --yes 
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Architecture (1.0 System)
 
 ```
-src/
-├── analysis/              # Core filtering and scoring
-│   ├── earnings_analyzer.py  # Main orchestrator
-│   ├── ticker_filter.py      # IV crush filtering
-│   └── scorers.py            # Scoring strategies
-├── options/               # Options data
-│   ├── tradier_client.py     # Real IV (Tradier/ORATS)
-│   └── data_client.py        # Fallback (yfinance)
-├── ai/                    # AI analysis
-│   ├── sentiment_analyzer.py
-│   └── strategy_generator.py
-├── data/calendars/        # Earnings calendars
-│   ├── alpha_vantage.py      # NASDAQ vendor (recommended)
-│   └── base.py               # Nasdaq free tier
-├── config/                # Configuration
-│   └── config_loader.py      # Shared config system
-└── core/                  # Utilities
-    ├── lru_cache.py          # Bounded caching
-    ├── http_session.py       # Connection pooling
-    └── usage_tracker_sqlite.py  # Budget tracking
-
-benchmarks/                # Performance tracking
-profiling/                 # Code profiling tools
+1.0/
+├── src/
+│   ├── analysis/              # Core filtering and scoring
+│   │   ├── earnings_analyzer.py  # Main orchestrator
+│   │   ├── ticker_filter.py      # IV crush filtering
+│   │   └── scorers.py            # Scoring strategies
+│   ├── options/               # Options data
+│   │   ├── tradier_client.py     # Real IV (Tradier/ORATS)
+│   │   └── data_client.py        # Fallback (yfinance)
+│   ├── ai/                    # AI analysis
+│   │   ├── sentiment_analyzer.py
+│   │   └── strategy_generator.py
+│   ├── data/calendars/        # Earnings calendars
+│   │   ├── alpha_vantage.py      # NASDAQ vendor (recommended)
+│   │   └── base.py               # Nasdaq free tier
+│   ├── config/                # Configuration
+│   │   └── config_loader.py      # Shared config system
+│   └── core/                  # Utilities
+│       ├── lru_cache.py          # Bounded caching
+│       ├── http_session.py       # Connection pooling
+│       └── usage_tracker_sqlite.py  # Budget tracking
+├── benchmarks/                # Performance tracking
+├── profiling/                 # Code profiling tools
+└── tests/                     # Test suite
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-### Budget (`config/budget.yaml`)
+### Budget (`1.0/config/budget.yaml`)
 ```yaml
 earnings_source: "alphavantage"  # or "nasdaq"
 perplexity_monthly_limit: 4.98   # Hard stop
@@ -134,7 +153,7 @@ model_cascade:
   order: ["perplexity", "google"]  # Auto-fallback
 ```
 
-### Trading Criteria (`config/trading_criteria.yaml`)
+### Trading Criteria (`1.0/config/trading_criteria.yaml`)
 ```yaml
 iv_thresholds:
   minimum: 60      # Hard filter
@@ -190,20 +209,20 @@ See `ENHANCEMENTS.md` for complete guide.
 
 ---
 
-## 🧪 Testing
+## 🧪 Testing (1.0 System)
 
 ```bash
 # Test individual components
-python -m src.options.tradier_client AAPL       # Test Tradier IV data
-python -m src.ai.sentiment_analyzer TSLA        # Test sentiment
-python -m src.data.calendars.alpha_vantage      # View earnings calendar
-python -m src.core.usage_tracker                # Budget dashboard
+python -m 1.0.src.options.tradier_client AAPL       # Test Tradier IV data
+python -m 1.0.src.ai.sentiment_analyzer TSLA        # Test sentiment
+python -m 1.0.src.data.calendars.alpha_vantage      # View earnings calendar
+python -m 1.0.src.core.usage_tracker                # Budget dashboard
 
 # Component comparison
-python -m src.data.calendars.factory            # Compare calendar sources
+python -m 1.0.src.data.calendars.factory            # Compare calendar sources
 
 # Full test suite
-pytest tests/ -v
+pytest 1.0/tests/ -v
 ```
 
 ---
@@ -236,9 +255,15 @@ pytest tests/ -v
 
 ## 📚 Documentation
 
+### 1.0 System
 - `ENHANCEMENTS.md` - Performance tools (benchmarking, profiling, market calendar)
-- `config/trading_criteria.yaml` - Filter thresholds and scoring weights
-- `config/budget.yaml` - API budgets and model selection
+- `1.0/config/trading_criteria.yaml` - Filter thresholds and scoring weights
+- `1.0/config/budget.yaml` - API budgets and model selection
+
+### 2.0 System (In Development)
+- `docs/2.0_OVERVIEW.md` - Complete architecture, timeline, and implementation plan
+- `docs/2.0_IMPLEMENTATION.md` - Detailed implementation guide with code templates
+- `2.0/README.md` - 2.0 system status and roadmap
 
 ---
 
