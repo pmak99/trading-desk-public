@@ -1,0 +1,51 @@
+### 5-Star Metrics (Critical: Directly identify IV spikes and crush potential, core to filtering high-premium opportunities with low directional risk)
+- **Daily IV Change**: ★★★★★  
+  Available in setup: Yes (via Alpha Vantage or Yahoo Finance for IV data).  
+  Essentiality: Highly necessary as it detects the immediate pre-earnings IV spike, ensuring you enter when premiums are peaked for maximum crush capture.
+
+- **IV Rank or IV Percentile**: ★★★★★  
+  Available in setup: Yes (calculable from historical IV via Alpha Vantage or Yahoo Finance).  
+  Essentiality: Critical for contextualizing if current IV is unusually high relative to history, confirming earnings-driven inflation and increasing crush likelihood.
+
+- **Days to Earnings**: ★★★★★  
+  Available in setup: Yes (earnings calendars from Alpha Vantage or Yahoo Finance).  
+  Essentiality: Fundamental filter to target only imminent earnings (0-2 days), aligning precisely with your 1-hour pre-entry timing—without this, the bot misses the event window.
+
+### 4-Star Metrics (Very Important: Enhance prediction of crush magnitude and risk management)
+- **Historical Post-Earnings IV Drop**: ★★★★☆  
+  Available in setup: Yes (historical options/IV data from Tradier, Alpha Vantage, or Yahoo Finance).  
+  Essentiality: Very necessary for backtesting repeatability; stocks with consistent large drops (>25%) boost confidence in post-earnings buyback profits.
+
+- **Implied Earnings Move**: ★★★★☆  
+  Available in setup: Yes (straddle data from Tradier options chains).  
+  Essentiality: Key for quantifying expected volatility (premium size), favoring setups where implied > historical actual moves to minimize blowout risk.
+
+- **Historical Average Post-Earnings Price Move**: ★★★★☆  
+  Available in setup: Yes (earnings history from Alpha Vantage or Yahoo Finance).  
+  Essentiality: Important for sizing positions; ensures actual moves stay within your spread/condor bounds, protecting against gamma while relying on crush.
+
+### 3-Star Metrics (Useful: Improve liquidity and trade execution, but not core to IV identification)
+- **Open Interest**: ★★★☆☆  
+  Available in setup: Yes (options chains from Tradier).  
+  Essentiality: Useful for confirming market interest in earnings options, aiding in selecting strikes with good fills, but secondary to IV metrics.
+
+- **Liquidity**: ★★★☆☆  
+  Available in setup: Yes (bid-ask spreads and volume from Tradier).  
+  Essentiality: Necessary for practical trading (tight spreads), but more about execution than strategy essence—assumes basic thresholds are met.
+
+- **Option Volume**: ★★★☆☆  
+  Available in setup: Yes (from Tradier).  
+  Essentiality: Complements liquidity/OI by ensuring active trading pre-earnings, reducing slippage on entry/exit, but redundant if those are already covered.
+
+### 2-Star Metrics (Optional: Add refinements for specific universes or edges)
+- **Stock Beta**: ★★☆☆☆  
+  Available in setup: Yes (from Yahoo Finance).  
+  Essentiality: Helpful for targeting higher-vol stocks (>1.2) that amplify IV spikes, but not essential—many low-beta names still crush well.
+
+- **Market Cap or Sector Filters**: ★★☆☆☆  
+  Available in setup: Yes (stock fundamentals from Yahoo Finance or Alpha Vantage).  
+  Essentiality: Optional for focusing on liquid mid/large-caps or vol-heavy sectors (e.g., tech), but over-filtering could limit opportunities.
+
+- **Sentiment Overlay**: ★★☆☆☆  
+  Available in setup: Yes (via Reddit scraping or Perplexity/Gemini analysis).  
+  Essentiality: Can highlight controversy-driven IV boosts, but subjective and less reliable than quant metrics—best as a tiebreaker.

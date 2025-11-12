@@ -1,0 +1,67 @@
+Here’s a ranked list of the **IV Crush Candidate Identification Metrics**, organized by **importance (⭐ rating)** and annotated for **availability** in your current setup *(Tradier, Alpha Vantage, Yahoo Finance, Reddit, Perplexity, Gemini)* and **essentiality** to your IV crush short-spread/iron condor strategy.
+
+---
+
+## ⭐⭐⭐⭐⭐ (Critical / Core Metrics)
+
+| Metric                                                              | Availability in Setup                                                        | Why It’s Essential                                                                                                                                                                                              |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Implied Volatility Rank / Percentile (IVR)**                      | ✅ **Tradier**, ✅ **Yahoo Finance (via option chains)**                       | Directly measures how elevated IV is versus its historical range. High IVR is the clearest signal that IV is “peaked” and ripe for a post-earnings crush. Absolutely foundational for timing short-vol entries. |
+| **Historical IV Crush Consistency (Average IV Drop Post-Earnings)** | ⚙️ *Computed manually* via Tradier + Alpha Vantage (past IV + earnings data) | Quantifies how reliably a ticker’s IV collapses post-earnings. Averages 4-8 prior cycles for statistical confidence. Critical for filtering high-probability crush candidates.                                  |
+| **Implied Move vs Actual Move (Volatility Risk Premium)**           | ⚙️ *Derived from* Tradier (option IVs) + Alpha Vantage (price history)       | Compares expected vs realized volatility. Core to ensuring options are overpriced relative to realized risk—your profit engine for short spreads and iron condors.                                              |
+| **Liquidity (Bid-Ask Spread, OI, Volume)**                          | ✅ **Tradier**, ✅ **Yahoo Finance**                                           | Ensures you can enter/exit efficiently. Illiquidity amplifies slippage and distorts IV readings. You already use this correctly—keep it as a gating filter.                                                     |
+
+---
+
+## ⭐⭐⭐⭐ (High-Value Enhancers)
+
+| Metric                                                  | Availability in Setup                                                    | Why It’s Important                                                                                                                                              |
+| ------------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Volatility Term Structure (Event IV Premium)**        | ⚙️ *Derived from* Tradier (compare near vs next expiration IVs)          | Captures how steeply front-month IV is elevated due to earnings. Confirms that IV premium is event-driven (i.e., will collapse). Excellent confirmation metric. |
+| **Options Volume & Unusual Activity (Volume/OI Ratio)** | ✅ **Tradier**, ✅ **Yahoo Finance**, ✅ **Reddit (sentiment cross-check)** | Highlights tickers seeing heavy speculative positioning. Often correlates with pre-earnings IV spikes. Useful for liquidity confirmation and timing entry.      |
+| **Earnings Date Proximity (0-1 day filter)**            | ✅ **Yahoo Finance**, ✅ **Alpha Vantage**, ✅ **Perplexity**               | Ensures IV is truly at its pre-event apex. Mandatory timing filter so your bot triggers at the right moment.                                                    |
+
+---
+
+## ⭐⭐⭐ (Supportive / Situational Metrics)
+
+| Metric                                      | Availability in Setup                 | Why It’s Useful                                                                                                      |
+| ------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Underlying Beta / Historical Volatility** | ✅ **Alpha Vantage**                   | Filters out extreme movers (high beta) that may invalidate “stay in range” assumptions. Helps size spreads properly. |
+| **Earnings Surprise Magnitude History**     | ✅ **Alpha Vantage (earnings API)**    | Large historical surprises can keep post-earnings IV elevated. Helps avoid names where IV doesn’t reliably collapse. |
+| **Analyst Dispersion / Forecast Spread**    | ⚙️ *Inferred via* Perplexity / Gemini | Proxy for uncertainty—tight consensus implies predictable outcomes → better IV crush odds.                           |
+| **Price Stability / ATR% Filter**           | ✅ **Alpha Vantage**                   | Stocks with lower ATR% tend to underperform implied moves. Reinforces your edge when selling vol.                    |
+
+---
+
+## ⭐⭐ (Optional / Contextual Metrics)
+
+| Metric                                         | Availability in Setup                                         | Why It’s Optional                                                                                                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Retail & Reddit Sentiment / Mention Volume** | ✅ **Reddit**, ✅ **Perplexity**, ⚙️ *via Gemini summarization* | Adds social layer—detects “meme-ified” names prone to outsized moves (risk control). Not core, but useful for flagging tickers to avoid or size smaller. |
+| **Sector Volatility Regime**                   | ⚙️ *Derived from group averages via Alpha Vantage or Yahoo*   | Helps normalize expectations (e.g., tech vs utilities). Optional calibration metric.                                                                     |
+
+---
+
+## ⭐ (Low Priority / Experimental)
+
+| Metric                                                                     | Availability in Setup                 | Why It’s Low Priority                                                                                                                 |
+| -------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| **Implied Skew (Call vs Put IV differential)**                             | ⚙️ *Partially via Tradier chain data* | Interesting for directional bias but limited value for pure IV crush trades. More relevant for delta-hedged or skew-arbitrage setups. |
+| **Social Media Implied Vol Proxy (via Gemini/Perplexity sentiment index)** | ⚙️ *Text-derived proxy*               | Fun to experiment with, but noisy for systematic identification. Keep as research metric, not a core signal.                          |
+
+---
+
+### ✅ Summary Ranking by Tier
+
+| Tier  | Focus                         | Purpose                                           |
+| ----- | ----------------------------- | ------------------------------------------------- |
+| ⭐⭐⭐⭐⭐ | **Core structural metrics**   | Must-have inputs for accurate IV crush detection. |
+| ⭐⭐⭐⭐  | **High-confidence enhancers** | Confirm and time entries; boost precision.        |
+| ⭐⭐⭐   | **Supportive controls**       | Manage risk, refine selections.                   |
+| ⭐⭐    | **Contextual refiners**       | Identify hype or regime bias.                     |
+| ⭐     | **Experimental metrics**      | Optional R&D signals for future iteration.        |
+
+---
+
+Would you like me to show how to **weight these metrics** numerically (e.g., scoring function from 0–100) for your candidate ranking algorithm? That would let you automatically prioritize tickers each day.
