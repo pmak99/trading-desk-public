@@ -35,6 +35,7 @@ def validate_configuration(config: Config) -> None:
     # Additional detailed checks
     _validate_database_access(config, errors)
     _validate_logging_setup(config, errors)
+    _validate_cache_config(config, errors)
 
     if errors:
         for error in errors:
@@ -72,4 +73,27 @@ def _validate_logging_setup(config: Config, errors: list) -> None:
     if config.logging.level.upper() not in valid_levels:
         errors.append(
             f"Invalid log level: {config.logging.level}. Must be one of {valid_levels}"
+        )
+
+
+def _validate_cache_config(config: Config, errors: list) -> None:
+    """Validate cache configuration."""
+    # L1 TTL must be less than L2 TTL for proper cache hierarchy
+    if config.cache.l1_ttl >= config.cache.l2_ttl:
+        errors.append(
+            f"L1 TTL ({config.cache.l1_ttl}s) must be < L2 TTL ({config.cache.l2_ttl}s) "
+            "for proper cache hierarchy"
+        )
+
+    # TTL values must be positive
+    if config.cache.l1_ttl <= 0:
+        errors.append(f"L1 TTL must be positive, got {config.cache.l1_ttl}")
+
+    if config.cache.l2_ttl <= 0:
+        errors.append(f"L2 TTL must be positive, got {config.cache.l2_ttl}")
+
+    # Warn about Alpha Vantage key (not an error, but worth noting)
+    if not config.api.alpha_vantage_key:
+        logger.warning(
+            "ALPHA_VANTAGE_KEY not set - historical data features may be limited"
         )

@@ -9,8 +9,8 @@ import time
 import asyncio
 import logging
 from functools import wraps
-from collections import defaultdict
-from typing import Dict, List, Optional, Callable, Any
+from collections import defaultdict, deque
+from typing import Dict, Deque, List, Optional, Callable, Any
 from threading import Lock
 import statistics
 
@@ -27,16 +27,21 @@ class PerformanceMonitor:
     - Statistics calculation (avg, min, max, p95, p99)
     - Thread-safe metric storage
     - Support for both sync and async functions
+    - Bounded storage to prevent memory leaks
     """
 
-    def __init__(self, default_threshold_ms: float = 10000):
+    def __init__(self, default_threshold_ms: float = 10000, max_samples: int = 10000):
         """
         Initialize performance monitor.
 
         Args:
             default_threshold_ms: Default threshold for operations (milliseconds)
+            max_samples: Maximum samples to keep per function (prevents memory leak)
         """
-        self.metrics: Dict[str, List[float]] = defaultdict(list)
+        self.max_samples = max_samples
+        self.metrics: Dict[str, Deque[float]] = defaultdict(
+            lambda: deque(maxlen=self.max_samples)
+        )
         self._lock = Lock()
         self.default_threshold_ms = default_threshold_ms
 
@@ -121,7 +126,7 @@ class PerformanceMonitor:
         """
         with self._lock:
             if func_name:
-                self.metrics[func_name] = []
+                self.metrics[func_name] = deque(maxlen=self.max_samples)
             else:
                 self.metrics.clear()
 

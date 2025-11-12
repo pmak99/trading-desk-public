@@ -56,7 +56,7 @@ class TestPerformanceMonitorBasics:
         monitor.track("test_func", 150.0)
 
         assert len(monitor.metrics["test_func"]) == 3
-        assert monitor.metrics["test_func"] == [100.0, 200.0, 150.0]
+        assert list(monitor.metrics["test_func"]) == [100.0, 200.0, 150.0]
 
     def test_set_custom_threshold(self, monitor):
         """Test setting custom threshold for a function."""
