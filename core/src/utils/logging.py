@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from src.utils.tracing import CorrelationIdFilter
+
 
 def setup_logging(
     level: str = "INFO",
@@ -25,14 +27,17 @@ def setup_logging(
         console_output: Whether to log to console
         log_format: Optional custom log format
 
-    Phase 1 Enhancement: Will add correlation ID filter for tracing
+    Phase 1 Enhancement: Adds correlation ID filter for tracing
     """
-    # Default format (Phase 1 will add correlation_id)
+    # Default format with correlation ID
     if log_format is None:
-        log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        log_format = "%(asctime)s - [%(correlation_id)s] - %(name)s - %(levelname)s - %(message)s"
 
     # Create formatter
     formatter = logging.Formatter(log_format, datefmt="%Y-%m-%d %H:%M:%S")
+
+    # Create correlation ID filter
+    correlation_filter = CorrelationIdFilter()
 
     # Get root logger
     root_logger = logging.getLogger()
@@ -45,6 +50,7 @@ def setup_logging(
     if console_output:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
+        console_handler.addFilter(correlation_filter)
         root_logger.addHandler(console_handler)
 
     # File handler
@@ -52,6 +58,7 @@ def setup_logging(
         log_file.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(formatter)
+        file_handler.addFilter(correlation_filter)
         root_logger.addHandler(file_handler)
 
     # Reduce noise from third-party libraries

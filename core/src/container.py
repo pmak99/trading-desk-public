@@ -20,10 +20,14 @@ from src.infrastructure.database.repositories.prices_repository import (
 )
 from src.application.metrics.implied_move import ImpliedMoveCalculator
 from src.application.metrics.vrp import VRPCalculator
+from src.application.services.analyzer import TickerAnalyzer
+from src.application.services.health import HealthCheckService
+from src.application.async_metrics.vrp_analyzer_async import AsyncTickerAnalyzer
 from src.utils.rate_limiter import (
     create_alpha_vantage_limiter,
     create_tradier_limiter,
 )
+from src.utils.circuit_breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,10 @@ class Container:
         self._prices_repo: Optional[PricesRepository] = None
         self._implied_move_calc: Optional[ImpliedMoveCalculator] = None
         self._vrp_calc: Optional[VRPCalculator] = None
+        self._analyzer: Optional[TickerAnalyzer] = None
+        self._async_analyzer: Optional[AsyncTickerAnalyzer] = None
+        self._health_check_service: Optional[HealthCheckService] = None
+        self._tradier_breaker: Optional[CircuitBreaker] = None
 
     # ========================================================================
     # Infrastructure Layer
@@ -149,6 +157,34 @@ class Container:
         return self._vrp_calc
 
     # ========================================================================
+    # Application Layer - Services
+    # ========================================================================
+
+    @property
+    def analyzer(self) -> TickerAnalyzer:
+        """Get ticker analyzer service."""
+        if self._analyzer is None:
+            self._analyzer = TickerAnalyzer(self)
+            logger.debug("Created TickerAnalyzer")
+        return self._analyzer
+
+    @property
+    def async_analyzer(self) -> AsyncTickerAnalyzer:
+        """Get async ticker analyzer service."""
+        if self._async_analyzer is None:
+            self._async_analyzer = AsyncTickerAnalyzer(self.analyzer)
+            logger.debug("Created AsyncTickerAnalyzer")
+        return self._async_analyzer
+
+    @property
+    def health_check_service(self) -> HealthCheckService:
+        """Get health check service."""
+        if self._health_check_service is None:
+            self._health_check_service = HealthCheckService(self)
+            logger.debug("Created HealthCheckService")
+        return self._health_check_service
+
+    # ========================================================================
     # Utility Methods
     # ========================================================================
 
@@ -183,6 +219,28 @@ class Container:
         if self._cache:
             return self._cache.get_stats()
         return {}
+
+    def setup_api_resilience(self):
+        """Setup circuit breaker protection for APIs.
+
+        Wraps Tradier API methods with circuit breaker to prevent
+        cascading failures when the API is down.
+        """
+        if self._tradier_breaker is None:
+            self._tradier_breaker = CircuitBreaker(
+                name="tradier", failure_threshold=5, recovery_timeout=60
+            )
+            logger.info("Circuit breaker installed for Tradier API")
+
+        # Wrap get_option_chain with circuit breaker
+        if self._tradier is not None:
+            original_get_chain = self._tradier.get_option_chain
+
+            def get_chain_with_breaker(ticker, exp):
+                return self._tradier_breaker.call(original_get_chain, ticker, exp)
+
+            self._tradier.get_option_chain = get_chain_with_breaker
+            logger.debug("Tradier API wrapped with circuit breaker")
 
     # ========================================================================
     # Factory Methods (for testing)

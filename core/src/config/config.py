@@ -8,7 +8,7 @@ All configuration is immutable and validated at startup.
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from dotenv import load_dotenv
 
 
