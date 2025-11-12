@@ -12,6 +12,7 @@ from src.config.config import Config
 from src.infrastructure.api.tradier import TradierAPI
 from src.infrastructure.api.alpha_vantage import AlphaVantageAPI
 from src.infrastructure.cache.memory_cache import MemoryCache, CachedOptionsDataProvider
+from src.infrastructure.cache.hybrid_cache import HybridCache
 from src.infrastructure.database.repositories.earnings_repository import (
     EarningsRepository,
 )
@@ -49,6 +50,7 @@ class Container:
         self._tradier: Optional[TradierAPI] = None
         self._alphavantage: Optional[AlphaVantageAPI] = None
         self._cache: Optional[MemoryCache] = None
+        self._hybrid_cache: Optional[HybridCache] = None
         self._cached_options_provider: Optional[CachedOptionsDataProvider] = None
         self._earnings_repo: Optional[EarningsRepository] = None
         self._prices_repo: Optional[PricesRepository] = None
@@ -85,6 +87,25 @@ class Container:
             )
             logger.debug("Created MemoryCache")
         return self._cache
+
+    @property
+    def hybrid_cache(self) -> HybridCache:
+        """
+        Get hybrid cache (L1 memory + L2 SQLite persistence).
+
+        Phase 2 feature: Persistent cache that survives restarts.
+        """
+        if self._hybrid_cache is None:
+            # Use separate database file for L2 cache
+            cache_db_path = self.config.database.path.parent / "cache.db"
+            self._hybrid_cache = HybridCache(
+                db_path=cache_db_path,
+                l1_ttl_seconds=self.config.cache.l1_ttl,
+                l2_ttl_seconds=self.config.cache.l2_ttl,
+                max_l1_size=1000
+            )
+            logger.debug(f"Created HybridCache (db={cache_db_path})")
+        return self._hybrid_cache
 
     @property
     def cached_options_provider(self) -> CachedOptionsDataProvider:
