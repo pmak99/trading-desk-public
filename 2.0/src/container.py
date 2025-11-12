@@ -20,7 +20,10 @@ from src.infrastructure.database.repositories.prices_repository import (
 )
 from src.application.metrics.implied_move import ImpliedMoveCalculator
 from src.application.metrics.vrp import VRPCalculator
-from src.utils.rate_limiter import create_alpha_vantage_limiter
+from src.utils.rate_limiter import (
+    create_alpha_vantage_limiter,
+    create_tradier_limiter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +59,13 @@ class Container:
     def tradier(self) -> TradierAPI:
         """Get Tradier API client."""
         if self._tradier is None:
+            rate_limiter = create_tradier_limiter()
             self._tradier = TradierAPI(
                 api_key=self.config.api.tradier_api_key,
                 base_url=self.config.api.tradier_base_url,
+                rate_limiter=rate_limiter,
             )
-            logger.debug("Created TradierAPI client")
+            logger.debug("Created TradierAPI client with rate limiter")
         return self._tradier
 
     @property

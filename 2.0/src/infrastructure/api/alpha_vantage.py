@@ -15,6 +15,9 @@ from src.utils.rate_limiter import TokenBucketRateLimiter
 
 logger = logging.getLogger(__name__)
 
+# Maximum response size to prevent OOM attacks (10MB)
+MAX_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB
+
 
 class AlphaVantageAPI:
     """
@@ -36,6 +39,10 @@ class AlphaVantageAPI:
         self.base_url = base_url
         self.timeout = 30
         self.rate_limiter = rate_limiter
+
+    def __repr__(self):
+        """Mask API key in repr to prevent leaking in logs."""
+        return f"AlphaVantageAPI(base_url={self.base_url}, key=***)"
 
     def get_earnings_calendar(
         self, symbol: Optional[str] = None, horizon: str = "3month"
@@ -73,6 +80,25 @@ class AlphaVantageAPI:
                 self.base_url, params=params, timeout=self.timeout
             )
             response.raise_for_status()
+
+            # Check response size to prevent OOM
+            content_length = response.headers.get('Content-Length')
+            if content_length and int(content_length) > MAX_RESPONSE_SIZE:
+                return Err(
+                    AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Response too large: {content_length} bytes",
+                    )
+                )
+
+            # Also check actual response size
+            if len(response.content) > MAX_RESPONSE_SIZE:
+                return Err(
+                    AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Response too large: {len(response.content)} bytes",
+                    )
+                )
 
             # Parse CSV response
             lines = response.text.strip().split('\n')
@@ -172,6 +198,25 @@ class AlphaVantageAPI:
                 self.base_url, params=params, timeout=self.timeout
             )
             response.raise_for_status()
+
+            # Check response size to prevent OOM
+            content_length = response.headers.get('Content-Length')
+            if content_length and int(content_length) > MAX_RESPONSE_SIZE:
+                return Err(
+                    AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Response too large: {content_length} bytes",
+                    )
+                )
+
+            # Also check actual response size
+            if len(response.content) > MAX_RESPONSE_SIZE:
+                return Err(
+                    AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Response too large: {len(response.content)} bytes",
+                    )
+                )
 
             data = response.json()
 

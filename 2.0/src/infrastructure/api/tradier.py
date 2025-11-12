@@ -8,12 +8,15 @@ Implements OptionsDataProvider protocol with retry logic and circuit breaker
 import requests
 import logging
 from datetime import date
-from typing import Dict
+from typing import Dict, Optional
 from src.domain.types import Money, Strike, OptionChain, OptionQuote, Percentage
 from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 from src.domain.enums import OptionType
 
 logger = logging.getLogger(__name__)
+
+# Maximum response size to prevent OOM attacks (10MB)
+MAX_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB
 
 
 class TradierAPI:
@@ -26,7 +29,10 @@ class TradierAPI:
     """
 
     def __init__(
-        self, api_key: str, base_url: str = "https://api.tradier.com/v1"
+        self,
+        api_key: str,
+        base_url: str = "https://api.tradier.com/v1",
+        rate_limiter: Optional['TokenBucketRateLimiter'] = None,
     ):
         self.api_key = api_key
         self.base_url = base_url
@@ -35,6 +41,11 @@ class TradierAPI:
             'Accept': 'application/json',
         }
         self.timeout = 10
+        self.rate_limiter = rate_limiter
+
+    def __repr__(self):
+        """Mask API key in repr to prevent leaking in logs."""
+        return f"TradierAPI(base_url={self.base_url}, key=***)"
 
     def get_stock_price(self, ticker: str) -> Result[Money, AppError]:
         """
@@ -46,6 +57,15 @@ class TradierAPI:
         Returns:
             Result with Money or AppError
         """
+        # Rate limit check
+        if self.rate_limiter and not self.rate_limiter.acquire():
+            return Err(
+                AppError(
+                    ErrorCode.RATELIMIT,
+                    "Tradier rate limit exceeded",
+                )
+            )
+
         try:
             response = requests.get(
                 f"{self.base_url}/markets/quotes",
@@ -54,6 +74,24 @@ class TradierAPI:
                 timeout=self.timeout,
             )
             response.raise_for_status()
+
+            # Check response size to prevent OOM
+            content_length = response.headers.get('Content-Length')
+            if content_length and int(content_length) > MAX_RESPONSE_SIZE:
+                return Err(
+                    AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Response too large: {content_length} bytes",
+                    )
+                )
+
+            if len(response.content) > MAX_RESPONSE_SIZE:
+                return Err(
+                    AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Response too large: {len(response.content)} bytes",
+                    )
+                )
 
             data = response.json()
             quotes = data.get('quotes', {}).get('quote', [])
@@ -96,6 +134,15 @@ class TradierAPI:
         Returns:
             Result with OptionChain or AppError
         """
+        # Rate limit check (separate from get_stock_price call)
+        if self.rate_limiter and not self.rate_limiter.acquire():
+            return Err(
+                AppError(
+                    ErrorCode.RATELIMIT,
+                    "Tradier rate limit exceeded",
+                )
+            )
+
         try:
             # First, get current stock price
             price_result = self.get_stock_price(ticker)
@@ -116,6 +163,24 @@ class TradierAPI:
                 timeout=self.timeout,
             )
             response.raise_for_status()
+
+            # Check response size to prevent OOM
+            content_length = response.headers.get('Content-Length')
+            if content_length and int(content_length) > MAX_RESPONSE_SIZE:
+                return Err(
+                    AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Response too large: {content_length} bytes",
+                    )
+                )
+
+            if len(response.content) > MAX_RESPONSE_SIZE:
+                return Err(
+                    AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Response too large: {len(response.content)} bytes",
+                    )
+                )
 
             data = response.json()
             options = data.get('options', {}).get('option', [])
@@ -218,6 +283,24 @@ class TradierAPI:
                 timeout=self.timeout,
             )
             response.raise_for_status()
+
+            # Check response size to prevent OOM
+            content_length = response.headers.get('Content-Length')
+            if content_length and int(content_length) > MAX_RESPONSE_SIZE:
+                return Err(
+                    AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Response too large: {content_length} bytes",
+                    )
+                )
+
+            if len(response.content) > MAX_RESPONSE_SIZE:
+                return Err(
+                    AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Response too large: {len(response.content)} bytes",
+                    )
+                )
 
             data = response.json()
             expirations = data.get('expirations', {}).get('date', [])

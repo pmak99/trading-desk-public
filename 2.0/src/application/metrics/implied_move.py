@@ -45,6 +45,16 @@ class ImpliedMoveCalculator:
         """
         logger.info(f"Calculating implied move: {ticker} exp {expiration}")
 
+        # Validate expiration is not in the past
+        today = date.today()
+        if expiration < today:
+            return Err(
+                AppError(
+                    ErrorCode.INVALID,
+                    f"Expiration {expiration} is in the past (today: {today})",
+                )
+            )
+
         # Get option chain
         chain_result = self.provider.get_option_chain(ticker, expiration)
         if chain_result.is_err:
