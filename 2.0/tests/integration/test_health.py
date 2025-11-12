@@ -19,7 +19,7 @@ def config():
 @pytest.fixture
 def container(config):
     """Create container with test config."""
-    container = Container(config)
+    container = Container(config, skip_validation=True)
     # Initialize database for tests
     container.initialize_database()
     return container
@@ -83,7 +83,7 @@ class TestHealthCheckService:
         # Create config with invalid API key
         modified_api = replace(config.api, tradier_api_key="invalid_key")
         modified_config = replace(config, api=modified_api)
-        container = Container(modified_config)
+        container = Container(modified_config, skip_validation=True)
         health_service = container.health_check_service
 
         result = await health_service._check_tradier()
@@ -146,7 +146,7 @@ class TestHealthCheckService:
         # Use non-existent database path
         modified_db = replace(config.database, path=Path("/tmp/nonexistent_test_db.db"))
         modified_config = replace(config, database=modified_db)
-        container = Container(modified_config)
+        container = Container(modified_config, skip_validation=True)
         health_service = container.health_check_service
 
         result = await health_service._check_database()

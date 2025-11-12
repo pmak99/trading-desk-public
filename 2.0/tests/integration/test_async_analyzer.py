@@ -21,7 +21,7 @@ def config():
 @pytest.fixture
 def container(config):
     """Create container with test config."""
-    container = Container(config)
+    container = Container(config, skip_validation=True)
     container.initialize_database()
     return container
 
