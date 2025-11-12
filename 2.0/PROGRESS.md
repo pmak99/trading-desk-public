@@ -1,15 +1,15 @@
 # IV Crush 2.0 - Implementation Progress Tracker
 
-**Last Updated:** 2025-11-12 (Session 1 Complete)
-**Current Phase:** MVP Foundation (Days 1-3)
-**Overall Status:** 🟢 Week 0 Foundation Complete - Ready for Week 1
+**Last Updated:** 2025-11-12 (Session 2 Complete)
+**Current Phase:** MVP Week 1 (Days 4-10)
+**Overall Status:** 🟢 Week 1 Tier 1 Complete - End-to-End Working!
 
 ---
 
 ## Quick Reference
 
 ### Timeline Overview
-- **MVP (Days 1-21):** Core system with basic metrics ✅ Week 0 COMPLETE (40%)
+- **MVP (Days 1-21):** Core system with basic metrics ✅ Week 0-1 COMPLETE (65%)
 - **Phase 1 (Days 22-28):** Critical resilience features ⏳ NOT STARTED
 - **Phase 2 (Days 29-35):** Data persistence & operations ⏳ NOT STARTED
 - **Phase 3 (Days 36-42):** Production deployment ⏳ NOT STARTED
@@ -29,6 +29,19 @@
 - ✅ CLI script skeleton (analyze.py)
 - ✅ pyproject.toml with all dependencies
 - ✅ Documentation (README, PROGRESS)
+
+### Session 2 Summary - Historical Data Integration ✅ COMPLETE
+**Duration:** ~2 hours | **Files Created:** 6 | **Lines of Code:** ~1,200
+
+**Completed:**
+- ✅ PricesRepository for historical moves CRUD
+- ✅ AlphaVantageAPI client with earnings calendar & price history
+- ✅ TokenBucket rate limiter with composite support
+- ✅ backfill.py script for populating historical data
+- ✅ Updated analyze.py with end-to-end VRP flow
+- ✅ Unit tests for ImpliedMove and VRP calculators
+- ✅ Container updated with new repositories
+- ✅ **System now works end-to-end!**
 
 ---
 
@@ -69,20 +82,25 @@
 - `PROGRESS.md` - This file
 - Updated `README.md` - Quick start guide
 
-#### Week 1 (Days 4-10): Core Metrics ⏳ NOT STARTED
+#### Week 1 (Days 4-10): Core Metrics ✅ COMPLETE
 
-**STATUS:** ⚪ 0% Complete
+**STATUS:** 🟢 100% Complete
 
-- [ ] ImpliedMoveCalculator: Straddle-based implied moves
-- [ ] VRPCalculator: VRP ratio with edge scoring
-- [ ] Unit tests for calculators
-- [ ] Integration with options data provider
+- [x] ImpliedMoveCalculator: Straddle-based implied moves
+- [x] VRPCalculator: VRP ratio with edge scoring
+- [x] Unit tests for calculators
+- [x] Integration with options data provider
+- [x] Historical data backfill system
+- [x] End-to-end ticker analysis working
 
-**Files Pending:**
-- `src/application/metrics/implied_move.py`
-- `src/application/metrics/vrp.py`
-- `tests/unit/test_implied_move.py`
-- `tests/unit/test_vrp.py`
+**Files Created:**
+- `src/application/metrics/implied_move.py` ✓ (Session 1)
+- `src/application/metrics/vrp.py` ✓ (Session 1)
+- `src/infrastructure/database/repositories/prices_repository.py` ✓ (Session 2)
+- `src/infrastructure/api/alpha_vantage.py` ✓ (Session 2)
+- `src/utils/rate_limiter.py` ✓ (Session 2)
+- `scripts/backfill.py` ✓ (Session 2)
+- `tests/unit/test_calculators.py` ✓ (Session 2)
 
 #### Week 1.5 (Days 7-10): Data Enrichment ⏳ NOT STARTED
 

@@ -118,17 +118,61 @@ Notes:
 
         # Step 2: Get historical moves (from database)
         logger.info("\n📊 Step 2: Get Historical Moves")
-        earnings_repo = container.earnings_repository
+        prices_repo = container.prices_repository
 
-        # TODO: This will be implemented in Week 1
-        # For now, return success after implied move calculation
-        logger.info("✓ Implied move calculation complete!")
-        logger.info("\nℹ️  VRP calculation requires historical data (Week 1)")
-        logger.info("   Run backfill.py first to populate historical moves")
+        hist_result = prices_repo.get_historical_moves(args.ticker, limit=12)
 
+        if hist_result.is_err:
+            logger.warning(f"No historical data: {hist_result.error}")
+            logger.info("\nℹ️  VRP calculation requires historical data")
+            logger.info("   Run: python scripts/backfill.py " + args.ticker)
+            logger.info("\n✓ Implied move analysis complete!")
+            return 0
+
+        historical_moves = hist_result.value
+        logger.info(f"✓ Found {len(historical_moves)} historical earnings moves")
+
+        # Show recent history
+        for move in historical_moves[:3]:
+            logger.info(
+                f"  {move.earnings_date}: {move.intraday_move_pct} "
+                f"(gap: {move.gap_move_pct}, close: {move.close_move_pct})"
+            )
+
+        # Step 3: Calculate VRP
+        logger.info("\n📊 Step 3: Calculate VRP")
+
+        vrp_result = vrp_calc.calculate(
+            ticker=args.ticker,
+            expiration=args.expiration,
+            implied_move=implied_move,
+            historical_moves=historical_moves,
+        )
+
+        if vrp_result.is_err:
+            logger.error(f"Failed to calculate VRP: {vrp_result.error}")
+            return 1
+
+        vrp = vrp_result.value
+
+        logger.info(f"✓ VRP Ratio: {vrp.vrp_ratio:.2f}x")
+        logger.info(f"  Implied Move: {vrp.implied_move_pct}")
+        logger.info(f"  Historical Mean: {vrp.historical_mean_move_pct}")
+        logger.info(f"  Edge Score: {vrp.edge_score:.2f}")
+        logger.info(f"  Recommendation: {vrp.recommendation.value.upper()}")
+
+        # Final summary
         logger.info("\n" + "=" * 80)
-        logger.info("Analysis complete!")
+        logger.info("Analysis Complete!")
         logger.info("=" * 80)
+        logger.info(f"Ticker: {args.ticker}")
+        logger.info(f"Implied Move: {vrp.implied_move_pct}")
+        logger.info(f"VRP Ratio: {vrp.vrp_ratio:.2f}x → {vrp.recommendation.value.upper()}")
+
+        if vrp.is_tradeable:
+            logger.info("\n✅ TRADEABLE OPPORTUNITY")
+        else:
+            logger.info("\n⏭️  SKIP - Insufficient edge")
 
         return 0
 
