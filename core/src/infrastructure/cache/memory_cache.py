@@ -10,6 +10,10 @@ from typing import Optional, Any, Dict
 
 logger = logging.getLogger(__name__)
 
+# Cache version for key namespacing
+# Increment this to invalidate all caches after schema/format changes
+CACHE_VERSION = "v1"
+
 
 class MemoryCache:
     """
@@ -139,7 +143,9 @@ class CachedOptionsDataProvider:
 
     def get_stock_price(self, ticker: str):
         """Get stock price with caching."""
-        key = f"stock_price:{ticker}"
+        # Normalize ticker and use versioned cache key
+        ticker_normalized = ticker.upper()
+        key = f"{CACHE_VERSION}:stock_price:{ticker_normalized}"
         cached = self.cache.get(key)
 
         if cached is not None:
@@ -153,7 +159,9 @@ class CachedOptionsDataProvider:
 
     def get_option_chain(self, ticker: str, expiration):
         """Get option chain with caching."""
-        key = f"option_chain:{ticker}:{expiration}"
+        # Normalize ticker and use versioned cache key
+        ticker_normalized = ticker.upper()
+        key = f"{CACHE_VERSION}:option_chain:{ticker_normalized}:{expiration}"
         cached = self.cache.get(key)
 
         if cached is not None:

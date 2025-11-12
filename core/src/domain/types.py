@@ -6,7 +6,7 @@ and prevent accidental mutations.
 """
 
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, getcontext
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Dict, Optional, List
@@ -17,6 +17,10 @@ from src.domain.enums import (
     ExpirationCycle,
     SettlementType
 )
+
+# Set Decimal precision for financial calculations
+# 10 digits provides sufficient precision for stock prices and percentages
+getcontext().prec = 10
 
 
 # ============================================================================
