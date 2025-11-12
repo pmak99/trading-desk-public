@@ -34,6 +34,7 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
+asyncio_mode = "auto"
 addopts = [
     "-v",
     "--strict-markers",
@@ -47,6 +48,7 @@ markers = [
     "integration: Integration tests",
     "performance: Performance/load tests",
     "slow: Slow running tests",
+    "asyncio: Async tests using pytest-asyncio",
 ]
 
 [tool.coverage.run]
