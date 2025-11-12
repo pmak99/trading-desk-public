@@ -94,11 +94,14 @@ class TokenBucketRateLimiter:
                 )
                 return False
 
-        # Blocking mode: wait outside lock
-        wait_time = self._calculate_wait_time(tokens)
+            # Calculate wait time inside lock (thread-safe)
+            wait_time = self._calculate_wait_time(tokens)
+
+        # Blocking mode: wait outside lock (don't hold lock while sleeping)
         logger.info(f"Rate limit: waiting {wait_time:.2f}s for token")
         time.sleep(wait_time)
 
+        # Try again after waiting
         with self.lock:
             self._refill()
             if self.tokens >= tokens:

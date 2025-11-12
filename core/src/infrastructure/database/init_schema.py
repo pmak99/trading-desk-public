@@ -28,7 +28,20 @@ def init_database(db_path: Path) -> None:
     # Ensure parent directory exists
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(db_path))
+    # Check if database already initialized to prevent race conditions
+    if db_path.exists():
+        if verify_database(db_path):
+            logger.debug(f"Database already initialized: {db_path}")
+            return
+
+    # Use exclusive mode to prevent concurrent initialization
+    # URI mode allows isolation_level parameter
+    conn = sqlite3.connect(
+        f"file:{db_path}?mode=rwc",
+        uri=True,
+        isolation_level='EXCLUSIVE',
+        timeout=30
+    )
     cursor = conn.cursor()
 
     try:

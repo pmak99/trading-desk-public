@@ -10,9 +10,10 @@ Usage:
 import sys
 import argparse
 import logging
+import time
 from datetime import date, timedelta
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -24,7 +25,12 @@ from src.config.config import Config
 logger = logging.getLogger(__name__)
 
 
-def backfill_ticker(container: Container, ticker: str, quarters: int = 12) -> int:
+def backfill_ticker(
+    container: Container,
+    ticker: str,
+    quarters: int = 12,
+    timeout: Optional[int] = None,
+) -> int:
     """
     Backfill historical moves for a single ticker.
 
@@ -32,12 +38,22 @@ def backfill_ticker(container: Container, ticker: str, quarters: int = 12) -> in
         container: DI container
         ticker: Stock symbol
         quarters: Number of past quarters to backfill
+        timeout: Optional timeout in seconds per ticker (default: None = no timeout)
 
     Returns:
         Number of moves saved
     """
+    start_time = time.time()
+
+    def check_timeout():
+        """Check if timeout exceeded."""
+        if timeout and (time.time() - start_time) > timeout:
+            raise TimeoutError(f"Ticker {ticker} exceeded timeout of {timeout}s")
+
     logger.info(f"\n{'=' * 60}")
     logger.info(f"Backfilling {ticker} ({quarters} quarters)")
+    if timeout:
+        logger.info(f"Timeout: {timeout}s")
     logger.info(f"{'=' * 60}")
 
     av_client = container.alphavantage
@@ -46,6 +62,7 @@ def backfill_ticker(container: Container, ticker: str, quarters: int = 12) -> in
 
     # Step 1: Get earnings calendar for this ticker
     logger.info(f"📅 Fetching earnings calendar for {ticker}...")
+    check_timeout()
     earnings_result = av_client.get_earnings_calendar(symbol=ticker, horizon="12month")
 
     if earnings_result.is_err:
@@ -72,6 +89,7 @@ def backfill_ticker(container: Container, ticker: str, quarters: int = 12) -> in
 
     # Step 2: Get daily prices (full history)
     logger.info(f"📊 Fetching price history for {ticker}...")
+    check_timeout()
     prices_result = av_client.get_daily_prices(ticker, outputsize="full")
 
     if prices_result.is_err:
@@ -86,6 +104,7 @@ def backfill_ticker(container: Container, ticker: str, quarters: int = 12) -> in
 
     for i, (t, earnings_date, timing) in enumerate(past_earnings, 1):
         logger.info(f"[{i}/{len(past_earnings)}] Processing {earnings_date}...")
+        check_timeout()
 
         # Calculate move
         move_result = av_client.calculate_earnings_move(
@@ -134,10 +153,14 @@ Examples:
     # Limit to 4 quarters
     python scripts/backfill.py AAPL --quarters 4
 
+    # Set custom timeout per ticker
+    python scripts/backfill.py AAPL --timeout 600
+
 Notes:
     - Requires ALPHA_VANTAGE_KEY in .env
     - Rate limited to 5 calls/minute (Alpha Vantage free tier)
     - Use --quarters to limit data fetched per ticker
+    - Use --timeout to prevent stuck tickers (default: 300s)
         """,
     )
 
@@ -157,6 +180,12 @@ Notes:
         type=int,
         default=12,
         help="Number of past quarters to backfill (default: 12)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Timeout in seconds per ticker (default: 300s = 5 minutes)",
     )
     parser.add_argument(
         "--log-level",
@@ -204,6 +233,7 @@ Notes:
     logger.info("=" * 80)
     logger.info(f"Tickers: {len(tickers)}")
     logger.info(f"Quarters per ticker: {args.quarters}")
+    logger.info(f"Timeout per ticker: {args.timeout}s")
     logger.info(f"Estimated API calls: {len(tickers) * 2}")  # Calendar + prices
     logger.info(f"Estimated time: ~{len(tickers) * 25} seconds (rate limits)")
     logger.info("=" * 80)
@@ -226,7 +256,9 @@ Notes:
             logger.info(f"\n[{i}/{len(tickers)}] Processing {ticker}")
 
             try:
-                moves = backfill_ticker(container, ticker, args.quarters)
+                moves = backfill_ticker(
+                    container, ticker, args.quarters, timeout=args.timeout
+                )
                 total_moves += moves
 
                 if moves == 0:
@@ -235,6 +267,11 @@ Notes:
             except KeyboardInterrupt:
                 logger.info("\n\nInterrupted by user")
                 break
+
+            except TimeoutError as e:
+                logger.warning(f"Timeout: {e}")
+                failed_tickers.append(ticker)
+                continue
 
             except Exception as e:
                 logger.error(f"Error processing {ticker}: {e}", exc_info=True)
