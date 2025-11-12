@@ -73,6 +73,8 @@ class HybridCache:
         """Initialize SQLite schema for L2 cache."""
         try:
             with sqlite3.connect(str(self.db_path)) as conn:
+                # Enable WAL mode for better write concurrency
+                conn.execute('PRAGMA journal_mode=WAL')
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS cache (
                         key TEXT PRIMARY KEY,
@@ -85,7 +87,7 @@ class HybridCache:
                     'CREATE INDEX IF NOT EXISTS idx_cache_timestamp ON cache(timestamp)'
                 )
                 conn.commit()
-                logger.debug(f"L2 cache schema initialized: {self.db_path}")
+                logger.debug(f"L2 cache schema initialized with WAL mode: {self.db_path}")
         except sqlite3.Error as e:
             logger.error(f"Failed to initialize L2 cache schema: {e}")
             raise
