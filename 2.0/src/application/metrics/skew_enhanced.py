@@ -162,6 +162,7 @@ class SkewAnalyzerEnhanced:
             List of (moneyness, skew) tuples
         """
         points = []
+        ticker = chain.ticker  # Extract ticker for logging
 
         for strike in chain.strikes:
             strike_price = float(strike.price)

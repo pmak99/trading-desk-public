@@ -93,6 +93,21 @@ class ResilienceConfig:
 
 
 @dataclass(frozen=True)
+class AlgorithmConfig:
+    """Phase 4 Enhanced Algorithm Configuration."""
+
+    # Enable Phase 4 enhanced algorithms
+    use_interpolated_move: bool = True  # Straddle interpolation between strikes
+    use_enhanced_skew: bool = True      # Polynomial-fitted volatility skew
+    use_enhanced_consistency: bool = True  # Exponential-weighted consistency
+
+    # Algorithm parameters (optional overrides)
+    skew_min_points: int = 5            # Minimum points for polynomial fit
+    consistency_decay_factor: float = 0.85  # Exponential weight decay
+    interpolation_tolerance: float = 0.01   # Strike match tolerance (dollars)
+
+
+@dataclass(frozen=True)
 class LoggingConfig:
     """Logging configuration."""
 
@@ -112,6 +127,7 @@ class Config:
     thresholds: ThresholdsConfig
     rate_limits: RateLimitConfig
     resilience: ResilienceConfig
+    algorithms: AlgorithmConfig
     logging: LoggingConfig
 
     @classmethod
@@ -206,6 +222,16 @@ class Config:
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", "30")),
         )
 
+        # Algorithms (Phase 4)
+        algorithms = AlgorithmConfig(
+            use_interpolated_move=os.getenv("USE_INTERPOLATED_MOVE", "true").lower() == "true",
+            use_enhanced_skew=os.getenv("USE_ENHANCED_SKEW", "true").lower() == "true",
+            use_enhanced_consistency=os.getenv("USE_ENHANCED_CONSISTENCY", "true").lower() == "true",
+            skew_min_points=int(os.getenv("SKEW_MIN_POINTS", "5")),
+            consistency_decay_factor=float(os.getenv("CONSISTENCY_DECAY_FACTOR", "0.85")),
+            interpolation_tolerance=float(os.getenv("INTERPOLATION_TOLERANCE", "0.01")),
+        )
+
         # Logging
         log_file_path = os.getenv("LOG_FILE")
         logging = LoggingConfig(
@@ -225,6 +251,7 @@ class Config:
             thresholds=thresholds,
             rate_limits=rate_limits,
             resilience=resilience,
+            algorithms=algorithms,
             logging=logging,
         )
 

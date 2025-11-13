@@ -67,10 +67,13 @@ class Container:
         self._prices_repo: Optional[PricesRepository] = None
         self._implied_move_calc: Optional[ImpliedMoveCalculator] = None
         self._vrp_calc: Optional[VRPCalculator] = None
+        self._skew_analyzer = "uninitialized"  # SkewAnalyzerEnhanced or None (Phase 4)
+        self._consistency_analyzer = "uninitialized"  # ConsistencyAnalyzerEnhanced or None (Phase 4)
         self._analyzer: Optional[TickerAnalyzer] = None
         self._async_analyzer: Optional[AsyncTickerAnalyzer] = None
         self._health_check_service: Optional[HealthCheckService] = None
         self._tradier_breaker: Optional[CircuitBreaker] = None
+        self._alpha_vantage_breaker: Optional[CircuitBreaker] = None
 
     # ========================================================================
     # Infrastructure Layer
@@ -167,13 +170,20 @@ class Container:
 
     @property
     def implied_move_calculator(self) -> ImpliedMoveCalculator:
-        """Get implied move calculator."""
+        """Get implied move calculator (standard or interpolated based on config)."""
         if self._implied_move_calc is None:
-            # Use cached provider for efficiency
-            self._implied_move_calc = ImpliedMoveCalculator(
-                provider=self.cached_options_provider
-            )
-            logger.debug("Created ImpliedMoveCalculator")
+            # Use enhanced interpolated calculator if enabled in config
+            if self.config.algorithms.use_interpolated_move:
+                from src.application.metrics.implied_move_interpolated import ImpliedMoveCalculatorInterpolated
+                self._implied_move_calc = ImpliedMoveCalculatorInterpolated(
+                    provider=self.cached_options_provider
+                )
+                logger.info("Created ImpliedMoveCalculatorInterpolated (Phase 4)")
+            else:
+                self._implied_move_calc = ImpliedMoveCalculator(
+                    provider=self.cached_options_provider
+                )
+                logger.debug("Created ImpliedMoveCalculator (standard)")
         return self._implied_move_calc
 
     @property
@@ -187,6 +197,38 @@ class Container:
             )
             logger.debug("Created VRPCalculator")
         return self._vrp_calc
+
+    @property
+    def skew_analyzer(self):
+        """Get skew analyzer (enhanced if enabled in config, None if disabled)."""
+        if self._skew_analyzer == "uninitialized":
+            if self.config.algorithms.use_enhanced_skew:
+                from src.application.metrics.skew_enhanced import SkewAnalyzerEnhanced
+                self._skew_analyzer = SkewAnalyzerEnhanced(
+                    provider=self.cached_options_provider
+                )
+                logger.info("Created SkewAnalyzerEnhanced (Phase 4)")
+            else:
+                # Set to None permanently if disabled
+                self._skew_analyzer = None
+                logger.debug("Skew analysis disabled (use_enhanced_skew=false)")
+        return self._skew_analyzer
+
+    @property
+    def consistency_analyzer(self):
+        """Get consistency analyzer (enhanced if enabled in config, None if disabled)."""
+        if self._consistency_analyzer == "uninitialized":
+            if self.config.algorithms.use_enhanced_consistency:
+                from src.application.metrics.consistency_enhanced import ConsistencyAnalyzerEnhanced
+                self._consistency_analyzer = ConsistencyAnalyzerEnhanced(
+                    prices_repo=self.prices_repository
+                )
+                logger.info("Created ConsistencyAnalyzerEnhanced (Phase 4)")
+            else:
+                # Set to None permanently if disabled
+                self._consistency_analyzer = None
+                logger.debug("Consistency analysis disabled (use_enhanced_consistency=false)")
+        return self._consistency_analyzer
 
     # ========================================================================
     # Application Layer - Services
@@ -253,26 +295,62 @@ class Container:
         return {}
 
     def setup_api_resilience(self):
-        """Setup circuit breaker protection for APIs.
+        """Setup circuit breaker protection for all external APIs.
 
-        Wraps Tradier API methods with circuit breaker to prevent
-        cascading failures when the API is down.
+        Wraps all Tradier and Alpha Vantage API methods with circuit breakers
+        to prevent cascading failures when APIs are down.
+
+        Protected methods:
+        - Tradier: get_option_chain, get_stock_price, get_expirations
+        - Alpha Vantage: get_earnings_calendar, get_daily_prices
         """
+        # Setup Tradier circuit breaker
         if self._tradier_breaker is None:
             self._tradier_breaker = CircuitBreaker(
                 name="tradier", failure_threshold=5, recovery_timeout=60
             )
             logger.info("Circuit breaker installed for Tradier API")
 
-        # Wrap get_option_chain with circuit breaker
+        # Wrap all Tradier API methods
         if self._tradier is not None:
-            original_get_chain = self._tradier.get_option_chain
+            tradier_methods = ['get_option_chain', 'get_stock_price', 'get_expirations']
 
-            def get_chain_with_breaker(ticker, exp):
-                return self._tradier_breaker.call(original_get_chain, ticker, exp)
+            for method_name in tradier_methods:
+                if hasattr(self._tradier, method_name):
+                    original_method = getattr(self._tradier, method_name)
 
-            self._tradier.get_option_chain = get_chain_with_breaker
-            logger.debug("Tradier API wrapped with circuit breaker")
+                    # Create closure to capture original_method
+                    def create_wrapper(orig):
+                        def wrapper(*args, **kwargs):
+                            return self._tradier_breaker.call(orig, *args, **kwargs)
+                        return wrapper
+
+                    setattr(self._tradier, method_name, create_wrapper(original_method))
+                    logger.debug(f"Tradier API method '{method_name}' wrapped with circuit breaker")
+
+        # Setup Alpha Vantage circuit breaker
+        if self._alpha_vantage_breaker is None:
+            self._alpha_vantage_breaker = CircuitBreaker(
+                name="alpha_vantage", failure_threshold=3, recovery_timeout=120
+            )
+            logger.info("Circuit breaker installed for Alpha Vantage API")
+
+        # Wrap all Alpha Vantage API methods
+        if self._alpha_vantage is not None:
+            av_methods = ['get_earnings_calendar', 'get_daily_prices']
+
+            for method_name in av_methods:
+                if hasattr(self._alpha_vantage, method_name):
+                    original_method = getattr(self._alpha_vantage, method_name)
+
+                    # Create closure to capture original_method
+                    def create_wrapper(orig):
+                        def wrapper(*args, **kwargs):
+                            return self._alpha_vantage_breaker.call(orig, *args, **kwargs)
+                        return wrapper
+
+                    setattr(self._alpha_vantage, method_name, create_wrapper(original_method))
+                    logger.debug(f"Alpha Vantage API method '{method_name}' wrapped with circuit breaker")
 
     # ========================================================================
     # Factory Methods (for testing)

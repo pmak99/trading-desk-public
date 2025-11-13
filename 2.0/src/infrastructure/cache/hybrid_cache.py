@@ -161,13 +161,19 @@ class HybridCache:
         logger.debug(f"Cache MISS: {key}")
         return None
 
-    def set(self, key: str, value: Any) -> None:
+    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         """
         Set cached value in both L1 and L2.
 
         Args:
             key: Cache key
             value: Value to cache (must be picklable)
+            ttl: Ignored for HybridCache (uses configured L1/L2 TTLs).
+                 Included for CacheProvider protocol compliance.
+
+        Note:
+            HybridCache uses instance-configured TTLs (l1_ttl, l2_ttl) for all entries.
+            The ttl parameter is accepted for protocol compatibility but not used.
         """
         now = datetime.now()
 

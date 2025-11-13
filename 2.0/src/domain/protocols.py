@@ -5,7 +5,7 @@ Protocols define interfaces without inheritance, enabling duck typing
 and easier mocking in tests.
 """
 
-from typing import Protocol, List, Optional
+from typing import Protocol, List, Optional, Any
 from datetime import date, datetime
 from src.domain.types import (
     Money,
@@ -227,11 +227,11 @@ class CacheProvider(Protocol):
     Implementations: MemoryCache, HybridCache (Phase 2)
     """
 
-    def get(self, key: str) -> Optional[any]:
+    def get(self, key: str) -> Optional[Any]:
         """Get cached value by key."""
         ...
 
-    def set(self, key: str, value: any, ttl: Optional[int] = None) -> None:
+    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         """Set cached value with optional TTL."""
         ...
 
