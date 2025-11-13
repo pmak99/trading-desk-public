@@ -15,7 +15,9 @@ from src.domain.enums import (
     OptionType,
     Recommendation,
     ExpirationCycle,
-    SettlementType
+    SettlementType,
+    StrategyType,
+    DirectionalBias
 )
 
 # Set Decimal precision for financial calculations
@@ -382,6 +384,9 @@ class TickerAnalysis:
     skew: Optional[SkewResult] = None
     term_structure: Optional[TermStructureResult] = None
 
+    # Strategy recommendations (optional)
+    strategies: Optional['StrategyRecommendation'] = None
+
     # Overall recommendation
     recommendation: Recommendation = Recommendation.SKIP
     confidence: Optional[float] = None  # 0.0 - 1.0
@@ -395,6 +400,152 @@ class TickerAnalysis:
     def is_tradeable(self) -> bool:
         """Meets minimum tradeable threshold."""
         return self.recommendation in [Recommendation.EXCELLENT, Recommendation.GOOD]
+
+
+# ============================================================================
+# Strategy Types (Quantitative Strategy Generation)
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class StrategyLeg:
+    """
+    Single leg of an options strategy.
+    Represents one option position (long or short).
+    """
+
+    strike: Strike
+    option_type: OptionType  # CALL or PUT
+    action: str  # "BUY" or "SELL"
+    contracts: int
+    premium: Money  # Price per contract
+
+    @property
+    def is_long(self) -> bool:
+        """Whether this is a long position (buying)."""
+        return self.action == "BUY"
+
+    @property
+    def is_short(self) -> bool:
+        """Whether this is a short position (selling)."""
+        return self.action == "SELL"
+
+    @property
+    def cost(self) -> Money:
+        """Total cost/credit for this leg."""
+        total = self.premium * self.contracts * 100  # 100 shares per contract
+        return total if self.is_long else Money(-total.amount)
+
+
+@dataclass(frozen=True)
+class Strategy:
+    """
+    Complete options strategy with all legs and calculated metrics.
+
+    Supports vertical spreads (bull put, bear call) and iron condors.
+    """
+
+    ticker: str
+    strategy_type: StrategyType
+    expiration: date
+    legs: List[StrategyLeg]
+
+    # Calculated metrics
+    net_credit: Money  # Positive for credit spreads
+    max_profit: Money
+    max_loss: Money
+    breakeven: List[Money]  # Can have 1-2 breakevens
+    probability_of_profit: float  # 0.0 - 1.0
+    reward_risk_ratio: float  # max_profit / max_loss
+
+    # Position sizing
+    contracts: int  # Number of spreads for $20K risk budget
+    capital_required: Money  # Total capital at risk
+
+    # Scoring
+    profitability_score: float  # 0-100
+    risk_score: float  # 0-100 (lower is safer)
+    overall_score: float  # 0-100 (composite)
+
+    # Supporting rationale
+    rationale: str  # Brief explanation of edge
+
+    # Position Greeks (aggregated across all legs)
+    position_delta: Optional[float] = None  # Net delta exposure
+    position_gamma: Optional[float] = None  # Net gamma exposure
+    position_theta: Optional[float] = None  # Net theta (daily P/L from decay)
+    position_vega: Optional[float] = None   # Net vega (IV sensitivity)
+
+    @property
+    def strike_description(self) -> str:
+        """Human-readable strike description."""
+        if self.strategy_type == StrategyType.BULL_PUT_SPREAD:
+            short = next(leg for leg in self.legs if leg.is_short and leg.option_type == OptionType.PUT)
+            long = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.PUT)
+            return f"Short {short.strike}P / Long {long.strike}P"
+
+        elif self.strategy_type == StrategyType.BEAR_CALL_SPREAD:
+            short = next(leg for leg in self.legs if leg.is_short and leg.option_type == OptionType.CALL)
+            long = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.CALL)
+            return f"Short {short.strike}C / Long {long.strike}C"
+
+        elif self.strategy_type == StrategyType.IRON_CONDOR:
+            put_short = next(leg for leg in self.legs if leg.is_short and leg.option_type == OptionType.PUT)
+            put_long = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.PUT)
+            call_short = next(leg for leg in self.legs if leg.is_short and leg.option_type == OptionType.CALL)
+            call_long = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.CALL)
+            return f"Put: {put_short.strike}/{put_long.strike} | Call: {call_short.strike}/{call_long.strike}"
+
+        elif self.strategy_type == StrategyType.IRON_BUTTERFLY:
+            # Get ATM strikes (short positions)
+            atm_call = next(leg for leg in self.legs if leg.is_short and leg.option_type == OptionType.CALL)
+            atm_put = next(leg for leg in self.legs if leg.is_short and leg.option_type == OptionType.PUT)
+            # Get wing strikes (long positions)
+            wing_call = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.CALL)
+            wing_put = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.PUT)
+            return f"ATM: {atm_call.strike}C/{atm_put.strike}P | Wings: {wing_put.strike}P/{wing_call.strike}C"
+
+        return "N/A"
+
+    @property
+    def is_defined_risk(self) -> bool:
+        """Whether this strategy has defined/limited risk."""
+        return True  # All our strategies (spreads) have defined risk
+
+
+@dataclass(frozen=True)
+class StrategyRecommendation:
+    """
+    Complete strategy recommendation with 2-3 ranked options.
+    Generated from VRP analysis and options chain data.
+    """
+
+    ticker: str
+    expiration: date
+    analysis_time: datetime
+
+    # Input context
+    stock_price: Money
+    implied_move_pct: Percentage
+    vrp_ratio: float
+    directional_bias: DirectionalBias
+
+    # Generated strategies (2-3 options)
+    strategies: List[Strategy]
+
+    # Best recommendation
+    recommended_index: int  # Index in strategies list
+    recommendation_rationale: str  # Why this one is best
+
+    @property
+    def recommended_strategy(self) -> Strategy:
+        """Get the recommended strategy."""
+        return self.strategies[self.recommended_index]
+
+    @property
+    def has_multiple_options(self) -> bool:
+        """Whether multiple strategy options were generated."""
+        return len(self.strategies) > 1
 
 
 # ============================================================================
