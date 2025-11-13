@@ -175,7 +175,7 @@ def fetch_earnings_for_date(
     """
     logger.info(f"Fetching earnings calendar for {scan_date}...")
 
-    alpha_vantage = container.alpha_vantage_api
+    alpha_vantage = container.alphavantage
     result = alpha_vantage.get_earnings_calendar(horizon="3month")
 
     if result.is_err:
@@ -206,7 +206,7 @@ def fetch_earnings_for_ticker(
     Returns:
         (earnings_date, timing) tuple or None if not found
     """
-    alpha_vantage = container.alpha_vantage_api
+    alpha_vantage = container.alphavantage
     result = alpha_vantage.get_earnings_calendar(symbol=ticker, horizon="3month")
 
     if result.is_err:

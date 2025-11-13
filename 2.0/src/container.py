@@ -223,9 +223,7 @@ class Container:
         if self._consistency_analyzer == "uninitialized":
             if self.config.algorithms.use_enhanced_consistency:
                 from src.application.metrics.consistency_enhanced import ConsistencyAnalyzerEnhanced
-                self._consistency_analyzer = ConsistencyAnalyzerEnhanced(
-                    prices_repo=self.prices_repository
-                )
+                self._consistency_analyzer = ConsistencyAnalyzerEnhanced()
                 logger.info("Created ConsistencyAnalyzerEnhanced (Phase 4)")
             else:
                 # Set to None permanently if disabled

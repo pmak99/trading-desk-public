@@ -131,14 +131,29 @@ class StrategyGenerator:
         if not skew:
             return DirectionalBias.NEUTRAL
 
-        # Skew > 0: Puts more expensive = bearish
-        # Skew < 0: Calls more expensive = bullish
-        if skew.direction == 'bearish':
-            return DirectionalBias.BEARISH
-        elif skew.direction == 'bullish':
-            return DirectionalBias.BULLISH
-        else:
-            return DirectionalBias.NEUTRAL
+        # Handle both old SkewResult and new SkewAnalysis types
+        # SkewResult has: direction = 'bearish', 'bullish', 'neutral'
+        # SkewAnalysis has: directional_bias = 'put_bias', 'call_bias', 'neutral'
+
+        # Try new SkewAnalysis format first
+        if hasattr(skew, 'directional_bias'):
+            if skew.directional_bias == 'put_bias':
+                return DirectionalBias.BEARISH
+            elif skew.directional_bias == 'call_bias':
+                return DirectionalBias.BULLISH
+            else:
+                return DirectionalBias.NEUTRAL
+
+        # Fallback to old SkewResult format
+        elif hasattr(skew, 'direction'):
+            if skew.direction == 'bearish':
+                return DirectionalBias.BEARISH
+            elif skew.direction == 'bullish':
+                return DirectionalBias.BULLISH
+            else:
+                return DirectionalBias.NEUTRAL
+
+        return DirectionalBias.NEUTRAL
 
     def _select_strategy_types(
         self, vrp: VRPResult, bias: DirectionalBias
