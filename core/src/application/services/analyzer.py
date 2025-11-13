@@ -141,7 +141,7 @@ class TickerAnalyzer:
             analysis = TickerAnalysis(
                 ticker=ticker,
                 earnings_date=earnings_date,
-                earnings_timing=EarningsTiming.AFTER_CLOSE,  # Default, can enhance later
+                earnings_timing=EarningsTiming.AMC,  # Default to After Market Close
                 entry_time=datetime.now(),
                 expiration=expiration,
                 implied_move=implied_move,

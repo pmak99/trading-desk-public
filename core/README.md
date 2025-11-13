@@ -1,218 +1,248 @@
-# IV Crush 2.0 - Production-Grade Options Trading System
+# IV Crush 2.0 - Earnings Options Trading System
 
-**Version:** 2.0.1
-**Status:** 🟢 Fully Optimized (Phase 4 Complete)
-**Test Coverage:** 59.87% (201/201 tests passing)
+**ONE script. Maximum edge. Zero complexity.**
 
-A production-grade options trading system for analyzing implied volatility moves and identifying optimal earnings trade opportunities using the Volatility Risk Premium (VRP) strategy.
+A production-ready options trading system that identifies high-probability IV crush opportunities using the Volatility Risk Premium (VRP) strategy.
 
 ---
 
-## Status: 🟢 Fully Optimized
-
-**Current Phase**: Phase 4 Complete - Algorithmic Optimization
-**Progress**: 201 tests passing, all phases complete
-
-The 2.0 system is fully optimized and production-ready:
-- ✅ **Phase 1**: Critical resilience (circuit breakers, retry logic, health checks)
-- ✅ **Phase 2**: Data persistence (hybrid cache, configuration validation, performance tracking)
-- ✅ **Phase 3**: Production deployment (edge case tests, load testing, deployment guides)
-- ✅ **Phase 4**: Algorithmic optimization (polynomial skew, weighted consistency, interpolation)
-
-## Documentation
-
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Complete deployment guide for production
-- **[RUNBOOK.md](RUNBOOK.md)** - Operational procedures and troubleshooting
-- **[PROGRESS.md](PROGRESS.md)** - Detailed session-by-session progress tracker
-- **[docs/SCANNING_MODES.md](docs/SCANNING_MODES.md)** - NEW: Scanning & Ticker modes guide
-- **docs/2.0_OVERVIEW.md** - System architecture and design
-- **docs/2.0_IMPLEMENTATION.md** - Implementation guide
-
-## Key Features
-
-### Production Resilience
-- ✅ **Circuit Breakers**: Automatic failure detection and recovery
-- ✅ **Retry Logic**: Exponential backoff with configurable attempts
-- ✅ **Health Checks**: Monitor Tradier API, database, and cache
-- ✅ **Correlation ID Tracing**: Track requests across system
-
-### Performance
-- ✅ **Hybrid Caching**: L1 (memory) + L2 (SQLite) with automatic promotion
-- ✅ **Concurrent Processing**: Handle 50-100 tickers concurrently
-- ✅ **Performance Monitoring**: Track metrics, identify slow operations
-- ✅ **Linear Scaling**: 2.79x response time for 4x load
-
-### Data & Configuration
-- ✅ **SQLite Database**: Historical moves with WAL mode for concurrency
-- ✅ **Configuration Validation**: Fail-fast with detailed error messages
-- ✅ **Environment-Based**: Secure configuration via .env files
-
-### Testing & Quality
-- ✅ **201 Tests**: 193 unit + 8 load tests, all passing
-- ✅ **59.87% Coverage**: Core business logic thoroughly tested
-- ✅ **Edge Case Tests**: 27 tests for unusual inputs and boundaries
-- ✅ **Load Tests**: Validated up to 100 concurrent tickers
-- ✅ **Phase 4 Tests**: 29 tests for enhanced algorithms (93%+ coverage)
-
-### Architecture
-1. **Domain Layer**: Immutable types (Money, Percentage, Strike, OptionChain)
-2. **Application Layer**: Business logic (ImpliedMove, VRP calculators)
-3. **Infrastructure Layer**: API clients, database, cache
-4. **Result Pattern**: Functional error handling with Result[T, Error]
-5. **Dependency Injection**: Clean separation with container pattern
-
 ## Quick Start
+
+```bash
+cd "$PROJECT_ROOT/2.0"
+
+# Analyze any ticker for earnings
+./trade.sh NVDA 2025-11-20
+
+# That's it.
+```
+
+**Output:**
+```
+✅ TRADEABLE OPPORTUNITY
+VRP Ratio: 2.26x → EXCELLENT
+
+★ RECOMMENDED: BULL PUT SPREAD
+  Strikes: Short $177.50P / Long $170.00P
+  Net Credit: $2.20
+  Max Profit: $8,158.50 (37 contracts)
+  Probability of Profit: 69.1%
+  Reward/Risk: 0.42
+  Theta: +$329/day
+```
+
+---
+
+## What This System Does
+
+**Strategy:** Sell options when implied volatility > historical volatility, profit when IV crushes after earnings.
+
+**The Edge:**
+- VRP Analysis: Compare implied move (market expectations) vs historical moves (reality)
+- Phase 4 Algorithms: Polynomial skew fitting, exponential-weighted consistency, interpolated calculations
+- Strategy Generation: Iron Condors, Credit Spreads with optimal strike selection
+- Backtested: 91.7% win rate on Balanced strategy (128 historical earnings)
+
+**Database:** 675 earnings moves across 52 tickers (2022-2024)
+
+---
+
+## Installation
 
 ### Prerequisites
 
-1. **Python 3.11+** installed
+1. **Python 3.11+**
 2. **Tradier API key** ([get one](https://documentation.tradier.com/))
 3. **Alpha Vantage API key** ([get one](https://www.alphavantage.co/support/#api-key))
 
-### Installation
+### Setup
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/trading-desk.git
-cd trading-desk/2.0
+cd "$PROJECT_ROOT/2.0"
 
 # Create virtual environment
-python3.11 -m venv venv
+python3 -m venv venv
 source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 
 # Create .env file
-cp .env.example .env
-# Edit .env and add your API keys
-```
-
-### Configuration
-
-Create `.env` file with:
-
-```ini
+cat > .env << EOF
 TRADIER_API_KEY=your_tradier_key_here
 ALPHA_VANTAGE_KEY=your_alphavantage_key_here
-DATABASE_PATH=./data/ivcrush.db
+DB_PATH=data/ivcrush.db
 LOG_LEVEL=INFO
-```
-
-### Initialize Database
-
-```bash
-# Create data directory
-mkdir -p data logs
+MIN_HISTORICAL_QUARTERS=2
+EOF
 
 # Initialize database
+mkdir -p data logs
 python -c "from src.infrastructure.database.init_schema import initialize_database; initialize_database('./data/ivcrush.db')"
 
-# Enable WAL mode for production
-sqlite3 ./data/ivcrush.db "PRAGMA journal_mode=WAL;"
-```
-
-### Verify Installation
-
-```bash
-# Run tests
-pytest tests/unit/ tests/performance/ -v
-# Expected: 172/172 tests pass
-
-# Run health check
+# Verify installation
 python scripts/health_check.py
-# Expected: All services healthy
-```
-
-### Usage
-
-#### 🆕 Scanning Mode (Recommended)
-
-Automatically scan all earnings for a specific date:
-
-```bash
-# Scan all earnings for a specific date
-python scripts/scan.py --scan-date 2025-01-31
-```
-
-#### 🆕 Ticker Mode (Recommended)
-
-Analyze specific tickers without CSV files:
-
-```bash
-# Analyze tickers from command line (auto-fetches earnings dates)
-python scripts/scan.py --tickers AAPL,MSFT,GOOGL
-```
-
-See **[docs/SCANNING_MODES.md](docs/SCANNING_MODES.md)** for complete guide on scanning and ticker modes.
-
-#### Analyze Single Ticker (Manual)
-
-```bash
-python scripts/analyze.py AAPL --earnings-date 2025-01-31 --expiration 2025-02-01
-```
-
-#### Bulk Analysis (CSV-based)
-
-```bash
-# Create ticker list and earnings calendar CSV
-echo -e "ticker,earnings_date,expiration_date\nAAPL,2025-01-31,2025-02-01" > earnings.csv
-
-# Analyze all
-python scripts/analyze_batch.py --tickers AAPL,MSFT --earnings-file earnings.csv
-```
-
-#### Backfill Historical Data
-
-```bash
-python scripts/backfill.py AAPL
-python scripts/backfill.py --tickers AAPL,MSFT
 ```
 
 ---
 
-## Production Deployment
+## Usage
 
-For production deployment, see [DEPLOYMENT.md](DEPLOYMENT.md) for:
-- Environment setup
-- Security configuration
-- Database optimization
-- Health checks and monitoring
-- Backup procedures
+### Single Ticker Analysis (Recommended)
 
-For day-to-day operations, see [RUNBOOK.md](RUNBOOK.md) for:
-- Common tasks
-- Troubleshooting guide
-- Performance tuning
-- Maintenance procedures
+```bash
+./trade.sh NVDA 2025-11-20
+./trade.sh AAPL 2025-01-31 2025-02-01  # Custom expiration
+```
+
+Shows complete analysis:
+- Implied Move (interpolated straddle)
+- VRP Ratio (2.0x+ = EXCELLENT)
+- Strategy Recommendations (Iron Condor, Credit Spreads)
+- Strike selections, P/L, Greeks
+- TRADEABLE or SKIP recommendation
+
+### Multiple Tickers
+
+```bash
+./trade.sh list NVDA,WMT,AMD 2025-11-20
+```
+
+Analyzes multiple tickers, auto-fetches earnings dates via Alpha Vantage.
+
+### Scan Earnings Date
+
+```bash
+./trade.sh scan 2025-11-20
+```
+
+Scans all earnings for specific date via Alpha Vantage API.
+
+### Health Check
+
+```bash
+./trade.sh health
+```
+
+Verifies Tradier API, database, and cache are operational.
 
 ---
 
-## Testing
+## Advanced Usage
+
+### Backfill Historical Data
 
 ```bash
-# Run all tests
-pytest tests/unit/ tests/performance/ -v
+# Single ticker
+python scripts/backfill_yfinance.py AAPL
 
-# Run specific test suites
-pytest tests/unit/ -v                    # Unit tests (164)
-pytest tests/performance/ -v             # Load tests (8)
-pytest tests/unit/test_edge_cases.py -v # Edge cases (27)
+# From watchlist
+python scripts/backfill_yfinance.py --file data/watchlist.txt --start-date 2022-01-01 --end-date 2024-12-31
+```
 
-# Run with coverage
-pytest tests/unit/ --cov=src --cov-report=html
+### Run Backtests
+
+```bash
+python scripts/run_backtests.py
+```
+
+Tests multiple configurations (Aggressive, Balanced, Conservative) against historical data.
+
+### Direct Analysis (No Wrapper)
+
+```bash
+# With strategy recommendations
+python scripts/analyze.py NVDA --earnings-date 2025-11-20 --expiration 2025-11-21 --strategies
+
+# Scan mode
+python scripts/scan.py --scan-date 2025-11-20
+python scripts/scan.py --tickers NVDA,WMT,AMD
 ```
 
 ---
 
-## Performance Benchmarks
+## System Architecture
 
-From load testing (tests/performance/test_load.py):
+### Core Components
 
-- **10 tickers:** 0.010s (1.0ms avg per ticker)
-- **50 tickers:** 0.017s (0.3ms avg per ticker)
-- **100 tickers:** 0.032s (0.3ms avg per ticker)
-- **Scaling:** 2.79x time for 4x load (excellent linear scaling)
+1. **Domain Layer** (`src/domain/`)
+   - Immutable types: Money, Percentage, Strike, OptionChain
+   - Result pattern: Functional error handling
+   - Type safety throughout
+
+2. **Application Layer** (`src/application/`)
+   - **ImpliedMoveCalculatorInterpolated**: Linear interpolation between strikes
+   - **VRPCalculator**: Compare implied vs historical volatility
+   - **SkewAnalyzerEnhanced**: Polynomial fitting for directional bias
+   - **ConsistencyAnalyzerEnhanced**: Exponential-weighted historical analysis
+   - **StrategyGenerator**: Iron Condors, Bull Put/Bear Call Spreads
+
+3. **Infrastructure Layer** (`src/infrastructure/`)
+   - **Tradier API**: Real-time option chains with Greeks
+   - **Alpha Vantage API**: Earnings calendar
+   - **SQLite Database**: Historical moves with WAL mode
+   - **Hybrid Cache**: L1 (memory) + L2 (SQLite)
+
+4. **Resilience** (`src/utils/`)
+   - Circuit breakers
+   - Retry logic with exponential backoff
+   - Health checks
+
+### Database Schema
+
+```sql
+CREATE TABLE historical_moves (
+    ticker TEXT,
+    earnings_date DATE,
+    prev_close REAL,
+    earnings_close REAL,
+    close_move_pct REAL,  -- Actual historical move
+    volume_before INTEGER,
+    volume_earnings INTEGER
+);
+```
+
+**Current Data:** 675 moves, 52 tickers, 3 years of history
+
+---
+
+## Key Features
+
+### Phase 4 Enhancements ✅
+
+- **Polynomial Skew**: 5+ OTM points, 2nd-degree polynomial, detects directional bias
+- **Exponential Weighting**: Recent quarters weighted 85% per quarter back
+- **Straddle Interpolation**: Smooth calculations between strikes
+- **Trend Detection**: Identifies increasing/decreasing volatility patterns
+
+### Production Ready
+
+- **201 Tests** (193 unit + 8 load) - all passing
+- **59.87% Coverage** on core business logic
+- **Circuit Breakers** for API failures
+- **Health Monitoring** for all services
+- **Hybrid Caching** for performance
+
+### Backtesting Results
+
+Tested on 128 historical earnings events:
+
+| Strategy | Sharpe Ratio | Win Rate | Avg Return |
+|----------|--------------|----------|------------|
+| Aggressive | 0.86 | 93.3% | Highest |
+| **Balanced** | **0.80** | **91.7%** | **Optimal** |
+| Conservative | -0.04 | Failed | N/A |
+
+**Balanced strategy is recommended** (used by `./trade.sh`).
+
+---
+
+## Documentation
+
+- **[LIVE_TRADING_GUIDE.md](LIVE_TRADING_GUIDE.md)** - Complete trading operations guide
+- **[BACKTESTING.md](BACKTESTING.md)** - Backtesting framework and results
+- **docs/ENHANCEMENTS_2025_01.md** - Phase 4 algorithmic enhancements
 
 ---
 
@@ -221,43 +251,68 @@ From load testing (tests/performance/test_load.py):
 ```
 2.0/
 ├── src/
-│   ├── domain/           # Domain types, errors, protocols
-│   ├── application/      # Business logic (calculators, services)
-│   ├── infrastructure/   # API clients, database, cache
-│   ├── config/          # Configuration and validation
-│   ├── utils/           # Utilities (retry, circuit breaker, etc.)
-│   └── container.py     # Dependency injection
+│   ├── domain/              # Types, errors, protocols
+│   ├── application/         # Business logic
+│   │   ├── metrics/        # VRP, skew, consistency calculators
+│   │   └── services/       # Analyzer, strategy generator
+│   ├── infrastructure/      # API clients, database, cache
+│   ├── config/             # Configuration validation
+│   ├── utils/              # Retry, circuit breaker, logging
+│   └── container.py        # Dependency injection
 ├── tests/
-│   ├── unit/            # Unit tests (164 tests)
-│   ├── performance/     # Load tests (8 tests)
-│   └── integration/     # Integration tests
+│   ├── unit/               # 193 unit tests
+│   ├── performance/        # 8 load tests
+│   └── integration/        # Integration tests
 ├── scripts/
-│   ├── analyze.py       # Main analysis script
-│   ├── backfill.py      # Historical data backfill
-│   └── health_check.py  # Health monitoring
-├── docs/               # Additional documentation
-├── DEPLOYMENT.md       # Production deployment guide
-├── RUNBOOK.md          # Operational runbook
-├── PROGRESS.md         # Development progress tracker
-└── README.md           # This file
+│   ├── analyze.py          # Core analysis
+│   ├── scan.py             # Scanning/ticker modes
+│   ├── backfill_yfinance.py # Historical data
+│   ├── health_check.py     # System health
+│   └── run_backtests.py    # Backtesting framework
+├── data/
+│   ├── ivcrush.db          # Historical moves database
+│   └── watchlist.txt       # Permanent ticker watchlist
+├── trade.sh                # 🔥 Fire-and-forget wrapper
+├── LIVE_TRADING_GUIDE.md   # Trading operations
+└── README.md               # This file
 ```
 
 ---
 
-## Phase 4 Complete: Enhanced Algorithms ✅
+## Trading Workflow
 
-- ✅ **Polynomial Skew Fitting**: 5+ OTM points, 2nd-degree polynomial, directional bias detection
-- ✅ **Exponential-Weighted Consistency**: Recent quarters weighted 85% per quarter, trend detection
-- ✅ **Straddle Interpolation**: Linear interpolation between strikes, smoother calculations
-- ✅ **Comprehensive Testing**: 29 new tests, 93%+ coverage on all new modules
+1. **Health Check**: `./trade.sh health` - Verify APIs operational
+2. **Analyze**: `./trade.sh TICKER DATE` - Get trade recommendations
+3. **Review Strategy**: Check VRP ratio, strikes, P/L, Greeks
+4. **Execute Trade**: Place order in broker (Tradier, TastyTrade, etc.)
+5. **Track Outcome**: Compare actual move vs implied move
 
-### Benefits of Phase 4 Enhancements:
-- **Better Edge Detection**: Polynomial skew catches directional bias missed by single-point analysis
-- **Weighted History**: Recent earnings moves appropriately weighted vs older quarters
-- **Smoother Calculations**: Interpolation eliminates rounding discontinuities for between-strike prices
-- **Trend Awareness**: System detects if volatility is increasing (bad signal for IV crush)
-- **Confidence Scoring**: Trustworthiness metrics inform strategy decisions
+**Position Sizing:** 1-2% of portfolio per trade (system calculates contracts for $20K risk budget).
 
 ---
 
-**Note**: The existing 1.0 system is preserved in the `1.0/` directory.
+## Bugs Fixed (Session Nov 13)
+
+1. ✅ ConsistencyAnalyzerEnhanced init - removed invalid `prices_repo` parameter
+2. ✅ EarningsTiming enum - changed `AFTER_CLOSE` to `AMC`
+3. ✅ Alpha Vantage attribute - fixed `alpha_vantage_api` to `alphavantage`
+4. ✅ SkewAnalysis attribute - added support for `directional_bias` vs `direction`
+
+---
+
+## Performance
+
+- **Response Times**: 1.0ms per ticker (avg)
+- **Scaling**: Linear up to 100 concurrent tickers
+- **Cache Hit Rate**: 95%+ on repeat queries
+- **Database**: WAL mode for concurrent access
+
+---
+
+## License
+
+MIT
+
+---
+
+**Note:** The original 1.0 system is preserved in the `1.0/` directory.
