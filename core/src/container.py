@@ -194,6 +194,7 @@ class Container:
                 threshold_excellent=self.config.thresholds.vrp_excellent,
                 threshold_good=self.config.thresholds.vrp_good,
                 threshold_marginal=self.config.thresholds.vrp_marginal,
+                min_quarters=self.config.thresholds.min_historical_quarters,
             )
             logger.debug("Created VRPCalculator")
         return self._vrp_calc
