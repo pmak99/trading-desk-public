@@ -61,3 +61,20 @@ class SettlementType(Enum):
 
     AM = "AM"  # Settled at market open
     PM = "PM"  # Settled at market close
+
+
+class StrategyType(Enum):
+    """Options strategy types for earnings trades."""
+
+    BULL_PUT_SPREAD = "bull_put_spread"      # Credit spread below price (bullish/neutral)
+    BEAR_CALL_SPREAD = "bear_call_spread"    # Credit spread above price (bearish/neutral)
+    IRON_CONDOR = "iron_condor"              # Dual credit spreads (neutral)
+    IRON_BUTTERFLY = "iron_butterfly"        # Tight dual spreads at ATM (neutral)
+
+
+class DirectionalBias(Enum):
+    """Market directional bias from skew analysis."""
+
+    BULLISH = "bullish"      # Calls relatively cheaper (positive skew)
+    BEARISH = "bearish"      # Puts relatively cheaper (negative skew)
+    NEUTRAL = "neutral"      # Balanced IV between puts and calls

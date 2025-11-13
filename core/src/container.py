@@ -23,6 +23,7 @@ from src.infrastructure.database.repositories.prices_repository import (
 from src.application.metrics.implied_move import ImpliedMoveCalculator
 from src.application.metrics.vrp import VRPCalculator
 from src.application.services.analyzer import TickerAnalyzer
+from src.application.services.strategy_generator import StrategyGenerator
 from src.application.services.health import HealthCheckService
 from src.application.async_metrics.vrp_analyzer_async import AsyncTickerAnalyzer
 from src.utils.rate_limiter import (
@@ -69,6 +70,7 @@ class Container:
         self._vrp_calc: Optional[VRPCalculator] = None
         self._skew_analyzer = "uninitialized"  # SkewAnalyzerEnhanced or None (Phase 4)
         self._consistency_analyzer = "uninitialized"  # ConsistencyAnalyzerEnhanced or None (Phase 4)
+        self._strategy_generator: Optional[StrategyGenerator] = None
         self._analyzer: Optional[TickerAnalyzer] = None
         self._async_analyzer: Optional[AsyncTickerAnalyzer] = None
         self._health_check_service: Optional[HealthCheckService] = None
@@ -234,6 +236,14 @@ class Container:
     # ========================================================================
     # Application Layer - Services
     # ========================================================================
+
+    @property
+    def strategy_generator(self) -> StrategyGenerator:
+        """Get strategy generator service."""
+        if self._strategy_generator is None:
+            self._strategy_generator = StrategyGenerator()
+            logger.debug("Created StrategyGenerator")
+        return self._strategy_generator
 
     @property
     def analyzer(self) -> TickerAnalyzer:
