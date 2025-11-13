@@ -1,0 +1,15 @@
+# ShellCheck configuration for trade.sh
+# https://github.com/koalaman/shellcheck/wiki/Ignore
+
+# Disable: "read without -r will mangle backslashes"
+disable=SC2162
+
+# Disable: "Not following: file was not specified as input"
+disable=SC1091
+
+# Disable: "Prefer explicit -n to check for output"
+disable=SC2244
+
+# Disable: "Quote to prevent word splitting"
+# (We handle quoting explicitly where needed)
+disable=SC2086
