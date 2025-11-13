@@ -442,6 +442,7 @@ class TestConfigurationEdgeCases:
             ThresholdsConfig,
             RateLimitConfig,
             ResilienceConfig,
+            AlgorithmConfig,
             LoggingConfig,
         )
         from src.config.validation import validate_configuration
@@ -466,6 +467,7 @@ class TestConfigurationEdgeCases:
                 retry_max_attempts=1,  # Minimum
                 max_concurrent_requests=1,
             ),
+            algorithms=AlgorithmConfig(),
             logging=LoggingConfig(),
         )
 
@@ -482,6 +484,7 @@ class TestConfigurationEdgeCases:
             ThresholdsConfig,
             RateLimitConfig,
             ResilienceConfig,
+            AlgorithmConfig,
             LoggingConfig,
         )
         from src.config.validation import validate_configuration, ConfigurationError
@@ -496,6 +499,7 @@ class TestConfigurationEdgeCases:
             thresholds=ThresholdsConfig(),
             rate_limits=RateLimitConfig(),
             resilience=ResilienceConfig(),
+            algorithms=AlgorithmConfig(),
             logging=LoggingConfig(),
         )
 

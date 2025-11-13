@@ -5,7 +5,7 @@ from datetime import date, datetime
 from typing import Optional
 
 from src.domain.types import TickerAnalysis, ImpliedMove, VRPResult
-from src.domain.errors import Result, AppError
+from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 from src.domain.enums import EarningsTiming
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class TickerAnalyzer:
             )
 
             if implied_result.is_err:
-                return Result.err(implied_result.error)
+                return Err(implied_result.error)
 
             implied_move = implied_result.value
 
@@ -56,20 +56,20 @@ class TickerAnalyzer:
             )
 
             if hist_result.is_err:
-                return Result.err(
+                return Err(
                     AppError(
-                        message=f"No historical data for {ticker}",
-                        error_type="DATA_NOT_FOUND",
+                        ErrorCode.NODATA,
+                        f"No historical data for {ticker}",
                     )
                 )
 
             historical_moves = hist_result.value
 
             if len(historical_moves) < 3:
-                return Result.err(
+                return Err(
                     AppError(
-                        message=f"Insufficient historical data for {ticker} (need 3+, got {len(historical_moves)})",
-                        error_type="INSUFFICIENT_DATA",
+                        ErrorCode.NODATA,
+                        f"Insufficient historical data for {ticker} (need 3+, got {len(historical_moves)})",
                     )
                 )
 
@@ -82,9 +82,33 @@ class TickerAnalyzer:
             )
 
             if vrp_result.is_err:
-                return Result.err(vrp_result.error)
+                return Err(vrp_result.error)
 
             vrp = vrp_result.value
+
+            # Step 4: Optionally calculate enhanced skew (Phase 4)
+            skew = None
+            if self.container.skew_analyzer:
+                skew_result = self.container.skew_analyzer.analyze_skew_curve(
+                    ticker, expiration
+                )
+                if skew_result.is_ok:
+                    skew = skew_result.value
+                    logger.debug(f"{ticker}: Skew analysis complete")
+                else:
+                    logger.warning(f"{ticker}: Skew analysis failed: {skew_result.error}")
+
+            # Step 5: Optionally calculate enhanced consistency (Phase 4)
+            consistency = None
+            if self.container.consistency_analyzer and len(historical_moves) >= 4:
+                consistency_result = self.container.consistency_analyzer.analyze_consistency(
+                    ticker, historical_moves
+                )
+                if consistency_result.is_ok:
+                    consistency = consistency_result.value
+                    logger.debug(f"{ticker}: Consistency analysis complete")
+                else:
+                    logger.warning(f"{ticker}: Consistency analysis failed: {consistency_result.error}")
 
             # Build complete analysis
             analysis = TickerAnalysis(
@@ -95,15 +119,15 @@ class TickerAnalyzer:
                 expiration=expiration,
                 implied_move=implied_move,
                 vrp=vrp,
-                consistency=None,  # Phase 2 enhancement
-                skew=None,  # Phase 2 enhancement
-                term_structure=None,  # Phase 2 enhancement
+                consistency=consistency,  # Phase 4 enhanced
+                skew=skew,  # Phase 4 enhanced
+                term_structure=None,  # Future enhancement
             )
 
-            return Result.ok(analysis)
+            return Ok(analysis)
 
         except Exception as e:
             logger.error(f"Error analyzing {ticker}: {e}", exc_info=True)
-            return Result.err(
-                AppError(message=f"Analysis failed: {str(e)}", error_type="ANALYSIS_ERROR")
+            return Err(
+                AppError(ErrorCode.CALCULATION, f"Analysis failed: {str(e)}")
             )

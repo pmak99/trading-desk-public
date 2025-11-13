@@ -192,7 +192,8 @@ def verify_database(db_path: Path) -> bool:
 
         for table in required_tables:
             cursor.execute(
-                f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,)
             )
             if not cursor.fetchone():
                 logger.error(f"Missing table: {table}")

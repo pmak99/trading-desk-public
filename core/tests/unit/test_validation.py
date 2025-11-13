@@ -19,6 +19,7 @@ from src.config.config import (
     ThresholdsConfig,
     RateLimitConfig,
     ResilienceConfig,
+    AlgorithmConfig,
     LoggingConfig,
 )
 from src.config.validation import validate_configuration, ConfigurationError
@@ -40,6 +41,7 @@ def valid_config(tmp_path):
         thresholds=ThresholdsConfig(),
         rate_limits=RateLimitConfig(),
         resilience=ResilienceConfig(),
+            algorithms=AlgorithmConfig(),
         logging=LoggingConfig(),
     )
 
@@ -64,6 +66,7 @@ class TestConfigurationValidation:
             thresholds=valid_config.thresholds,
             rate_limits=valid_config.rate_limits,
             resilience=valid_config.resilience,
+            algorithms=valid_config.algorithms,
             logging=valid_config.logging,
         )
 
@@ -87,6 +90,7 @@ class TestConfigurationValidation:
             thresholds=ThresholdsConfig(),
             rate_limits=RateLimitConfig(),
             resilience=ResilienceConfig(),
+            algorithms=AlgorithmConfig(),
             logging=LoggingConfig(),
         )
 
@@ -110,6 +114,7 @@ class TestConfigurationValidation:
             thresholds=ThresholdsConfig(),
             rate_limits=RateLimitConfig(),
             resilience=ResilienceConfig(),
+            algorithms=AlgorithmConfig(),
             logging=LoggingConfig(),
         )
 
@@ -133,6 +138,7 @@ class TestConfigurationValidation:
             ),
             rate_limits=valid_config.rate_limits,
             resilience=valid_config.resilience,
+            algorithms=valid_config.algorithms,
             logging=valid_config.logging,
         )
 
@@ -155,6 +161,7 @@ class TestConfigurationValidation:
             ),
             rate_limits=valid_config.rate_limits,
             resilience=valid_config.resilience,
+            algorithms=valid_config.algorithms,
             logging=valid_config.logging,
         )
 
@@ -175,6 +182,7 @@ class TestConfigurationValidation:
                 alpha_vantage_per_minute=0,  # Invalid: must be > 0
             ),
             resilience=valid_config.resilience,
+            algorithms=valid_config.algorithms,
             logging=valid_config.logging,
         )
 
@@ -194,6 +202,7 @@ class TestConfigurationValidation:
             resilience=ResilienceConfig(
                 retry_max_attempts=0,  # Invalid: must be >= 1
             ),
+            algorithms=valid_config.algorithms,
             logging=valid_config.logging,
         )
 
@@ -213,6 +222,7 @@ class TestConfigurationValidation:
             resilience=ResilienceConfig(
                 max_concurrent_requests=0,  # Invalid: must be >= 1
             ),
+            algorithms=valid_config.algorithms,
             logging=valid_config.logging,
         )
 
@@ -230,6 +240,7 @@ class TestConfigurationValidation:
             thresholds=valid_config.thresholds,
             rate_limits=valid_config.rate_limits,
             resilience=valid_config.resilience,
+            algorithms=valid_config.algorithms,
             logging=LoggingConfig(level="INVALID_LEVEL"),
         )
 
@@ -252,6 +263,7 @@ class TestConfigurationValidation:
             thresholds=ThresholdsConfig(),
             rate_limits=RateLimitConfig(),
             resilience=ResilienceConfig(),
+            algorithms=AlgorithmConfig(),
             logging=LoggingConfig(log_file=log_path),
         )
 
@@ -275,6 +287,7 @@ class TestConfigurationValidation:
             thresholds=ThresholdsConfig(),
             rate_limits=RateLimitConfig(),
             resilience=ResilienceConfig(),
+            algorithms=AlgorithmConfig(),
             logging=LoggingConfig(log_file=log_path),
         )
 
@@ -310,6 +323,7 @@ class TestConfigurationValidation:
             resilience=ResilienceConfig(
                 retry_max_attempts=0,  # Error 4: must be >= 1
             ),
+            algorithms=AlgorithmConfig(),
             logging=LoggingConfig(),
         )
 
@@ -329,6 +343,7 @@ class TestConfigurationValidation:
             thresholds=valid_config.thresholds,
             rate_limits=valid_config.rate_limits,
             resilience=valid_config.resilience,
+            algorithms=valid_config.algorithms,
             logging=LoggingConfig(log_file=None),  # No log file
         )
 
@@ -347,6 +362,7 @@ class TestConfigurationValidation:
                 thresholds=valid_config.thresholds,
                 rate_limits=valid_config.rate_limits,
                 resilience=valid_config.resilience,
+            algorithms=valid_config.algorithms,
                 logging=LoggingConfig(level=level),
             )
 
@@ -362,6 +378,7 @@ class TestConfigurationValidation:
             thresholds=valid_config.thresholds,
             rate_limits=valid_config.rate_limits,
             resilience=valid_config.resilience,
+            algorithms=valid_config.algorithms,
             logging=LoggingConfig(level="debug"),  # lowercase
         )
 
@@ -391,6 +408,7 @@ class TestConfigValidateMethod:
             ),
             rate_limits=RateLimitConfig(),
             resilience=ResilienceConfig(),
+            algorithms=AlgorithmConfig(),
             logging=LoggingConfig(),
         )
 
