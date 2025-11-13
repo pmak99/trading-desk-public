@@ -426,8 +426,8 @@ find logs/ -name "*.log" -mtime +30 -exec gzip {} \;
 # 4. Clean old backups
 find backups/ -name "*.db" -mtime +30 -delete
 
-# 5. Generate weekly report
-python scripts/weekly_report.py > reports/weekly_$(date +%Y%m%d).txt
+# 5. Review performance statistics
+python -c "from src.utils.performance import get_monitor; import json; print(json.dumps(get_monitor().get_all_stats(), indent=2))" > reports/weekly_$(date +%Y%m%d).json
 ```
 
 ### Monthly Maintenance
@@ -442,8 +442,10 @@ sqlite3 data/ivcrush.db ".backup 'backups/monthly_$(date +%Y%m).db'"
 # 2. Clean historical data older than 1 year
 sqlite3 data/ivcrush.db "DELETE FROM historical_moves WHERE event_date < date('now', '-365 days');"
 
-# 3. Analyze performance trends
-python scripts/monthly_analysis.py
+# 3. Review database and cache statistics
+echo "=== Database Size ===" && du -h data/ivcrush.db
+echo "=== Cache Statistics ===" && python -c "from src.container import Container; import json; print(json.dumps(Container().hybrid_cache().stats(), indent=2))"
+echo "=== Performance Stats ===" && python -c "from src.utils.performance import get_monitor; import json; print(json.dumps(get_monitor().get_all_stats(), indent=2))"
 
 # 4. Review and update rate limits
 grep RATE_LIMIT .env
@@ -458,8 +460,13 @@ pip list --outdated
 # 1. Review all configuration
 cat .env | grep -v "KEY"
 
-# 2. Performance audit
-python scripts/performance_audit.py
+# 2. Performance audit - run comprehensive tests
+echo "=== Running Full Test Suite ==="
+pytest tests/unit/ tests/performance/ -v
+echo "=== Performance Statistics ==="
+python -c "from src.utils.performance import get_monitor; m = get_monitor(); slow = m.get_slow_operations(); print(f'Slow operations: {len(slow)}'); [print(f\"  {op['name']}: {op['duration']:.3f}s\") for op in slow[:10]]"
+echo "=== Cache Performance ==="
+python -c "from src.container import Container; stats = Container().hybrid_cache().stats(); l1_total = stats['l1_hits'] + stats['l1_misses']; hit_rate = (stats['l1_hits'] / l1_total * 100) if l1_total > 0 else 0; print(f'L1 Hit Rate: {hit_rate:.1f}%')"
 
 # 3. Update documentation
 git log --since="3 months ago" --oneline

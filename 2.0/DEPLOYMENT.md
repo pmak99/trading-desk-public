@@ -240,7 +240,197 @@ python scripts/analyze.py AAPL --earnings-date 2025-01-31 --expiration 2025-02-0
 # Expected: JSON output with analysis results
 ```
 
-### Step 4: Schedule Backfill (Optional)
+### Step 4: Configure Scheduled Execution (Recommended for Production)
+
+The IV Crush system is designed as a one-off batch analysis tool that runs on a schedule. Configure it using systemd service + timer for scheduled execution.
+
+#### Prerequisites
+
+1. Create an earnings calendar CSV file with upcoming earnings dates:
+
+```bash
+# Create earnings calendar file
+cat > /home/ivcrush/trading-desk/2.0/earnings.csv << 'EOF'
+ticker,earnings_date,expiration_date
+AAPL,2025-01-31,2025-02-01
+MSFT,2025-02-15,2025-02-21
+GOOGL,2025-02-20,2025-02-21
+TSLA,2025-03-10,2025-03-14
+EOF
+```
+
+2. Create a tickers file (optional - if not using earnings calendar for all tickers):
+
+```bash
+# Create tickers file
+cat > /home/ivcrush/trading-desk/2.0/tickers.txt << 'EOF'
+AAPL
+MSFT
+GOOGL
+TSLA
+EOF
+```
+
+#### Create Systemd Service File
+
+```bash
+# Create service file
+sudo nano /etc/systemd/system/ivcrush.service
+```
+
+Add the following configuration:
+
+```ini
+[Unit]
+Description=IV Crush 2.0 Options Trading Analysis
+Documentation=https://github.com/yourusername/trading-desk
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ivcrush
+Group=ivcrush
+WorkingDirectory=/home/ivcrush/trading-desk/2.0
+Environment="PATH=/home/ivcrush/trading-desk/2.0/venv/bin"
+EnvironmentFile=/home/ivcrush/trading-desk/2.0/.env
+
+# Batch analysis with earnings calendar
+ExecStart=/home/ivcrush/trading-desk/2.0/venv/bin/python scripts/analyze_batch.py --file /home/ivcrush/trading-desk/2.0/tickers.txt --earnings-file /home/ivcrush/trading-desk/2.0/earnings.csv --continue-on-error
+
+# Alternative: Analyze single ticker
+# ExecStart=/home/ivcrush/trading-desk/2.0/venv/bin/python scripts/analyze.py AAPL --earnings-date 2025-01-31 --expiration 2025-02-01
+
+StandardOutput=append:/home/ivcrush/trading-desk/2.0/logs/analysis.log
+StandardError=append:/home/ivcrush/trading-desk/2.0/logs/analysis_error.log
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/ivcrush/trading-desk/2.0/data /home/ivcrush/trading-desk/2.0/logs
+
+[Install]
+WantedBy=multi-user.target
+```
+
+#### Create Systemd Timer File
+
+```bash
+# Create timer file
+sudo nano /etc/systemd/system/ivcrush.timer
+```
+
+Add the following configuration:
+
+```ini
+[Unit]
+Description=IV Crush 2.0 Analysis Timer
+Documentation=https://github.com/yourusername/trading-desk
+Requires=ivcrush.service
+
+[Timer]
+# Run every weekday at 9:30 AM ET (after market open)
+OnCalendar=Mon-Fri *-*-* 09:30:00
+
+# Run on boot if missed (e.g., system was down)
+Persistent=true
+
+# Randomize start time by up to 5 minutes to avoid thundering herd
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+```
+
+**Alternative Timer Schedules:**
+
+```ini
+# Every day at 9:30 AM
+OnCalendar=*-*-* 09:30:00
+
+# Every Monday at 10:00 AM
+OnCalendar=Mon *-*-* 10:00:00
+
+# Every hour during market hours (9:30 AM - 4:00 PM ET, Mon-Fri)
+OnCalendar=Mon-Fri *-*-* 09,10,11,12,13,14,15,16:30:00
+
+# Every 4 hours
+OnCalendar=*-*-* 00,04,08,12,16,20:00:00
+```
+
+#### Enable and Start Timer
+
+```bash
+# Reload systemd to recognize new service and timer
+sudo systemctl daemon-reload
+
+# Enable timer to start on boot
+sudo systemctl enable ivcrush.timer
+
+# Start the timer
+sudo systemctl start ivcrush.timer
+
+# Check timer status
+sudo systemctl status ivcrush.timer
+
+# List all timers to verify schedule
+sudo systemctl list-timers ivcrush.timer
+
+# View timer logs
+sudo journalctl -u ivcrush.timer
+```
+
+#### Test Service Manually
+
+Before relying on the timer, test the service manually:
+
+```bash
+# Run service once manually
+sudo systemctl start ivcrush.service
+
+# Check status
+sudo systemctl status ivcrush.service
+
+# View logs
+sudo journalctl -u ivcrush.service -n 50
+tail -n 100 /home/ivcrush/trading-desk/2.0/logs/analysis.log
+```
+
+#### Service and Timer Management Commands
+
+```bash
+# Timer commands
+sudo systemctl start ivcrush.timer      # Start timer
+sudo systemctl stop ivcrush.timer       # Stop timer
+sudo systemctl restart ivcrush.timer    # Restart timer
+sudo systemctl status ivcrush.timer     # Check timer status
+sudo systemctl list-timers ivcrush.*    # Show next run time
+
+# Service commands (manual execution)
+sudo systemctl start ivcrush.service    # Run analysis now
+sudo systemctl status ivcrush.service   # Check last run status
+
+# View logs
+sudo journalctl -u ivcrush.service --since today    # Today's service logs
+sudo journalctl -u ivcrush.timer --since today      # Today's timer logs
+sudo journalctl -u ivcrush.* -f                     # Follow all logs
+
+# Disable/remove
+sudo systemctl stop ivcrush.timer
+sudo systemctl disable ivcrush.timer
+sudo rm /etc/systemd/system/ivcrush.{service,timer}
+sudo systemctl daemon-reload
+```
+
+**Note:** The systemd timer approach is more robust than cron because:
+- Better logging integration with journalctl
+- Can catch up on missed runs (Persistent=true)
+- Integrated service dependencies
+- Better security isolation
+
+### Step 5: Schedule Backfill (Optional)
 
 If you need historical data:
 
