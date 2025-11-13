@@ -10,17 +10,22 @@ Usage:
     # Scanning mode - scan earnings for a specific date
     python scripts/scan.py --scan-date 2025-01-31
 
-    # Ticker mode - analyze specific tickers
+    # Ticker mode - analyze specific tickers (with auto-backfill)
     python scripts/scan.py --tickers AAPL,MSFT,GOOGL
 
     # Ticker mode with custom expiration days offset
     python scripts/scan.py --tickers AAPL,MSFT --expiration-offset 1
+
+Auto-Backfill:
+    - Ticker mode: Automatically backfills missing historical data (last 3 years)
+    - Scan mode: Does NOT auto-backfill (to avoid excessive delays with many tickers)
 """
 
 import sys
 import argparse
 import logging
 import time
+import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -228,10 +233,18 @@ def analyze_ticker(
     container: Container,
     ticker: str,
     earnings_date: date,
-    expiration_date: date
+    expiration_date: date,
+    auto_backfill: bool = False
 ) -> Optional[dict]:
     """
     Analyze a single ticker for IV Crush opportunity.
+
+    Args:
+        container: Dependency injection container
+        ticker: Stock ticker symbol
+        earnings_date: Date of earnings announcement
+        expiration_date: Options expiration date
+        auto_backfill: If True, automatically backfill missing historical data
 
     Returns dict with analysis results or None if analysis failed.
     """
@@ -273,16 +286,95 @@ def analyze_ticker(
 
         if hist_result.is_err:
             logger.warning(f"✗ No historical data: {hist_result.error}")
-            logger.info("   Run: python scripts/backfill.py " + ticker)
-            return {
-                'ticker': ticker,
-                'earnings_date': str(earnings_date),
-                'expiration_date': str(expiration_date),
-                'implied_move_pct': str(implied_move.implied_move_pct),
-                'stock_price': float(implied_move.stock_price.amount),
-                'status': 'NO_HISTORICAL_DATA',
-                'tradeable': False
-            }
+
+            # Auto-backfill if enabled (for ticker mode/list mode)
+            if auto_backfill:
+                logger.info(f"📊 Auto-backfilling historical earnings data for {ticker}...")
+
+                # Calculate start date (3 years ago)
+                start_date = (date.today() - timedelta(days=3*365)).isoformat()
+                end_date = (date.today() - timedelta(days=1)).isoformat()
+
+                try:
+                    # Call backfill script
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            "scripts/backfill_yfinance.py",
+                            ticker,
+                            "--start-date", start_date,
+                            "--end-date", end_date
+                        ],
+                        cwd=Path(__file__).parent.parent,
+                        capture_output=True,
+                        text=True,
+                        timeout=120
+                    )
+
+                    if result.returncode == 0:
+                        logger.info(f"✓ Backfill complete for {ticker}")
+
+                        # Retry fetching historical moves
+                        logger.info("📊 Retrying historical data fetch...")
+                        hist_result = prices_repo.get_historical_moves(ticker, limit=12)
+
+                        if hist_result.is_err:
+                            logger.warning(f"✗ Still no historical data after backfill: {hist_result.error}")
+                            return {
+                                'ticker': ticker,
+                                'earnings_date': str(earnings_date),
+                                'expiration_date': str(expiration_date),
+                                'implied_move_pct': str(implied_move.implied_move_pct),
+                                'stock_price': float(implied_move.stock_price.amount),
+                                'status': 'NO_HISTORICAL_DATA',
+                                'tradeable': False
+                            }
+                    else:
+                        logger.warning(f"✗ Backfill failed for {ticker}: {result.stderr}")
+                        return {
+                            'ticker': ticker,
+                            'earnings_date': str(earnings_date),
+                            'expiration_date': str(expiration_date),
+                            'implied_move_pct': str(implied_move.implied_move_pct),
+                            'stock_price': float(implied_move.stock_price.amount),
+                            'status': 'BACKFILL_FAILED',
+                            'tradeable': False
+                        }
+
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"✗ Backfill timeout for {ticker}")
+                    return {
+                        'ticker': ticker,
+                        'earnings_date': str(earnings_date),
+                        'expiration_date': str(expiration_date),
+                        'implied_move_pct': str(implied_move.implied_move_pct),
+                        'stock_price': float(implied_move.stock_price.amount),
+                        'status': 'BACKFILL_TIMEOUT',
+                        'tradeable': False
+                    }
+                except Exception as e:
+                    logger.warning(f"✗ Backfill error for {ticker}: {e}")
+                    return {
+                        'ticker': ticker,
+                        'earnings_date': str(earnings_date),
+                        'expiration_date': str(expiration_date),
+                        'implied_move_pct': str(implied_move.implied_move_pct),
+                        'stock_price': float(implied_move.stock_price.amount),
+                        'status': 'BACKFILL_ERROR',
+                        'tradeable': False
+                    }
+            else:
+                # No auto-backfill - suggest manual backfill
+                logger.info("   Run: python scripts/backfill_yfinance.py " + ticker)
+                return {
+                    'ticker': ticker,
+                    'earnings_date': str(earnings_date),
+                    'expiration_date': str(expiration_date),
+                    'implied_move_pct': str(implied_move.implied_move_pct),
+                    'stock_price': float(implied_move.stock_price.amount),
+                    'status': 'NO_HISTORICAL_DATA',
+                    'tradeable': False
+                }
 
         historical_moves = hist_result.value
         logger.info(f"✓ Found {len(historical_moves)} historical moves")
@@ -370,12 +462,13 @@ def scanning_mode(
         )
         logger.info(f"Calculated expiration: {expiration_date}")
 
-        # Analyze ticker
+        # Analyze ticker (no auto-backfill in scan mode to avoid excessive delays)
         result = analyze_ticker(
             container,
             ticker,
             earnings_date,
-            expiration_date
+            expiration_date,
+            auto_backfill=False
         )
 
         if result:
@@ -473,12 +566,13 @@ def ticker_mode(
         )
         logger.info(f"Calculated expiration: {expiration_date}")
 
-        # Analyze ticker
+        # Analyze ticker (with auto-backfill enabled for ticker mode)
         result = analyze_ticker(
             container,
             ticker,
             earnings_date,
-            expiration_date
+            expiration_date,
+            auto_backfill=True
         )
 
         if result:
