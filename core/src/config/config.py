@@ -148,8 +148,8 @@ class Config:
         if env_file:
             load_dotenv(env_file)
         else:
-            # Try to load from project root
-            project_root = Path(__file__).parent.parent.parent.parent
+            # Try to load from project root (src/config/config.py -> go up 3 levels to project root)
+            project_root = Path(__file__).parent.parent.parent
             env_path = project_root / ".env"
             if env_path.exists():
                 load_dotenv(env_path)

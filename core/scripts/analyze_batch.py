@@ -119,7 +119,7 @@ def analyze_ticker(
                 'earnings_date': str(earnings_date),
                 'expiration_date': str(expiration_date),
                 'implied_move_pct': str(implied_move.implied_move_pct),
-                'stock_price': float(implied_move.stock_price),
+                'stock_price': float(implied_move.stock_price.amount),
                 'status': 'NO_HISTORICAL_DATA',
                 'tradeable': False
             }
@@ -157,7 +157,7 @@ def analyze_ticker(
             'ticker': ticker,
             'earnings_date': str(earnings_date),
             'expiration_date': str(expiration_date),
-            'stock_price': float(implied_move.stock_price),
+            'stock_price': float(implied_move.stock_price.amount),
             'implied_move_pct': str(vrp.implied_move_pct),
             'historical_mean_pct': str(vrp.historical_mean_move_pct),
             'vrp_ratio': float(vrp.vrp_ratio),
