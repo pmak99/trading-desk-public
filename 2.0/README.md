@@ -24,6 +24,7 @@ The 2.0 system is fully optimized and production-ready:
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** - Complete deployment guide for production
 - **[RUNBOOK.md](RUNBOOK.md)** - Operational procedures and troubleshooting
 - **[PROGRESS.md](PROGRESS.md)** - Detailed session-by-session progress tracker
+- **[docs/SCANNING_MODES.md](docs/SCANNING_MODES.md)** - NEW: Scanning & Ticker modes guide
 - **docs/2.0_OVERVIEW.md** - System architecture and design
 - **docs/2.0_IMPLEMENTATION.md** - Implementation guide
 
@@ -125,26 +126,47 @@ python scripts/health_check.py
 
 ### Usage
 
-#### Analyze Single Ticker
+#### 🆕 Scanning Mode (Recommended)
+
+Automatically scan all earnings for a specific date:
+
+```bash
+# Scan all earnings for a specific date
+python scripts/scan.py --scan-date 2025-01-31
+```
+
+#### 🆕 Ticker Mode (Recommended)
+
+Analyze specific tickers without CSV files:
+
+```bash
+# Analyze tickers from command line (auto-fetches earnings dates)
+python scripts/scan.py --tickers AAPL,MSFT,GOOGL
+```
+
+See **[docs/SCANNING_MODES.md](docs/SCANNING_MODES.md)** for complete guide on scanning and ticker modes.
+
+#### Analyze Single Ticker (Manual)
 
 ```bash
 python scripts/analyze.py AAPL --earnings-date 2025-01-31 --expiration 2025-02-01
 ```
 
-#### Bulk Analysis
+#### Bulk Analysis (CSV-based)
 
 ```bash
-# Create ticker list
-echo -e "AAPL\nMSFT\nGOOGL" > tickers.txt
+# Create ticker list and earnings calendar CSV
+echo -e "ticker,earnings_date,expiration_date\nAAPL,2025-01-31,2025-02-01" > earnings.csv
 
 # Analyze all
-python scripts/analyze.py --file tickers.txt --output results.json
+python scripts/analyze_batch.py --tickers AAPL,MSFT --earnings-file earnings.csv
 ```
 
 #### Backfill Historical Data
 
 ```bash
-python scripts/backfill.py --tickers AAPL,MSFT --days 90
+python scripts/backfill.py AAPL
+python scripts/backfill.py --tickers AAPL,MSFT
 ```
 
 ---
