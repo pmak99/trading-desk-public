@@ -94,7 +94,10 @@ class TradierAPI:
                 )
 
             data = response.json()
-            quotes = data.get('quotes', {}).get('quote', [])
+
+            # Handle case where 'quotes' key exists but value is None
+            quotes_data = data.get('quotes') or {}
+            quotes = quotes_data.get('quote', [])
 
             # Handle single quote or list
             if not isinstance(quotes, list):
@@ -183,7 +186,10 @@ class TradierAPI:
                 )
 
             data = response.json()
-            options = data.get('options', {}).get('option', [])
+
+            # Handle case where 'options' key exists but value is None
+            options_data = data.get('options') or {}
+            options = options_data.get('option', [])
 
             # Handle single option or list
             if not isinstance(options, list):

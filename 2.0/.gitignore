@@ -1,1 +1,38 @@
-2.0/
+# Environment variables
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.db-journal
+*.db-wal
+cache.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution
+dist/
+build/
+*.egg-info/

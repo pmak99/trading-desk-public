@@ -43,12 +43,14 @@ class VRPCalculator:
         threshold_excellent: float = 2.0,
         threshold_good: float = 1.5,
         threshold_marginal: float = 1.2,
+        min_quarters: int = 4,
     ):
         self.thresholds = {
             'excellent': threshold_excellent,
             'good': threshold_good,
             'marginal': threshold_marginal,
         }
+        self.min_quarters = min_quarters
 
     def calculate(
         self,
@@ -80,11 +82,11 @@ class VRPCalculator:
                 )
             )
 
-        if len(historical_moves) < 4:
+        if len(historical_moves) < self.min_quarters:
             return Err(
                 AppError(
                     ErrorCode.NODATA,
-                    f"Need 4+ quarters, got {len(historical_moves)}",
+                    f"Need {self.min_quarters}+ quarters, got {len(historical_moves)}",
                 )
             )
 
