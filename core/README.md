@@ -103,6 +103,8 @@ Shows complete analysis:
 - Strike selections, P/L, Greeks
 - TRADEABLE or SKIP recommendation
 
+**Auto-Backfill:** If historical data is missing for a ticker, the script automatically backfills the last 3 years of earnings data and retries the analysis. No manual intervention needed!
+
 ### Multiple Tickers
 
 ```bash
