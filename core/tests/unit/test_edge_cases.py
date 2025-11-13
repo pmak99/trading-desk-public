@@ -114,9 +114,9 @@ class TestEmptyAndMissingData:
         calc = ImpliedMoveCalculator(mock_options_provider)
         result = calc.calculate("NOATM", date.today() + timedelta(days=7))
 
-        # Should handle gracefully, either work or return error
-        # Implementation determines exact behavior
-        assert result.is_ok or result.is_err
+        # No ATM strikes should return error (cannot calculate straddle)
+        assert result.is_err, "Expected error for chain with no ATM strikes"
+        assert result.unwrap_err().code in (ErrorCode.NODATA, ErrorCode.INVALID, ErrorCode.CALCULATION)
 
     def test_missing_historical_data(self, mock_options_provider):
         """Insufficient historical data for VRP calculation."""
@@ -210,8 +210,16 @@ class TestBoundaryConditions:
         calc = ImpliedMoveCalculator(mock_options_provider)
         result = calc.calculate("ZEROD", date.today())
 
-        # 0 DTE options are valid
-        assert result.is_ok or result.is_err  # Implementation specific
+        # 0 DTE options are valid and should calculate successfully
+        # Note: Some implementations may reject 0 DTE, so we accept either
+        if result.is_err:
+            # If error, should be due to 0 DTE being rejected
+            assert result.unwrap_err().code in (ErrorCode.INVALID, ErrorCode.CALCULATION), \
+                f"Unexpected error code: {result.unwrap_err().code}"
+        else:
+            # If success, should have positive implied move
+            analysis = result.unwrap()
+            assert analysis.implied_move.amount > 0
 
     def test_expiration_far_future(self, mock_options_provider):
         """Options expiring in 2 years (LEAPS)."""
@@ -361,8 +369,10 @@ class TestDataValidation:
         calc = ImpliedMoveCalculator(mock_options_provider)
         result = calc.calculate("PAST", past_date)
 
-        # Expired options should either work or error - implementation dependent
-        assert result.is_ok or result.is_err
+        # Past expiration dates should be rejected
+        assert result.is_err, "Expected error for past expiration date"
+        assert result.unwrap_err().code in (ErrorCode.INVALID, ErrorCode.NODATA), \
+            f"Unexpected error code for past expiration: {result.unwrap_err().code}"
 
 
 class TestConcurrencyEdgeCases:

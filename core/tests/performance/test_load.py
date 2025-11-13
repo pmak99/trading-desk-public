@@ -99,6 +99,9 @@ class TestBaselinePerformance:
         successful = sum(1 for r in results if r.is_ok)
         assert successful == 10, f"Expected 10 successful analyses, got {successful}"
 
+        # Performance threshold: 10 tickers should complete in < 0.5s
+        assert elapsed < 0.5, f"Performance regression: {elapsed:.3f}s > 0.5s threshold"
+
         print(f"\n✓ 10 tickers analyzed in {elapsed:.3f}s ({elapsed/10*1000:.1f}ms avg)")
 
 
@@ -133,6 +136,9 @@ class TestTargetLoad:
         assert len(results) == 50
         successful = sum(1 for r in results if r.is_ok)
         assert successful == 50, f"Expected 50 successful analyses, got {successful}"
+
+        # Performance threshold: 50 tickers should complete in < 2.0s
+        assert elapsed < 2.0, f"Performance regression: {elapsed:.3f}s > 2.0s threshold"
 
         avg_per_ticker = elapsed / 50
         print(f"\n✓ 50 tickers analyzed in {elapsed:.3f}s ({avg_per_ticker*1000:.1f}ms avg)")
@@ -169,6 +175,9 @@ class TestStressLoad:
         assert len(results) == 100
         successful = sum(1 for r in results if r.is_ok)
         assert successful == 100, f"Expected 100 successful analyses, got {successful}"
+
+        # Performance threshold: 100 tickers should complete in < 4.0s
+        assert elapsed < 4.0, f"Performance regression: {elapsed:.3f}s > 4.0s threshold"
 
         avg_per_ticker = elapsed / 100
         print(f"\n✓ 100 tickers analyzed in {elapsed:.3f}s ({avg_per_ticker*1000:.1f}ms avg)")
@@ -212,6 +221,9 @@ class TestBatchProcessing:
         successful = sum(1 for r in all_results if r.is_ok)
         assert successful == 30
 
+        # Performance threshold: 30 tickers in batches should complete in < 1.5s
+        assert elapsed < 1.5, f"Performance regression: {elapsed:.3f}s > 1.5s threshold"
+
         print(f"\n✓ 30 tickers in 3 batches: {elapsed:.3f}s")
 
     @pytest.mark.asyncio
@@ -245,6 +257,9 @@ class TestBatchProcessing:
         assert len(results) == 50
         successful = sum(1 for r in results if r.is_ok)
         assert successful == 50
+
+        # Performance threshold: 50 tickers with concurrency limit should complete in < 2.5s
+        assert elapsed < 2.5, f"Performance regression: {elapsed:.3f}s > 2.5s threshold"
 
         print(f"\n✓ 50 tickers with max 10 concurrent: {elapsed:.3f}s")
 
