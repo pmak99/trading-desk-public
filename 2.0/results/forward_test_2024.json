@@ -1,0 +1,935 @@
+[
+  {
+    "run_id": "3db1ffb5",
+    "config_name": "VRP-Dominant",
+    "config_description": "Prioritizes raw VRP edge over other factors. Baseline strategy.",
+    "period": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    },
+    "metrics": {
+      "total_opportunities": 261,
+      "qualified_opportunities": 219,
+      "selected_trades": 10,
+      "win_rate": 90.0,
+      "total_pnl": 33.13,
+      "avg_pnl_per_trade": 3.31,
+      "sharpe_ratio": 0.93,
+      "max_drawdown": 2.65,
+      "avg_score_winners": 71.1,
+      "avg_score_losers": 71.03
+    },
+    "trades": [
+      {
+        "ticker": "TSM",
+        "earnings_date": "2024-01-17",
+        "score": 71.03,
+        "rank": 6,
+        "selected": true,
+        "actual_move": 1.26,
+        "avg_historical": 3.8,
+        "pnl": 1.8
+      },
+      {
+        "ticker": "ASML",
+        "earnings_date": "2024-01-24",
+        "score": 71.03,
+        "rank": 7,
+        "selected": true,
+        "actual_move": 8.85,
+        "avg_historical": 3.61,
+        "pnl": -2.65
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-02-13",
+        "score": 71.22,
+        "rank": 3,
+        "selected": true,
+        "actual_move": 13.4,
+        "avg_historical": 15.02,
+        "pnl": 7.2
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-05-08",
+        "score": 71.1,
+        "rank": 5,
+        "selected": true,
+        "actual_move": 18.59,
+        "avg_historical": 14.69,
+        "pnl": 7.04
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-07-23",
+        "score": 70.95,
+        "rank": 8,
+        "selected": true,
+        "actual_move": 1.05,
+        "avg_historical": 2.67,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-08-07",
+        "score": 71.14,
+        "rank": 4,
+        "selected": true,
+        "actual_move": 17.83,
+        "avg_historical": 15.15,
+        "pnl": 7.26
+      },
+      {
+        "ticker": "AVGO",
+        "earnings_date": "2024-09-05",
+        "score": 70.9,
+        "rank": 9,
+        "selected": true,
+        "actual_move": 0.84,
+        "avg_historical": 2.38,
+        "pnl": 1.12
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-10-22",
+        "score": 70.87,
+        "rank": 10,
+        "selected": true,
+        "actual_move": 2.0,
+        "avg_historical": 2.66,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "RDDT",
+        "earnings_date": "2024-10-29",
+        "score": 71.23,
+        "rank": 2,
+        "selected": true,
+        "actual_move": 2.59,
+        "avg_historical": 3.33,
+        "pnl": 1.57
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-11-12",
+        "score": 71.48,
+        "rank": 1,
+        "selected": true,
+        "actual_move": 21.04,
+        "avg_historical": 15.92,
+        "pnl": 7.27
+      }
+    ]
+  },
+  {
+    "run_id": "9f23e8f3",
+    "config_name": "Balanced",
+    "config_description": "Well-rounded approach balancing VRP, consistency, skew, and liquidity.",
+    "period": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    },
+    "metrics": {
+      "total_opportunities": 261,
+      "qualified_opportunities": 236,
+      "selected_trades": 12,
+      "win_rate": 91.67,
+      "total_pnl": 35.56,
+      "avg_pnl_per_trade": 2.96,
+      "sharpe_ratio": 0.89,
+      "max_drawdown": 2.65,
+      "avg_score_winners": 72.52,
+      "avg_score_losers": 72.49
+    },
+    "trades": [
+      {
+        "ticker": "TSM",
+        "earnings_date": "2024-01-17",
+        "score": 72.49,
+        "rank": 6,
+        "selected": true,
+        "actual_move": 1.26,
+        "avg_historical": 3.8,
+        "pnl": 1.8
+      },
+      {
+        "ticker": "ASML",
+        "earnings_date": "2024-01-24",
+        "score": 72.49,
+        "rank": 7,
+        "selected": true,
+        "actual_move": 8.85,
+        "avg_historical": 3.61,
+        "pnl": -2.65
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-02-13",
+        "score": 72.73,
+        "rank": 3,
+        "selected": true,
+        "actual_move": 13.4,
+        "avg_historical": 15.02,
+        "pnl": 7.2
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-04-23",
+        "score": 72.27,
+        "rank": 11,
+        "selected": true,
+        "actual_move": 2.69,
+        "avg_historical": 2.64,
+        "pnl": 1.24
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-05-08",
+        "score": 72.57,
+        "rank": 5,
+        "selected": true,
+        "actual_move": 18.59,
+        "avg_historical": 14.69,
+        "pnl": 7.04
+      },
+      {
+        "ticker": "AVGO",
+        "earnings_date": "2024-06-12",
+        "score": 72.24,
+        "rank": 12,
+        "selected": true,
+        "actual_move": 2.36,
+        "avg_historical": 2.53,
+        "pnl": 1.19
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-07-23",
+        "score": 72.39,
+        "rank": 8,
+        "selected": true,
+        "actual_move": 1.05,
+        "avg_historical": 2.67,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-08-07",
+        "score": 72.62,
+        "rank": 4,
+        "selected": true,
+        "actual_move": 17.83,
+        "avg_historical": 15.15,
+        "pnl": 7.26
+      },
+      {
+        "ticker": "AVGO",
+        "earnings_date": "2024-09-05",
+        "score": 72.33,
+        "rank": 9,
+        "selected": true,
+        "actual_move": 0.84,
+        "avg_historical": 2.38,
+        "pnl": 1.12
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-10-22",
+        "score": 72.29,
+        "rank": 10,
+        "selected": true,
+        "actual_move": 2.0,
+        "avg_historical": 2.66,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "RDDT",
+        "earnings_date": "2024-10-29",
+        "score": 72.74,
+        "rank": 2,
+        "selected": true,
+        "actual_move": 2.59,
+        "avg_historical": 3.33,
+        "pnl": 1.57
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-11-12",
+        "score": 73.05,
+        "rank": 1,
+        "selected": true,
+        "actual_move": 21.04,
+        "avg_historical": 15.92,
+        "pnl": 7.27
+      }
+    ]
+  },
+  {
+    "run_id": "08e8ace1",
+    "config_name": "Liquidity-First",
+    "config_description": "Prioritizes liquidity and low slippage. Best for larger position sizes.",
+    "period": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    },
+    "metrics": {
+      "total_opportunities": 261,
+      "qualified_opportunities": 236,
+      "selected_trades": 10,
+      "win_rate": 90.0,
+      "total_pnl": 33.13,
+      "avg_pnl_per_trade": 3.31,
+      "sharpe_ratio": 0.93,
+      "max_drawdown": 2.65,
+      "avg_score_winners": 71.14,
+      "avg_score_losers": 71.07
+    },
+    "trades": [
+      {
+        "ticker": "TSM",
+        "earnings_date": "2024-01-17",
+        "score": 71.07,
+        "rank": 6,
+        "selected": true,
+        "actual_move": 1.26,
+        "avg_historical": 3.8,
+        "pnl": 1.8
+      },
+      {
+        "ticker": "ASML",
+        "earnings_date": "2024-01-24",
+        "score": 71.07,
+        "rank": 7,
+        "selected": true,
+        "actual_move": 8.85,
+        "avg_historical": 3.61,
+        "pnl": -2.65
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-02-13",
+        "score": 71.26,
+        "rank": 3,
+        "selected": true,
+        "actual_move": 13.4,
+        "avg_historical": 15.02,
+        "pnl": 7.2
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-05-08",
+        "score": 71.14,
+        "rank": 5,
+        "selected": true,
+        "actual_move": 18.59,
+        "avg_historical": 14.69,
+        "pnl": 7.04
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-07-23",
+        "score": 70.99,
+        "rank": 8,
+        "selected": true,
+        "actual_move": 1.05,
+        "avg_historical": 2.67,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-08-07",
+        "score": 71.17,
+        "rank": 4,
+        "selected": true,
+        "actual_move": 17.83,
+        "avg_historical": 15.15,
+        "pnl": 7.26
+      },
+      {
+        "ticker": "AVGO",
+        "earnings_date": "2024-09-05",
+        "score": 70.94,
+        "rank": 9,
+        "selected": true,
+        "actual_move": 0.84,
+        "avg_historical": 2.38,
+        "pnl": 1.12
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-10-22",
+        "score": 70.91,
+        "rank": 10,
+        "selected": true,
+        "actual_move": 2.0,
+        "avg_historical": 2.66,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "RDDT",
+        "earnings_date": "2024-10-29",
+        "score": 71.27,
+        "rank": 2,
+        "selected": true,
+        "actual_move": 2.59,
+        "avg_historical": 3.33,
+        "pnl": 1.57
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-11-12",
+        "score": 71.51,
+        "rank": 1,
+        "selected": true,
+        "actual_move": 21.04,
+        "avg_historical": 15.92,
+        "pnl": 7.27
+      }
+    ]
+  },
+  {
+    "run_id": "dbc65097",
+    "config_name": "Consistency-Heavy",
+    "config_description": "Favors stocks with predictable earnings moves. Lower variance.",
+    "period": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    },
+    "metrics": {
+      "total_opportunities": 261,
+      "qualified_opportunities": 202,
+      "selected_trades": 8,
+      "win_rate": 87.5,
+      "total_pnl": 30.76,
+      "avg_pnl_per_trade": 3.84,
+      "sharpe_ratio": 1.0,
+      "max_drawdown": 2.65,
+      "avg_score_winners": 76.72,
+      "avg_score_losers": 76.42
+    },
+    "trades": [
+      {
+        "ticker": "TSM",
+        "earnings_date": "2024-01-17",
+        "score": 76.42,
+        "rank": 6,
+        "selected": true,
+        "actual_move": 1.26,
+        "avg_historical": 3.8,
+        "pnl": 1.8
+      },
+      {
+        "ticker": "ASML",
+        "earnings_date": "2024-01-24",
+        "score": 76.42,
+        "rank": 7,
+        "selected": true,
+        "actual_move": 8.85,
+        "avg_historical": 3.61,
+        "pnl": -2.65
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-02-13",
+        "score": 76.85,
+        "rank": 3,
+        "selected": true,
+        "actual_move": 13.4,
+        "avg_historical": 15.02,
+        "pnl": 7.2
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-05-08",
+        "score": 76.57,
+        "rank": 5,
+        "selected": true,
+        "actual_move": 18.59,
+        "avg_historical": 14.69,
+        "pnl": 7.04
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-07-23",
+        "score": 76.24,
+        "rank": 8,
+        "selected": true,
+        "actual_move": 1.05,
+        "avg_historical": 2.67,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-08-07",
+        "score": 76.66,
+        "rank": 4,
+        "selected": true,
+        "actual_move": 17.83,
+        "avg_historical": 15.15,
+        "pnl": 7.26
+      },
+      {
+        "ticker": "RDDT",
+        "earnings_date": "2024-10-29",
+        "score": 76.87,
+        "rank": 2,
+        "selected": true,
+        "actual_move": 2.59,
+        "avg_historical": 3.33,
+        "pnl": 1.57
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-11-12",
+        "score": 77.43,
+        "rank": 1,
+        "selected": true,
+        "actual_move": 21.04,
+        "avg_historical": 15.92,
+        "pnl": 7.27
+      }
+    ]
+  },
+  {
+    "run_id": "137e33a4",
+    "config_name": "Skew-Aware",
+    "config_description": "Emphasizes skew analysis. Avoids extreme skew or uses it directionally.",
+    "period": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    },
+    "metrics": {
+      "total_opportunities": 261,
+      "qualified_opportunities": 236,
+      "selected_trades": 10,
+      "win_rate": 90.0,
+      "total_pnl": 33.13,
+      "avg_pnl_per_trade": 3.31,
+      "sharpe_ratio": 0.93,
+      "max_drawdown": 2.65,
+      "avg_score_winners": 72.92,
+      "avg_score_losers": 72.85
+    },
+    "trades": [
+      {
+        "ticker": "TSM",
+        "earnings_date": "2024-01-17",
+        "score": 72.85,
+        "rank": 6,
+        "selected": true,
+        "actual_move": 1.26,
+        "avg_historical": 3.8,
+        "pnl": 1.8
+      },
+      {
+        "ticker": "ASML",
+        "earnings_date": "2024-01-24",
+        "score": 72.85,
+        "rank": 7,
+        "selected": true,
+        "actual_move": 8.85,
+        "avg_historical": 3.61,
+        "pnl": -2.65
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-02-13",
+        "score": 73.04,
+        "rank": 3,
+        "selected": true,
+        "actual_move": 13.4,
+        "avg_historical": 15.02,
+        "pnl": 7.2
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-05-08",
+        "score": 72.92,
+        "rank": 5,
+        "selected": true,
+        "actual_move": 18.59,
+        "avg_historical": 14.69,
+        "pnl": 7.04
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-07-23",
+        "score": 72.77,
+        "rank": 8,
+        "selected": true,
+        "actual_move": 1.05,
+        "avg_historical": 2.67,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-08-07",
+        "score": 72.96,
+        "rank": 4,
+        "selected": true,
+        "actual_move": 17.83,
+        "avg_historical": 15.15,
+        "pnl": 7.26
+      },
+      {
+        "ticker": "AVGO",
+        "earnings_date": "2024-09-05",
+        "score": 72.72,
+        "rank": 9,
+        "selected": true,
+        "actual_move": 0.84,
+        "avg_historical": 2.38,
+        "pnl": 1.12
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-10-22",
+        "score": 72.69,
+        "rank": 10,
+        "selected": true,
+        "actual_move": 2.0,
+        "avg_historical": 2.66,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "RDDT",
+        "earnings_date": "2024-10-29",
+        "score": 73.05,
+        "rank": 2,
+        "selected": true,
+        "actual_move": 2.59,
+        "avg_historical": 3.33,
+        "pnl": 1.57
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-11-12",
+        "score": 73.3,
+        "rank": 1,
+        "selected": true,
+        "actual_move": 21.04,
+        "avg_historical": 15.92,
+        "pnl": 7.27
+      }
+    ]
+  },
+  {
+    "run_id": "3f2b1b3d",
+    "config_name": "Aggressive",
+    "config_description": "Higher volume approach. Lower thresholds, more trades.",
+    "period": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    },
+    "metrics": {
+      "total_opportunities": 261,
+      "qualified_opportunities": 236,
+      "selected_trades": 15,
+      "win_rate": 86.67,
+      "total_pnl": 40.82,
+      "avg_pnl_per_trade": 2.72,
+      "sharpe_ratio": 0.87,
+      "max_drawdown": 2.65,
+      "avg_score_winners": 75.75,
+      "avg_score_losers": 75.63
+    },
+    "trades": [
+      {
+        "ticker": "TSM",
+        "earnings_date": "2024-01-17",
+        "score": 75.77,
+        "rank": 6,
+        "selected": true,
+        "actual_move": 1.26,
+        "avg_historical": 3.8,
+        "pnl": 1.8
+      },
+      {
+        "ticker": "ASML",
+        "earnings_date": "2024-01-24",
+        "score": 75.77,
+        "rank": 7,
+        "selected": true,
+        "actual_move": 8.85,
+        "avg_historical": 3.61,
+        "pnl": -2.65
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-02-06",
+        "score": 75.57,
+        "rank": 13,
+        "selected": true,
+        "actual_move": 2.77,
+        "avg_historical": 2.62,
+        "pnl": 1.23
+      },
+      {
+        "ticker": "SPOT",
+        "earnings_date": "2024-02-06",
+        "score": 75.48,
+        "rank": 15,
+        "selected": true,
+        "actual_move": 3.88,
+        "avg_historical": 9.42,
+        "pnl": 4.5
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-02-13",
+        "score": 75.96,
+        "rank": 3,
+        "selected": true,
+        "actual_move": 13.4,
+        "avg_historical": 15.02,
+        "pnl": 7.2
+      },
+      {
+        "ticker": "AVGO",
+        "earnings_date": "2024-03-07",
+        "score": 75.49,
+        "rank": 14,
+        "selected": true,
+        "actual_move": 4.22,
+        "avg_historical": 2.15,
+        "pnl": -0.48
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-04-23",
+        "score": 75.59,
+        "rank": 11,
+        "selected": true,
+        "actual_move": 2.69,
+        "avg_historical": 2.64,
+        "pnl": 1.24
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-05-08",
+        "score": 75.84,
+        "rank": 5,
+        "selected": true,
+        "actual_move": 18.59,
+        "avg_historical": 14.69,
+        "pnl": 7.04
+      },
+      {
+        "ticker": "AVGO",
+        "earnings_date": "2024-06-12",
+        "score": 75.57,
+        "rank": 12,
+        "selected": true,
+        "actual_move": 2.36,
+        "avg_historical": 2.53,
+        "pnl": 1.19
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-07-23",
+        "score": 75.69,
+        "rank": 8,
+        "selected": true,
+        "actual_move": 1.05,
+        "avg_historical": 2.67,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-08-07",
+        "score": 75.87,
+        "rank": 4,
+        "selected": true,
+        "actual_move": 17.83,
+        "avg_historical": 15.15,
+        "pnl": 7.26
+      },
+      {
+        "ticker": "AVGO",
+        "earnings_date": "2024-09-05",
+        "score": 75.64,
+        "rank": 9,
+        "selected": true,
+        "actual_move": 0.84,
+        "avg_historical": 2.38,
+        "pnl": 1.12
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-10-22",
+        "score": 75.61,
+        "rank": 10,
+        "selected": true,
+        "actual_move": 2.0,
+        "avg_historical": 2.66,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "RDDT",
+        "earnings_date": "2024-10-29",
+        "score": 75.97,
+        "rank": 2,
+        "selected": true,
+        "actual_move": 2.59,
+        "avg_historical": 3.33,
+        "pnl": 1.57
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-11-12",
+        "score": 76.21,
+        "rank": 1,
+        "selected": true,
+        "actual_move": 21.04,
+        "avg_historical": 15.92,
+        "pnl": 7.27
+      }
+    ]
+  },
+  {
+    "run_id": "f06cf4e1",
+    "config_name": "Conservative",
+    "config_description": "High-confidence only. Fewer trades, higher win rate expected.",
+    "period": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    },
+    "metrics": {
+      "total_opportunities": 261,
+      "qualified_opportunities": 0,
+      "selected_trades": 0,
+      "win_rate": 0.0,
+      "total_pnl": 0.0,
+      "avg_pnl_per_trade": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown": 0.0,
+      "avg_score_winners": 0.0,
+      "avg_score_losers": 0.0
+    },
+    "trades": []
+  },
+  {
+    "run_id": "7c8e6be1",
+    "config_name": "Hybrid",
+    "config_description": "Adaptive approach balancing edge and execution quality.",
+    "period": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    },
+    "metrics": {
+      "total_opportunities": 261,
+      "qualified_opportunities": 236,
+      "selected_trades": 10,
+      "win_rate": 90.0,
+      "total_pnl": 33.13,
+      "avg_pnl_per_trade": 3.31,
+      "sharpe_ratio": 0.93,
+      "max_drawdown": 2.65,
+      "avg_score_winners": 71.54,
+      "avg_score_losers": 71.47
+    },
+    "trades": [
+      {
+        "ticker": "TSM",
+        "earnings_date": "2024-01-17",
+        "score": 71.47,
+        "rank": 6,
+        "selected": true,
+        "actual_move": 1.26,
+        "avg_historical": 3.8,
+        "pnl": 1.8
+      },
+      {
+        "ticker": "ASML",
+        "earnings_date": "2024-01-24",
+        "score": 71.47,
+        "rank": 7,
+        "selected": true,
+        "actual_move": 8.85,
+        "avg_historical": 3.61,
+        "pnl": -2.65
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-02-13",
+        "score": 71.66,
+        "rank": 3,
+        "selected": true,
+        "actual_move": 13.4,
+        "avg_historical": 15.02,
+        "pnl": 7.2
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-05-08",
+        "score": 71.54,
+        "rank": 5,
+        "selected": true,
+        "actual_move": 18.59,
+        "avg_historical": 14.69,
+        "pnl": 7.04
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-07-23",
+        "score": 71.39,
+        "rank": 8,
+        "selected": true,
+        "actual_move": 1.05,
+        "avg_historical": 2.67,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-08-07",
+        "score": 71.57,
+        "rank": 4,
+        "selected": true,
+        "actual_move": 17.83,
+        "avg_historical": 15.15,
+        "pnl": 7.26
+      },
+      {
+        "ticker": "AVGO",
+        "earnings_date": "2024-09-05",
+        "score": 71.34,
+        "rank": 9,
+        "selected": true,
+        "actual_move": 0.84,
+        "avg_historical": 2.38,
+        "pnl": 1.12
+      },
+      {
+        "ticker": "ENPH",
+        "earnings_date": "2024-10-22",
+        "score": 71.31,
+        "rank": 10,
+        "selected": true,
+        "actual_move": 2.0,
+        "avg_historical": 2.66,
+        "pnl": 1.26
+      },
+      {
+        "ticker": "RDDT",
+        "earnings_date": "2024-10-29",
+        "score": 71.67,
+        "rank": 2,
+        "selected": true,
+        "actual_move": 2.59,
+        "avg_historical": 3.33,
+        "pnl": 1.57
+      },
+      {
+        "ticker": "SHOP",
+        "earnings_date": "2024-11-12",
+        "score": 71.91,
+        "rank": 1,
+        "selected": true,
+        "actual_move": 21.04,
+        "avg_historical": 15.92,
+        "pnl": 7.27
+      }
+    ]
+  }
+]
