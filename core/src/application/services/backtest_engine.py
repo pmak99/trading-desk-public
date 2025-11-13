@@ -179,22 +179,28 @@ class BacktestEngine:
         self,
         actual_move: float,
         avg_historical_move: float,
+        stock_price: float = 100.0,
+        bid_ask_spread_pct: float = 0.10,
+        commission_per_contract: float = 0.65,
+        use_realistic_model: bool = True,
     ) -> float:
         """
         Simulate P&L for a straddle trade.
 
-        Simplified model:
-        - Assume we sell ATM straddle
-        - Premium collected = 50% of implied move (simplified)
-        - Implied move = avg_historical_move * 1.3 (typical IV inflation)
-        - P&L = premium - max(0, actual_move - implied_move) * stock_price
-
-        Further simplified as percentage:
-        P&L% = implied_move * 0.5 - max(0, actual_move - implied_move)
+        Enhanced realistic model:
+        - Sell ATM straddle with bid-ask spread costs
+        - Premium collected at bid (worse price)
+        - Exit at ask next day (worse price)
+        - Commission costs on entry and exit
+        - IV crush decay modeling
 
         Args:
             actual_move: Actual move percentage
             avg_historical_move: Average historical move percentage
+            stock_price: Stock price for commission calculation
+            bid_ask_spread_pct: Bid-ask spread as % of mid (default 10%)
+            commission_per_contract: Commission per contract (default $0.65)
+            use_realistic_model: If True, use enhanced model; if False, use simple model
 
         Returns:
             Simulated P&L as percentage of stock price
@@ -202,14 +208,42 @@ class BacktestEngine:
         # Assume implied move is historical * 1.3 (typical IV inflation for earnings)
         implied_move = avg_historical_move * 1.3
 
-        # Premium collected (50% of straddle cost, which equals implied move)
-        premium = implied_move * 0.5
+        if not use_realistic_model:
+            # Simple model (original)
+            premium = implied_move * 0.5
+            loss = max(0, actual_move - implied_move)
+            return premium - loss
 
-        # Loss if actual exceeds implied
-        loss = max(0, actual_move - implied_move)
+        # Enhanced realistic model
+        # Entry: Sell straddle at bid (50% of implied move, less half spread)
+        straddle_mid = implied_move * 0.5
+        entry_slippage = straddle_mid * (bid_ask_spread_pct / 2)
+        premium_collected = straddle_mid - entry_slippage
 
-        # Net P&L
-        pnl = premium - loss
+        # Exit: Buy back straddle next day after IV crush
+        # Residual value = intrinsic value if actual > implied
+        residual_intrinsic = max(0, actual_move - implied_move)
+
+        # Add some residual time value (IV doesn't go to zero)
+        # Assume 20% of original implied move remains as residual IV
+        residual_extrinsic = implied_move * 0.10
+
+        # Total exit cost at ask (worse price)
+        exit_mid = residual_intrinsic + residual_extrinsic
+        exit_slippage = exit_mid * (bid_ask_spread_pct / 2)
+        exit_cost = exit_mid + exit_slippage
+
+        # Commission costs (2 contracts: call + put, entry + exit)
+        # Commission is per contract, need to express as % of stock price
+        # Total commission: 4 * $0.65 = $2.60
+        # Per share: $2.60 / 100 shares = $0.026
+        # As % of stock price: ($0.026 / stock_price) * 100
+        total_commission = 4 * commission_per_contract
+        commission_per_share = total_commission / 100  # Divide by 100 shares
+        commission_pct = (commission_per_share / stock_price) * 100
+
+        # Net P&L as percentage
+        pnl = premium_collected - exit_cost - commission_pct
 
         return pnl
 
@@ -334,8 +368,17 @@ class BacktestEngine:
                 score
             )
 
-            # Simulate P&L
-            pnl = self.simulate_pnl(actual_move, avg_move)
+            # Simulate P&L with realistic costs
+            # Use $100 as default stock price for commission calculation
+            # (commission impact is minimal for most stocks $50-$500)
+            # Use 10% bid-ask spread (typical for earnings straddles)
+            pnl = self.simulate_pnl(
+                actual_move=actual_move,
+                avg_historical_move=avg_move,
+                stock_price=100.0,
+                bid_ask_spread_pct=0.10,
+                use_realistic_model=True,
+            )
 
             trade = BacktestTrade(
                 ticker=score.ticker,
@@ -441,3 +484,162 @@ class BacktestEngine:
         logger.info(f"  Sharpe: {sharpe:.2f}")
 
         return result
+
+    def run_walk_forward_backtest(
+        self,
+        configs: List[ScoringConfig],
+        start_date: date,
+        end_date: date,
+        train_window_days: int = 180,
+        test_window_days: int = 90,
+        step_days: int = 90,
+    ) -> Dict[str, List[BacktestResult]]:
+        """
+        Walk-forward optimization to prevent overfitting.
+
+        Process:
+        1. Train on window 1 (e.g., 6 months) → select best config
+        2. Test on window 2 (e.g., 3 months) → validate performance
+        3. Roll window forward by step_days
+        4. Repeat until end of date range
+
+        This ensures configs are tested on unseen future data, simulating
+        how they would perform in real trading.
+
+        Args:
+            configs: List of scoring configurations to test
+            start_date: Start of backtest period
+            end_date: End of backtest period
+            train_window_days: Training window size (default 180 days / 6 months)
+            test_window_days: Testing window size (default 90 days / 3 months)
+            step_days: Days to roll window forward (default 90 days)
+
+        Returns:
+            Dictionary with keys:
+            - "train_results": List of training period results for each window
+            - "test_results": List of test period results (out-of-sample)
+            - "best_configs": List of best config names per window
+            - "summary": Aggregate statistics
+        """
+        logger.info("=" * 80)
+        logger.info("WALK-FORWARD BACKTEST")
+        logger.info(f"Period: {start_date} to {end_date}")
+        logger.info(f"Train window: {train_window_days} days")
+        logger.info(f"Test window: {test_window_days} days")
+        logger.info(f"Step: {step_days} days")
+        logger.info(f"Configs: {len(configs)}")
+        logger.info("=" * 80)
+
+        train_results = []
+        test_results = []
+        best_configs = []
+
+        # Generate windows
+        current_train_start = start_date
+        window_num = 0
+
+        while True:
+            window_num += 1
+
+            # Calculate window dates
+            current_train_end = current_train_start + timedelta(days=train_window_days)
+            current_test_start = current_train_end + timedelta(days=1)
+            current_test_end = current_test_start + timedelta(days=test_window_days)
+
+            # Stop if test window goes beyond end date
+            if current_test_end > end_date:
+                logger.info(f"Stopping: test window would exceed {end_date}")
+                break
+
+            logger.info(f"\n--- Window {window_num} ---")
+            logger.info(f"Train: {current_train_start} to {current_train_end}")
+            logger.info(f"Test:  {current_test_start} to {current_test_end}")
+
+            # Phase 1: Train on training window with all configs
+            window_train_results = []
+            for config in configs:
+                result = self.run_backtest(
+                    config=config,
+                    start_date=current_train_start,
+                    end_date=current_train_end,
+                )
+                window_train_results.append(result)
+                train_results.append(result)
+
+            # Select best config based on training performance
+            # Use Sharpe ratio as primary metric (risk-adjusted return)
+            best_config_result = max(
+                window_train_results,
+                key=lambda r: r.sharpe_ratio if r.selected_trades > 0 else -999
+            )
+            best_config_name = best_config_result.config_name
+            best_configs.append(best_config_name)
+
+            logger.info(f"Best config (train): {best_config_name}")
+            logger.info(f"  Train Sharpe: {best_config_result.sharpe_ratio:.2f}")
+            logger.info(f"  Train Win Rate: {best_config_result.win_rate:.1f}%")
+            logger.info(f"  Train Trades: {best_config_result.selected_trades}")
+
+            # Phase 2: Test best config on test window (out-of-sample)
+            best_config = next(c for c in configs if c.name == best_config_name)
+            test_result = self.run_backtest(
+                config=best_config,
+                start_date=current_test_start,
+                end_date=current_test_end,
+            )
+            test_results.append(test_result)
+
+            logger.info(f"Best config (test): {best_config_name}")
+            logger.info(f"  Test Sharpe: {test_result.sharpe_ratio:.2f}")
+            logger.info(f"  Test Win Rate: {test_result.win_rate:.1f}%")
+            logger.info(f"  Test Trades: {test_result.selected_trades}")
+            logger.info(f"  Test P&L: {test_result.total_pnl:.2f}%")
+
+            # Advance window
+            current_train_start += timedelta(days=step_days)
+
+        # Calculate summary statistics
+        if test_results:
+            total_test_trades = sum(r.selected_trades for r in test_results)
+            avg_test_sharpe = statistics.mean([r.sharpe_ratio for r in test_results if r.selected_trades > 0])
+            avg_test_win_rate = statistics.mean([r.win_rate for r in test_results if r.selected_trades > 0])
+            total_test_pnl = sum(r.total_pnl for r in test_results)
+
+            # Count config selections
+            from collections import Counter
+            config_counts = Counter(best_configs)
+
+            summary = {
+                "total_windows": window_num - 1,
+                "total_test_trades": total_test_trades,
+                "avg_test_sharpe": avg_test_sharpe,
+                "avg_test_win_rate": avg_test_win_rate,
+                "total_test_pnl": total_test_pnl,
+                "config_selection_counts": dict(config_counts),
+                "most_selected_config": config_counts.most_common(1)[0] if config_counts else None,
+            }
+
+            logger.info("\n" + "=" * 80)
+            logger.info("WALK-FORWARD SUMMARY (Out-of-Sample Performance)")
+            logger.info("=" * 80)
+            logger.info(f"Total windows: {summary['total_windows']}")
+            logger.info(f"Total test trades: {summary['total_test_trades']}")
+            logger.info(f"Avg test Sharpe: {summary['avg_test_sharpe']:.2f}")
+            logger.info(f"Avg test win rate: {summary['avg_test_win_rate']:.1f}%")
+            logger.info(f"Total test P&L: {summary['total_test_pnl']:.2f}%")
+            logger.info(f"\nConfig selection counts:")
+            for config_name, count in config_counts.most_common():
+                logger.info(f"  {config_name}: {count} times")
+            logger.info("=" * 80)
+        else:
+            summary = {
+                "total_windows": 0,
+                "error": "No test windows completed"
+            }
+
+        return {
+            "train_results": train_results,
+            "test_results": test_results,
+            "best_configs": best_configs,
+            "summary": summary,
+        }
