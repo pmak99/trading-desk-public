@@ -27,7 +27,11 @@ class TickerAnalyzer:
         self.container = container
 
     def analyze(
-        self, ticker: str, earnings_date: date, expiration: date
+        self,
+        ticker: str,
+        earnings_date: date,
+        expiration: date,
+        generate_strategies: bool = False
     ) -> Result[TickerAnalysis, AppError]:
         """Analyze a ticker for IV Crush opportunity.
 
@@ -35,6 +39,7 @@ class TickerAnalyzer:
             ticker: Stock ticker symbol
             earnings_date: Date of earnings announcement
             expiration: Option expiration date
+            generate_strategies: If True, generate trade strategies (bull put, bear call, iron condor)
 
         Returns:
             Result containing TickerAnalysis or error
@@ -110,6 +115,28 @@ class TickerAnalyzer:
                 else:
                     logger.warning(f"{ticker}: Consistency analysis failed: {consistency_result.error}")
 
+            # Step 6: Optionally generate trade strategies
+            strategies = None
+            if generate_strategies and vrp.is_tradeable:
+                try:
+                    # Get the full option chain for strategy generation
+                    chain_result = self.container.cached_options_provider.get_option_chain(
+                        ticker, expiration
+                    )
+                    if chain_result.is_ok:
+                        option_chain = chain_result.value
+                        strategies = self.container.strategy_generator.generate_strategies(
+                            ticker=ticker,
+                            option_chain=option_chain,
+                            vrp=vrp,
+                            skew=skew,
+                        )
+                        logger.info(f"{ticker}: Generated {len(strategies.strategies)} strategies")
+                    else:
+                        logger.warning(f"{ticker}: Could not fetch option chain for strategies: {chain_result.error}")
+                except Exception as e:
+                    logger.warning(f"{ticker}: Strategy generation failed: {e}")
+
             # Build complete analysis
             analysis = TickerAnalysis(
                 ticker=ticker,
@@ -122,6 +149,7 @@ class TickerAnalyzer:
                 consistency=consistency,  # Phase 4 enhanced
                 skew=skew,  # Phase 4 enhanced
                 term_structure=None,  # Future enhancement
+                strategies=strategies,  # Strategy recommendations
             )
 
             return Ok(analysis)

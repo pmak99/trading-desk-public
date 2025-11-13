@@ -69,6 +69,11 @@ Notes:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level",
     )
+    parser.add_argument(
+        "--strategies",
+        action="store_true",
+        help="Generate trade strategies (bull put spread, bear call spread, iron condor)",
+    )
 
     args = parser.parse_args()
 
@@ -90,87 +95,105 @@ Notes:
         # Create container
         container = Container(config)
 
-        # Get calculators
-        implied_move_calc = container.implied_move_calculator
-        vrp_calc = container.vrp_calculator
+        # Use the analyzer service
+        analyzer = container.analyzer
 
-        # Step 1: Calculate implied move
-        logger.info("\n📊 Step 1: Calculate Implied Move")
-        implied_result = implied_move_calc.calculate(
-            args.ticker, args.expiration
-        )
-
-        if implied_result.is_err:
-            logger.error(f"Failed to calculate implied move: {implied_result.error}")
-            return 1
-
-        implied_move = implied_result.value
-
-        logger.info(f"✓ Implied Move: {implied_move.implied_move_pct}")
-        logger.info(f"  Stock Price: {implied_move.stock_price}")
-        logger.info(f"  ATM Strike: {implied_move.atm_strike}")
-        logger.info(f"  Straddle Cost: {implied_move.straddle_cost}")
-        logger.info(f"  Upper Bound: {implied_move.upper_bound}")
-        logger.info(f"  Lower Bound: {implied_move.lower_bound}")
-
-        if implied_move.avg_iv:
-            logger.info(f"  Average IV: {implied_move.avg_iv}")
-
-        # Step 2: Get historical moves (from database)
-        logger.info("\n📊 Step 2: Get Historical Moves")
-        prices_repo = container.prices_repository
-
-        hist_result = prices_repo.get_historical_moves(args.ticker, limit=12)
-
-        if hist_result.is_err:
-            logger.warning(f"No historical data: {hist_result.error}")
-            logger.info("\nℹ️  VRP calculation requires historical data")
-            logger.info("   Run: python scripts/backfill.py " + args.ticker)
-            logger.info("\n✓ Implied move analysis complete!")
-            return 0
-
-        historical_moves = hist_result.value
-        logger.info(f"✓ Found {len(historical_moves)} historical earnings moves")
-
-        # Show recent history
-        for move in historical_moves[:3]:
-            logger.info(
-                f"  {move.earnings_date}: {move.intraday_move_pct} "
-                f"(gap: {move.gap_move_pct}, close: {move.close_move_pct})"
-            )
-
-        # Step 3: Calculate VRP
-        logger.info("\n📊 Step 3: Calculate VRP")
-
-        vrp_result = vrp_calc.calculate(
+        # Run complete analysis
+        logger.info("\n📊 Running Complete Analysis...")
+        result = analyzer.analyze(
             ticker=args.ticker,
+            earnings_date=args.earnings_date,
             expiration=args.expiration,
-            implied_move=implied_move,
-            historical_moves=historical_moves,
+            generate_strategies=args.strategies,
         )
 
-        if vrp_result.is_err:
-            logger.error(f"Failed to calculate VRP: {vrp_result.error}")
+        if result.is_err:
+            logger.error(f"Analysis failed: {result.error}")
+            if "No historical data" in str(result.error):
+                logger.info("\nℹ️  VRP calculation requires historical data")
+                logger.info("   Run: python scripts/backfill.py " + args.ticker)
             return 1
 
-        vrp = vrp_result.value
+        analysis = result.value
 
-        logger.info(f"✓ VRP Ratio: {vrp.vrp_ratio:.2f}x")
-        logger.info(f"  Implied Move: {vrp.implied_move_pct}")
-        logger.info(f"  Historical Mean: {vrp.historical_mean_move_pct}")
-        logger.info(f"  Edge Score: {vrp.edge_score:.2f}")
-        logger.info(f"  Recommendation: {vrp.recommendation.value.upper()}")
-
-        # Final summary
+        # Display results
         logger.info("\n" + "=" * 80)
-        logger.info("Analysis Complete!")
+        logger.info("ANALYSIS RESULTS")
+        logger.info("=" * 80)
+
+        # Implied Move
+        logger.info(f"\n📊 Implied Move:")
+        logger.info(f"  Stock Price: {analysis.implied_move.stock_price}")
+        logger.info(f"  Implied Move: {analysis.implied_move.implied_move_pct}")
+        logger.info(f"  Upper Bound: {analysis.implied_move.upper_bound}")
+        logger.info(f"  Lower Bound: {analysis.implied_move.lower_bound}")
+        if analysis.implied_move.avg_iv:
+            logger.info(f"  Average IV: {analysis.implied_move.avg_iv}")
+
+        # VRP Analysis
+        logger.info(f"\n📊 VRP Analysis:")
+        logger.info(f"  VRP Ratio: {analysis.vrp.vrp_ratio:.2f}x")
+        logger.info(f"  Historical Mean: {analysis.vrp.historical_mean_move_pct}")
+        logger.info(f"  Edge Score: {analysis.vrp.edge_score:.2f}")
+        logger.info(f"  Recommendation: {analysis.vrp.recommendation.value.upper()}")
+
+        # Strategy Recommendations
+        if args.strategies and analysis.strategies:
+            logger.info("\n" + "=" * 80)
+            logger.info("STRATEGY RECOMMENDATIONS")
+            logger.info("=" * 80)
+
+            strats = analysis.strategies
+            logger.info(f"\nDirectional Bias: {strats.directional_bias.value.upper()}")
+            logger.info(f"Generated {len(strats.strategies)} strategies\n")
+
+            for i, strategy in enumerate(strats.strategies, 1):
+                is_recommended = (i - 1 == strats.recommended_index)
+                marker = "★ RECOMMENDED" if is_recommended else f"  Strategy {i}"
+
+                logger.info(f"\n{marker}: {strategy.strategy_type.value.replace('_', ' ').upper()}")
+                logger.info(f"  Strikes: {strategy.strike_description}")
+                logger.info(f"  Net Credit: {strategy.net_credit}")
+                logger.info(f"  Max Profit: {strategy.max_profit} ({strategy.contracts} contracts)")
+                logger.info(f"  Max Loss: {strategy.max_loss}")
+                logger.info(f"  Breakeven: {', '.join(str(be) for be in strategy.breakeven)}")
+                logger.info(f"  Probability of Profit: {strategy.probability_of_profit:.1%}")
+                logger.info(f"  Reward/Risk: {strategy.reward_risk_ratio:.2f}")
+                logger.info(f"  Score: {strategy.overall_score:.1f}/100")
+
+                # Display Greeks if available
+                if strategy.position_delta is not None:
+                    logger.info(f"  Greeks:")
+                    logger.info(f"    Delta: {strategy.position_delta:+.2f} (directional exposure)")
+                    if strategy.position_gamma is not None:
+                        logger.info(f"    Gamma: {strategy.position_gamma:+.4f} (delta sensitivity)")
+                    if strategy.position_theta is not None:
+                        logger.info(f"    Theta: {strategy.position_theta:+.2f} (daily time decay)")
+                    if strategy.position_vega is not None:
+                        logger.info(f"    Vega: {strategy.position_vega:+.2f} (IV sensitivity)")
+
+                logger.info(f"  Rationale: {strategy.rationale}")
+
+            logger.info(f"\n💡 Recommendation: {strats.recommendation_rationale}")
+
+        elif args.strategies and not analysis.strategies:
+            logger.info("\n⚠️  Strategy generation was requested but not available")
+            logger.info("   (VRP may not meet minimum threshold)")
+
+        # Final Summary
+        logger.info("\n" + "=" * 80)
+        logger.info("SUMMARY")
         logger.info("=" * 80)
         logger.info(f"Ticker: {args.ticker}")
-        logger.info(f"Implied Move: {vrp.implied_move_pct}")
-        logger.info(f"VRP Ratio: {vrp.vrp_ratio:.2f}x → {vrp.recommendation.value.upper()}")
+        logger.info(f"Implied Move: {analysis.vrp.implied_move_pct}")
+        logger.info(f"VRP Ratio: {analysis.vrp.vrp_ratio:.2f}x → {analysis.vrp.recommendation.value.upper()}")
 
-        if vrp.is_tradeable:
+        if analysis.vrp.is_tradeable:
             logger.info("\n✅ TRADEABLE OPPORTUNITY")
+            if args.strategies and analysis.strategies:
+                rec = analysis.strategies.recommended_strategy
+                logger.info(f"   Best Strategy: {rec.strategy_type.value.replace('_', ' ').title()}")
+                logger.info(f"   Expected Return: {rec.max_profit} (R/R: {rec.reward_risk_ratio:.2f})")
         else:
             logger.info("\n⏭️  SKIP - Insufficient edge")
 

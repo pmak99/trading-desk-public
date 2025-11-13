@@ -215,10 +215,29 @@ class TradierAPI:
 
                     strike = Strike(float(opt['strike']))
 
-                    # Parse IV (may be None)
+                    # Parse Greeks (may be None if not available)
+                    greeks = opt.get('greeks', {})
                     iv = None
-                    if opt.get('greeks') and opt['greeks'].get('mid_iv'):
-                        iv = Percentage(float(opt['greeks']['mid_iv']) * 100)
+                    delta = None
+                    gamma = None
+                    theta = None
+                    vega = None
+
+                    if greeks:
+                        if greeks.get('mid_iv'):
+                            iv = Percentage(float(greeks['mid_iv']) * 100)
+                        # Delta: probability ITM (~0.0 to ~1.0 for calls, ~-1.0 to ~0.0 for puts)
+                        if greeks.get('delta'):
+                            delta = float(greeks['delta'])
+                        # Gamma: rate of change of delta
+                        if greeks.get('gamma'):
+                            gamma = float(greeks['gamma'])
+                        # Theta: time decay per day
+                        if greeks.get('theta'):
+                            theta = float(greeks['theta'])
+                        # Vega: sensitivity to 1% change in IV
+                        if greeks.get('vega'):
+                            vega = float(greeks['vega'])
 
                     quote = OptionQuote(
                         bid=Money(float(opt['bid'])),
@@ -226,6 +245,10 @@ class TradierAPI:
                         implied_volatility=iv,
                         open_interest=int(opt.get('open_interest', 0)),
                         volume=int(opt.get('volume', 0)),
+                        delta=delta,
+                        gamma=gamma,
+                        theta=theta,
+                        vega=vega,
                     )
 
                     # Categorize by option type
