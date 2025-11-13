@@ -145,11 +145,46 @@ analyze_single() {
     fi
 
     # Run analysis with strategy generation
-    # FIXED: Year-agnostic timestamp filtering
-    python scripts/analyze.py "$ticker" \
+    # Capture full output to check for missing data error
+    local analysis_output
+    analysis_output=$(python scripts/analyze.py "$ticker" \
         --earnings-date "$earnings_date" \
         --expiration "$expiration" \
-        --strategies 2>&1 | \
+        --strategies 2>&1) || true  # Don't exit on error due to set -e
+
+    # Check if analysis failed due to missing historical data
+    if echo "$analysis_output" | grep -q "No historical data for $ticker"; then
+        echo -e "${YELLOW}⚠️  No historical data found for $ticker${NC}"
+        echo -e "${BLUE}📊 Auto-backfilling historical earnings data...${NC}"
+        echo ""
+
+        # Automatically backfill data (last 3 years)
+        local start_date
+        start_date=$(date -d "3 years ago" +%Y-%m-%d 2>/dev/null || date -v-3y +%Y-%m-%d 2>/dev/null || echo "2022-01-01")
+        local end_date
+        end_date=$(date -d "yesterday" +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d 2>/dev/null || echo "2025-11-12")
+
+        python scripts/backfill_yfinance.py "$ticker" \
+            --start-date "$start_date" \
+            --end-date "$end_date" 2>&1 | \
+            grep -E "Processing|Backfilled|saved|✓|Total moves" || {
+            echo -e "${RED}Backfill failed${NC}"
+            return 1
+        }
+
+        echo ""
+        echo -e "${GREEN}✓ Backfill complete. Retrying analysis...${NC}"
+        echo ""
+
+        # Retry analysis after backfill
+        analysis_output=$(python scripts/analyze.py "$ticker" \
+            --earnings-date "$earnings_date" \
+            --expiration "$expiration" \
+            --strategies 2>&1) || true  # Don't exit on error
+    fi
+
+    # Display analysis results (filter timestamps and show from ANALYSIS RESULTS onward)
+    echo "$analysis_output" | \
         sed -n '/ANALYSIS RESULTS/,$p' | \
         sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - INFO - //' || {
         echo -e "${RED}Analysis failed${NC}"
