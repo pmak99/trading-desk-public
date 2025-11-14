@@ -1,5 +1,7 @@
 # Optimization Results - November 13, 2025
 
+> **📌 NOTE:** This document provides historical context for the optimization journey. For current deployment status and empirical validation with 208 real trades, see **[POSITION_SIZING_DEPLOYMENT.md](POSITION_SIZING_DEPLOYMENT.md)**.
+
 Summary of AB testing and algorithm optimization results.
 
 ---
