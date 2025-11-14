@@ -282,7 +282,7 @@ whisper_mode() {
     # Run whisper mode
     $cmd 2>&1 | \
         grep -v "^[0-9]\{4\}-" | \
-        grep -A 500 "WHISPER MODE\|Retrieved\|Tickers:\|Processing\|VRP\|Score\|TRADEABLE\|Whisper Analysis\|Total\|Analyzed\|Skipped\|Errors\|OPPORTUNITIES" || {
+        grep -E "WHISPER MODE|Retrieved|Tickers:|Processing [A-Z]|Rate limit pause|VRP|Score|TRADEABLE|SKIP|Whisper|Analysis|Total|Analyzed|Skipped|Errors|OPPORTUNITIES|SUMMARY|RESULT" || {
         echo -e "${RED}Whisper mode failed${NC}"
         echo -e "${YELLOW}Could not fetch most anticipated earnings${NC}"
         echo -e "${YELLOW}Tip: Check Reddit access or provide screenshot (--fallback-image)${NC}"
