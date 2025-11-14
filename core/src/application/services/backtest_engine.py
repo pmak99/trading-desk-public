@@ -71,7 +71,7 @@ class BacktestResult:
 
     # Performance metrics (selected trades only)
     win_rate: float  # % of profitable trades
-    total_pnl: float  # Total P&L
+    total_pnl: float  # Total P&L (in dollars if position_sizing=True, else %)
     avg_pnl_per_trade: float  # Average P&L per trade
     sharpe_ratio: float  # Risk-adjusted return
     max_drawdown: float  # Maximum peak-to-trough decline
@@ -82,6 +82,11 @@ class BacktestResult:
 
     # Raw trades
     trades: List[BacktestTrade]
+
+    # Position sizing metrics (if enabled)
+    position_sizing_enabled: bool = False
+    total_capital: float = 0.0  # Total capital deployed
+    kelly_fraction: float = 0.0  # Kelly fraction used
 
 
 class BacktestEngine:
@@ -284,11 +289,117 @@ class BacktestEngine:
         conn.close()
         return events
 
+    def calculate_kelly_fraction(
+        self,
+        trades: List[BacktestTrade],
+    ) -> float:
+        """
+        Calculate Kelly Criterion fraction from historical trades.
+
+        Args:
+            trades: List of historical trades
+
+        Returns:
+            Kelly fraction (capped at 0.25 for quarter-Kelly)
+        """
+        if not trades:
+            return 0.10  # Default conservative sizing
+
+        winners = [t.simulated_pnl for t in trades if t.simulated_pnl > 0]
+        losers = [t.simulated_pnl for t in trades if t.simulated_pnl <= 0]
+
+        if not winners or not losers:
+            return 0.10  # Default if all wins or all losses
+
+        win_rate = len(winners) / len(trades)
+        avg_win = statistics.mean([abs(w) for w in winners])
+        avg_loss = statistics.mean([abs(l) for l in losers])
+
+        if avg_loss == 0:
+            return 0.25  # Max quarter-Kelly
+
+        # Kelly formula: f = (p * b - q) / b
+        # where p = win rate, q = loss rate, b = win/loss ratio
+        p = win_rate
+        q = 1 - win_rate
+        b = avg_win / avg_loss
+
+        kelly = (p * b - q) / b
+
+        # Cap at quarter-Kelly for safety
+        return min(max(kelly, 0.05), 0.25)
+
+    def apply_position_sizing(
+        self,
+        trades: List[BacktestTrade],
+        total_capital: float = 40000.0,
+        use_hybrid: bool = True,
+    ) -> Tuple[float, float, float]:
+        """
+        Apply position sizing to trades using Kelly + VRP weighting.
+
+        Modifies trades in place, converting P&L from percentage to dollars.
+
+        Args:
+            trades: List of backtest trades (modified in place!)
+            total_capital: Total capital available
+            use_hybrid: If True, use Kelly + VRP hybrid; if False, use equal weight
+
+        Returns:
+            Tuple of (kelly_fraction, total P&L in dollars, max drawdown in dollars)
+        """
+        if not trades:
+            return 0.0, 0.0, 0.0
+
+        # Store original P&L percentages for Kelly calculation
+        original_pnls = [t.simulated_pnl for t in trades]
+
+        # Calculate Kelly fraction from percentage returns
+        kelly_frac = self.calculate_kelly_fraction(trades)
+
+        if not use_hybrid:
+            # Equal weight baseline
+            position_size = total_capital / len(trades)
+            for i, trade in enumerate(trades):
+                # Convert percentage P&L to dollar P&L
+                trade.simulated_pnl = original_pnls[i] / 100.0 * position_size
+
+        else:
+            # Hybrid: Kelly base * VRP multiplier
+            avg_score = statistics.mean(t.composite_score for t in trades)
+
+            for i, trade in enumerate(trades):
+                # VRP multiplier (relative to average)
+                vrp_multiplier = trade.composite_score / avg_score
+
+                # Position size = capital * kelly_frac * VRP_multiplier
+                position_size = total_capital * kelly_frac * vrp_multiplier
+
+                # Convert P&L from percentage to dollars
+                trade.simulated_pnl = original_pnls[i] / 100.0 * position_size
+
+        # Calculate total P&L and max drawdown in dollars
+        total_pnl = sum(t.simulated_pnl for t in trades)
+
+        cumulative = 0.0
+        peak = 0.0
+        max_dd = 0.0
+
+        for trade in trades:
+            cumulative += trade.simulated_pnl
+            peak = max(peak, cumulative)
+            drawdown = peak - cumulative
+            max_dd = max(max_dd, drawdown)
+
+        return kelly_frac, total_pnl, max_dd
+
     def run_backtest(
         self,
         config: ScoringConfig,
         start_date: date,
         end_date: date,
+        position_sizing: bool = False,
+        total_capital: float = 40000.0,
     ) -> BacktestResult:
         """
         Run backtest for a specific configuration.
@@ -421,32 +532,57 @@ class BacktestEngine:
                 trades=trades,
             )
 
+        # Apply position sizing if enabled
+        kelly_frac = 0.0
+        if position_sizing:
+            kelly_frac, total_pnl_dollars, max_dd_dollars = self.apply_position_sizing(
+                selected_trades,
+                total_capital=total_capital,
+                use_hybrid=True,
+            )
+
+            # After position sizing, P&L is in dollars
+            total_pnl = total_pnl_dollars
+            avg_pnl = total_pnl / len(selected_trades)
+            max_drawdown = max_dd_dollars
+
+            # Sharpe ratio with dollar P&L
+            pnls = [t.simulated_pnl for t in selected_trades]
+            sharpe = (
+                (statistics.mean(pnls) / statistics.stdev(pnls)) * (50 ** 0.5)
+                if len(pnls) > 1 and statistics.stdev(pnls) > 0
+                else 0.0
+            )
+
+        else:
+            # Original percentage-based metrics
+            total_pnl = sum(t.simulated_pnl for t in selected_trades)
+            avg_pnl = total_pnl / len(selected_trades)
+
+            # Sharpe ratio (simplified)
+            pnls = [t.simulated_pnl for t in selected_trades]
+            sharpe = (
+                statistics.mean(pnls) / statistics.stdev(pnls)
+                if len(pnls) > 1 and statistics.stdev(pnls) > 0
+                else 0.0
+            )
+
+            # Max drawdown (simplified: cumulative worst losing streak)
+            cumulative_pnl = 0
+            peak_pnl = 0
+            max_drawdown = 0
+
+            for trade in selected_trades:
+                cumulative_pnl += trade.simulated_pnl
+                peak_pnl = max(peak_pnl, cumulative_pnl)
+                drawdown = peak_pnl - cumulative_pnl
+                max_drawdown = max(max_drawdown, drawdown)
+
         # Performance metrics
         winners = [t for t in selected_trades if t.simulated_pnl > 0]
         losers = [t for t in selected_trades if t.simulated_pnl <= 0]
 
         win_rate = len(winners) / len(selected_trades) * 100
-        total_pnl = sum(t.simulated_pnl for t in selected_trades)
-        avg_pnl = total_pnl / len(selected_trades)
-
-        # Sharpe ratio (simplified)
-        pnls = [t.simulated_pnl for t in selected_trades]
-        sharpe = (
-            statistics.mean(pnls) / statistics.stdev(pnls)
-            if len(pnls) > 1 and statistics.stdev(pnls) > 0
-            else 0.0
-        )
-
-        # Max drawdown (simplified: cumulative worst losing streak)
-        cumulative_pnl = 0
-        peak_pnl = 0
-        max_drawdown = 0
-
-        for trade in selected_trades:
-            cumulative_pnl += trade.simulated_pnl
-            peak_pnl = max(peak_pnl, cumulative_pnl)
-            drawdown = peak_pnl - cumulative_pnl
-            max_drawdown = max(max_drawdown, drawdown)
 
         # Trade quality
         avg_score_winners = (
@@ -475,6 +611,9 @@ class BacktestEngine:
             avg_score_winners=avg_score_winners,
             avg_score_losers=avg_score_losers,
             trades=trades,
+            position_sizing_enabled=position_sizing,
+            total_capital=total_capital if position_sizing else 0.0,
+            kelly_fraction=kelly_frac,
         )
 
         logger.info(f"Backtest complete: {config.name}")
