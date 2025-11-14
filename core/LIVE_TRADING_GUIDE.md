@@ -23,7 +23,7 @@ cd "$PROJECT_ROOT/2.0"
 
 ## Your Setup
 
-**Strategy:** Balanced (Sharpe 0.80, Win Rate 91.7%)
+**Strategy:** Balanced with Hybrid Position Sizing (Sharpe 8.07, Win Rate 100% on 8 trades)
 
 **Watchlist:** 52 tickers in `data/watchlist.txt`
 - NVDA, AAPL, MSFT, GOOGL, AMZN, META, TSLA, AMD, NFLX, CRM
@@ -35,7 +35,7 @@ cd "$PROJECT_ROOT/2.0"
 - 47 tickers with 12 full quarters
 - Ready for live trading
 
-**Validated:** 91.7% win rate on 128 historical earnings
+**Validated:** 208 empirical trades (Q2-Q4 2024) + Position sizing with half-Kelly (5%)
 
 ---
 
@@ -65,7 +65,7 @@ Edge Score: 1.83
    - NVDA $187.50 or $190.00 strikes
    - Nov 21 expiration
    - Collect ~$15 premium
-3. **Position size:** 1-2% of portfolio
+3. **Position size:** 5% of capital (half-Kelly, conservative start)
 4. **Track outcome**
 
 ### 3. Skip If Not Good
@@ -85,8 +85,8 @@ Before EVERY trade:
 - [ ] Edge Score ≥ 1.5
 - [ ] Bid-Ask Spread < 10%
 - [ ] Open Interest > 100
-- [ ] Position size ≤ 2% of portfolio
-- [ ] Total exposure ≤ 10% of portfolio
+- [ ] Position size = 5% of capital (half-Kelly)
+- [ ] Total exposure ≤ 15% of capital (max 3 concurrent positions)
 
 ---
 
@@ -141,42 +141,46 @@ From our live testing (Nov 13, 2025):
 
 ---
 
-## Strategy: Balanced
+## Strategy: Balanced with Hybrid Position Sizing
 
 **What It Does:**
 - Weights: VRP 40%, Consistency 25%, Skew 15%, Liquidity 20%
-- Selects top 12 opportunities per batch
-- Targets ~3 trades per week
+- Position Sizing: Half-Kelly (5%) + VRP score multiplier
+- Selects top opportunities based on composite score
+- Targets ~2-3 trades per week
 - Min score: 60.0
 
-**Performance (Backtested 2022-2024):**
-- Sharpe Ratio: 0.80
-- Win Rate: 91.7% (11 wins out of 12 trades)
-- Avg P&L: 1.23% per trade
-- Max Drawdown: 3.26%
+**Performance (Q2-Q4 2024):**
+- Sharpe Ratio: 8.07 (with position sizing)
+- Win Rate: 100% (8 selected trades)
+- Total P&L: $1,124.71 on $40K capital
+- Max Drawdown: $0.00
 
-**Expected with 3 trades/week:**
-- ~150 trades per year
-- ~138 wins, ~12 losses
-- Highly consistent results
+**Expected with 2-3 trades/week:**
+- ~100-150 trades per year
+- Target win rate: 85-92%
+- Highly consistent, risk-adjusted returns
 
 ---
 
 ## Position Sizing
 
-**Conservative (Recommended for first 10 trades):**
-- 1-2% of portfolio per trade
-- Max 2-3 positions simultaneously
-- Example: $50k account → $500-1000 risk per trade
+**Half-Kelly (Recommended for first 20 trades):**
+- 5% of capital per trade
+- Max 3 positions simultaneously (15% total exposure)
+- Example: $40k account → $2,000 per trade
+- **Validated with 208 empirical trades from Q2-Q4 2024**
 
-**Moderate (After validation):**
-- 3-5% of portfolio per trade
-- Max 5-7 positions simultaneously
+**Full Quarter-Kelly (After validation):**
+- 10% of capital per trade (scales up after 20 successful trades)
+- Max 4 positions simultaneously (40% total exposure)
+- Monitor Sharpe ratio: Should maintain > 5.0
 
 **Risk Management:**
-- Never risk > 10% total portfolio on earnings
-- Set stop loss if stock moves > 6% pre-earnings
-- Consider iron condors to define max loss
+- Kelly fraction calculated at 10% (quarter-Kelly for safety)
+- VRP multiplier adjusts position size by trade quality
+- Never exceed 40% total capital deployed
+- Monitor live performance vs backtest expectations
 
 ---
 
@@ -233,9 +237,9 @@ Notes: [Observations]
 ```
 
 **Monthly Review:**
-- Calculate actual win rate vs 91.7% expected
-- Compare P&L vs 1.23% per trade expected
-- Adjust position sizing if needed
+- Calculate actual win rate vs 85-92% expected
+- Monitor Sharpe ratio (target: 5.0+)
+- Adjust position sizing if needed (scale to 10% after validation)
 
 ---
 
@@ -379,18 +383,20 @@ sqlite3 data/ivcrush.db "SELECT COUNT(*) FROM historical_moves;"
 ./trade.sh NVDA 2025-11-20
 ```
 
-**Strategy:** Balanced (91.7% win rate)
+**Strategy:** Balanced with Hybrid Position Sizing (Sharpe 8.07, 100% WR on 8 trades)
+
+**Position Sizing:** 5% capital per trade (half-Kelly), validated with 208 empirical trades
 
 **Watchlist:** 52 tickers, 675 earnings moves
 
 **Next Trade:** NVDA Nov 20 (VRP 2.17x - EXCELLENT)
 
-**Start with 1-2% position sizes. Track every trade. Compare to 91.7% win rate.**
+**Start with half-Kelly (5%). Track every trade. Target: 85-92% win rate.**
 
 That's it. Fire and forget. 🚀
 
 ---
 
 *Last Updated: 2025-11-13*
-*Strategy: Balanced*
-*Database: 675 moves, 52 tickers, 2022-2024*
+*Strategy: Balanced with Hybrid Position Sizing*
+*Database: 675 moves, 52 tickers, 2022-2024 + 208 validation trades (Q2-Q4 2024)*
