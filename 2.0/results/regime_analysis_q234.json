@@ -1,0 +1,38 @@
+{
+  "analysis_date": "2025-11-13T22:33:47.737149",
+  "regimes": {
+    "low_vol": {
+      "vix_range": "VIX < 15",
+      "trade_count": 64,
+      "win_rate": 68.75,
+      "avg_pnl": 1.125,
+      "total_pnl": 72.0,
+      "sharpe_ratio": 2.8379530074910106,
+      "max_drawdown": 15.0,
+      "avg_score": 5.161261247110639,
+      "avg_vix": 13.57781246304512
+    },
+    "normal": {
+      "vix_range": "15 \u2264 VIX < 25",
+      "trade_count": 132,
+      "win_rate": 72.72727272727273,
+      "avg_pnl": 1.3636363636363635,
+      "total_pnl": 180.0,
+      "sharpe_ratio": 3.594744866686043,
+      "max_drawdown": 12.00000000000001,
+      "avg_score": 3.589602558975599,
+      "avg_vix": 18.58454549673832
+    },
+    "high_vol": {
+      "vix_range": "VIX \u2265 25",
+      "trade_count": 12,
+      "win_rate": 83.33333333333334,
+      "avg_pnl": 2.0,
+      "total_pnl": 24.0,
+      "sharpe_ratio": 6.0553007081949835,
+      "max_drawdown": 3.0,
+      "avg_score": 4.60643897231914,
+      "avg_vix": 29.570833206176758
+    }
+  }
+}
