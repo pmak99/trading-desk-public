@@ -86,6 +86,44 @@ python -c "from src.infrastructure.database.init_schema import initialize_databa
 python scripts/health_check.py
 ```
 
+### Optional: Whisper Mode Setup
+
+The **Whisper Mode** feature fetches "most anticipated earnings" from Earnings Whispers via Reddit. This is entirely optional.
+
+#### Reddit API (Primary Method)
+
+1. Create a Reddit app at [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps)
+   - Choose "script" type
+   - Name: "iv-crush-trading-bot"
+   - Redirect URI: http://localhost:8080
+
+2. Add credentials to `.env`:
+   ```bash
+   REDDIT_CLIENT_ID=your_client_id_here
+   REDDIT_CLIENT_SECRET=your_secret_here
+   ```
+
+#### Tesseract OCR (Fallback Method)
+
+Install OCR dependencies for image-based fallback (if Reddit is unavailable):
+
+```bash
+# Install Python packages
+pip install -e ".[whisper]"
+
+# Install Tesseract binary
+# macOS
+brew install tesseract
+
+# Ubuntu/Debian
+sudo apt-get install tesseract-ocr
+
+# Windows (Chocolatey)
+choco install tesseract
+```
+
+**Note:** Whisper mode works without OCR (Reddit only). OCR fallback is purely optional for manual screenshots.
+
 ---
 
 ## Usage
@@ -121,6 +159,27 @@ Analyzes multiple tickers, auto-fetches earnings dates via Alpha Vantage.
 ```
 
 Scans all earnings for specific date via Alpha Vantage API.
+
+### Whisper Mode (Most Anticipated Earnings)
+
+```bash
+# Current week's most anticipated earnings
+./trade.sh whisper
+
+# Specific week (provide Monday date)
+./trade.sh whisper 2025-11-10
+
+# With image fallback (if Reddit unavailable)
+python scripts/scan.py --whisper-week --fallback-image data/earnings_screenshot.png
+```
+
+Fetches "most anticipated earnings" tickers from Earnings Whispers via:
+- **Primary**: Reddit r/wallstreetbets weekly earnings threads (PRAW API)
+- **Fallback**: Image OCR (screenshot of earnings table)
+
+Automatically backfills historical data and analyzes each ticker for VRP opportunities.
+
+**Setup Required:** See "Optional: Whisper Mode Setup" in Installation section above.
 
 ### Health Check
 
@@ -161,6 +220,11 @@ python scripts/analyze.py NVDA --earnings-date 2025-11-20 --expiration 2025-11-2
 # Scan mode
 python scripts/scan.py --scan-date 2025-11-20
 python scripts/scan.py --tickers NVDA,WMT,AMD
+
+# Whisper mode (most anticipated earnings)
+python scripts/scan.py --whisper-week
+python scripts/scan.py --whisper-week 2025-11-10
+python scripts/scan.py --whisper-week --fallback-image data/earnings.png
 ```
 
 ---

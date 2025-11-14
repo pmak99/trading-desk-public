@@ -7,6 +7,7 @@
 #   ./trade.sh NVDA 2025-11-20                    # Single ticker
 #   ./trade.sh list NVDA,WMT,AMD 2025-11-20       # Multiple tickers
 #   ./trade.sh scan 2025-11-20                     # Scan all earnings for date
+#   ./trade.sh whisper [YYYY-MM-DD]                # Most anticipated earnings (current or specific week)
 #   ./trade.sh health                              # Health check
 
 set -e
@@ -94,6 +95,7 @@ show_usage() {
     echo "  $0 TICKER YYYY-MM-DD [YYYY-MM-DD]           # Analyze single ticker"
     echo "  $0 list TICKERS YYYY-MM-DD [offset_days]    # Analyze multiple tickers"
     echo "  $0 scan YYYY-MM-DD                           # Scan earnings for date"
+    echo "  $0 whisper [YYYY-MM-DD]                      # Most anticipated earnings"
     echo "  $0 health                                    # Health check only"
     echo ""
     echo "Examples:"
@@ -108,6 +110,10 @@ show_usage() {
     echo "  ${GREEN}# Scan all earnings for a specific date${NC}"
     echo "  $0 scan 2025-11-20"
     echo ""
+    echo "  ${GREEN}# Most anticipated earnings (from Earnings Whispers)${NC}"
+    echo "  $0 whisper                                  # Current week"
+    echo "  $0 whisper 2025-11-10                       # Specific week (Monday)"
+    echo ""
     echo "  ${GREEN}# Quick health check${NC}"
     echo "  $0 health"
     echo ""
@@ -116,6 +122,7 @@ show_usage() {
     echo "  ✓ Strategy recommendations (Iron Condor, Credit Spreads)"
     echo "  ✓ Strike selections with P/L calculations"
     echo "  ✓ Phase 4 metrics (consistency, skew analysis)"
+    echo "  ✓ Auto-backfill historical data (whisper & ticker modes)"
     echo ""
     echo -e "${YELLOW}Database:${NC} 675 earnings moves, 52 tickers (2022-2024)"
     echo -e "${YELLOW}Strategy:${NC} Balanced with Half-Kelly Position Sizing (5% capital per trade)"
@@ -253,6 +260,37 @@ scan_earnings() {
     echo ""
 }
 
+whisper_mode() {
+    local week_monday=${1:-}
+
+    # Validate date if provided
+    if [ -n "$week_monday" ]; then
+        validate_date "$week_monday" || return 1
+    fi
+
+    echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
+    echo -e "${BLUE}${BOLD}    Most Anticipated Earnings${NC}"
+    echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
+    echo ""
+
+    # Build command
+    local cmd="python scripts/scan.py --whisper-week"
+    if [ -n "$week_monday" ]; then
+        cmd="$cmd $week_monday"
+    fi
+
+    # Run whisper mode
+    $cmd 2>&1 | \
+        grep -v "^[0-9]\{4\}-" | \
+        grep -A 500 "WHISPER MODE\|Retrieved\|Tickers:\|Processing\|VRP\|Score\|TRADEABLE\|Whisper Analysis\|Total\|Analyzed\|Skipped\|Errors\|OPPORTUNITIES" || {
+        echo -e "${RED}Whisper mode failed${NC}"
+        echo -e "${YELLOW}Could not fetch most anticipated earnings${NC}"
+        echo -e "${YELLOW}Tip: Check Reddit access or provide screenshot (--fallback-image)${NC}"
+        return 1
+    }
+    echo ""
+}
+
 show_summary() {
     # Summary is now included in the output from the Python scripts
     # No additional summary needed
@@ -273,6 +311,12 @@ case "$1" in
         fi
         health_check
         scan_earnings "$2"
+        show_summary
+        ;;
+
+    whisper)
+        health_check
+        whisper_mode "$2"
         show_summary
         ;;
 
