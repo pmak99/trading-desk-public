@@ -8,9 +8,11 @@ Fallback: Image file with OCR parsing
 import logging
 import re
 import os
+import hashlib
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple
 from pathlib import Path
+from enum import Enum
 
 import praw
 import requests
@@ -29,6 +31,107 @@ except ImportError:
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+
+class CircuitState(Enum):
+    """Circuit breaker states."""
+    CLOSED = "closed"      # Normal operation
+    OPEN = "open"          # Failing, requests blocked
+    HALF_OPEN = "half_open"  # Testing if service recovered
+
+
+class CircuitBreaker:
+    """Simple circuit breaker for external service calls."""
+
+    def __init__(
+        self,
+        name: str,
+        failure_threshold: int = 3,
+        recovery_timeout: int = 60,
+        success_threshold: int = 2
+    ):
+        """
+        Initialize circuit breaker.
+
+        Args:
+            name: Circuit breaker name for logging
+            failure_threshold: Consecutive failures before opening circuit
+            recovery_timeout: Seconds to wait before attempting recovery
+            success_threshold: Consecutive successes in half-open to close circuit
+        """
+        self.name = name
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.success_threshold = success_threshold
+
+        self.state = CircuitState.CLOSED
+        self.failure_count = 0
+        self.success_count = 0
+        self.last_failure_time: Optional[float] = None
+
+    def call(self, func, *args, **kwargs):
+        """
+        Execute function with circuit breaker protection.
+
+        Args:
+            func: Function to execute
+            *args, **kwargs: Arguments to pass to function
+
+        Returns:
+            Function result
+
+        Raises:
+            Exception: If circuit is open or function fails
+        """
+        # Check if circuit should move to half-open
+        if self.state == CircuitState.OPEN:
+            if self.last_failure_time:
+                time_since_failure = datetime.now().timestamp() - self.last_failure_time
+                if time_since_failure >= self.recovery_timeout:
+                    logger.debug(f"Circuit {self.name}: OPEN -> HALF_OPEN (recovery attempt)")
+                    self.state = CircuitState.HALF_OPEN
+                    self.success_count = 0
+                else:
+                    raise Exception(f"Circuit breaker {self.name} is OPEN (failing fast)")
+
+        # Execute function
+        try:
+            result = func(*args, **kwargs)
+            self._on_success()
+            return result
+        except Exception as e:
+            self._on_failure()
+            raise
+
+    def _on_success(self):
+        """Handle successful call."""
+        if self.state == CircuitState.HALF_OPEN:
+            self.success_count += 1
+            if self.success_count >= self.success_threshold:
+                logger.info(f"Circuit {self.name}: HALF_OPEN -> CLOSED (recovered)")
+                self.state = CircuitState.CLOSED
+                self.failure_count = 0
+        elif self.state == CircuitState.CLOSED:
+            # Reset failure count on success
+            self.failure_count = 0
+
+    def _on_failure(self):
+        """Handle failed call."""
+        self.last_failure_time = datetime.now().timestamp()
+
+        if self.state == CircuitState.HALF_OPEN:
+            logger.warning(f"Circuit {self.name}: HALF_OPEN -> OPEN (recovery failed)")
+            self.state = CircuitState.OPEN
+            self.failure_count = 0
+        elif self.state == CircuitState.CLOSED:
+            self.failure_count += 1
+            if self.failure_count >= self.failure_threshold:
+                logger.warning(f"Circuit {self.name}: CLOSED -> OPEN (threshold reached: {self.failure_count})")
+                self.state = CircuitState.OPEN
+
+    def is_open(self) -> bool:
+        """Check if circuit is currently open."""
+        return self.state == CircuitState.OPEN
 
 
 def get_week_monday(target_date: Optional[datetime] = None) -> datetime:
@@ -57,12 +160,17 @@ class EarningsWhisperScraper:
 
     # OCR configuration
     MIN_TICKER_LENGTH = 2  # Minimum characters for valid ticker
+    OCR_CACHE_TTL_SECONDS = 604800  # 7 days (weekly earnings posts)
+
+    # Pre-compiled regex patterns for better performance
+    _TICKER_PATTERN = re.compile(r'\b([A-Z]{1,5})\b')
+    _DATE_PATTERN = re.compile(r'(\d{1,2})/(\d{1,2})')
 
     # Regex patterns for extracting tickers from Reddit markdown
     TICKER_PATTERNS = [
-        r'\[([A-Z]{1,5})\]\(http',           # [TICKER](url)
-        r'\*\*([A-Z]{1,5})\*\*',             # **TICKER**
-        r'^[-*]\s+([A-Z]{1,5})\s+[\(\[]'    # - TICKER (date)
+        re.compile(r'\[([A-Z]{1,5})\]\(http'),           # [TICKER](url)
+        re.compile(r'\*\*([A-Z]{1,5})\*\*'),             # **TICKER**
+        re.compile(r'^[-*]\s+([A-Z]{1,5})\s+[\(\[]')    # - TICKER (date)
     ]
 
     # Words to exclude from OCR ticker extraction (common false positives)
@@ -92,7 +200,7 @@ class EarningsWhisperScraper:
     }
 
     def __init__(self):
-        """Initialize Reddit client."""
+        """Initialize Reddit client, OCR cache, and circuit breakers."""
         try:
             self.reddit = praw.Reddit(
                 client_id=os.getenv('REDDIT_CLIENT_ID'),
@@ -104,6 +212,23 @@ class EarningsWhisperScraper:
         except Exception as e:
             logger.warning(f"Reddit unavailable: {e}")
             self.reddit_available = False
+
+        # OCR result cache: {url_hash: (tickers, timestamp)}
+        self._ocr_cache: Dict[str, Tuple[List[str], float]] = {}
+
+        # Circuit breakers for external dependencies
+        self._reddit_breaker = CircuitBreaker(
+            name="Reddit",
+            failure_threshold=3,
+            recovery_timeout=120,  # 2 minutes
+            success_threshold=2
+        )
+        self._image_breaker = CircuitBreaker(
+            name="ImageDownload",
+            failure_threshold=5,
+            recovery_timeout=60,  # 1 minute
+            success_threshold=2
+        )
 
     def get_most_anticipated_earnings(
         self,
@@ -134,13 +259,16 @@ class EarningsWhisperScraper:
         monday = get_week_monday(target_date)
         logger.info(f"Fetching earnings for week of {monday.strftime('%Y-%m-%d')}")
 
-        # Try Reddit first
-        if self.reddit_available:
-            result = self._fetch_from_reddit(monday)
-            if result.is_ok:
-                logger.info(f"✓ Retrieved {len(result.value)} tickers from Reddit")
-                return result
-            logger.warning("Reddit fetch failed")
+        # Try Reddit first (with circuit breaker)
+        if self.reddit_available and not self._reddit_breaker.is_open():
+            try:
+                result = self._reddit_breaker.call(self._fetch_from_reddit_impl, monday)
+                if result.is_ok:
+                    logger.info(f"✓ Retrieved {len(result.value)} tickers from Reddit")
+                    return result
+                logger.warning("Reddit fetch failed")
+            except Exception as e:
+                logger.warning(f"Reddit circuit breaker: {e}")
 
         # Fallback to image
         if fallback_image:
@@ -156,8 +284,8 @@ class EarningsWhisperScraper:
             context={"week_monday": monday.strftime("%Y-%m-%d")}
         ))
 
-    def _fetch_from_reddit(self, week_monday: datetime) -> Result[List[str], AppError]:
-        """Fetch from r/wallstreetbets weekly earnings thread."""
+    def _fetch_from_reddit_impl(self, week_monday: datetime) -> Result[List[str], AppError]:
+        """Fetch from r/wallstreetbets weekly earnings thread (circuit breaker protected)."""
         try:
             subreddit = self.reddit.subreddit('wallstreetbets')
             friday = week_monday + timedelta(days=4)
@@ -242,8 +370,7 @@ class EarningsWhisperScraper:
             True if title matches the week, False otherwise
         """
         # Extract date pattern from title: "11/10 - 11/14" or "11/10"
-        date_pattern = r'(\d{1,2})/(\d{1,2})'
-        matches = re.findall(date_pattern, title)
+        matches = self._DATE_PATTERN.findall(title)
 
         if not matches:
             return False
@@ -291,9 +418,9 @@ class EarningsWhisperScraper:
                 if line.strip().startswith('#') or 'upcoming earnings' in line.lower():
                     break
 
-                # Extract ticker patterns using class constants
+                # Extract ticker patterns using pre-compiled patterns
                 for pattern in self.TICKER_PATTERNS:
-                    match = re.search(pattern, line)
+                    match = pattern.search(line)
                     if match:
                         tickers.append(match.group(1))
                         break
@@ -317,35 +444,29 @@ class EarningsWhisperScraper:
                     "OCR not available. Install: pip install pillow pytesseract && brew install tesseract"
                 ))
 
-            # Download image with user agent and size validation
-            headers = {
-                'User-Agent': 'iv-crush-trading-bot/2.0 (Python/requests)'
-            }
-            response = requests.get(
-                image_url,
-                timeout=self.IMAGE_DOWNLOAD_TIMEOUT,
-                headers=headers,
-                stream=True
-            )
-            response.raise_for_status()
+            # Check cache first
+            url_hash = hashlib.md5(image_url.encode()).hexdigest()
+            if url_hash in self._ocr_cache:
+                cached_tickers, cached_time = self._ocr_cache[url_hash]
+                age_seconds = datetime.now().timestamp() - cached_time
+                if age_seconds < self.OCR_CACHE_TTL_SECONDS:
+                    logger.debug(f"Cache hit for {image_url[:50]}... (age: {age_seconds:.0f}s)")
+                    return Result.Ok(cached_tickers)
+                else:
+                    logger.debug(f"Cache expired for {image_url[:50]}... (age: {age_seconds:.0f}s)")
+                    del self._ocr_cache[url_hash]
 
-            # Check content length before downloading
-            content_length = response.headers.get('content-length')
-            if content_length and int(content_length) > self.MAX_IMAGE_SIZE_BYTES:
+            # Download image with circuit breaker protection
+            try:
+                content = self._image_breaker.call(
+                    self._download_image_impl,
+                    image_url
+                )
+            except Exception as e:
                 return Result.Err(AppError(
                     ErrorCode.EXTERNAL,
-                    f"Image too large: {int(content_length):,} bytes (max: {self.MAX_IMAGE_SIZE_BYTES:,})"
+                    f"Image download failed (circuit breaker): {e}"
                 ))
-
-            # Download with size limit enforcement
-            content = b''
-            for chunk in response.iter_content(chunk_size=self.IMAGE_CHUNK_SIZE):
-                content += chunk
-                if len(content) > self.MAX_IMAGE_SIZE_BYTES:
-                    return Result.Err(AppError(
-                        ErrorCode.EXTERNAL,
-                        f"Image exceeds size limit during download: {len(content):,} bytes"
-                    ))
 
             logger.debug(f"Downloaded {len(content):,} bytes from {image_url}")
 
@@ -370,6 +491,11 @@ class EarningsWhisperScraper:
                     return Result.Err(AppError(ErrorCode.NODATA, "No tickers found in image"))
 
                 logger.debug(f"Extracted {len(tickers)} tickers after filtering")
+
+                # Cache the result
+                self._ocr_cache[url_hash] = (tickers, datetime.now().timestamp())
+                logger.debug(f"Cached OCR result for {image_url[:50]}...")
+
                 return Result.Ok(tickers)
 
             finally:
@@ -380,6 +506,48 @@ class EarningsWhisperScraper:
             return Result.Err(AppError(ErrorCode.EXTERNAL, f"Image download error: {e}"))
         except Exception as e:
             return Result.Err(AppError(ErrorCode.EXTERNAL, f"Image processing error: {e}"))
+
+    def _download_image_impl(self, image_url: str) -> bytes:
+        """
+        Download image from URL with size validation.
+
+        Args:
+            image_url: URL to download
+
+        Returns:
+            Image content as bytes
+
+        Raises:
+            Exception: If download fails or size exceeds limit
+        """
+        headers = {
+            'User-Agent': 'iv-crush-trading-bot/2.0 (Python/requests)'
+        }
+        response = requests.get(
+            image_url,
+            timeout=self.IMAGE_DOWNLOAD_TIMEOUT,
+            headers=headers,
+            stream=True
+        )
+        response.raise_for_status()
+
+        # Check content length before downloading
+        content_length = response.headers.get('content-length')
+        if content_length and int(content_length) > self.MAX_IMAGE_SIZE_BYTES:
+            raise Exception(
+                f"Image too large: {int(content_length):,} bytes (max: {self.MAX_IMAGE_SIZE_BYTES:,})"
+            )
+
+        # Download with size limit enforcement
+        content = b''
+        for chunk in response.iter_content(chunk_size=self.IMAGE_CHUNK_SIZE):
+            content += chunk
+            if len(content) > self.MAX_IMAGE_SIZE_BYTES:
+                raise Exception(
+                    f"Image exceeds size limit during download: {len(content):,} bytes"
+                )
+
+        return content
 
     def _parse_image(self, image_path: str) -> Result[List[str], AppError]:
         """Extract tickers from earnings table image using OCR."""
@@ -456,7 +624,7 @@ class EarningsWhisperScraper:
             # Extract tickers from earnings section
             if in_earnings_section:
                 # Find ALL uppercase words in line (tickers can appear anywhere)
-                line_tickers = re.findall(r'\b([A-Z]{1,5})\b', line)
+                line_tickers = self._TICKER_PATTERN.findall(line)
                 for ticker in line_tickers:
                     if ticker not in self.EXCLUDED_WORDS and len(ticker) >= self.MIN_TICKER_LENGTH:
                         if ticker not in tickers:  # Avoid duplicates
@@ -466,7 +634,7 @@ class EarningsWhisperScraper:
         # Fallback: If no "Most Anticipated" section found, use simple extraction
         if not tickers:
             logger.debug("No 'Most Anticipated' section found, using fallback extraction")
-            potential_tickers = re.findall(r'\b[A-Z]{1,5}\b', text)
+            potential_tickers = self._TICKER_PATTERN.findall(text)
 
             for ticker in potential_tickers:
                 if ticker not in self.EXCLUDED_WORDS and len(ticker) >= self.MIN_TICKER_LENGTH:
