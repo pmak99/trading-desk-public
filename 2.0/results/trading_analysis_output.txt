@@ -1,0 +1,69 @@
+Reading trading history...
+✓ Loaded 496 option trades
+
+Grouping into positions...
+✓ Identified 65 unique positions
+
+Calculating P&L...
+✓ Calculated P&L for all positions
+
+Analyzing performance...
+
+================================================================================
+ACTUAL TRADING HISTORY ANALYSIS - Last 90 Days
+================================================================================
+
+OVERALL PERFORMANCE
+================================================================================
+Total Positions: 65
+Closed Positions: 59
+Open Positions: 6
+
+Total P&L: $96,880.38
+Win Rate: 83.1%
+Winners: 49
+Losers: 10
+Avg Win: $6,084.79
+Avg Loss: $-20,127.42
+
+================================================================================
+PERFORMANCE BY POSITION TYPE
+================================================================================
+Other               :  30 positions, $115,622.96 P&L,  83.3% WR
+Call Spread         :   8 positions, $45,645.58 P&L,  87.5% WR
+Iron Condor         :   3 positions, $-70,305.52 P&L,  66.7% WR
+Put Spread          :  18 positions, $5,917.36 P&L,  83.3% WR
+
+================================================================================
+PERFORMANCE BY TICKER (Top 10)
+================================================================================
+ORCL  :   1 positions, $61,283.22 P&L, 100.0% WR
+NVDA  :   1 positions, $28,724.86 P&L, 100.0% WR
+RDDT  :   2 positions, $26,232.32 P&L, 100.0% WR
+MU    :   1 positions, $24,076.98 P&L, 100.0% WR
+TGT   :   1 positions, $15,816.24 P&L, 100.0% WR
+SPXW  :   1 positions, $12,857.44 P&L, 100.0% WR
+ASML  :   1 positions, $12,196.00 P&L, 100.0% WR
+FDX   :   1 positions, $11,202.42 P&L, 100.0% WR
+FIG   :   1 positions, $10,807.48 P&L, 100.0% WR
+SPY   :   5 positions, $10,704.42 P&L,  60.0% WR
+
+================================================================================
+BEST 5 TRADES
+================================================================================
+ORCL   2025-09-12   Other                $61,283.22
+NVDA   2025-08-29   Iron Condor          $28,724.86
+MU     2025-09-26   Other                $24,076.98
+RDDT   2025-10-31   Other                $19,637.48
+TGT    2025-08-22   Call Spread          $15,816.24
+
+================================================================================
+WORST 5 TRADES
+================================================================================
+AVGO   2025-09-05   Iron Condor          $-102,120.44
+NFLX   2025-10-24   Other                $-50,943.48
+META   2025-10-31   Put Spread           $-18,691.36
+CVNA   2025-10-31   Put Spread           $-10,648.32
+PINS   2025-11-07   Other                $-10,086.96
+
+✓ Results saved to: results/actual_trading_analysis.json
