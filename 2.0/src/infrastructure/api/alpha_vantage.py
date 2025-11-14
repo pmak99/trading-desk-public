@@ -111,8 +111,19 @@ class AlphaVantageAPI:
                 )
 
             # Parse header and data
+            # CSV format: symbol,name,reportDate,fiscalDateEnding,estimate,currency
             header = lines[0].split(',')
             results = []
+
+            # Find column indices from header (robust against column order changes)
+            try:
+                symbol_idx = header.index('symbol')
+                report_date_idx = header.index('reportDate')
+            except ValueError:
+                # Fallback to hardcoded indices if header doesn't match
+                logger.warning("CSV header doesn't match expected format, using fallback indices")
+                symbol_idx = 0
+                report_date_idx = 2
 
             for line in lines[1:]:
                 try:
@@ -120,17 +131,12 @@ class AlphaVantageAPI:
                     if len(fields) < 3:
                         continue
 
-                    ticker = fields[0].strip()
-                    report_date = date.fromisoformat(fields[1].strip())
+                    ticker = fields[symbol_idx].strip()
+                    report_date = date.fromisoformat(fields[report_date_idx].strip())
 
-                    # Parse timing (reportTime column if available)
+                    # Alpha Vantage CSV doesn't include timing (BMO/AMC) info
+                    # Default to UNKNOWN - timing should be fetched from another source if needed
                     timing = EarningsTiming.UNKNOWN
-                    if len(fields) > 3 and fields[3]:
-                        time_str = fields[3].strip().lower()
-                        if "bmo" in time_str or "before" in time_str:
-                            timing = EarningsTiming.BMO
-                        elif "amc" in time_str or "after" in time_str:
-                            timing = EarningsTiming.AMC
 
                     results.append((ticker, report_date, timing))
 
