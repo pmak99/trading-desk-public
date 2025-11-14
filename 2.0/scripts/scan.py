@@ -37,6 +37,10 @@ from src.utils.logging import setup_logging
 from src.container import Container
 from src.config.config import Config
 from src.domain.enums import EarningsTiming
+from src.infrastructure.data_sources.earnings_whisper_scraper import (
+    EarningsWhisperScraper,
+    get_week_monday
+)
 
 logger = logging.getLogger(__name__)
 
@@ -610,6 +614,150 @@ def ticker_mode(
     return 0 if error_count == 0 else 1
 
 
+def whisper_mode(
+    container: Container,
+    week_monday: Optional[str] = None,
+    fallback_image: Optional[str] = None,
+    expiration_offset: Optional[int] = None
+) -> int:
+    """
+    Whisper mode: Analyze most anticipated earnings.
+
+    Fetches tickers from Reddit and analyzes each with auto-backfill.
+
+    Args:
+        container: DI container
+        week_monday: Monday in YYYY-MM-DD (defaults to current week)
+        fallback_image: Path to earnings screenshot (PNG/JPG)
+        expiration_offset: Custom expiration offset in days
+
+    Returns:
+        Exit code (0 = success, 1 = error)
+    """
+    logger.info("=" * 80)
+    logger.info("WHISPER MODE: Most Anticipated Earnings")
+    logger.info("=" * 80)
+
+    if week_monday:
+        try:
+            target_date = datetime.strptime(week_monday, "%Y-%m-%d")
+            monday = get_week_monday(target_date)
+        except ValueError:
+            logger.error(f"Invalid date: {week_monday}. Use YYYY-MM-DD")
+            return 1
+    else:
+        monday = get_week_monday()
+
+    logger.info(f"Week: {monday.strftime('%Y-%m-%d')}")
+    if fallback_image:
+        logger.info(f"Fallback: {fallback_image}")
+    logger.info("")
+
+    logger.info("Fetching ticker list...")
+    scraper = EarningsWhisperScraper()
+    result = scraper.get_most_anticipated_earnings(
+        week_monday=monday.strftime("%Y-%m-%d"),
+        fallback_image=fallback_image
+    )
+
+    if result.is_err:
+        logger.error(f"Failed to fetch ticker list: {result.error}")
+        return 1
+
+    tickers = result.value
+    logger.info(f"✓ Retrieved {len(tickers)} most anticipated tickers")
+    logger.info(f"Tickers: {', '.join(tickers)}")
+    logger.info("")
+
+    # Rate limit warning
+    if len(tickers) > ALPHA_VANTAGE_CALLS_PER_MINUTE:
+        logger.warning(
+            f"⚠️  Analyzing {len(tickers)} tickers will require rate limiting "
+            f"(Alpha Vantage: {ALPHA_VANTAGE_CALLS_PER_MINUTE} calls/min)"
+        )
+    logger.info("")
+
+    # Analyze each ticker
+    results = []
+    success_count = 0
+    error_count = 0
+    skip_count = 0
+    api_call_count = 0
+
+    for i, ticker in enumerate(tickers):
+        # Rate limit handling - pause after every N API calls
+        if api_call_count > 0 and api_call_count % ALPHA_VANTAGE_CALLS_PER_MINUTE == 0:
+            logger.info(
+                f"⏸️  Rate limit pause ({RATE_LIMIT_PAUSE_SECONDS}s) "
+                f"after {api_call_count} API calls..."
+            )
+            time.sleep(RATE_LIMIT_PAUSE_SECONDS)
+
+        logger.info(f"\n{'=' * 80}")
+        logger.info(f"Processing {ticker} ({i+1}/{len(tickers)})")
+        logger.info(f"{'=' * 80}")
+
+        # Fetch earnings date for ticker (counts as 1 API call)
+        earnings_info = fetch_earnings_for_ticker(container, ticker)
+        api_call_count += 1
+
+        if not earnings_info:
+            logger.warning(f"No upcoming earnings found for {ticker} - skipping")
+            skip_count += 1
+            continue
+
+        earnings_date, timing = earnings_info
+
+        # Calculate expiration date
+        expiration_date = calculate_expiration_date(
+            earnings_date, timing, expiration_offset
+        )
+        logger.info(f"Calculated expiration: {expiration_date}")
+
+        # Analyze ticker (with auto-backfill enabled like ticker mode)
+        result = analyze_ticker(
+            container,
+            ticker,
+            earnings_date,
+            expiration_date,
+            auto_backfill=True
+        )
+
+        if result:
+            results.append(result)
+            if result['status'] == 'SUCCESS':
+                success_count += 1
+            else:
+                skip_count += 1
+        else:
+            error_count += 1
+
+    # Summary
+    logger.info("\n" + "=" * 80)
+    logger.info("Whisper Analysis Complete")
+    logger.info("=" * 80)
+    logger.info(f"Total Tickers: {len(tickers)}")
+    logger.info(f"✓ Analyzed: {success_count}")
+    logger.info(f"⏭️  Skipped: {skip_count}")
+    logger.info(f"✗ Errors: {error_count}")
+
+    # Tradeable opportunities
+    tradeable = [r for r in results if r.get('is_tradeable', False)]
+    if tradeable:
+        logger.info(f"\n🎯 {len(tradeable)} TRADEABLE OPPORTUNITIES:")
+        for r in sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True):
+            logger.info(
+                f"  {r['ticker']:6s}: "
+                f"VRP {r['vrp_ratio']:.2f}x, "
+                f"Edge {r['edge_score']:.2f}, "
+                f"{r['recommendation'].upper()}"
+            )
+    else:
+        logger.info("\nNo tradeable opportunities found")
+
+    return 0 if error_count == 0 else 1
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -623,6 +771,15 @@ Examples:
     # Ticker mode - analyze specific tickers
     python scripts/scan.py --tickers AAPL,MSFT,GOOGL
 
+    # Whisper mode - analyze most anticipated earnings (current week)
+    python scripts/scan.py --whisper-week
+
+    # Whisper mode - specific week (Monday)
+    python scripts/scan.py --whisper-week 2025-11-10
+
+    # Whisper mode with image fallback
+    python scripts/scan.py --whisper-week --fallback-image data/earnings.png
+
     # Ticker mode with custom expiration offset
     python scripts/scan.py --tickers AAPL --expiration-offset 1
 
@@ -634,8 +791,9 @@ Expiration Date Calculation:
 
 Notes:
     - Requires TRADIER_API_KEY and ALPHA_VANTAGE_API_KEY in .env
-    - Historical data should be backfilled first for VRP calculation
-    - Run: python scripts/backfill.py <TICKER> to backfill data
+    - Whisper mode auto-backfills historical data (like ticker mode)
+    - Historical data is backfilled automatically for VRP calculation
+    - Run: python scripts/backfill.py <TICKER> to manually backfill data
         """,
     )
 
@@ -651,12 +809,24 @@ Notes:
         type=str,
         help="Comma-separated list of tickers to analyze"
     )
+    mode_group.add_argument(
+        "--whisper-week",
+        nargs='?',
+        const='',
+        type=str,
+        help="Analyze most anticipated earnings for week (optional: YYYY-MM-DD for Monday, defaults to current week)"
+    )
 
     # Options
     parser.add_argument(
         "--expiration-offset",
         type=int,
         help="Custom expiration offset in days from earnings date (overrides auto-calculation)"
+    )
+    parser.add_argument(
+        "--fallback-image",
+        type=str,
+        help="Path to earnings screenshot (PNG/JPG) for whisper mode fallback"
     )
     parser.add_argument(
         "--log-level",
@@ -680,6 +850,15 @@ Notes:
         if args.scan_date:
             scan_date = parse_date(args.scan_date)
             return scanning_mode(container, scan_date, args.expiration_offset)
+        elif args.whisper_week is not None:
+            # whisper_week can be '' (empty string) for current week or a date string
+            week_monday = args.whisper_week if args.whisper_week else None
+            return whisper_mode(
+                container,
+                week_monday=week_monday,
+                fallback_image=args.fallback_image,
+                expiration_offset=args.expiration_offset
+            )
         else:
             tickers = [t.strip().upper() for t in args.tickers.split(',')]
             return ticker_mode(container, tickers, args.expiration_offset)
