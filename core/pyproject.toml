@@ -12,9 +12,14 @@ dependencies = [
     "requests>=2.32.0",
     "python-dotenv>=1.2.0",
     "numpy>=2.0.0",
+    "praw>=7.7.0",
 ]
 
 [project.optional-dependencies]
+whisper = [
+    "pillow>=10.0.0",
+    "pytesseract>=0.3.10",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",
