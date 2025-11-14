@@ -182,8 +182,10 @@ class TestValidateExpirationDate:
     def test_expiration_too_far_future(self):
         """Expiration > 30 days after earnings should return error."""
         today = date.today()
-        earnings = today + timedelta(days=1)
-        expiration = earnings + timedelta(days=35)  # 35 days after
+        # Ensure earnings is on a weekday
+        earnings = adjust_to_trading_day(today + timedelta(days=1))
+        # Calculate expiration 35 days after earnings (also ensure weekday)
+        expiration = adjust_to_trading_day(earnings + timedelta(days=35))
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
         assert result is not None
@@ -208,7 +210,8 @@ class TestValidateExpirationDate:
     def test_expiration_same_as_earnings(self):
         """Expiration same as earnings (0DTE) should be valid."""
         today = date.today()
-        earnings = today + timedelta(days=1)
+        # Ensure earnings is on a weekday
+        earnings = adjust_to_trading_day(today + timedelta(days=1))
         expiration = earnings  # Same day
 
         result = validate_expiration_date(expiration, earnings, "AAPL")

@@ -58,22 +58,16 @@ class TestBugFix2EarningsTimingEnum:
 class TestBugFix3AlphaVantageAttribute:
     """Test Bug Fix #3: Alpha Vantage attribute name."""
 
-    def test_container_has_alphavantage_attribute(self):
+    def test_container_has_alphavantage_attribute(self, container):
         """Verify Container has 'alphavantage' attribute (not 'alpha_vantage_api')."""
-        config = Config()
-        container = Container(config)
-
         # Should have 'alphavantage'
         assert hasattr(container, 'alphavantage')
 
         # Should NOT have 'alpha_vantage_api'
         assert not hasattr(container, 'alpha_vantage_api')
 
-    def test_alphavantage_is_callable(self):
+    def test_alphavantage_is_callable(self, container):
         """Verify alphavantage property is accessible."""
-        config = Config()
-        container = Container(config)
-
         # Should be able to access (lazy-loaded)
         alpha_vantage = container.alphavantage
         assert alpha_vantage is not None
@@ -152,11 +146,8 @@ class TestBugFix4SkewAnalysisDirectionalBias:
 class TestBugFixesIntegration:
     """Integration tests to verify all bug fixes work together."""
 
-    def test_container_creates_all_components(self):
+    def test_container_creates_all_components(self, container, config):
         """Verify Container can create all Phase 4 components without errors."""
-        config = Config()
-        container = Container(config)
-
         # Should be able to access all components
         assert container.alphavantage is not None
 
@@ -166,7 +157,8 @@ class TestBugFixesIntegration:
 
     def test_ticker_analysis_enum_usage(self):
         """Verify TickerAnalysis can be created with correct EarningsTiming enum."""
-        from src.domain.types import TickerAnalysis, ImpliedMove, VRPResult, Money, Percentage
+        from src.domain.types import TickerAnalysis, ImpliedMove, VRPResult, Money, Percentage, Strike
+        from src.domain.enums import Recommendation
         from datetime import datetime
 
         # Create a sample analysis with AMC timing
@@ -180,20 +172,21 @@ class TestBugFixesIntegration:
                 ticker="TEST",
                 expiration=date(2025, 11, 21),
                 stock_price=Money(100.0),
+                atm_strike=Strike(100.0),
+                straddle_cost=Money(5.0),
                 implied_move_pct=Percentage(5.0),
                 upper_bound=Money(105.0),
                 lower_bound=Money(95.0),
-                atm_straddle_price=Money(5.0),
-                average_iv=Percentage(50.0)
+                avg_iv=Percentage(50.0)
             ),
             vrp=VRPResult(
                 ticker="TEST",
+                expiration=date(2025, 11, 21),
                 vrp_ratio=2.0,
                 implied_move_pct=Percentage(5.0),
-                historical_mean_pct=Percentage(2.5),
-                recommendation="EXCELLENT",
-                edge_score=1.5,
-                is_tradeable=True
+                historical_mean_move_pct=Percentage(2.5),
+                recommendation=Recommendation.EXCELLENT,
+                edge_score=1.5
             ),
             consistency=None,
             skew=None,
