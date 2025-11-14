@@ -182,20 +182,51 @@ Notes:
 
         # Final Summary
         logger.info("\n" + "=" * 80)
-        logger.info("SUMMARY")
+        logger.info("SINGLE TICKER ANALYSIS - SUMMARY")
         logger.info("=" * 80)
-        logger.info(f"Ticker: {args.ticker}")
-        logger.info(f"Implied Move: {analysis.vrp.implied_move_pct}")
-        logger.info(f"VRP Ratio: {analysis.vrp.vrp_ratio:.2f}x → {analysis.vrp.recommendation.value.upper()}")
+        logger.info(f"\n📊 Analysis Results:")
+        logger.info(f"   Ticker: {args.ticker}")
+        logger.info(f"   Earnings: {args.earnings_date}")
+        logger.info(f"   Expiration: {args.expiration}")
+        logger.info(f"   Stock Price: {analysis.implied_move.stock_price}")
+        logger.info(f"\n📈 VRP Metrics:")
+        logger.info(f"   Implied Move: {analysis.vrp.implied_move_pct}")
+        logger.info(f"   Historical Avg: {analysis.vrp.historical_mean_move_pct}")
+        logger.info(f"   VRP Ratio: {analysis.vrp.vrp_ratio:.2f}x")
+        logger.info(f"   Edge Score: {analysis.vrp.edge_score:.2f}")
+        logger.info(f"   Recommendation: {analysis.vrp.recommendation.value.upper()}")
 
         if analysis.vrp.is_tradeable:
-            logger.info("\n✅ TRADEABLE OPPORTUNITY")
+            logger.info("\n" + "=" * 80)
+            logger.info("✅ RESULT: TRADEABLE OPPORTUNITY")
+            logger.info("=" * 80)
             if args.strategies and analysis.strategies:
                 rec = analysis.strategies.recommended_strategy
-                logger.info(f"   Best Strategy: {rec.strategy_type.value.replace('_', ' ').title()}")
-                logger.info(f"   Expected Return: {rec.max_profit} (R/R: {rec.reward_risk_ratio:.2f})")
+                logger.info(f"\n💡 Recommended Strategy: {rec.strategy_type.value.replace('_', ' ').title()}")
+                logger.info(f"   Strikes: {rec.strike_description}")
+                logger.info(f"   Net Credit: {rec.net_credit}")
+                logger.info(f"   Max Profit: {rec.max_profit} ({rec.contracts} contracts)")
+                logger.info(f"   Max Loss: {rec.max_loss}")
+                logger.info(f"   Reward/Risk: {rec.reward_risk_ratio:.2f}")
+                logger.info(f"   Win Probability: {rec.probability_of_profit:.1%}")
+                logger.info(f"\n📝 Next Steps:")
+                logger.info(f"   1. Review strategy details above")
+                logger.info(f"   2. Check your broker for exact pricing")
+                logger.info(f"   3. Enter position before earnings ({args.earnings_date})")
+                logger.info(f"   4. Close position at market open after earnings")
+            else:
+                logger.info(f"\n📝 Next Steps:")
+                logger.info(f"   1. Run with --strategies flag to see specific trade setups")
+                logger.info(f"   2. VRP edge detected but strategy generation not enabled")
         else:
-            logger.info("\n⏭️  SKIP - Insufficient edge")
+            logger.info("\n" + "=" * 80)
+            logger.info("⏭️  RESULT: SKIP - INSUFFICIENT EDGE")
+            logger.info("=" * 80)
+            logger.info(f"\n❌ Not Tradeable:")
+            logger.info(f"   VRP ratio {analysis.vrp.vrp_ratio:.2f}x does not meet minimum threshold")
+            logger.info(f"   Edge score {analysis.vrp.edge_score:.2f} is too low")
+            logger.info(f"\n📝 Recommendation:")
+            logger.info(f"   Skip this earnings - insufficient statistical edge")
 
         return 0
 

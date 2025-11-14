@@ -486,26 +486,45 @@ def scanning_mode(
 
     # Summary
     logger.info("\n" + "=" * 80)
-    logger.info("Scan Complete")
+    logger.info("SCAN MODE - SUMMARY")
     logger.info("=" * 80)
-    logger.info(f"Total Earnings: {len(earnings_events)}")
-    logger.info(f"✓ Analyzed: {success_count}")
-    logger.info(f"⏭️  Skipped: {skip_count}")
-    logger.info(f"✗ Errors: {error_count}")
+    logger.info(f"\n📅 Scan Details:")
+    logger.info(f"   Mode: Earnings Date Scan")
+    logger.info(f"   Date: {scan_date}")
+    logger.info(f"   Total Earnings Found: {len(earnings_events)}")
+    logger.info(f"\n📊 Analysis Results:")
+    logger.info(f"   ✓ Successfully Analyzed: {success_count}")
+    logger.info(f"   ⏭️  Skipped (No Data): {skip_count}")
+    logger.info(f"   ✗ Errors: {error_count}")
 
     # Tradeable opportunities
     tradeable = [r for r in results if r.get('is_tradeable', False)]
     if tradeable:
-        logger.info(f"\n🎯 {len(tradeable)} TRADEABLE OPPORTUNITIES:")
-        for r in sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True):
+        logger.info(f"\n" + "=" * 80)
+        logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
+        logger.info("=" * 80)
+        logger.info(f"\n🎯 Ranked by VRP Ratio:")
+        for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
             logger.info(
-                f"  {r['ticker']:6s}: "
-                f"VRP {r['vrp_ratio']:.2f}x, "
-                f"Edge {r['edge_score']:.2f}, "
+                f"   {i}. {r['ticker']:6s}: "
+                f"VRP {r['vrp_ratio']:.2f}x | "
+                f"Edge {r['edge_score']:.2f} | "
                 f"{r['recommendation'].upper()}"
             )
+        logger.info(f"\n📝 Next Steps:")
+        logger.info(f"   1. Analyze individual tickers with: ./trade.sh TICKER {scan_date} --strategies")
+        logger.info(f"   2. Review strategy recommendations for each opportunity")
+        logger.info(f"   3. Check broker pricing before entering positions")
     else:
-        logger.info("\nNo tradeable opportunities found")
+        logger.info(f"\n" + "=" * 80)
+        logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
+        logger.info("=" * 80)
+        logger.info(f"\n❌ No opportunities found for {scan_date}")
+        if skip_count > 0:
+            logger.info(f"   Note: {skip_count} ticker(s) skipped due to missing historical data")
+            logger.info(f"   Tip: Run individual analysis with auto-backfill using single ticker mode")
+        logger.info(f"\n📝 Recommendation:")
+        logger.info(f"   Try scanning a different earnings date or check whisper mode for anticipated earnings")
 
     return 0 if error_count == 0 else 1
 
@@ -590,26 +609,46 @@ def ticker_mode(
 
     # Summary
     logger.info("\n" + "=" * 80)
-    logger.info("Ticker Analysis Complete")
+    logger.info("LIST MODE - SUMMARY")
     logger.info("=" * 80)
-    logger.info(f"Total Tickers: {len(tickers)}")
-    logger.info(f"✓ Analyzed: {success_count}")
-    logger.info(f"⏭️  Skipped: {skip_count}")
-    logger.info(f"✗ Errors: {error_count}")
+    logger.info(f"\n📋 Ticker List Analysis:")
+    logger.info(f"   Mode: Multiple Ticker Analysis")
+    logger.info(f"   Tickers Requested: {len(tickers)}")
+    logger.info(f"   Tickers Analyzed: {', '.join(tickers)}")
+    logger.info(f"\n📊 Analysis Results:")
+    logger.info(f"   ✓ Successfully Analyzed: {success_count}")
+    logger.info(f"   ⏭️  Skipped (No Earnings/Data): {skip_count}")
+    logger.info(f"   ✗ Errors: {error_count}")
 
     # Tradeable opportunities
     tradeable = [r for r in results if r.get('is_tradeable', False)]
     if tradeable:
-        logger.info(f"\n🎯 {len(tradeable)} TRADEABLE OPPORTUNITIES:")
-        for r in sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True):
+        logger.info(f"\n" + "=" * 80)
+        logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
+        logger.info("=" * 80)
+        logger.info(f"\n🎯 Ranked by VRP Ratio:")
+        for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
             logger.info(
-                f"  {r['ticker']:6s}: "
-                f"VRP {r['vrp_ratio']:.2f}x, "
-                f"Edge {r['edge_score']:.2f}, "
-                f"{r['recommendation'].upper()}"
+                f"   {i}. {r['ticker']:6s}: "
+                f"VRP {r['vrp_ratio']:.2f}x | "
+                f"Edge {r['edge_score']:.2f} | "
+                f"{r['recommendation'].upper()} | "
+                f"Earnings {r['earnings_date']}"
             )
+        logger.info(f"\n📝 Next Steps:")
+        logger.info(f"   1. Analyze top opportunities with: ./trade.sh TICKER YYYY-MM-DD --strategies")
+        logger.info(f"   2. Review detailed strategy recommendations")
+        logger.info(f"   3. Prioritize by VRP ratio and edge score")
+        logger.info(f"   4. Verify earnings dates and check broker pricing")
     else:
-        logger.info("\nNo tradeable opportunities found")
+        logger.info(f"\n" + "=" * 80)
+        logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
+        logger.info("=" * 80)
+        logger.info(f"\n❌ No opportunities found among {len(tickers)} ticker(s)")
+        if skip_count > 0:
+            logger.info(f"   Note: {skip_count} ticker(s) had no upcoming earnings or insufficient data")
+        logger.info(f"\n📝 Recommendation:")
+        logger.info(f"   Try different tickers or use whisper mode for most anticipated earnings")
 
     return 0 if error_count == 0 else 1
 
@@ -734,26 +773,52 @@ def whisper_mode(
 
     # Summary
     logger.info("\n" + "=" * 80)
-    logger.info("Whisper Analysis Complete")
+    logger.info("WHISPER MODE - SUMMARY")
     logger.info("=" * 80)
-    logger.info(f"Total Tickers: {len(tickers)}")
-    logger.info(f"✓ Analyzed: {success_count}")
-    logger.info(f"⏭️  Skipped: {skip_count}")
-    logger.info(f"✗ Errors: {error_count}")
+    logger.info(f"\n🔊 Most Anticipated Earnings Analysis:")
+    logger.info(f"   Mode: Earnings Whispers (Reddit r/EarningsWhispers)")
+    logger.info(f"   Week: {monday.strftime('%Y-%m-%d')}")
+    logger.info(f"   Total Tickers: {len(tickers)}")
+    logger.info(f"\n📊 Analysis Results:")
+    logger.info(f"   ✓ Successfully Analyzed: {success_count}")
+    logger.info(f"   ⏭️  Skipped (No Earnings/Data): {skip_count}")
+    logger.info(f"   ✗ Errors: {error_count}")
 
     # Tradeable opportunities
     tradeable = [r for r in results if r.get('is_tradeable', False)]
     if tradeable:
-        logger.info(f"\n🎯 {len(tradeable)} TRADEABLE OPPORTUNITIES:")
-        for r in sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True):
+        logger.info(f"\n" + "=" * 80)
+        logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
+        logger.info("=" * 80)
+        logger.info(f"\n🎯 Most Anticipated + High VRP (Ranked by VRP Ratio):")
+        for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
             logger.info(
-                f"  {r['ticker']:6s}: "
-                f"VRP {r['vrp_ratio']:.2f}x, "
-                f"Edge {r['edge_score']:.2f}, "
-                f"{r['recommendation'].upper()}"
+                f"   {i}. {r['ticker']:6s}: "
+                f"VRP {r['vrp_ratio']:.2f}x | "
+                f"Edge {r['edge_score']:.2f} | "
+                f"{r['recommendation'].upper()} | "
+                f"Earnings {r['earnings_date']}"
             )
+        logger.info(f"\n💡 Why This Matters:")
+        logger.info(f"   These tickers combine:")
+        logger.info(f"   • High retail/market attention (Most Anticipated)")
+        logger.info(f"   • Strong statistical edge (VRP ratio)")
+        logger.info(f"   • Better liquidity expected (High volume)")
+        logger.info(f"\n📝 Next Steps:")
+        logger.info(f"   1. Analyze top opportunities with: ./trade.sh TICKER YYYY-MM-DD --strategies")
+        logger.info(f"   2. Review detailed strategy recommendations")
+        logger.info(f"   3. Prioritize by VRP ratio and market attention")
+        logger.info(f"   4. Check broker for tight bid-ask spreads")
     else:
-        logger.info("\nNo tradeable opportunities found")
+        logger.info(f"\n" + "=" * 80)
+        logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
+        logger.info("=" * 80)
+        logger.info(f"\n❌ No opportunities found among most anticipated earnings")
+        if skip_count > 0:
+            logger.info(f"   Note: {skip_count} ticker(s) had no upcoming earnings or insufficient data")
+        logger.info(f"\n📝 Recommendation:")
+        logger.info(f"   High market attention doesn't always mean high VRP")
+        logger.info(f"   Try: ./trade.sh scan YYYY-MM-DD for broader earnings scan")
 
     return 0 if error_count == 0 else 1
 
