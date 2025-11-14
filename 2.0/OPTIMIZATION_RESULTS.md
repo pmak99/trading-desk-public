@@ -134,9 +134,13 @@ position_size = capital * kelly_frac * vrp_multiplier
    - Result: **+100% P&L improvement**
    - Recommended: Hybrid (Kelly + VRP) strategy
 
+3. ✅ **Market Regime Analysis** (VIX-based) (3 hours)
+   - Result: Promising patterns, but limited sample size (8 trades)
+   - Finding: Higher volatility correlates with better P&L per trade
+   - Recommendation: Continue monitoring across regimes
+
 ### Pending 🔄
 
-3. ⏳ **Market Regime Analysis** (VIX-based)
 4. ⏳ **Historical Lookback Window Optimization**
 5. ⏳ **Earnings Timing Analysis** (BMO vs AMC)
 6. ⏳ **Decay Factor Optimization**
@@ -144,7 +148,68 @@ position_size = capital * kelly_frac * vrp_multiplier
 
 ---
 
-## Overall Impact
+## 3. Market Regime Analysis (VIX-Based)
+
+**Objective:** Analyze IV Crush performance across different market volatility regimes.
+
+### VIX Regimes Tested
+
+- **Low Vol:** VIX < 15
+- **Normal:** 15 ≤ VIX < 25
+- **High Vol:** VIX ≥ 25
+
+### Results (2024 Data - 8 Trades)
+
+| Regime | Trades | Win Rate | Avg P&L | Total P&L | Sharpe | Avg VIX |
+|--------|--------|----------|---------|-----------|--------|---------|
+| **Low Vol** | 5 (62.5%) | 80.0% | +2.94% | +14.72% | 4.94 | 14.07 |
+| **Normal** | 2 (25.0%) | 100.0% | +4.39% | +8.77% | 7.79 | 17.60 |
+| **High Vol** | 1 (12.5%) | 100.0% | +7.26% | +7.26% | 0.00 | 27.85 |
+
+### Key Findings
+
+📊 **Regime Distribution:**
+- Majority of trades occurred in low volatility environment (62.5%)
+- 2024 was predominantly a low-VIX year
+
+📈 **Performance Patterns:**
+- **Higher VIX → Better P&L:** Avg P&L increases with volatility (+2.94% → +4.39% → +7.26%)
+- **Normal Regime:** Best risk-adjusted returns (Sharpe 7.79, 100% win rate)
+- **Low Vol Regime:** Most frequent but lower P&L per trade
+
+🔍 **Low Vol vs High Vol:**
+- Win Rate: 80% → 100% (+20% in high vol)
+- Avg P&L: +2.94% → +7.26% (+147% in high vol)
+- Sample Size: 5 trades vs 1 trade (insufficient for statistical significance)
+
+### Hypothesis
+
+**IV Crush trades perform better in higher volatility regimes because:**
+1. Higher VIX → Higher implied volatility premiums to collect
+2. Greater mean reversion potential (higher IV → larger IV crush)
+3. More pronounced volatility compression after earnings
+
+**However:** Small sample size (8 trades total) prevents definitive conclusions.
+
+### Recommendation
+
+⚠️ **Insufficient data for regime-based strategy adjustments**
+
+**Current Action:** Monitor only
+- Continue collecting data across all regimes
+- Re-evaluate when sample size > 30 trades (10+ per regime)
+- Hypothesis is promising but needs validation
+
+**Future Consideration (when sufficient data):**
+- Increase position sizing in high/normal vol regimes
+- Lower min_score threshold when VIX > 20
+- Add VIX-based multiplier to composite scoring
+
+**No changes to production strategy at this time.**
+
+---
+
+## 4. Overall Impact
 
 ### Before Optimization (Baseline)
 - Configuration: Consistency-Heavy (best Sharpe)
@@ -173,7 +238,7 @@ position_size = capital * kelly_frac * vrp_multiplier
 3. ✅ Start with half-Kelly (12.5%) for safety
 
 ### Short-Term (Week 1-2)
-1. Market Regime Analysis (VIX-based filtering)
+1. ✅ Market Regime Analysis (VIX-based) - Complete, monitoring mode
 2. Earnings Timing Analysis (BMO vs AMC performance)
 3. Historical Lookback Window optimization
 
