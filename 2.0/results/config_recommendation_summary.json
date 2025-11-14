@@ -1,0 +1,126 @@
+{
+  "analysis_date": "2025-11-14",
+  "account_size": 600000,
+  "test_period": "Q1-Q3 2025 + Last 90 Days",
+  "total_positions": 100,
+  "total_trades": 770,
+
+  "top_3_configs": {
+    "aggressive": {
+      "rank_by_returns": 1,
+      "rank_by_sharpe": 3,
+      "total_pnl": 481430,
+      "monthly_avg": 43766,
+      "annual_projection": 525192,
+      "roi_percent": 87.5,
+      "win_rate": 85.5,
+      "trades": 92,
+      "avg_pnl_per_trade": 5235,
+      "sharpe_ratio": 0.85,
+      "max_drawdown_percent": 5.8,
+      "best_for": "Maximum absolute returns"
+    },
+    "liquidity_first": {
+      "rank_by_returns": 2,
+      "rank_by_sharpe": 2,
+      "total_pnl": 396425,
+      "monthly_avg": 36039,
+      "annual_projection": 432468,
+      "roi_percent": 72.1,
+      "win_rate": 86.5,
+      "trades": 37,
+      "avg_pnl_per_trade": 10715,
+      "sharpe_ratio": 0.92,
+      "max_drawdown_percent": 4.2,
+      "best_for": "Highest quality per trade",
+      "note": "Current approach"
+    },
+    "consistency_heavy": {
+      "rank_by_returns": 3,
+      "rank_by_sharpe": 1,
+      "total_pnl": 234634,
+      "monthly_avg": 21330,
+      "annual_projection": 255960,
+      "roi_percent": 42.7,
+      "win_rate": 88.9,
+      "trades": 45,
+      "avg_pnl_per_trade": 5214,
+      "sharpe_ratio": 1.00,
+      "max_drawdown_percent": 2.5,
+      "best_for": "Best risk-adjusted returns (Sharpe)"
+    }
+  },
+
+  "key_findings": {
+    "aggressive_vs_liquidity_first": {
+      "pnl_difference": 85005,
+      "percent_improvement": 21.4,
+      "trade_count_difference": 55,
+      "monthly_advantage": 7727
+    },
+    "aggressive_vs_consistency_heavy": {
+      "pnl_difference": 246796,
+      "percent_improvement": 105.2,
+      "trade_count_difference": 47,
+      "monthly_advantage": 22436,
+      "sharpe_tradeoff": -0.15
+    }
+  },
+
+  "recommendation": {
+    "primary": "aggressive",
+    "reason": "For $600K account, absolute returns matter more. $246K annual advantage over Consistency-Heavy justifies slightly lower Sharpe ratio.",
+    "expected_annual_return": 525192,
+    "expected_monthly_income": 43766,
+    "expected_win_rate": 85,
+    "risk_level": "Moderate (5.8% max drawdown)",
+    "time_commitment": "High (8-10 trades/month)"
+  },
+
+  "alternatives": {
+    "if_sharpe_priority": {
+      "config": "consistency_heavy",
+      "sharpe": 1.00,
+      "annual_return": 255960,
+      "tradeoff": "Give up $246K annually for better Sharpe"
+    },
+    "if_part_time_trader": {
+      "config": "liquidity_first",
+      "trades_per_month": 3.4,
+      "annual_return": 432468,
+      "quality_per_trade": 10715
+    }
+  },
+
+  "implementation_plan": {
+    "month_1": "Transition - Mix of Liquidity-First + Aggressive criteria, target 6-8 trades",
+    "month_2_3": "Full deployment - Adopt Aggressive fully, target 8-10 trades/month",
+    "month_4_plus": "Optimization - Monitor and adjust based on actual performance"
+  },
+
+  "risk_management": {
+    "position_size": 30000,
+    "position_size_percent": 5.0,
+    "max_positions": 3,
+    "max_risk": 90000,
+    "max_risk_percent": 15.0,
+    "stop_loss": -0.5,
+    "blacklist": ["AVGO", "NFLX", "META"]
+  },
+
+  "validation": {
+    "backtest_period": "Jan-Sep 2025",
+    "forward_test_period": "Oct-Nov 2025",
+    "backtest_win_rate": {
+      "aggressive": 81.0,
+      "liquidity_first": 79.2,
+      "consistency_heavy": 80.0
+    },
+    "forward_test_win_rate": {
+      "aggressive": 92.3,
+      "liquidity_first": 100.0,
+      "consistency_heavy": 100.0
+    },
+    "note": "All configs validated on both in-sample and out-of-sample data"
+  }
+}
