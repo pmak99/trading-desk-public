@@ -1,0 +1,27 @@
+{
+  "analysis_date": "2025-11-13T22:13:08.067066",
+  "timings": {
+    "BMO": {
+      "trade_count": 5,
+      "win_rate": 80.0,
+      "avg_pnl": 5.224,
+      "total_pnl": 26.119999999999997,
+      "sharpe_ratio": 8.390210470117959,
+      "max_drawdown": 2.65,
+      "avg_score": 76.786,
+      "avg_actual_move": 15.942,
+      "avg_predicted_move": 12.878
+    },
+    "AMC": {
+      "trade_count": 3,
+      "win_rate": 100.0,
+      "avg_pnl": 1.5433333333333334,
+      "total_pnl": 4.630000000000001,
+      "sharpe_ratio": 40.271528847423724,
+      "max_drawdown": 0.0,
+      "avg_score": 76.51,
+      "avg_actual_move": 1.6333333333333333,
+      "avg_predicted_move": 3.2666666666666666
+    }
+  }
+}

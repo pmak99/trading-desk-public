@@ -1,0 +1,53 @@
+{
+  "analysis_date": "2025-11-13T22:15:27.838345",
+  "configurations": [
+    {
+      "name": "No Decay (Equal Weights)",
+      "decay_factor": 1.0,
+      "tickers_analyzed": 50,
+      "avg_consistency": 27.8793047198094,
+      "avg_weighted_std": 3.121815537507011,
+      "avg_cv": 0.8399379211711291
+    },
+    {
+      "name": "Very Slow Decay",
+      "decay_factor": 0.95,
+      "tickers_analyzed": 50,
+      "avg_consistency": 27.827406075882703,
+      "avg_weighted_std": 3.0979037817967328,
+      "avg_cv": 0.8399379211711291
+    },
+    {
+      "name": "Slow Decay",
+      "decay_factor": 0.9,
+      "tickers_analyzed": 50,
+      "avg_consistency": 27.94501828026921,
+      "avg_weighted_std": 3.053828756882309,
+      "avg_cv": 0.8399379211711291
+    },
+    {
+      "name": "Baseline Decay",
+      "decay_factor": 0.85,
+      "tickers_analyzed": 50,
+      "avg_consistency": 28.27448196708697,
+      "avg_weighted_std": 2.9898660702003403,
+      "avg_cv": 0.8399379211711291
+    },
+    {
+      "name": "Fast Decay",
+      "decay_factor": 0.8,
+      "tickers_analyzed": 50,
+      "avg_consistency": 28.81886330153581,
+      "avg_weighted_std": 2.907861641356485,
+      "avg_cv": 0.8399379211711291
+    },
+    {
+      "name": "Very Fast Decay",
+      "decay_factor": 0.75,
+      "tickers_analyzed": 50,
+      "avg_consistency": 29.447632796721066,
+      "avg_weighted_std": 2.8108988644246673,
+      "avg_cv": 0.8399379211711291
+    }
+  ]
+}
