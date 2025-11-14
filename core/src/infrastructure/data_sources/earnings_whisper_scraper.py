@@ -44,6 +44,20 @@ def get_week_monday(target_date: Optional[datetime] = None) -> datetime:
 class EarningsWhisperScraper:
     """Scraper for most anticipated earnings using PRAW and OCR."""
 
+    # Search configuration
+    FLAIR_SEARCH_LIMIT = 20  # Last ~5 weeks of earnings threads
+    FLAIR_SEARCH_TIME_FILTER = 'month'
+    TEXT_SEARCH_LIMIT = 10
+    TEXT_SEARCH_TIME_FILTER = 'month'
+
+    # Image download configuration
+    MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
+    IMAGE_DOWNLOAD_TIMEOUT = 30  # seconds
+    IMAGE_CHUNK_SIZE = 8192  # bytes
+
+    # OCR configuration
+    MIN_TICKER_LENGTH = 2  # Minimum characters for valid ticker
+
     # Regex patterns for extracting tickers from Reddit markdown
     TICKER_PATTERNS = [
         r'\[([A-Z]{1,5})\]\(http',           # [TICKER](url)
@@ -154,8 +168,8 @@ class EarningsWhisperScraper:
                 posts = list(subreddit.search(
                     'flair:"Earnings Thread"',
                     sort='new',
-                    time_filter='month',
-                    limit=20
+                    time_filter=self.FLAIR_SEARCH_TIME_FILTER,
+                    limit=self.FLAIR_SEARCH_LIMIT
                 ))
                 logger.debug(f"Flair search found {len(posts)} posts")
             except Exception as e:
@@ -168,20 +182,20 @@ class EarningsWhisperScraper:
                 posts = list(subreddit.search(
                     f"weekly earnings thread {monday_str}",
                     sort='new',
-                    time_filter='month',
-                    limit=10
+                    time_filter=self.TEXT_SEARCH_TIME_FILTER,
+                    limit=self.TEXT_SEARCH_LIMIT
                 ))
                 logger.debug(f"Text search found {len(posts)} posts")
 
-                # Final fallback to broader search
-                if not posts or not any('weekly earnings thread' in p.title.lower() for p in posts):
-                    posts = list(subreddit.search(
-                        "weekly earnings thread",
-                        sort='new',
-                        time_filter='month',
-                        limit=10
-                    ))
-                    logger.debug(f"Broad search found {len(posts)} posts")
+            # Final fallback to broader search if still no results
+            if not posts:
+                posts = list(subreddit.search(
+                    "weekly earnings thread",
+                    sort='new',
+                    time_filter=self.TEXT_SEARCH_TIME_FILTER,
+                    limit=self.TEXT_SEARCH_LIMIT
+                ))
+                logger.debug(f"Broad search found {len(posts)} posts")
 
             for post in posts:
                 if 'weekly earnings thread' in post.title.lower():
@@ -218,7 +232,15 @@ class EarningsWhisperScraper:
             return Result.Err(AppError(ErrorCode.EXTERNAL, f"Reddit error: {e}"))
 
     def _matches_week(self, title: str, week_monday: datetime) -> bool:
-        """Check if Reddit post title matches the requested week."""
+        """Check if Reddit post title matches the requested week.
+
+        Args:
+            title: Reddit post title (e.g., "Weekly Earnings Thread 11/10 - 11/14")
+            week_monday: Target Monday datetime to match
+
+        Returns:
+            True if title matches the week, False otherwise
+        """
         # Extract date pattern from title: "11/10 - 11/14" or "11/10"
         date_pattern = r'(\d{1,2})/(\d{1,2})'
         matches = re.findall(date_pattern, title)
@@ -228,11 +250,32 @@ class EarningsWhisperScraper:
 
         # Get the first date from title (should be Monday)
         month_str, day_str = matches[0]
-        title_month = int(month_str)
-        title_day = int(day_str)
 
-        # Match if same month and day
-        return title_month == week_monday.month and title_day == week_monday.day
+        try:
+            title_month = int(month_str)
+            title_day = int(day_str)
+
+            # Validate reasonable date ranges
+            if not (1 <= title_month <= 12):
+                logger.debug(f"Invalid month {title_month} in title: {title}")
+                return False
+            if not (1 <= title_day <= 31):
+                logger.debug(f"Invalid day {title_day} in title: {title}")
+                return False
+
+            # Match if same month and day
+            # Note: Year check not possible from title alone, but acceptable
+            # for recent posts (within current year or last 12 months)
+            matches_date = title_month == week_monday.month and title_day == week_monday.day
+
+            if matches_date:
+                logger.debug(f"Matched: {title} -> {week_monday.strftime('%Y-%m-%d')}")
+
+            return matches_date
+
+        except (ValueError, OverflowError) as e:
+            logger.debug(f"Failed to parse date from title '{title}': {e}")
+            return False
 
     def _parse_reddit_post(self, text: str) -> List[str]:
         """Extract tickers from Reddit post text."""
@@ -258,7 +301,14 @@ class EarningsWhisperScraper:
         return list(dict.fromkeys(tickers))  # Remove duplicates, preserve order
 
     def _download_and_parse_image(self, image_url: str) -> Result[List[str], AppError]:
-        """Download Reddit image and parse with OCR."""
+        """Download Reddit image and parse with OCR.
+
+        Args:
+            image_url: URL to the image to download and parse
+
+        Returns:
+            Result with list of ticker symbols or error
+        """
         try:
             # Check if OCR dependencies are available
             if not OCR_AVAILABLE:
@@ -267,14 +317,42 @@ class EarningsWhisperScraper:
                     "OCR not available. Install: pip install pillow pytesseract && brew install tesseract"
                 ))
 
-            # Download image to temp file
-            response = requests.get(image_url, timeout=30)
+            # Download image with user agent and size validation
+            headers = {
+                'User-Agent': 'iv-crush-trading-bot/2.0 (Python/requests)'
+            }
+            response = requests.get(
+                image_url,
+                timeout=self.IMAGE_DOWNLOAD_TIMEOUT,
+                headers=headers,
+                stream=True
+            )
             response.raise_for_status()
+
+            # Check content length before downloading
+            content_length = response.headers.get('content-length')
+            if content_length and int(content_length) > self.MAX_IMAGE_SIZE_BYTES:
+                return Result.Err(AppError(
+                    ErrorCode.EXTERNAL,
+                    f"Image too large: {int(content_length):,} bytes (max: {self.MAX_IMAGE_SIZE_BYTES:,})"
+                ))
+
+            # Download with size limit enforcement
+            content = b''
+            for chunk in response.iter_content(chunk_size=self.IMAGE_CHUNK_SIZE):
+                content += chunk
+                if len(content) > self.MAX_IMAGE_SIZE_BYTES:
+                    return Result.Err(AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Image exceeds size limit during download: {len(content):,} bytes"
+                    ))
+
+            logger.debug(f"Downloaded {len(content):,} bytes from {image_url}")
 
             # Create temp file with proper extension
             suffix = '.jpg' if image_url.lower().endswith('.jpg') or image_url.lower().endswith('.jpeg') else '.png'
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-                tmp_file.write(response.content)
+                tmp_file.write(content)
                 tmp_path = tmp_file.name
 
             try:
@@ -282,12 +360,16 @@ class EarningsWhisperScraper:
                 image = Image.open(tmp_path)
                 text = pytesseract.image_to_string(image)
 
+                logger.debug(f"OCR extracted {len(text)} characters")
+                logger.debug(f"OCR text preview: {text[:200]}...")
+
                 # Extract ticker symbols
                 tickers = self._extract_tickers_from_ocr(text)
 
                 if not tickers:
                     return Result.Err(AppError(ErrorCode.NODATA, "No tickers found in image"))
 
+                logger.debug(f"Extracted {len(tickers)} tickers after filtering")
                 return Result.Ok(tickers)
 
             finally:
@@ -336,16 +418,59 @@ class EarningsWhisperScraper:
             return Result.Err(AppError(ErrorCode.EXTERNAL, f"Image parsing error: {e}"))
 
     def _extract_tickers_from_ocr(self, text: str) -> List[str]:
-        """Extract valid ticker symbols from OCR text."""
+        """Extract valid ticker symbols from OCR text.
+
+        Uses context-aware extraction to find tickers in the "Most Anticipated"
+        section and filters out common false positives.
+
+        Args:
+            text: OCR-extracted text from earnings image
+
+        Returns:
+            List of ticker symbols, deduplicated and order-preserved
+        """
         tickers = []
 
-        # Find all potential tickers (1-5 uppercase letters)
-        potential_tickers = re.findall(r'\b[A-Z]{1,5}\b', text)
+        # Try context-aware extraction first
+        # Look for "Most Anticipated" or "WHISPERS" section markers
+        lines = text.split('\n')
+        in_earnings_section = False
+        section_found = False
 
-        # Filter out common false positives using class constants
-        for ticker in potential_tickers:
-            if ticker not in self.EXCLUDED_WORDS and len(ticker) >= 2:
-                tickers.append(ticker)
+        for line in lines:
+            line_lower = line.lower()
+
+            # Detect earnings section start (various formats)
+            if any(marker in line_lower for marker in ['most', 'anticipated', 'whispers', 'earnings']):
+                if not in_earnings_section:  # First occurrence
+                    in_earnings_section = True
+                    section_found = True
+                    logger.debug(f"Found earnings section marker in line: {line[:60]}")
+                continue
+
+            # Detect section end (other headers like "Upcoming", headers with ##)
+            if in_earnings_section and any(header in line_lower for header in ['upcoming', 'other', 'next week']) and len(line.strip()) < 30:
+                logger.debug(f"End of earnings section at: {line[:50]}")
+                break
+
+            # Extract tickers from earnings section
+            if in_earnings_section:
+                # Find ALL uppercase words in line (tickers can appear anywhere)
+                line_tickers = re.findall(r'\b([A-Z]{1,5})\b', line)
+                for ticker in line_tickers:
+                    if ticker not in self.EXCLUDED_WORDS and len(ticker) >= self.MIN_TICKER_LENGTH:
+                        if ticker not in tickers:  # Avoid duplicates
+                            tickers.append(ticker)
+                            logger.debug(f"Extracted ticker: {ticker} <- {line[:60]}")
+
+        # Fallback: If no "Most Anticipated" section found, use simple extraction
+        if not tickers:
+            logger.debug("No 'Most Anticipated' section found, using fallback extraction")
+            potential_tickers = re.findall(r'\b[A-Z]{1,5}\b', text)
+
+            for ticker in potential_tickers:
+                if ticker not in self.EXCLUDED_WORDS and len(ticker) >= self.MIN_TICKER_LENGTH:
+                    tickers.append(ticker)
 
         return list(dict.fromkeys(tickers))  # Remove duplicates, preserve order
 
