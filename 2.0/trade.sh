@@ -184,7 +184,8 @@ analyze_single() {
             --strategies 2>&1) || true  # Don't exit on error
     fi
 
-    # Display analysis results (filter timestamps and show from ANALYSIS RESULTS onward)
+    # Display analysis results (filter timestamps)
+    # Show from ANALYSIS RESULTS onward to capture full output including SUMMARY section
     echo "$analysis_output" | \
         sed -n '/ANALYSIS RESULTS/,$p' | \
         sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - INFO - //' || {
@@ -221,7 +222,7 @@ analyze_list() {
         --tickers "$tickers" \
         --expiration-offset "$offset_days" 2>&1 | \
         grep -v "^[0-9]\{4\}-" | \
-        grep -A 500 "Processing\|VRP\|TRADEABLE\|SKIP\|Score\|Strategy" || {
+        grep -A 500 "Processing\|VRP\|TRADEABLE\|SKIP\|Score\|Strategy\|Analysis Complete\|Total\|Analyzed\|Skipped\|Errors\|OPPORTUNITIES" || {
         echo -e "${RED}Analysis failed${NC}"
         echo -e "${YELLOW}Note: Auto-fetch earnings may not work. Try single ticker mode with explicit dates.${NC}"
         return 1
@@ -244,7 +245,7 @@ scan_earnings() {
     python scripts/scan.py \
         --scan-date "$scan_date" 2>&1 | \
         grep -v "^[0-9]\{4\}-" | \
-        grep -A 500 "SCANNING MODE\|Found\|Processing\|VRP\|Score\|TRADEABLE\|opportunities" || {
+        grep -A 500 "SCANNING MODE\|Found\|Processing\|VRP\|Score\|TRADEABLE\|Scan Complete\|Total\|Analyzed\|Skipped\|Errors\|OPPORTUNITIES" || {
         echo -e "${RED}Scan failed${NC}"
         echo -e "${YELLOW}No earnings found for this date${NC}"
         return 1
@@ -253,24 +254,9 @@ scan_earnings() {
 }
 
 show_summary() {
-    echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}${BOLD}    Next Steps${NC}"
-    echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo "If ✅ TRADEABLE:"
-    echo "  1. Review recommended strategy (Iron Condor, Credit Spreads, etc.)"
-    echo "  2. Check strikes, net credit, and max profit/loss"
-    echo "  3. Execute trade in your broker"
-    echo "  4. Position size: 5% of capital (half-Kelly, conservative start)"
-    echo "  5. Track outcome vs prediction"
-    echo ""
-    echo "If ⏭️ SKIP:"
-    echo "  • VRP too low (< 1.5x)"
-    echo "  • Move to next opportunity"
-    echo "  • Don't force trades"
-    echo ""
-    echo -e "${YELLOW}Remember:${NC} Use 5% position sizing (half-Kelly). Target: 85-92% win rate"
-    echo ""
+    # Summary is now included in the output from the Python scripts
+    # No additional summary needed
+    :
 }
 
 # Main logic
