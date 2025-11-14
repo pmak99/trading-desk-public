@@ -13,6 +13,8 @@ from typing import List, Optional
 from pathlib import Path
 
 import praw
+import requests
+import tempfile
 from dotenv import load_dotenv
 
 from src.domain.errors import Result, AppError, ErrorCode
@@ -56,7 +58,23 @@ class EarningsWhisperScraper:
         'GET', 'HAS', 'HIM', 'HIS', 'HOW', 'ITS', 'MAY', 'NEW',
         'NOW', 'OLD', 'SEE', 'TWO', 'WAY', 'WHO', 'BOY', 'DID',
         'ITS', 'LET', 'PUT', 'SAY', 'SHE', 'TOO', 'USE', 'BMO',
-        'AMC', 'DMH', 'EST', 'PST', 'EDT', 'PDT', 'MOST', 'ANTICIPATED'
+        'AMC', 'DMH', 'EST', 'PST', 'EDT', 'PDT', 'MOST', 'ANTICIPATED',
+        # Additional OCR false positives from company names
+        'LOWES', 'HERES', 'DRESS', 'LESS', 'MINI', 'MOOG', 'SHOE',
+        'JACK', 'TEN', 'THAT', 'WITH', 'FROM', 'HAVE', 'THIS',
+        'WILL', 'YOUR', 'MORE', 'BEEN', 'THAN', 'SOME', 'TIME',
+        'VERY', 'WHEN', 'COME', 'HERE', 'JUST', 'LIKE', 'LONG',
+        'MAKE', 'MANY', 'OVER', 'SUCH', 'TAKE', 'THEM', 'WELL',
+        'ONLY', 'BACK', 'GOOD', 'HIGH', 'LIFE', 'MUCH', 'DOWN',
+        'BOTH', 'EACH', 'FIND', 'FOUR', 'GIVE', 'HAND', 'KEEP',
+        'LAST', 'LATE', 'LOOK', 'MOST', 'MOVE', 'NEXT', 'OPEN',
+        'PART', 'PLAY', 'REAL', 'SAME', 'SEEM', 'SHOW', 'SIDE',
+        'STILL', 'TELL', 'THING', 'TURN', 'WEEK', 'WHAT', 'WORK',
+        'YEAR', 'AREA', 'BEST', 'CASE', 'EVEN', 'FACT', 'FEEL',
+        'FORM', 'HAND', 'IDEA', 'KIND', 'KNOW', 'LATE', 'LESS',
+        'MEAN', 'NAME', 'NEED', 'ONCE', 'POINT', 'RIGHT', 'ROOM',
+        'SEEM', 'TELL', 'THESE', 'THOSE', 'UNDER', 'UNTIL', 'WHILE',
+        'WORLD', 'WOULD', 'WRITE'
     }
 
     def __init__(self):
@@ -131,29 +149,65 @@ class EarningsWhisperScraper:
             friday = week_monday + timedelta(days=4)
             week_str = f"{week_monday.month}/{week_monday.day} {friday.month}/{friday.day}"
 
-            # Search with date range
-            posts = list(subreddit.search(
-                f"weekly earnings thread {week_str}",
-                sort='new',
-                time_filter='week',
-                limit=10
-            ))
-
-            # Fallback to broader search
-            if not posts:
+            # Primary method: Search by flair (most reliable)
+            try:
                 posts = list(subreddit.search(
-                    "weekly earnings thread",
+                    'flair:"Earnings Thread"',
                     sort='new',
-                    time_filter='week',
-                    limit=5
+                    time_filter='month',
+                    limit=20
                 ))
+                logger.debug(f"Flair search found {len(posts)} posts")
+            except Exception as e:
+                logger.debug(f"Flair search failed: {e}")
+                posts = []
+
+            # Fallback: Search by text if flair fails
+            if not posts:
+                monday_str = f"{week_monday.month}/{week_monday.day}"
+                posts = list(subreddit.search(
+                    f"weekly earnings thread {monday_str}",
+                    sort='new',
+                    time_filter='month',
+                    limit=10
+                ))
+                logger.debug(f"Text search found {len(posts)} posts")
+
+                # Final fallback to broader search
+                if not posts or not any('weekly earnings thread' in p.title.lower() for p in posts):
+                    posts = list(subreddit.search(
+                        "weekly earnings thread",
+                        sort='new',
+                        time_filter='month',
+                        limit=10
+                    ))
+                    logger.debug(f"Broad search found {len(posts)} posts")
 
             for post in posts:
                 if 'weekly earnings thread' in post.title.lower():
-                    tickers = self._parse_reddit_post(post.selftext)
-                    if tickers:
-                        logger.info(f"Parsed from: {post.title}")
-                        return Result.Ok(tickers)
+                    # Check if this is the right week by parsing the title
+                    if not self._matches_week(post.title, week_monday):
+                        logger.debug(f"Skipping {post.title} - doesn't match week {week_str}")
+                        continue
+
+                    # Check if post is an image post
+                    if hasattr(post, 'url_overridden_by_dest') and post.url_overridden_by_dest:
+                        image_url = post.url_overridden_by_dest
+                        if any(image_url.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png']):
+                            logger.info(f"Found image post: {post.title}")
+                            logger.info(f"Downloading image from: {image_url}")
+                            result = self._download_and_parse_image(image_url)
+                            if result.is_ok:
+                                logger.info(f"Parsed {len(result.value)} tickers from image")
+                                return result
+                            logger.warning(f"Image parsing failed: {result.error}")
+
+                    # Fallback to text parsing if available
+                    if post.selftext:
+                        tickers = self._parse_reddit_post(post.selftext)
+                        if tickers:
+                            logger.info(f"Parsed from text: {post.title}")
+                            return Result.Ok(tickers)
 
             return Result.Err(AppError(
                 ErrorCode.NODATA,
@@ -162,6 +216,23 @@ class EarningsWhisperScraper:
 
         except Exception as e:
             return Result.Err(AppError(ErrorCode.EXTERNAL, f"Reddit error: {e}"))
+
+    def _matches_week(self, title: str, week_monday: datetime) -> bool:
+        """Check if Reddit post title matches the requested week."""
+        # Extract date pattern from title: "11/10 - 11/14" or "11/10"
+        date_pattern = r'(\d{1,2})/(\d{1,2})'
+        matches = re.findall(date_pattern, title)
+
+        if not matches:
+            return False
+
+        # Get the first date from title (should be Monday)
+        month_str, day_str = matches[0]
+        title_month = int(month_str)
+        title_day = int(day_str)
+
+        # Match if same month and day
+        return title_month == week_monday.month and title_day == week_monday.day
 
     def _parse_reddit_post(self, text: str) -> List[str]:
         """Extract tickers from Reddit post text."""
@@ -185,6 +256,48 @@ class EarningsWhisperScraper:
                         break
 
         return list(dict.fromkeys(tickers))  # Remove duplicates, preserve order
+
+    def _download_and_parse_image(self, image_url: str) -> Result[List[str], AppError]:
+        """Download Reddit image and parse with OCR."""
+        try:
+            # Check if OCR dependencies are available
+            if not OCR_AVAILABLE:
+                return Result.Err(AppError(
+                    ErrorCode.EXTERNAL,
+                    "OCR not available. Install: pip install pillow pytesseract && brew install tesseract"
+                ))
+
+            # Download image to temp file
+            response = requests.get(image_url, timeout=30)
+            response.raise_for_status()
+
+            # Create temp file with proper extension
+            suffix = '.jpg' if image_url.lower().endswith('.jpg') or image_url.lower().endswith('.jpeg') else '.png'
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+                tmp_file.write(response.content)
+                tmp_path = tmp_file.name
+
+            try:
+                # Parse the downloaded image
+                image = Image.open(tmp_path)
+                text = pytesseract.image_to_string(image)
+
+                # Extract ticker symbols
+                tickers = self._extract_tickers_from_ocr(text)
+
+                if not tickers:
+                    return Result.Err(AppError(ErrorCode.NODATA, "No tickers found in image"))
+
+                return Result.Ok(tickers)
+
+            finally:
+                # Clean up temp file
+                Path(tmp_path).unlink(missing_ok=True)
+
+        except requests.RequestException as e:
+            return Result.Err(AppError(ErrorCode.EXTERNAL, f"Image download error: {e}"))
+        except Exception as e:
+            return Result.Err(AppError(ErrorCode.EXTERNAL, f"Image processing error: {e}"))
 
     def _parse_image(self, image_path: str) -> Result[List[str], AppError]:
         """Extract tickers from earnings table image using OCR."""
