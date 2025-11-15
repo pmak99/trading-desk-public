@@ -9,6 +9,7 @@ import logging
 import re
 import os
 import hashlib
+import time
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Tuple
 from pathlib import Path
@@ -165,6 +166,34 @@ class EarningsWhisperScraper:
     # Pre-compiled regex patterns for better performance
     _TICKER_PATTERN = re.compile(r'\b([A-Z]{1,5})\b')  # 1-5 uppercase letters (standard ticker format)
     _DATE_PATTERN = re.compile(r'(\d{1,2})/(\d{1,2})')
+    _WRITTEN_DATE_PATTERN = re.compile(
+        r'(january|february|march|april|may|june|july|august|'
+        r'september|october|november|december)\s+(\d{1,2})',
+        re.IGNORECASE
+    )
+
+    # Month name to number mapping
+    _MONTH_NAMES = {
+        'january': 1, 'february': 2, 'march': 3, 'april': 4,
+        'may': 5, 'june': 6, 'july': 7, 'august': 8,
+        'september': 9, 'october': 10, 'november': 11, 'december': 12
+    }
+
+    # Twitter scraping configuration
+    TWITTER_URL = "https://twitter.com/eWhispers"
+    PAGE_LOAD_TIMEOUT_MS = 30000  # 30 seconds
+    TWEET_WAIT_TIMEOUT_MS = 10000  # 10 seconds
+    MAX_TWEETS_TO_CHECK = 50
+
+    # CSS selectors with fallbacks for robustness
+    TWEET_SELECTORS = [
+        'article[data-testid="tweet"]',
+        'article[role="article"]',  # fallback if data-testid changes
+    ]
+    TWEET_TEXT_SELECTORS = [
+        '[data-testid="tweetText"]',
+        '[lang]',  # fallback - tweets usually have lang attribute
+    ]
 
     # Regex patterns for extracting tickers from Reddit markdown
     TICKER_PATTERNS = [
@@ -204,6 +233,10 @@ class EarningsWhisperScraper:
         # Playwright requires no initialization - works directly
         self.twitter_available = True
         logger.debug("Twitter scraper ready (playwright browser automation - no auth required)")
+
+        # Rate limiting for Twitter scraping (avoid triggering anti-bot measures)
+        self._last_twitter_request: Optional[float] = None
+        self._min_request_interval = 5.0  # minimum seconds between requests
 
         # OCR result cache: {url_hash: (tickers, timestamp)}
         self._ocr_cache: Dict[str, Tuple[List[str], float]] = {}
@@ -278,98 +311,127 @@ class EarningsWhisperScraper:
 
     def _fetch_from_twitter(self, week_monday: datetime) -> Result[List[str], AppError]:
         """Fetch from @eWhispers Twitter account using playwright browser automation (circuit breaker protected)."""
+        # Rate limiting - wait if needed
+        if self._last_twitter_request is not None:
+            elapsed = time.time() - self._last_twitter_request
+            if elapsed < self._min_request_interval:
+                wait_time = self._min_request_interval - elapsed
+                logger.debug(f"Rate limiting: waiting {wait_time:.1f}s before Twitter request")
+                time.sleep(wait_time)
+
+        start_time = time.time()
+        monday_str = f"{week_monday.month}/{week_monday.day}"
+        logger.info(f"Scraping @eWhispers tweets for week {monday_str}")
+
+        browser = None
         try:
-            monday_str = f"{week_monday.month}/{week_monday.day}"
-            logger.info(f"Scraping @eWhispers tweets for week {monday_str} using browser automation")
-
             with sync_playwright() as p:
-                # Launch headless browser
-                logger.info("Launching headless Chromium browser...")
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
-
-                # Set user agent to avoid bot detection
-                page.set_extra_http_headers({
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                })
-
-                # Navigate to @eWhispers Twitter profile
-                url = "https://twitter.com/eWhispers"
-                logger.info(f"Navigating to {url}")
                 try:
-                    # Use 'load' instead of 'networkidle' - Twitter keeps making requests
-                    response = page.goto(url, wait_until='load', timeout=30000)
-                    logger.info(f"Page loaded with status: {response.status}")
-                    # Give it a moment for initial content to render
-                    page.wait_for_timeout(2000)
-                except PlaywrightTimeout as e:
-                    logger.error(f"Timeout navigating to page: {e}")
-                    # Take screenshot for debugging
-                    screenshot_path = "/tmp/twitter_timeout.png"
-                    page.screenshot(path=screenshot_path)
-                    logger.info(f"Screenshot saved to {screenshot_path}")
-                    browser.close()
-                    return Result.Err(AppError(ErrorCode.EXTERNAL, f"Navigation timeout: {e}"))
+                    # Launch headless browser
+                    logger.debug("Launching headless Chromium browser")
+                    browser = p.chromium.launch(headless=True)
+                    page = browser.new_page()
 
-                # Take screenshot to see what we got
-                screenshot_path = "/tmp/twitter_loaded.png"
-                page.screenshot(path=screenshot_path)
-                logger.info(f"Screenshot saved to {screenshot_path}")
+                    # Set user agent to avoid bot detection
+                    page.set_extra_http_headers({
+                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+                    })
 
-                # Log page title and URL to verify we're on the right page
-                logger.info(f"Page title: {page.title()}")
-                logger.info(f"Current URL: {page.url}")
+                    # Navigate to @eWhispers Twitter profile
+                    logger.debug(f"Navigating to {self.TWITTER_URL}")
+                    try:
+                        # Use 'load' instead of 'networkidle' - Twitter keeps making requests
+                        response = page.goto(self.TWITTER_URL, wait_until='load', timeout=self.PAGE_LOAD_TIMEOUT_MS)
+                        logger.debug(f"Page loaded with status: {response.status}")
+                    except PlaywrightTimeout as e:
+                        logger.error(f"Timeout navigating to Twitter: {e}")
+                        # Debug screenshot only if debug logging enabled
+                        if logger.isEnabledFor(logging.DEBUG):
+                            screenshot_path = f"/tmp/twitter_timeout_{int(time.time())}.png"
+                            page.screenshot(path=screenshot_path)
+                            logger.debug(f"Debug screenshot saved to {screenshot_path}")
+                        return Result.Err(AppError(ErrorCode.EXTERNAL, f"Navigation timeout: {e}"))
 
-                # Wait for tweets to load
-                try:
-                    logger.info("Waiting for tweet elements to appear...")
-                    page.wait_for_selector('article[data-testid="tweet"]', timeout=10000)
-                except PlaywrightTimeout:
-                    logger.warning("Timeout waiting for tweet selector, checking page content...")
-                    # Log some of the page content to see what's there
-                    page_text = page.content()[:1000]
-                    logger.debug(f"Page content preview: {page_text}")
-                    browser.close()
+                    # Debug logging only
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Page title: {page.title()}")
+                        logger.debug(f"Current URL: {page.url}")
+
+                    # Wait for tweets to load - try primary selector, fallback to alternative
+                    tweet_selector = None
+                    for selector in self.TWEET_SELECTORS:
+                        try:
+                            logger.debug(f"Waiting for tweets with selector: {selector}")
+                            page.wait_for_selector(selector, timeout=self.TWEET_WAIT_TIMEOUT_MS)
+                            tweet_selector = selector
+                            logger.debug(f"Found tweets using selector: {selector}")
+                            break
+                        except PlaywrightTimeout:
+                            logger.debug(f"Selector {selector} timed out, trying next...")
+                            continue
+
+                    if not tweet_selector:
+                        logger.warning("All tweet selectors failed - page may require authentication")
+                        return Result.Err(AppError(
+                            ErrorCode.EXTERNAL,
+                            "Could not find tweets - page may require authentication"
+                        ))
+
+                    # Extract tweet elements
+                    tweet_elements = page.query_selector_all(tweet_selector)
+                    logger.info(f"Found {len(tweet_elements)} tweets")
+
+                    # Check tweets for matching week
+                    for i, tweet_elem in enumerate(tweet_elements):
+                        if i >= self.MAX_TWEETS_TO_CHECK:
+                            logger.debug(f"Reached max tweet check limit ({self.MAX_TWEETS_TO_CHECK})")
+                            break
+
+                        # Extract text - try primary selector, fallback to alternative
+                        text_elem = None
+                        for text_selector in self.TWEET_TEXT_SELECTORS:
+                            text_elem = tweet_elem.query_selector(text_selector)
+                            if text_elem:
+                                break
+
+                        if not text_elem:
+                            logger.debug(f"Tweet {i+1}: No text element found")
+                            continue
+
+                        tweet_text = text_elem.inner_text()
+                        logger.debug(f"Tweet {i+1}: {tweet_text[:100]}...")
+
+                        # Check if this tweet matches the requested week
+                        if self._matches_week_in_tweet(tweet_text, week_monday):
+                            logger.info(f"Found matching tweet for week {monday_str}")
+
+                            # Parse tickers from tweet text
+                            tickers = self._parse_twitter_text(tweet_text)
+                            if tickers:
+                                duration = time.time() - start_time
+                                logger.info(f"Extracted {len(tickers)} tickers in {duration:.1f}s")
+                                return Result.Ok(tickers)
+
+                    # No matching tweet found
                     return Result.Err(AppError(
-                        ErrorCode.EXTERNAL,
-                        "Timeout waiting for tweets to load - may need authentication"
+                        ErrorCode.NODATA,
+                        f"No matching tweet found for {week_monday.strftime('%Y-%m-%d')}"
                     ))
 
-                # Extract tweet text from all visible tweets
-                tweet_elements = page.query_selector_all('article[data-testid="tweet"]')
-                logger.info(f"Found {len(tweet_elements)} tweet elements on page")
-
-                for i, tweet_elem in enumerate(tweet_elements[:50]):  # Check up to 50 tweets
-                    # Extract text from tweet
-                    text_elem = tweet_elem.query_selector('[data-testid="tweetText"]')
-                    if not text_elem:
-                        logger.debug(f"Tweet {i+1}: No tweetText element found")
-                        continue
-
-                    tweet_text = text_elem.inner_text()
-                    logger.info(f"Tweet {i+1}: {tweet_text[:100]}...")
-
-                    # Check if this tweet matches the requested week
-                    if self._matches_week_in_tweet(tweet_text, week_monday):
-                        logger.info(f"Found matching tweet for week {monday_str}")
-
-                        # Parse tickers from tweet text
-                        tickers = self._parse_twitter_text(tweet_text)
-                        if tickers:
-                            logger.info(f"Extracted {len(tickers)} tickers from tweet")
+                finally:
+                    # Ensure browser is always closed
+                    if browser:
+                        try:
                             browser.close()
-                            return Result.Ok(tickers)
-
-                browser.close()
-
-            return Result.Err(AppError(
-                ErrorCode.NODATA,
-                f"No matching tweet found for {week_monday.strftime('%Y-%m-%d')}"
-            ))
+                        except Exception as e:
+                            logger.debug(f"Error closing browser: {e}")
 
         except Exception as e:
             logger.error(f"Twitter scraper exception: {type(e).__name__}: {e}", exc_info=True)
             return Result.Err(AppError(ErrorCode.EXTERNAL, f"Twitter scraper error: {e}"))
+        finally:
+            # Update rate limiting timestamp
+            self._last_twitter_request = time.time()
 
     def _matches_week_in_tweet(self, tweet_text: str, week_monday: datetime) -> bool:
         """Check if tweet text matches the requested week.
@@ -382,20 +444,12 @@ class EarningsWhisperScraper:
             True if tweet matches the week, False otherwise
         """
         # Try written month format first (e.g., "November 17, 2025")
-        month_names = {
-            'january': 1, 'february': 2, 'march': 3, 'april': 4,
-            'may': 5, 'june': 6, 'july': 7, 'august': 8,
-            'september': 9, 'october': 10, 'november': 11, 'december': 12
-        }
-
-        # Pattern for "Month DD, YYYY" format
-        written_pattern = re.compile(r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})', re.IGNORECASE)
-        written_matches = written_pattern.findall(tweet_text.lower())
+        written_matches = self._WRITTEN_DATE_PATTERN.findall(tweet_text.lower())
 
         if written_matches:
             month_name, day_str = written_matches[0]
             try:
-                tweet_month = month_names[month_name.lower()]
+                tweet_month = self._MONTH_NAMES[month_name.lower()]
                 tweet_day = int(day_str)
 
                 matches_date = tweet_month == week_monday.month and tweet_day == week_monday.day
