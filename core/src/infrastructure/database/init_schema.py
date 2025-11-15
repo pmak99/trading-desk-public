@@ -216,21 +216,29 @@ def drop_all_tables(db_path: Path) -> None:
     Args:
         db_path: Path to SQLite database
     """
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.cursor()
-
-    tables = [
+    # Define allowed tables to prevent SQL injection
+    ALLOWED_TABLES = frozenset([
         'earnings_calendar',
         'historical_moves',
         'ticker_metadata',
         'analysis_log',
         'rate_limits',
         'cache',
-    ]
+    ])
+
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
 
     try:
-        for table in tables:
+        for table in ALLOWED_TABLES:
+            # Validate table name is alphanumeric + underscore only
+            if not table.replace('_', '').isalnum():
+                raise ValueError(f"Invalid table name: {table}")
+
+            # Use parameterized query where possible, or validated f-string
+            # Note: SQLite doesn't support parameterized table names, so we validate first
             cursor.execute(f'DROP TABLE IF EXISTS {table}')
+
         conn.commit()
         logger.warning(f"All tables dropped from {db_path}")
     finally:

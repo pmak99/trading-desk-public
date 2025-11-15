@@ -24,6 +24,13 @@ from src.domain.enums import (
 # 10 digits provides sufficient precision for stock prices and percentages
 getcontext().prec = 10
 
+# Percentage validation constants
+MIN_PERCENTAGE = -100.0  # Allow -100% for complete losses
+MAX_PERCENTAGE = 1000.0  # Allow up to 1000% for extreme gains
+
+# Response size limits (bytes)
+MAX_API_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB to prevent OOM attacks
+
 
 # ============================================================================
 # Value Objects (Primitives)
@@ -80,8 +87,11 @@ class Percentage:
     value: float
 
     def __init__(self, value: float):
-        if value < -100 or value > 1000:
-            raise ValueError(f"Invalid percentage: {value}")
+        if value < MIN_PERCENTAGE or value > MAX_PERCENTAGE:
+            raise ValueError(
+                f"Invalid percentage: {value}. "
+                f"Must be between {MIN_PERCENTAGE}% and {MAX_PERCENTAGE}%"
+            )
         object.__setattr__(self, 'value', float(value))
 
     def to_decimal(self) -> Decimal:

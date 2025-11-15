@@ -9,14 +9,18 @@ import requests
 import logging
 from datetime import date
 from typing import Dict, Optional
-from src.domain.types import Money, Strike, OptionChain, OptionQuote, Percentage
+from src.domain.types import (
+    Money,
+    Strike,
+    OptionChain,
+    OptionQuote,
+    Percentage,
+    MAX_API_RESPONSE_SIZE,
+)
 from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 from src.domain.enums import OptionType
 
 logger = logging.getLogger(__name__)
-
-# Maximum response size to prevent OOM attacks (10MB)
-MAX_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB
 
 
 class TradierAPI:
@@ -77,7 +81,7 @@ class TradierAPI:
 
             # Check response size to prevent OOM
             content_length = response.headers.get('Content-Length')
-            if content_length and int(content_length) > MAX_RESPONSE_SIZE:
+            if content_length and int(content_length) > MAX_API_RESPONSE_SIZE:
                 return Err(
                     AppError(
                         ErrorCode.EXTERNAL,
@@ -85,7 +89,7 @@ class TradierAPI:
                     )
                 )
 
-            if len(response.content) > MAX_RESPONSE_SIZE:
+            if len(response.content) > MAX_API_RESPONSE_SIZE:
                 return Err(
                     AppError(
                         ErrorCode.EXTERNAL,
@@ -169,7 +173,7 @@ class TradierAPI:
 
             # Check response size to prevent OOM
             content_length = response.headers.get('Content-Length')
-            if content_length and int(content_length) > MAX_RESPONSE_SIZE:
+            if content_length and int(content_length) > MAX_API_RESPONSE_SIZE:
                 return Err(
                     AppError(
                         ErrorCode.EXTERNAL,
@@ -177,7 +181,7 @@ class TradierAPI:
                     )
                 )
 
-            if len(response.content) > MAX_RESPONSE_SIZE:
+            if len(response.content) > MAX_API_RESPONSE_SIZE:
                 return Err(
                     AppError(
                         ErrorCode.EXTERNAL,
@@ -315,7 +319,7 @@ class TradierAPI:
 
             # Check response size to prevent OOM
             content_length = response.headers.get('Content-Length')
-            if content_length and int(content_length) > MAX_RESPONSE_SIZE:
+            if content_length and int(content_length) > MAX_API_RESPONSE_SIZE:
                 return Err(
                     AppError(
                         ErrorCode.EXTERNAL,
@@ -323,7 +327,7 @@ class TradierAPI:
                     )
                 )
 
-            if len(response.content) > MAX_RESPONSE_SIZE:
+            if len(response.content) > MAX_API_RESPONSE_SIZE:
                 return Err(
                     AppError(
                         ErrorCode.EXTERNAL,
@@ -359,3 +363,48 @@ class TradierAPI:
         except Exception as e:
             logger.error(f"Unexpected error fetching expirations: {e}")
             return Err(AppError(ErrorCode.EXTERNAL, str(e)))
+
+    def find_nearest_expiration(
+        self, ticker: str, target_date: date
+    ) -> Result[date, AppError]:
+        """
+        Find the nearest available expiration >= target date.
+
+        Args:
+            ticker: Stock symbol
+            target_date: Desired expiration date
+
+        Returns:
+            Result with nearest available expiration date or error
+        """
+        expirations_result = self.get_expirations(ticker)
+        if expirations_result.is_err:
+            return Err(expirations_result.error)
+
+        expirations = sorted(expirations_result.value)
+
+        # Find nearest expiration >= target_date
+        nearest = None
+        for exp in expirations:
+            if exp >= target_date:
+                nearest = exp
+                break
+
+        if nearest is None:
+            # No expiration >= target, use the furthest available
+            if expirations:
+                nearest = expirations[-1]
+                logger.warning(
+                    f"{ticker}: No expiration >= {target_date}, using {nearest}"
+                )
+            else:
+                return Err(
+                    AppError(ErrorCode.NODATA, f"No expirations for {ticker}")
+                )
+
+        if nearest != target_date:
+            logger.info(
+                f"{ticker}: Adjusted expiration {target_date} → {nearest}"
+            )
+
+        return Ok(nearest)
