@@ -954,6 +954,7 @@ def whisper_mode(
     success_count = 0
     error_count = 0
     skip_count = 0
+    filtered_count = 0
 
     # Progress bar for ticker processing
     pbar = tqdm(
@@ -980,6 +981,19 @@ def whisper_mode(
         expiration_date = calculate_expiration_date(
             earnings_date, timing, expiration_offset
         )
+
+        # Apply filters (market cap + liquidity) for whisper mode
+        should_filter, filter_reason = should_filter_ticker(
+            ticker, expiration_date, container,
+            check_market_cap=True,
+            check_liquidity=True
+        )
+
+        if should_filter:
+            filtered_count += 1
+            logger.info(f"⏭️  {ticker}: Filtered ({filter_reason})")
+            pbar.set_postfix_str(f"{ticker}: Filtered")
+            continue
 
         # Update progress with current action
         pbar.set_postfix_str(f"{ticker}: Analyzing VRP")
@@ -1016,6 +1030,7 @@ def whisper_mode(
     logger.info(f"   Week: {monday.strftime('%Y-%m-%d')}")
     logger.info(f"   Total Tickers: {len(tickers)}")
     logger.info(f"\n📊 Analysis Results:")
+    logger.info(f"   🔍 Filtered (Market Cap/Liquidity): {filtered_count}")
     logger.info(f"   ✓ Successfully Analyzed: {success_count}")
     logger.info(f"   ⏭️  Skipped (No Earnings/Data): {skip_count}")
     logger.info(f"   ✗ Errors: {error_count}")
