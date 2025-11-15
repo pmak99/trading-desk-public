@@ -1,7 +1,7 @@
 """
 Earnings Whisper scraper for most anticipated earnings.
 
-Primary: Reddit r/wallstreetbets weekly earnings threads (PRAW)
+Primary: X/Twitter @eWhispers account (tweepy)
 Fallback: Image file with OCR parsing
 """
 
@@ -14,7 +14,7 @@ from typing import List, Optional, Dict, Tuple
 from pathlib import Path
 from enum import Enum
 
-import praw
+import tweepy
 import requests
 import tempfile
 from dotenv import load_dotenv
@@ -163,7 +163,7 @@ class EarningsWhisperScraper:
     OCR_CACHE_TTL_SECONDS = 604800  # 7 days (weekly earnings posts)
 
     # Pre-compiled regex patterns for better performance
-    _TICKER_PATTERN = re.compile(r'\b([A-Z]{1,5})\b')
+    _TICKER_PATTERN = re.compile(r'\b([A-Z]{1,5})\b')  # 1-5 uppercase letters (standard ticker format)
     _DATE_PATTERN = re.compile(r'(\d{1,2})/(\d{1,2})')
 
     # Regex patterns for extracting tickers from Reddit markdown
@@ -200,25 +200,27 @@ class EarningsWhisperScraper:
     }
 
     def __init__(self):
-        """Initialize Reddit client, OCR cache, and circuit breakers."""
+        """Initialize Twitter client, OCR cache, and circuit breakers."""
         try:
-            self.reddit = praw.Reddit(
-                client_id=os.getenv('REDDIT_CLIENT_ID'),
-                client_secret=os.getenv('REDDIT_CLIENT_SECRET'),
-                user_agent='iv-crush-trading-bot/2.0'
-            )
-            self.reddit_available = True
-            logger.debug("PRAW initialized")
+            # Twitter API v2 with Bearer Token (app-only auth)
+            bearer_token = os.getenv('TWITTER_BEARER_TOKEN')
+            if bearer_token:
+                self.twitter = tweepy.Client(bearer_token=bearer_token)
+                self.twitter_available = True
+                logger.debug("Twitter API initialized")
+            else:
+                logger.warning("Twitter Bearer Token not found in environment")
+                self.twitter_available = False
         except Exception as e:
-            logger.warning(f"Reddit unavailable: {e}")
-            self.reddit_available = False
+            logger.warning(f"Twitter unavailable: {e}")
+            self.twitter_available = False
 
         # OCR result cache: {url_hash: (tickers, timestamp)}
         self._ocr_cache: Dict[str, Tuple[List[str], float]] = {}
 
         # Circuit breakers for external dependencies
-        self._reddit_breaker = CircuitBreaker(
-            name="Reddit",
+        self._twitter_breaker = CircuitBreaker(
+            name="Twitter",
             failure_threshold=3,
             recovery_timeout=120,  # 2 minutes
             success_threshold=2
@@ -259,16 +261,16 @@ class EarningsWhisperScraper:
         monday = get_week_monday(target_date)
         logger.info(f"Fetching earnings for week of {monday.strftime('%Y-%m-%d')}")
 
-        # Try Reddit first (with circuit breaker)
-        if self.reddit_available and not self._reddit_breaker.is_open():
+        # Try Twitter first (with circuit breaker)
+        if self.twitter_available and not self._twitter_breaker.is_open():
             try:
-                result = self._reddit_breaker.call(self._fetch_from_reddit_impl, monday)
+                result = self._twitter_breaker.call(self._fetch_from_twitter, monday)
                 if result.is_ok:
-                    logger.info(f"✓ Retrieved {len(result.value)} tickers from Reddit")
+                    logger.info(f"✓ Retrieved {len(result.value)} tickers from Twitter")
                     return result
-                logger.warning("Reddit fetch failed")
+                logger.warning("Twitter fetch failed")
             except Exception as e:
-                logger.warning(f"Reddit circuit breaker: {e}")
+                logger.warning(f"Twitter circuit breaker: {e}")
 
         # Fallback to image
         if fallback_image:
@@ -284,83 +286,110 @@ class EarningsWhisperScraper:
             context={"week_monday": monday.strftime("%Y-%m-%d")}
         ))
 
-    def _fetch_from_reddit_impl(self, week_monday: datetime) -> Result[List[str], AppError]:
-        """Fetch from r/wallstreetbets weekly earnings thread (circuit breaker protected)."""
+    def _fetch_from_twitter(self, week_monday: datetime) -> Result[List[str], AppError]:
+        """Fetch from @eWhispers Twitter account (circuit breaker protected)."""
         try:
-            subreddit = self.reddit.subreddit('wallstreetbets')
+            # Get @eWhispers user
+            user = self.twitter.get_user(username='eWhispers', user_fields=['id'])
+            if not user or not user.data:
+                return Result.Err(AppError(ErrorCode.EXTERNAL, "Could not find @eWhispers user"))
+
+            user_id = user.data.id
+            logger.debug(f"Found @eWhispers user ID: {user_id}")
+
+            # Calculate date range for the week
             friday = week_monday + timedelta(days=4)
-            week_str = f"{week_monday.month}/{week_monday.day} {friday.month}/{friday.day}"
+            monday_str = f"{week_monday.month}/{week_monday.day}"
 
-            # Primary method: Search by flair (most reliable)
-            try:
-                posts = list(subreddit.search(
-                    'flair:"Earnings Thread"',
-                    sort='new',
-                    time_filter=self.FLAIR_SEARCH_TIME_FILTER,
-                    limit=self.FLAIR_SEARCH_LIMIT
+            # Get recent tweets from @eWhispers (last 30 days)
+            start_time = week_monday - timedelta(days=7)  # Search a bit before the week
+            end_time = week_monday + timedelta(days=14)  # Search a bit after
+
+            tweets = self.twitter.get_users_tweets(
+                id=user_id,
+                max_results=50,
+                start_time=start_time.isoformat() + 'Z',
+                end_time=end_time.isoformat() + 'Z',
+                tweet_fields=['created_at', 'text']
+            )
+
+            if not tweets or not tweets.data:
+                logger.debug("No tweets found in date range")
+                return Result.Err(AppError(
+                    ErrorCode.NODATA,
+                    f"No @eWhispers tweets found for week {monday_str}"
                 ))
-                logger.debug(f"Flair search found {len(posts)} posts")
-            except Exception as e:
-                logger.debug(f"Flair search failed: {e}")
-                posts = []
 
-            # Fallback: Search by text if flair fails
-            if not posts:
-                monday_str = f"{week_monday.month}/{week_monday.day}"
-                posts = list(subreddit.search(
-                    f"weekly earnings thread {monday_str}",
-                    sort='new',
-                    time_filter=self.TEXT_SEARCH_TIME_FILTER,
-                    limit=self.TEXT_SEARCH_LIMIT
-                ))
-                logger.debug(f"Text search found {len(posts)} posts")
+            logger.debug(f"Found {len(tweets.data)} tweets from @eWhispers")
 
-            # Final fallback to broader search if still no results
-            if not posts:
-                posts = list(subreddit.search(
-                    "weekly earnings thread",
-                    sort='new',
-                    time_filter=self.TEXT_SEARCH_TIME_FILTER,
-                    limit=self.TEXT_SEARCH_LIMIT
-                ))
-                logger.debug(f"Broad search found {len(posts)} posts")
+            # Find tweet for this week by matching date in text
+            for tweet in tweets.data:
+                tweet_text = tweet.text
+                logger.debug(f"Checking tweet: {tweet_text[:100]}...")
 
-            for post in posts:
-                if 'weekly earnings thread' in post.title.lower():
-                    # Check if this is the right week by parsing the title
-                    if not self._matches_week(post.title, week_monday):
-                        logger.debug(f"Skipping {post.title} - doesn't match week {week_str}")
-                        continue
+                # Check if this tweet matches the requested week
+                if self._matches_week_in_tweet(tweet_text, week_monday):
+                    logger.info(f"Found matching tweet for week {monday_str}")
 
-                    # Check if post is an image post
-                    if hasattr(post, 'url_overridden_by_dest') and post.url_overridden_by_dest:
-                        image_url = post.url_overridden_by_dest
-                        if any(image_url.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png']):
-                            logger.info(f"Found image post: {post.title}")
-                            logger.info(f"Downloading image from: {image_url}")
-                            result = self._download_and_parse_image(image_url)
-                            if result.is_ok:
-                                logger.info(f"Parsed {len(result.value)} tickers from image")
-                                return result
-                            logger.warning(f"Image parsing failed: {result.error}")
-
-                    # Fallback to text parsing if available
-                    if post.selftext:
-                        tickers = self._parse_reddit_post(post.selftext)
-                        if tickers:
-                            logger.info(f"Parsed from text: {post.title}")
-                            return Result.Ok(tickers)
+                    # Parse tickers from tweet text
+                    tickers = self._parse_twitter_text(tweet_text)
+                    if tickers:
+                        logger.info(f"Extracted {len(tickers)} tickers from tweet")
+                        return Result.Ok(tickers)
 
             return Result.Err(AppError(
                 ErrorCode.NODATA,
-                f"No thread found for {week_monday.strftime('%Y-%m-%d')}"
+                f"No matching tweet found for {week_monday.strftime('%Y-%m-%d')}"
             ))
 
         except Exception as e:
-            return Result.Err(AppError(ErrorCode.EXTERNAL, f"Reddit error: {e}"))
+            return Result.Err(AppError(ErrorCode.EXTERNAL, f"Twitter error: {e}"))
+
+    def _matches_week_in_tweet(self, tweet_text: str, week_monday: datetime) -> bool:
+        """Check if tweet text matches the requested week.
+
+        Args:
+            tweet_text: Tweet text content
+            week_monday: Target Monday datetime to match
+
+        Returns:
+            True if tweet matches the week, False otherwise
+        """
+        # Extract date pattern from tweet similar to Reddit title
+        matches = self._DATE_PATTERN.findall(tweet_text)
+
+        if not matches:
+            return False
+
+        # Get the first date from tweet (should be Monday)
+        month_str, day_str = matches[0]
+
+        try:
+            tweet_month = int(month_str)
+            tweet_day = int(day_str)
+
+            # Validate reasonable date ranges
+            if not (1 <= tweet_month <= 12):
+                logger.debug(f"Invalid month {tweet_month} in tweet")
+                return False
+            if not (1 <= tweet_day <= 31):
+                logger.debug(f"Invalid day {tweet_day} in tweet")
+                return False
+
+            # Match if same month and day
+            matches_date = tweet_month == week_monday.month and tweet_day == week_monday.day
+
+            if matches_date:
+                logger.debug(f"Tweet date {tweet_month}/{tweet_day} matches {week_monday.strftime('%Y-%m-%d')}")
+
+            return matches_date
+
+        except (ValueError, OverflowError) as e:
+            logger.debug(f"Failed to parse date from tweet: {e}")
+            return False
 
     def _matches_week(self, title: str, week_monday: datetime) -> bool:
-        """Check if Reddit post title matches the requested week.
+        """Check if Reddit post title matches the requested week (legacy).
 
         Args:
             title: Reddit post title (e.g., "Weekly Earnings Thread 11/10 - 11/14")
@@ -404,8 +433,45 @@ class EarningsWhisperScraper:
             logger.debug(f"Failed to parse date from title '{title}': {e}")
             return False
 
+    def _parse_twitter_text(self, tweet_text: str) -> List[str]:
+        """Extract ticker symbols from @eWhispers tweet text.
+
+        Twitter format is cleaner than OCR - tickers are listed with $ prefix or
+        in a structured format. This method extracts all valid ticker symbols.
+
+        Args:
+            tweet_text: Full text of the tweet
+
+        Returns:
+            List of ticker symbols, deduplicated and order-preserved
+        """
+        tickers = []
+
+        # Extract tickers - Twitter often uses $TICKER format
+        # Also extract any 1-5 uppercase letter words
+        for line in tweet_text.split('\n'):
+            # Skip header lines
+            if any(skip in line.lower() for skip in ['most anticipated', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'week beginning']):
+                continue
+
+            # Extract $TICKER format (e.g., $NVDA, $WMT)
+            dollar_tickers = re.findall(r'\$([A-Z]{1,5})\b', line)
+            for ticker in dollar_tickers:
+                if ticker not in self.EXCLUDED_WORDS and ticker not in tickers:
+                    tickers.append(ticker)
+                    logger.debug(f"Extracted ticker ($ format): {ticker}")
+
+            # Extract plain uppercase tickers (1-5 letters)
+            plain_tickers = self._TICKER_PATTERN.findall(line)
+            for ticker in plain_tickers:
+                if ticker not in self.EXCLUDED_WORDS and len(ticker) >= self.MIN_TICKER_LENGTH and ticker not in tickers:
+                    tickers.append(ticker)
+                    logger.debug(f"Extracted ticker: {ticker}")
+
+        return list(dict.fromkeys(tickers))  # Remove duplicates, preserve order
+
     def _parse_reddit_post(self, text: str) -> List[str]:
-        """Extract tickers from Reddit post text."""
+        """Extract tickers from Reddit post text (legacy)."""
         tickers = []
         in_section = False
 
@@ -625,20 +691,30 @@ class EarningsWhisperScraper:
             if in_earnings_section:
                 # Find ALL uppercase words in line (tickers can appear anywhere)
                 line_tickers = self._TICKER_PATTERN.findall(line)
-                for ticker in line_tickers:
-                    if ticker not in self.EXCLUDED_WORDS and len(ticker) >= self.MIN_TICKER_LENGTH:
-                        if ticker not in tickers:  # Avoid duplicates
-                            tickers.append(ticker)
-                            logger.debug(f"Extracted ticker: {ticker} <- {line[:60]}")
+                for potential_ticker in line_tickers:
+                    if potential_ticker in self.EXCLUDED_WORDS:
+                        continue
+
+                    if len(potential_ticker) >= self.MIN_TICKER_LENGTH and len(potential_ticker) <= 5:
+                        # Valid ticker length - add directly
+                        if potential_ticker not in tickers:
+                            tickers.append(potential_ticker)
+                            logger.debug(f"Extracted ticker: {potential_ticker} <- {line[:60]}")
+                    # Note: Words >5 chars (company names) are skipped - use Twitter for better extraction
 
         # Fallback: If no "Most Anticipated" section found, use simple extraction
         if not tickers:
             logger.debug("No 'Most Anticipated' section found, using fallback extraction")
-            potential_tickers = self._TICKER_PATTERN.findall(text)
 
-            for ticker in potential_tickers:
-                if ticker not in self.EXCLUDED_WORDS and len(ticker) >= self.MIN_TICKER_LENGTH:
-                    tickers.append(ticker)
+            # Extract ticker patterns
+            potential_tickers = self._TICKER_PATTERN.findall(text)
+            for potential_ticker in potential_tickers:
+                if potential_ticker in self.EXCLUDED_WORDS:
+                    continue
+
+                if len(potential_ticker) >= self.MIN_TICKER_LENGTH and len(potential_ticker) <= 5:
+                    tickers.append(potential_ticker)
+                # Note: Words >5 chars (company names) are skipped
 
         return list(dict.fromkeys(tickers))  # Remove duplicates, preserve order
 
