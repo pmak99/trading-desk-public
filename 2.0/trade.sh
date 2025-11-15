@@ -282,10 +282,12 @@ whisper_mode() {
     # Run whisper mode
     $cmd 2>&1 | \
         sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - INFO - //' | \
-        grep -E "WHISPER MODE|Retrieved|Tickers:|Filtered|VRP|TRADEABLE|SKIP|Analysis|Total|Analyzed|Skipped|Errors|OPPORTUNITIES|SUMMARY|RESULT|Most Anticipated|Why This Matters|Next Steps|Mode:|Week:|^   [0-9]+\.|^   •|Edge|EXCELLENT|GOOD" || {
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - ERROR - /⚠️  /' | \
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - WARNING - /⚠️  /' | \
+        grep -E "WHISPER MODE|Retrieved|Tickers:|Filtered|VRP|TRADEABLE|SKIP|Analysis|Total|Analyzed|Skipped|Errors|OPPORTUNITIES|SUMMARY|RESULT|Most Anticipated|Why This Matters|Next Steps|Mode:|Week:|⚠️|Failed|^   [0-9]+\.|^   •|Edge|EXCELLENT|GOOD" || {
         echo -e "${RED}Whisper mode failed${NC}"
         echo -e "${YELLOW}Could not fetch most anticipated earnings${NC}"
-        echo -e "${YELLOW}Tip: Check Reddit access or provide screenshot (--fallback-image)${NC}"
+        echo -e "${YELLOW}Tip: Check Twitter access or use a different week${NC}"
         return 1
     }
     echo ""
