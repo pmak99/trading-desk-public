@@ -228,8 +228,13 @@ class EarningsWhisperScraper:
         'WORLD', 'WOULD', 'WRITE'
     }
 
-    def __init__(self):
-        """Initialize Twitter scraper (playwright), OCR cache, and circuit breakers."""
+    def __init__(self, cache=None):
+        """
+        Initialize Twitter scraper (playwright), OCR cache, and circuit breakers.
+
+        Args:
+            cache: Optional cache instance for caching whisper results by week
+        """
         # Playwright requires no initialization - works directly
         self.twitter_available = True
         logger.debug("Twitter scraper ready (playwright browser automation - no auth required)")
@@ -240,6 +245,9 @@ class EarningsWhisperScraper:
 
         # OCR result cache: {url_hash: (tickers, timestamp)}
         self._ocr_cache: Dict[str, Tuple[List[str], float]] = {}
+
+        # Week-specific whisper results cache (injected dependency)
+        self._cache = cache
 
         # Circuit breakers for external dependencies
         self._twitter_breaker = CircuitBreaker(
@@ -282,14 +290,33 @@ class EarningsWhisperScraper:
             target_date = datetime.now()
 
         monday = get_week_monday(target_date)
-        logger.info(f"Fetching earnings for week of {monday.strftime('%Y-%m-%d')}")
+        monday_str = monday.strftime('%Y-%m-%d')
+
+        # Check cache first (week-specific key)
+        if self._cache:
+            cache_key = f"whisper_tickers:{monday_str}"
+            cached_tickers = self._cache.get(cache_key)
+            if cached_tickers is not None:
+                logger.info(f"✓ Cache HIT for week {monday_str} ({len(cached_tickers)} tickers)")
+                return Result.Ok(cached_tickers)
+            logger.debug(f"Cache MISS for week {monday_str}")
+
+        logger.info(f"Fetching earnings for week of {monday_str}")
 
         # Try Twitter first (with circuit breaker)
         if self.twitter_available and not self._twitter_breaker.is_open():
             try:
                 result = self._twitter_breaker.call(self._fetch_from_twitter, monday)
                 if result.is_ok:
-                    logger.info(f"✓ Retrieved {len(result.value)} tickers from Twitter")
+                    tickers = result.value
+                    logger.info(f"✓ Retrieved {len(tickers)} tickers from Twitter")
+
+                    # Cache the result (week-specific)
+                    if self._cache:
+                        cache_key = f"whisper_tickers:{monday_str}"
+                        self._cache.set(cache_key, tickers)
+                        logger.debug(f"Cached whisper tickers for week {monday_str}")
+
                     return result
                 logger.warning("Twitter fetch failed")
             except Exception as e:
@@ -300,7 +327,15 @@ class EarningsWhisperScraper:
             logger.info(f"Using image fallback: {fallback_image}")
             result = self._parse_image(fallback_image)
             if result.is_ok:
-                logger.info(f"✓ Retrieved {len(result.value)} tickers from image")
+                tickers = result.value
+                logger.info(f"✓ Retrieved {len(tickers)} tickers from image")
+
+                # Cache the result (week-specific)
+                if self._cache:
+                    cache_key = f"whisper_tickers:{monday_str}"
+                    self._cache.set(cache_key, tickers)
+                    logger.debug(f"Cached whisper tickers for week {monday_str}")
+
                 return result
 
         return Result.Err(AppError(

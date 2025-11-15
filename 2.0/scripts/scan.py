@@ -29,6 +29,7 @@ import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
+from tqdm import tqdm
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -41,12 +42,139 @@ from src.infrastructure.data_sources.earnings_whisper_scraper import (
     EarningsWhisperScraper,
     get_week_monday
 )
+from src.infrastructure.cache.hybrid_cache import HybridCache
+
+# Try to import yfinance for market cap data
+try:
+    import yfinance as yf
+    YFINANCE_AVAILABLE = True
+except ImportError:
+    YFINANCE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 # Alpha Vantage free tier rate limits
 ALPHA_VANTAGE_CALLS_PER_MINUTE = 5
 RATE_LIMIT_PAUSE_SECONDS = 60
+
+
+def get_market_cap_millions(ticker: str) -> Optional[float]:
+    """
+    Get market cap in millions using yfinance.
+
+    Args:
+        ticker: Stock ticker symbol
+
+    Returns:
+        Market cap in millions or None if unavailable
+    """
+    if not YFINANCE_AVAILABLE:
+        logger.debug(f"yfinance not available, skipping market cap check for {ticker}")
+        return None
+
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        # Get market cap (in dollars)
+        market_cap = info.get('marketCap')
+        if market_cap and market_cap > 0:
+            market_cap_millions = market_cap / 1_000_000
+            logger.debug(f"{ticker}: Market cap ${market_cap_millions:.0f}M")
+            return market_cap_millions
+
+        logger.debug(f"{ticker}: No market cap data available")
+        return None
+
+    except Exception as e:
+        logger.debug(f"{ticker}: Failed to fetch market cap: {e}")
+        return None
+
+
+def check_basic_liquidity(ticker: str, expiration: date, container: Container) -> bool:
+    """
+    Quick liquidity check: Do options exist with reasonable OI?
+
+    Args:
+        ticker: Stock ticker symbol
+        expiration: Options expiration date
+        container: DI container for Tradier access
+
+    Returns:
+        True if liquidity is acceptable, False otherwise
+    """
+    try:
+        # Get option chain
+        tradier = container.tradier
+        chain_result = tradier.get_option_chain(ticker, expiration)
+
+        if chain_result.is_err:
+            logger.debug(f"{ticker}: No option chain available")
+            return False
+
+        chain = chain_result.value
+
+        # Check if we have any options with decent OI
+        min_oi = container.config.thresholds.min_open_interest
+
+        # Check both calls and puts
+        total_options = len(chain.calls) + len(chain.puts)
+        if total_options == 0:
+            logger.debug(f"{ticker}: No options found")
+            return False
+
+        # Check if at least some options have acceptable OI
+        # chain.calls and chain.puts are Dict[Strike, OptionQuote]
+        acceptable_calls = sum(1 for strike, opt in chain.calls.items() if opt.open_interest >= min_oi)
+        acceptable_puts = sum(1 for strike, opt in chain.puts.items() if opt.open_interest >= min_oi)
+
+        if acceptable_calls == 0 or acceptable_puts == 0:
+            logger.debug(f"{ticker}: Insufficient open interest (min {min_oi})")
+            return False
+
+        logger.debug(f"{ticker}: Liquidity OK ({acceptable_calls} calls, {acceptable_puts} puts with OI>={min_oi})")
+        return True
+
+    except Exception as e:
+        logger.debug(f"{ticker}: Liquidity check failed: {e}")
+        return False
+
+
+def should_filter_ticker(
+    ticker: str,
+    expiration: date,
+    container: Container,
+    check_market_cap: bool = True,
+    check_liquidity: bool = True
+) -> Tuple[bool, Optional[str]]:
+    """
+    Determine if ticker should be filtered out based on market cap and liquidity.
+
+    Args:
+        ticker: Stock ticker symbol
+        expiration: Options expiration date
+        container: DI container
+        check_market_cap: Whether to check market cap threshold
+        check_liquidity: Whether to check liquidity threshold
+
+    Returns:
+        (should_filter, reason) - True if should skip ticker, with reason string
+    """
+    # Check market cap
+    if check_market_cap:
+        market_cap_millions = get_market_cap_millions(ticker)
+        if market_cap_millions is not None:
+            min_market_cap = container.config.thresholds.min_market_cap_millions
+            if market_cap_millions < min_market_cap:
+                return (True, f"Market cap ${market_cap_millions:.0f}M < ${min_market_cap:.0f}M")
+
+    # Check liquidity
+    if check_liquidity:
+        has_liquidity = check_basic_liquidity(ticker, expiration, container)
+        if not has_liquidity:
+            return (True, "Insufficient liquidity")
+
+    return (False, None)
 
 
 def parse_date(date_str: str) -> date:
@@ -207,14 +335,37 @@ def fetch_earnings_for_date(
 
 def fetch_earnings_for_ticker(
     container: Container,
-    ticker: str
+    ticker: str,
+    cached_calendar: Optional[List[Tuple[str, date, EarningsTiming]]] = None
 ) -> Optional[Tuple[date, EarningsTiming]]:
     """
     Fetch earnings date for a specific ticker.
 
+    Args:
+        container: DI container
+        ticker: Stock ticker symbol
+        cached_calendar: Optional pre-fetched full calendar to filter from
+
     Returns:
         (earnings_date, timing) tuple or None if not found
     """
+    # If we have a cached full calendar, filter it locally (much faster)
+    if cached_calendar is not None:
+        ticker_earnings = [
+            (sym, dt, timing) for sym, dt, timing in cached_calendar
+            if sym == ticker
+        ]
+        if ticker_earnings:
+            # Sort by date and get nearest
+            ticker_earnings.sort(key=lambda x: x[1])
+            ticker_symbol, earnings_date, timing = ticker_earnings[0]
+            logger.info(f"{ticker}: Earnings on {earnings_date} ({timing.value})")
+            return (earnings_date, timing)
+        else:
+            logger.warning(f"No upcoming earnings found for {ticker}")
+            return None
+
+    # Fallback: individual API call (slower, more API calls)
     alpha_vantage = container.alphavantage
     result = alpha_vantage.get_earnings_calendar(symbol=ticker, horizon="3month")
 
@@ -456,15 +607,36 @@ def scanning_mode(
     success_count = 0
     error_count = 0
     skip_count = 0
+    filtered_count = 0
 
-    for ticker, earnings_date, timing in earnings_events:
-        logger.info(f"\n{ticker}: Earnings {timing.value}")
+    # Progress bar for scanning
+    pbar = tqdm(
+        earnings_events,
+        desc="Scanning earnings",
+        unit="ticker",
+        bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}'
+    )
+
+    for ticker, earnings_date, timing in pbar:
+        pbar.set_postfix_str(f"Current: {ticker}")
 
         # Calculate expiration date
         expiration_date = calculate_expiration_date(
             earnings_date, timing, expiration_offset
         )
-        logger.info(f"Calculated expiration: {expiration_date}")
+
+        # Apply filters (market cap + liquidity) for scan mode
+        should_filter, filter_reason = should_filter_ticker(
+            ticker, expiration_date, container,
+            check_market_cap=True,
+            check_liquidity=True
+        )
+
+        if should_filter:
+            filtered_count += 1
+            logger.info(f"⏭️  {ticker}: Filtered ({filter_reason})")
+            pbar.set_postfix_str(f"{ticker}: Filtered")
+            continue
 
         # Analyze ticker (no auto-backfill in scan mode to avoid excessive delays)
         result = analyze_ticker(
@@ -479,10 +651,15 @@ def scanning_mode(
             results.append(result)
             if result['status'] == 'SUCCESS':
                 success_count += 1
+                pbar.set_postfix_str(f"{ticker}: ✓ Complete")
             else:
                 skip_count += 1
+                pbar.set_postfix_str(f"{ticker}: No data")
         else:
             error_count += 1
+            pbar.set_postfix_str(f"{ticker}: ✗ Error")
+
+    pbar.close()
 
     # Summary
     logger.info("\n" + "=" * 80)
@@ -493,6 +670,7 @@ def scanning_mode(
     logger.info(f"   Date: {scan_date}")
     logger.info(f"   Total Earnings Found: {len(earnings_events)}")
     logger.info(f"\n📊 Analysis Results:")
+    logger.info(f"   🔍 Filtered (Market Cap/Liquidity): {filtered_count}")
     logger.info(f"   ✓ Successfully Analyzed: {success_count}")
     logger.info(f"   ⏭️  Skipped (No Data): {skip_count}")
     logger.info(f"   ✗ Errors: {error_count}")
@@ -543,42 +721,58 @@ def ticker_mode(
     logger.info("TICKER MODE: Command Line Tickers")
     logger.info("=" * 80)
     logger.info(f"Tickers: {', '.join(tickers)}")
-
-    # Rate limit warning
-    if len(tickers) > ALPHA_VANTAGE_CALLS_PER_MINUTE:
-        logger.warning(
-            f"⚠️  Analyzing {len(tickers)} tickers will require rate limiting "
-            f"(Alpha Vantage: {ALPHA_VANTAGE_CALLS_PER_MINUTE} calls/min)"
-        )
     logger.info("")
+
+    # Create cache for earnings calendar (6 days TTL)
+    cache_db_path = container.config.database.path.parent / "earnings_cache.db"
+    earnings_cache = HybridCache(
+        db_path=cache_db_path,
+        l1_ttl_seconds=3600,  # 1 hour in memory
+        l2_ttl_seconds=518400,  # 6 days persistent
+        max_l1_size=100
+    )
+
+    # Fetch full earnings calendar ONCE and cache it (6 day TTL)
+    logger.info("Fetching full earnings calendar...")
+    cache_key = f"earnings_calendar:{date.today().isoformat()}"
+    full_calendar = earnings_cache.get(cache_key)
+
+    if full_calendar is None:
+        logger.info("Cache MISS - fetching from Alpha Vantage...")
+        calendar_result = container.alphavantage.get_earnings_calendar(horizon="3month")
+        if calendar_result.is_err:
+            logger.error(f"Failed to fetch earnings calendar: {calendar_result.error}")
+            return 1
+        full_calendar = calendar_result.value
+        earnings_cache.set(cache_key, full_calendar)
+        logger.info(f"✓ Fetched {len(full_calendar)} total earnings events (cached)")
+    else:
+        logger.info(f"✓ Cache HIT - using cached calendar ({len(full_calendar)} events)")
 
     # Analyze each ticker
     results = []
     success_count = 0
     error_count = 0
     skip_count = 0
-    api_call_count = 0
+    filtered_count = 0
 
-    for i, ticker in enumerate(tickers):
-        # Rate limit handling - pause after every N API calls
-        if api_call_count > 0 and api_call_count % ALPHA_VANTAGE_CALLS_PER_MINUTE == 0:
-            logger.info(
-                f"⏸️  Rate limit pause ({RATE_LIMIT_PAUSE_SECONDS}s) "
-                f"after {api_call_count} API calls..."
-            )
-            time.sleep(RATE_LIMIT_PAUSE_SECONDS)
+    # Progress bar for ticker processing
+    pbar = tqdm(
+        tickers,
+        desc="Analyzing tickers",
+        unit="ticker",
+        bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}'
+    )
 
-        logger.info(f"\n{'=' * 80}")
-        logger.info(f"Processing {ticker} ({i+1}/{len(tickers)})")
-        logger.info(f"{'=' * 80}")
+    for ticker in pbar:
+        pbar.set_postfix_str(f"Current: {ticker}")
 
-        # Fetch earnings date for ticker (counts as 1 API call)
-        earnings_info = fetch_earnings_for_ticker(container, ticker)
-        api_call_count += 1
+        # Fetch earnings date for ticker (using cached full calendar - no API call!)
+        earnings_info = fetch_earnings_for_ticker(container, ticker, cached_calendar=full_calendar)
 
         if not earnings_info:
-            logger.warning(f"No upcoming earnings found for {ticker} - skipping")
             skip_count += 1
+            pbar.set_postfix_str(f"{ticker}: No earnings")
             continue
 
         earnings_date, timing = earnings_info
@@ -587,7 +781,22 @@ def ticker_mode(
         expiration_date = calculate_expiration_date(
             earnings_date, timing, expiration_offset
         )
-        logger.info(f"Calculated expiration: {expiration_date}")
+
+        # Apply filters (market cap + liquidity) for list mode
+        should_filter, filter_reason = should_filter_ticker(
+            ticker, expiration_date, container,
+            check_market_cap=True,
+            check_liquidity=True
+        )
+
+        if should_filter:
+            filtered_count += 1
+            logger.info(f"⏭️  {ticker}: Filtered ({filter_reason})")
+            pbar.set_postfix_str(f"{ticker}: Filtered")
+            continue
+
+        # Update progress
+        pbar.set_postfix_str(f"{ticker}: Analyzing VRP")
 
         # Analyze ticker (with auto-backfill enabled for ticker mode)
         result = analyze_ticker(
@@ -602,10 +811,15 @@ def ticker_mode(
             results.append(result)
             if result['status'] == 'SUCCESS':
                 success_count += 1
+                pbar.set_postfix_str(f"{ticker}: ✓ Complete")
             else:
                 skip_count += 1
+                pbar.set_postfix_str(f"{ticker}: Skipped")
         else:
             error_count += 1
+            pbar.set_postfix_str(f"{ticker}: ✗ Error")
+
+    pbar.close()
 
     # Summary
     logger.info("\n" + "=" * 80)
@@ -616,6 +830,7 @@ def ticker_mode(
     logger.info(f"   Tickers Requested: {len(tickers)}")
     logger.info(f"   Tickers Analyzed: {', '.join(tickers)}")
     logger.info(f"\n📊 Analysis Results:")
+    logger.info(f"   🔍 Filtered (Market Cap/Liquidity): {filtered_count}")
     logger.info(f"   ✓ Successfully Analyzed: {success_count}")
     logger.info(f"   ⏭️  Skipped (No Earnings/Data): {skip_count}")
     logger.info(f"   ✗ Errors: {error_count}")
@@ -692,8 +907,17 @@ def whisper_mode(
         logger.info(f"Fallback: {fallback_image}")
     logger.info("")
 
+    # Create cache for whisper data (6 days TTL = until next Monday)
+    cache_db_path = container.config.database.path.parent / "whisper_cache.db"
+    whisper_cache = HybridCache(
+        db_path=cache_db_path,
+        l1_ttl_seconds=3600,  # 1 hour in memory
+        l2_ttl_seconds=518400,  # 6 days persistent (until next Monday)
+        max_l1_size=100
+    )
+
     logger.info("Fetching ticker list...")
-    scraper = EarningsWhisperScraper()
+    scraper = EarningsWhisperScraper(cache=whisper_cache)
     result = scraper.get_most_anticipated_earnings(
         week_monday=monday.strftime("%Y-%m-%d"),
         fallback_image=fallback_image
@@ -708,41 +932,46 @@ def whisper_mode(
     logger.info(f"Tickers: {', '.join(tickers)}")
     logger.info("")
 
-    # Rate limit warning
-    if len(tickers) > ALPHA_VANTAGE_CALLS_PER_MINUTE:
-        logger.warning(
-            f"⚠️  Analyzing {len(tickers)} tickers will require rate limiting "
-            f"(Alpha Vantage: {ALPHA_VANTAGE_CALLS_PER_MINUTE} calls/min)"
-        )
-    logger.info("")
+    # Fetch full earnings calendar ONCE and cache it (6 day TTL)
+    logger.info("Fetching full earnings calendar...")
+    cache_key = f"earnings_calendar:{date.today().isoformat()}"
+    full_calendar = whisper_cache.get(cache_key)
+
+    if full_calendar is None:
+        logger.info("Cache MISS - fetching from Alpha Vantage...")
+        calendar_result = container.alphavantage.get_earnings_calendar(horizon="3month")
+        if calendar_result.is_err:
+            logger.error(f"Failed to fetch earnings calendar: {calendar_result.error}")
+            return 1
+        full_calendar = calendar_result.value
+        whisper_cache.set(cache_key, full_calendar)
+        logger.info(f"✓ Fetched {len(full_calendar)} total earnings events (cached)")
+    else:
+        logger.info(f"✓ Cache HIT - using cached calendar ({len(full_calendar)} events)")
 
     # Analyze each ticker
     results = []
     success_count = 0
     error_count = 0
     skip_count = 0
-    api_call_count = 0
 
-    for i, ticker in enumerate(tickers):
-        # Rate limit handling - pause after every N API calls
-        if api_call_count > 0 and api_call_count % ALPHA_VANTAGE_CALLS_PER_MINUTE == 0:
-            logger.info(
-                f"⏸️  Rate limit pause ({RATE_LIMIT_PAUSE_SECONDS}s) "
-                f"after {api_call_count} API calls..."
-            )
-            time.sleep(RATE_LIMIT_PAUSE_SECONDS)
+    # Progress bar for ticker processing
+    pbar = tqdm(
+        tickers,
+        desc="Analyzing tickers",
+        unit="ticker",
+        bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}'
+    )
 
-        logger.info(f"\n{'=' * 80}")
-        logger.info(f"Processing {ticker} ({i+1}/{len(tickers)})")
-        logger.info(f"{'=' * 80}")
+    for ticker in pbar:
+        pbar.set_postfix_str(f"Current: {ticker}")
 
-        # Fetch earnings date for ticker (counts as 1 API call)
-        earnings_info = fetch_earnings_for_ticker(container, ticker)
-        api_call_count += 1
+        # Fetch earnings date for ticker (using cached full calendar - no API call!)
+        earnings_info = fetch_earnings_for_ticker(container, ticker, cached_calendar=full_calendar)
 
         if not earnings_info:
-            logger.warning(f"No upcoming earnings found for {ticker} - skipping")
             skip_count += 1
+            pbar.set_postfix_str(f"{ticker}: No earnings")
             continue
 
         earnings_date, timing = earnings_info
@@ -751,7 +980,9 @@ def whisper_mode(
         expiration_date = calculate_expiration_date(
             earnings_date, timing, expiration_offset
         )
-        logger.info(f"Calculated expiration: {expiration_date}")
+
+        # Update progress with current action
+        pbar.set_postfix_str(f"{ticker}: Analyzing VRP")
 
         # Analyze ticker (with auto-backfill enabled like ticker mode)
         result = analyze_ticker(
@@ -766,10 +997,15 @@ def whisper_mode(
             results.append(result)
             if result['status'] == 'SUCCESS':
                 success_count += 1
+                pbar.set_postfix_str(f"{ticker}: ✓ Complete")
             else:
                 skip_count += 1
+                pbar.set_postfix_str(f"{ticker}: Skipped")
         else:
             error_count += 1
+            pbar.set_postfix_str(f"{ticker}: ✗ Error")
+
+    pbar.close()
 
     # Summary
     logger.info("\n" + "=" * 80)
