@@ -187,7 +187,11 @@ Notes:
         logger.info(f"\n📊 Analysis Results:")
         logger.info(f"   Ticker: {args.ticker}")
         logger.info(f"   Earnings: {args.earnings_date}")
-        logger.info(f"   Expiration: {args.expiration}")
+        # Show actual expiration used (may differ from requested if adjusted)
+        if analysis.expiration != args.expiration:
+            logger.info(f"   Expiration: {analysis.expiration} (adjusted from {args.expiration})")
+        else:
+            logger.info(f"   Expiration: {args.expiration}")
         logger.info(f"   Stock Price: {analysis.implied_move.stock_price}")
         logger.info(f"\n📈 VRP Metrics:")
         logger.info(f"   Implied Move: {analysis.vrp.implied_move_pct}")

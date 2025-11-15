@@ -13,6 +13,26 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class PositionSizeInput:
+    """
+    Input parameters for position sizing calculation.
+
+    Attributes:
+        ticker: Stock symbol
+        vrp_ratio: Implied move / Historical mean move ratio
+        consistency_score: Consistency score (0-1) from consistency analyzer
+        historical_win_rate: Historical win rate for this setup (optional)
+        num_historical_trades: Number of historical trades (for confidence)
+    """
+
+    ticker: str
+    vrp_ratio: float
+    consistency_score: float
+    historical_win_rate: Optional[float] = None
+    num_historical_trades: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class PositionSize:
     """
     Position sizing recommendation.
@@ -77,25 +97,23 @@ class PositionSizer:
 
     def calculate_position_size(
         self,
-        ticker: str,
-        vrp_ratio: float,
-        consistency_score: float,
-        historical_win_rate: Optional[float] = None,
-        num_historical_trades: Optional[int] = None,
+        input_params: PositionSizeInput,
     ) -> PositionSize:
         """
         Calculate optimal position size for a trade.
 
         Args:
-            ticker: Stock symbol
-            vrp_ratio: Implied move / Historical mean move ratio
-            consistency_score: Consistency score (0-1) from consistency analyzer
-            historical_win_rate: Historical win rate for this setup (optional)
-            num_historical_trades: Number of historical trades (for confidence)
+            input_params: PositionSizeInput containing all calculation parameters
 
         Returns:
             PositionSize with recommendation and risk metrics
         """
+        ticker = input_params.ticker
+        vrp_ratio = input_params.vrp_ratio
+        consistency_score = input_params.consistency_score
+        historical_win_rate = input_params.historical_win_rate
+        num_historical_trades = input_params.num_historical_trades
+
         # Estimate win probability from consistency and VRP
         # Higher consistency = higher probability of predictable move
         # Higher VRP ratio = higher probability of profitable trade

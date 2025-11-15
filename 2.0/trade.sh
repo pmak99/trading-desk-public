@@ -192,13 +192,23 @@ analyze_single() {
     fi
 
     # Display analysis results (filter timestamps)
-    # Show from ANALYSIS RESULTS onward to capture full output including SUMMARY section
-    echo "$analysis_output" | \
-        sed -n '/ANALYSIS RESULTS/,$p' | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - INFO - //' || {
+    # Check if analysis succeeded by looking for "ANALYSIS RESULTS" in output
+    if echo "$analysis_output" | grep -q "ANALYSIS RESULTS"; then
+        # Show from ANALYSIS RESULTS onward to capture full output including SUMMARY section
+        echo "$analysis_output" | \
+            sed -n '/ANALYSIS RESULTS/,$p' | \
+            sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - INFO - //'
+    else
+        # Analysis failed - show error messages
         echo -e "${RED}Analysis failed${NC}"
+        echo ""
+        echo "$analysis_output" | grep -E "ERROR|Analysis failed|No options|No historical" | \
+            sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - ERROR - //' | \
+            while IFS= read -r line; do
+                echo -e "${RED}⚠️  ${line}${NC}"
+            done
         return 1
-    }
+    fi
     echo ""
 }
 

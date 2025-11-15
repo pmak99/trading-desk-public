@@ -690,7 +690,7 @@ def scanning_mode(
                 f"{r['recommendation'].upper()}"
             )
         logger.info(f"\n📝 Next Steps:")
-        logger.info(f"   1. Analyze individual tickers with: ./trade.sh TICKER {scan_date} --strategies")
+        logger.info(f"   1. Analyze individual tickers with: ./trade.sh TICKER {scan_date}")
         logger.info(f"   2. Review strategy recommendations for each opportunity")
         logger.info(f"   3. Check broker pricing before entering positions")
     else:
@@ -851,7 +851,7 @@ def ticker_mode(
                 f"Earnings {r['earnings_date']}"
             )
         logger.info(f"\n📝 Next Steps:")
-        logger.info(f"   1. Analyze top opportunities with: ./trade.sh TICKER YYYY-MM-DD --strategies")
+        logger.info(f"   1. Analyze top opportunities with: ./trade.sh TICKER YYYY-MM-DD")
         logger.info(f"   2. Review detailed strategy recommendations")
         logger.info(f"   3. Prioritize by VRP ratio and edge score")
         logger.info(f"   4. Verify earnings dates and check broker pricing")
@@ -1056,7 +1056,7 @@ def whisper_mode(
         logger.info(f"   • Strong statistical edge (VRP ratio)")
         logger.info(f"   • Better liquidity expected (High volume)")
         logger.info(f"\n📝 Next Steps:")
-        logger.info(f"   1. Analyze top opportunities with: ./trade.sh TICKER YYYY-MM-DD --strategies")
+        logger.info(f"   1. Analyze top opportunities with: ./trade.sh TICKER YYYY-MM-DD")
         logger.info(f"   2. Review detailed strategy recommendations")
         logger.info(f"   3. Prioritize by VRP ratio and market attention")
         logger.info(f"   4. Check broker for tight bid-ask spreads")

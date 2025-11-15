@@ -38,16 +38,30 @@ class TickerAnalyzer:
         Args:
             ticker: Stock ticker symbol
             earnings_date: Date of earnings announcement
-            expiration: Option expiration date
+            expiration: Option expiration date (will be adjusted to nearest available)
             generate_strategies: If True, generate trade strategies (bull put, bear call, iron condor)
 
         Returns:
             Result containing TickerAnalysis or error
         """
         try:
+            # Step 0: Find nearest available expiration if exact date not available
+            nearest_exp_result = self.container.tradier.find_nearest_expiration(
+                ticker, expiration
+            )
+            if nearest_exp_result.is_err:
+                return Err(nearest_exp_result.error)
+
+            actual_expiration = nearest_exp_result.value
+            if actual_expiration != expiration:
+                logger.info(
+                    f"{ticker}: Using adjusted expiration {actual_expiration} "
+                    f"(requested {expiration})"
+                )
+
             # Step 1: Calculate implied move
             implied_result = self.container.implied_move_calculator.calculate(
-                ticker, expiration
+                ticker, actual_expiration
             )
 
             if implied_result.is_err:
@@ -81,7 +95,7 @@ class TickerAnalyzer:
             # Step 3: Calculate VRP
             vrp_result = self.container.vrp_calculator.calculate(
                 ticker=ticker,
-                expiration=expiration,
+                expiration=actual_expiration,
                 implied_move=implied_move,
                 historical_moves=historical_moves,
             )
@@ -95,7 +109,7 @@ class TickerAnalyzer:
             skew = None
             if self.container.skew_analyzer:
                 skew_result = self.container.skew_analyzer.analyze_skew_curve(
-                    ticker, expiration
+                    ticker, actual_expiration
                 )
                 if skew_result.is_ok:
                     skew = skew_result.value
@@ -121,7 +135,7 @@ class TickerAnalyzer:
                 try:
                     # Get the full option chain for strategy generation
                     chain_result = self.container.cached_options_provider.get_option_chain(
-                        ticker, expiration
+                        ticker, actual_expiration
                     )
                     if chain_result.is_ok:
                         option_chain = chain_result.value
@@ -143,7 +157,7 @@ class TickerAnalyzer:
                 earnings_date=earnings_date,
                 earnings_timing=EarningsTiming.AMC,  # Default to After Market Close
                 entry_time=datetime.now(),
-                expiration=expiration,
+                expiration=actual_expiration,  # Use adjusted expiration
                 implied_move=implied_move,
                 vrp=vrp,
                 consistency=consistency,  # Phase 4 enhanced
