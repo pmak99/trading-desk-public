@@ -6,6 +6,7 @@ Makes the entire system testable by allowing easy mocking.
 """
 
 import logging
+from functools import wraps
 from pathlib import Path
 from typing import Optional
 from src.config.config import Config
@@ -330,6 +331,7 @@ class Container:
 
                     # Create closure to capture original_method
                     def create_wrapper(orig):
+                        @wraps(orig)
                         def wrapper(*args, **kwargs):
                             return self._tradier_breaker.call(orig, *args, **kwargs)
                         return wrapper
@@ -354,6 +356,7 @@ class Container:
 
                     # Create closure to capture original_method
                     def create_wrapper(orig):
+                        @wraps(orig)
                         def wrapper(*args, **kwargs):
                             return self._alpha_vantage_breaker.call(orig, *args, **kwargs)
                         return wrapper
