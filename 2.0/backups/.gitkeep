@@ -1,0 +1,3 @@
+# This directory stores automated database backups
+# Add this folder to Google Drive sync for cloud backup
+# Retention: 30 days (auto-cleanup via trade.sh)
