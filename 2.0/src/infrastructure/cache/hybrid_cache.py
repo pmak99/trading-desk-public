@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 # Cache version for schema migrations
 CACHE_VERSION = "v1"
 
+# Connection timeout for cache database operations (30 seconds)
+CONNECTION_TIMEOUT = 30
+
 
 class HybridCache:
     """
@@ -72,7 +75,7 @@ class HybridCache:
     def _init_db(self) -> None:
         """Initialize SQLite schema for L2 cache."""
         try:
-            with sqlite3.connect(str(self.db_path)) as conn:
+            with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                 # Enable WAL mode for better write concurrency
                 conn.execute('PRAGMA journal_mode=WAL')
                 conn.execute('''
@@ -119,7 +122,7 @@ class HybridCache:
 
         # L2 check (SQLite)
         try:
-            with sqlite3.connect(str(self.db_path)) as conn:
+            with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                 row = conn.execute(
                     'SELECT value, timestamp FROM cache WHERE key = ?',
                     (key,)
@@ -147,12 +150,12 @@ class HybridCache:
                     except (pickle.UnpicklingError, EOFError, AttributeError) as e:
                         logger.warning(f"Failed to unpickle cached value for {key}: {e}")
                         # Delete corrupted entry
-                        with sqlite3.connect(str(self.db_path)) as conn:
+                        with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                             conn.execute('DELETE FROM cache WHERE key = ?', (key,))
                 else:
                     # Expired in L2
                     logger.debug(f"Cache L2 EXPIRED: {key} (age: {elapsed:.1f}s)")
-                    with sqlite3.connect(str(self.db_path)) as conn:
+                    with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                         conn.execute('DELETE FROM cache WHERE key = ?', (key,))
 
         except sqlite3.Error as e:
@@ -188,7 +191,7 @@ class HybridCache:
         # Set in L2 (SQLite)
         try:
             value_blob = pickle.dumps(value)
-            with sqlite3.connect(str(self.db_path)) as conn:
+            with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                 conn.execute(
                     '''
                     INSERT OR REPLACE INTO cache (key, value, timestamp, version)
@@ -214,7 +217,7 @@ class HybridCache:
 
         # Delete from L2
         try:
-            with sqlite3.connect(str(self.db_path)) as conn:
+            with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                 conn.execute('DELETE FROM cache WHERE key = ?', (key,))
                 conn.commit()
             logger.debug(f"Cache DELETE: {key} (L1+L2)")
@@ -231,7 +234,7 @@ class HybridCache:
 
         # Clear L2
         try:
-            with sqlite3.connect(str(self.db_path)) as conn:
+            with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.execute('SELECT COUNT(*) FROM cache')
                 count_l2 = cursor.fetchone()[0]
                 conn.execute('DELETE FROM cache')
@@ -249,7 +252,7 @@ class HybridCache:
         """
         try:
             cutoff = datetime.now() - timedelta(seconds=self.l2_ttl)
-            with sqlite3.connect(str(self.db_path)) as conn:
+            with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.execute(
                     'DELETE FROM cache WHERE timestamp < ?',
                     (cutoff.isoformat(),)
@@ -285,7 +288,7 @@ class HybridCache:
             l1_count = len(self._l1_cache)
 
         try:
-            with sqlite3.connect(str(self.db_path)) as conn:
+            with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.execute('SELECT COUNT(*) FROM cache')
                 l2_count = cursor.fetchone()[0]
         except sqlite3.Error:

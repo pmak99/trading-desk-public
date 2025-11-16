@@ -21,6 +21,10 @@ def add_backtest_tables(db_path: Path) -> None:
 
     Args:
         db_path: Path to SQLite database file
+
+    Note:
+        Assumes database is already initialized with WAL mode via init_database().
+        If called on a fresh database, WAL mode should be set first.
     """
     conn = sqlite3.connect(str(db_path), timeout=30)
     cursor = conn.cursor()
