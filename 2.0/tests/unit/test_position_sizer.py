@@ -3,7 +3,7 @@ Unit tests for position sizing service.
 """
 
 import pytest
-from src.application.services.position_sizer import PositionSizer, PositionSize
+from src.application.services.position_sizer import PositionSizer, PositionSize, PositionSizeInput
 
 
 class TestPositionSizer:
@@ -18,9 +18,11 @@ class TestPositionSizer:
         )
 
         result = sizer.calculate_position_size(
-            ticker="AAPL",
-            vrp_ratio=2.0,  # Excellent VRP
-            consistency_score=0.8,  # High consistency
+            PositionSizeInput(
+                ticker="AAPL",
+                vrp_ratio=2.0,  # Excellent VRP
+                consistency_score=0.8,  # High consistency
+            )
         )
 
         assert isinstance(result, PositionSize)
@@ -39,11 +41,13 @@ class TestPositionSizer:
         )
 
         result = sizer.calculate_position_size(
-            ticker="AAPL",
-            vrp_ratio=2.5,  # Very high VRP
-            consistency_score=0.9,  # Very high consistency
-            historical_win_rate=0.75,  # Strong historical performance
-            num_historical_trades=30,  # Good sample size
+            PositionSizeInput(
+                ticker="AAPL",
+                vrp_ratio=2.5,  # Very high VRP
+                consistency_score=0.9,  # Very high consistency
+                historical_win_rate=0.75,  # Strong historical performance
+                num_historical_trades=30,  # Good sample size
+            )
         )
 
         # Should recommend larger position with high edge + confidence
@@ -56,11 +60,13 @@ class TestPositionSizer:
         sizer = PositionSizer(fractional_kelly=0.25)
 
         result = sizer.calculate_position_size(
-            ticker="XYZ",
-            vrp_ratio=1.2,  # Marginal VRP
-            consistency_score=0.3,  # Low consistency
-            historical_win_rate=0.50,  # Coin flip
-            num_historical_trades=5,  # Small sample
+            PositionSizeInput(
+                ticker="XYZ",
+                vrp_ratio=1.2,  # Marginal VRP
+                consistency_score=0.3,  # Low consistency
+                historical_win_rate=0.50,  # Coin flip
+                num_historical_trades=5,  # Small sample
+            )
         )
 
         # Should recommend smaller position or zero
@@ -76,10 +82,12 @@ class TestPositionSizer:
         )
 
         result = sizer.calculate_position_size(
-            ticker="AAPL",
-            vrp_ratio=3.0,  # Extreme VRP
-            consistency_score=0.95,  # Near-perfect consistency
-            historical_win_rate=0.80,  # Very high win rate
+            PositionSizeInput(
+                ticker="AAPL",
+                vrp_ratio=3.0,  # Extreme VRP
+                consistency_score=0.95,  # Near-perfect consistency
+                historical_win_rate=0.80,  # Very high win rate
+            )
         )
 
         # Should be capped at 3%
@@ -95,9 +103,11 @@ class TestPositionSizer:
         )
 
         result = sizer.calculate_position_size(
-            ticker="AAPL",
-            vrp_ratio=2.0,
-            consistency_score=0.8,
+            PositionSizeInput(
+                ticker="AAPL",
+                vrp_ratio=2.0,
+                consistency_score=0.8,
+            )
         )
 
         # Should be capped by loss limit
@@ -110,10 +120,12 @@ class TestPositionSizer:
 
         # Very low win rate, low VRP = negative Kelly
         result = sizer.calculate_position_size(
-            ticker="BAD",
-            vrp_ratio=0.8,  # Below 1.0 = negative edge
-            consistency_score=0.2,  # Low consistency
-            historical_win_rate=0.35,  # Low win rate
+            PositionSizeInput(
+                ticker="BAD",
+                vrp_ratio=0.8,  # Below 1.0 = negative edge
+                consistency_score=0.2,  # Low consistency
+                historical_win_rate=0.35,  # Low win rate
+            )
         )
 
         # Should return zero or near-zero position
@@ -131,17 +143,21 @@ class TestPositionSizer:
 
         # Same setup, different confidence levels
         result_high_conf = sizer.calculate_position_size(
-            ticker="AAPL",
-            vrp_ratio=2.0,
-            consistency_score=0.8,  # High consistency = high confidence
-            num_historical_trades=30,
+            PositionSizeInput(
+                ticker="AAPL",
+                vrp_ratio=2.0,
+                consistency_score=0.8,  # High consistency = high confidence
+                num_historical_trades=30,
+            )
         )
 
         result_low_conf = sizer.calculate_position_size(
-            ticker="AAPL",
-            vrp_ratio=2.0,
-            consistency_score=0.3,  # Low consistency = low confidence
-            num_historical_trades=3,
+            PositionSizeInput(
+                ticker="AAPL",
+                vrp_ratio=2.0,
+                consistency_score=0.3,  # Low consistency = low confidence
+                num_historical_trades=3,
+            )
         )
 
         # Low confidence should result in smaller position
@@ -154,9 +170,9 @@ class TestPositionSizer:
         sizer = PositionSizer(fractional_kelly=0.25)
 
         positions = [
-            sizer.calculate_position_size("AAPL", 2.0, 0.8),
-            sizer.calculate_position_size("MSFT", 1.8, 0.7),
-            sizer.calculate_position_size("GOOGL", 1.9, 0.75),
+            sizer.calculate_position_size(PositionSizeInput(ticker="AAPL", vrp_ratio=2.0, consistency_score=0.8)),
+            sizer.calculate_position_size(PositionSizeInput(ticker="MSFT", vrp_ratio=1.8, consistency_score=0.7)),
+            sizer.calculate_position_size(PositionSizeInput(ticker="GOOGL", vrp_ratio=1.9, consistency_score=0.75)),
         ]
 
         # Total should be well under 20% default limit
@@ -179,11 +195,11 @@ class TestPositionSizer:
 
         # Create 5 large positions
         positions = [
-            sizer.calculate_position_size("AAPL", 2.5, 0.9),
-            sizer.calculate_position_size("MSFT", 2.3, 0.85),
-            sizer.calculate_position_size("GOOGL", 2.4, 0.88),
-            sizer.calculate_position_size("AMZN", 2.2, 0.82),
-            sizer.calculate_position_size("META", 2.1, 0.80),
+            sizer.calculate_position_size(PositionSizeInput(ticker="AAPL", vrp_ratio=2.5, consistency_score=0.9)),
+            sizer.calculate_position_size(PositionSizeInput(ticker="MSFT", vrp_ratio=2.3, consistency_score=0.85)),
+            sizer.calculate_position_size(PositionSizeInput(ticker="GOOGL", vrp_ratio=2.4, consistency_score=0.88)),
+            sizer.calculate_position_size(PositionSizeInput(ticker="AMZN", vrp_ratio=2.2, consistency_score=0.82)),
+            sizer.calculate_position_size(PositionSizeInput(ticker="META", vrp_ratio=2.1, consistency_score=0.80)),
         ]
 
         total_exposure = sum(p.position_size_pct for p in positions)
@@ -213,11 +229,15 @@ class TestPositionSizer:
         """Test different fractional Kelly values."""
         # Full Kelly (very aggressive)
         sizer_full = PositionSizer(fractional_kelly=1.0, max_position_pct=0.50)
-        result_full = sizer_full.calculate_position_size("AAPL", 2.0, 0.8)
+        result_full = sizer_full.calculate_position_size(
+            PositionSizeInput(ticker="AAPL", vrp_ratio=2.0, consistency_score=0.8)
+        )
 
         # Quarter Kelly (conservative)
         sizer_quarter = PositionSizer(fractional_kelly=0.25, max_position_pct=0.50)
-        result_quarter = sizer_quarter.calculate_position_size("AAPL", 2.0, 0.8)
+        result_quarter = sizer_quarter.calculate_position_size(
+            PositionSizeInput(ticker="AAPL", vrp_ratio=2.0, consistency_score=0.8)
+        )
 
         # Full Kelly should be ~4x quarter Kelly (before caps)
         assert result_full.kelly_fraction == result_quarter.kelly_fraction
@@ -234,17 +254,21 @@ class TestPositionSizer:
 
         # Without historical win rate (estimated from consistency/VRP)
         result_estimated = sizer.calculate_position_size(
-            ticker="AAPL",
-            vrp_ratio=2.0,
-            consistency_score=0.6,
+            PositionSizeInput(
+                ticker="AAPL",
+                vrp_ratio=2.0,
+                consistency_score=0.6,
+            )
         )
 
         # With explicit historical win rate
         result_historical = sizer.calculate_position_size(
-            ticker="AAPL",
-            vrp_ratio=2.0,
-            consistency_score=0.6,
-            historical_win_rate=0.80,  # Much higher than estimated
+            PositionSizeInput(
+                ticker="AAPL",
+                vrp_ratio=2.0,
+                consistency_score=0.6,
+                historical_win_rate=0.80,  # Much higher than estimated
+            )
         )
 
         # Historical win rate should lead to larger or equal position
