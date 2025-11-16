@@ -391,6 +391,91 @@ CREATE TABLE historical_moves (
 
 ---
 
+## Database Backups
+
+### Automatic Backups
+
+**Every time you run `./trade.sh`**, the system automatically backs up your database to the `backups/` folder. Backups are:
+- **Triggered**: On every analysis command (ticker, scan, list, whisper)
+- **Frequency**: Only if last backup is >6 hours old (avoids spam)
+- **Location**: `2.0/backups/ivcrush_YYYYMMDD_HHMMSS.db`
+- **Retention**: Last 30 days (automatic cleanup)
+- **Impact**: Silent, non-blocking (<1 second)
+
+### Google Drive Sync (Recommended)
+
+For cloud redundancy, sync the `backups/` folder to Google Drive:
+
+1. **Open Google Drive desktop app**
+2. **Add folder to sync**:
+   - Navigate to: `Trading Desk/2.0/backups/`
+   - Enable sync for this folder
+3. **Verify**: Check Google Drive web to confirm backups are uploading
+
+**Storage**: ~13MB for 30 days of backups (negligible with Google One subscription)
+
+### Restoring from Backup
+
+If you need to restore your database:
+
+```bash
+cd "$PROJECT_ROOT/2.0"
+./scripts/restore_database.sh
+```
+
+**The restore script will**:
+1. List all available backups with timestamps and sizes
+2. Show current database info
+3. Create a safety backup before restore (optional)
+4. Restore selected backup
+5. Verify database integrity
+
+**Example restore session**:
+```
+Available backups:
+
+ 1) 2025-01-15 14:30:22  444KB  (< 1 day)
+ 2) 2025-01-14 09:15:10  440KB  (< 7 days)
+ 3) 2025-01-13 16:45:33  438KB  (< 7 days)
+
+Current database:
+  data/ivcrush.db - 444KB (modified: Jan 15 14:30)
+
+Select backup number to restore (or 'q' to quit): 2
+
+Selected: ivcrush_20250114_091510.db
+
+WARNING: This will replace your current database!
+
+Create safety backup before restore? (Y/n): y
+Creating safety backup: data/ivcrush.db.pre-restore-20250115_143022
+✓ Safety backup created
+
+Continue with restore? (y/N): y
+
+Restoring database...
+✓ Database file restored
+Verifying database integrity...
+✓ Database integrity check passed
+
+✓ Restore successful
+```
+
+### Manual Backup (Optional)
+
+You can also create manual backups anytime:
+
+```bash
+# Simple copy
+cp data/ivcrush.db backups/ivcrush_manual_$(date +%Y%m%d).db
+
+# With compression
+sqlite3 data/ivcrush.db "PRAGMA wal_checkpoint(FULL); .backup backups/ivcrush_manual.db"
+gzip backups/ivcrush_manual.db
+```
+
+---
+
 ## Recent Improvements
 
 ### November 2025 - Cache & Database Audit Fixes
