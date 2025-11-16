@@ -12,6 +12,9 @@ from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 
 logger = logging.getLogger(__name__)
 
+# Connection timeout for all database operations (30 seconds)
+CONNECTION_TIMEOUT = 30
+
 
 class PricesRepository:
     """Repository for historical price movements."""
@@ -32,7 +35,7 @@ class PricesRepository:
             Result with None on success or AppError on failure
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
@@ -86,7 +89,7 @@ class PricesRepository:
             return Ok(0)
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.cursor()
 
                 data = [
@@ -141,7 +144,7 @@ class PricesRepository:
             Result with list of HistoricalMove or AppError
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
@@ -205,7 +208,7 @@ class PricesRepository:
             Result with HistoricalMove or AppError
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
@@ -260,7 +263,7 @@ class PricesRepository:
             Result with count or AppError
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     'SELECT COUNT(*) FROM historical_moves WHERE ticker = ?',
@@ -287,7 +290,7 @@ class PricesRepository:
             Result with count of deleted rows
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''

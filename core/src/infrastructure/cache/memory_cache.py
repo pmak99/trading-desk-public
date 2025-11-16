@@ -6,6 +6,7 @@ Simple L1 cache for MVP. Will be enhanced to HybridCache in Phase 2.
 
 import logging
 from datetime import datetime, timedelta
+from threading import Lock
 from typing import Optional, Any, Dict
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class MemoryCache:
         self.max_size = max_size
         self._cache: Dict[str, Any] = {}
         self._timestamps: Dict[str, datetime] = {}
+        self._lock = Lock()  # Thread safety for all cache operations
 
     def get(self, key: str) -> Optional[Any]:
         """
@@ -46,28 +48,29 @@ class MemoryCache:
         Returns:
             Cached value or None if expired/missing
         """
-        if key not in self._cache:
-            logger.debug(f"Cache MISS: {key}")
-            return None
+        with self._lock:
+            if key not in self._cache:
+                logger.debug(f"Cache MISS: {key}")
+                return None
 
-        # Check if expired
-        stored_time = self._timestamps.get(key)
-        if stored_time is None:
-            del self._cache[key]
-            return None
+            # Check if expired
+            stored_time = self._timestamps.get(key)
+            if stored_time is None:
+                del self._cache[key]
+                return None
 
-        now = datetime.now()
-        elapsed = (now - stored_time).total_seconds()
+            now = datetime.now()
+            elapsed = (now - stored_time).total_seconds()
 
-        if elapsed > self.ttl_seconds:
-            # Expired
-            logger.debug(f"Cache EXPIRED: {key} (age: {elapsed:.1f}s)")
-            del self._cache[key]
-            del self._timestamps[key]
-            return None
+            if elapsed > self.ttl_seconds:
+                # Expired
+                logger.debug(f"Cache EXPIRED: {key} (age: {elapsed:.1f}s)")
+                del self._cache[key]
+                del self._timestamps[key]
+                return None
 
-        logger.debug(f"Cache HIT: {key} (age: {elapsed:.1f}s)")
-        return self._cache[key]
+            logger.debug(f"Cache HIT: {key} (age: {elapsed:.1f}s)")
+            return self._cache[key]
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         """
@@ -78,36 +81,44 @@ class MemoryCache:
             value: Value to cache
             ttl: Optional custom TTL in seconds
         """
-        # Enforce max size (simple LRU: remove oldest)
-        if len(self._cache) >= self.max_size and key not in self._cache:
-            self._evict_oldest()
+        with self._lock:
+            # Enforce max size (simple LRU: remove oldest)
+            if len(self._cache) >= self.max_size and key not in self._cache:
+                self._evict_oldest()
 
-        self._cache[key] = value
-        self._timestamps[key] = datetime.now()
+            self._cache[key] = value
+            self._timestamps[key] = datetime.now()
 
-        effective_ttl = ttl if ttl is not None else self.ttl_seconds
-        logger.debug(f"Cache SET: {key} (TTL: {effective_ttl}s)")
+            effective_ttl = ttl if ttl is not None else self.ttl_seconds
+            logger.debug(f"Cache SET: {key} (TTL: {effective_ttl}s)")
 
     def delete(self, key: str) -> None:
         """Delete cached value."""
-        if key in self._cache:
-            del self._cache[key]
-            del self._timestamps[key]
-            logger.debug(f"Cache DELETE: {key}")
+        with self._lock:
+            if key in self._cache:
+                del self._cache[key]
+                del self._timestamps[key]
+                logger.debug(f"Cache DELETE: {key}")
 
     def clear(self) -> None:
         """Clear all cached values."""
-        count = len(self._cache)
-        self._cache.clear()
-        self._timestamps.clear()
-        logger.info(f"Cache CLEARED: {count} entries removed")
+        with self._lock:
+            count = len(self._cache)
+            self._cache.clear()
+            self._timestamps.clear()
+            logger.info(f"Cache CLEARED: {count} entries removed")
 
     def size(self) -> int:
         """Get current cache size."""
-        return len(self._cache)
+        with self._lock:
+            return len(self._cache)
 
     def _evict_oldest(self) -> None:
-        """Evict oldest entry (LRU)."""
+        """
+        Evict oldest entry (LRU).
+
+        Note: Called with lock already held by set().
+        """
         if not self._timestamps:
             return
 
@@ -118,14 +129,16 @@ class MemoryCache:
 
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
-        return {
-            "size": len(self._cache),
-            "max_size": self.max_size,
-            "ttl_seconds": self.ttl_seconds,
-            "utilization_pct": (len(self._cache) / self.max_size * 100)
-            if self.max_size > 0
-            else 0,
-        }
+        with self._lock:
+            size = len(self._cache)
+            return {
+                "size": size,
+                "max_size": self.max_size,
+                "ttl_seconds": self.ttl_seconds,
+                "utilization_pct": (size / self.max_size * 100)
+                if self.max_size > 0
+                else 0,
+            }
 
 
 class CachedOptionsDataProvider:
