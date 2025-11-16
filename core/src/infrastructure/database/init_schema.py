@@ -32,6 +32,8 @@ def init_database(db_path: Path) -> None:
     if db_path.exists():
         if verify_database(db_path):
             logger.debug(f"Database already initialized: {db_path}")
+            # Ensure WAL mode is set even for existing databases
+            _ensure_wal_mode(db_path)
             return
 
     # Use exclusive mode to prevent concurrent initialization
@@ -45,6 +47,12 @@ def init_database(db_path: Path) -> None:
     cursor = conn.cursor()
 
     try:
+        # Enable WAL mode for better concurrency and performance
+        cursor.execute('PRAGMA journal_mode=WAL')
+        cursor.execute('PRAGMA synchronous=NORMAL')  # Safe with WAL
+        cursor.execute('PRAGMA busy_timeout=5000')   # 5 second timeout on locks
+        logger.info("Database configured: WAL mode enabled, busy_timeout=5s")
+
         # Table 1: Earnings Calendar
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS earnings_calendar (
@@ -243,6 +251,35 @@ def drop_all_tables(db_path: Path) -> None:
         logger.warning(f"All tables dropped from {db_path}")
     finally:
         conn.close()
+
+
+def _ensure_wal_mode(db_path: Path) -> None:
+    """
+    Ensure database is using WAL mode with optimal settings.
+
+    Args:
+        db_path: Path to SQLite database
+    """
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30)
+        cursor = conn.cursor()
+
+        # Check current journal mode
+        current_mode = cursor.execute('PRAGMA journal_mode').fetchone()[0]
+
+        if current_mode.lower() != 'wal':
+            # Set WAL mode
+            cursor.execute('PRAGMA journal_mode=WAL')
+            cursor.execute('PRAGMA synchronous=NORMAL')
+            cursor.execute('PRAGMA busy_timeout=5000')
+            conn.commit()
+            logger.info(f"✓ WAL mode enabled for existing database: {db_path}")
+        else:
+            logger.debug(f"Database already using WAL mode: {db_path}")
+
+        conn.close()
+    except sqlite3.Error as e:
+        logger.error(f"Failed to ensure WAL mode: {e}")
 
 
 if __name__ == "__main__":

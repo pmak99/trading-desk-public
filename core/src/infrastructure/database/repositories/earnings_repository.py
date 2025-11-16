@@ -12,6 +12,9 @@ from src.domain.enums import EarningsTiming
 
 logger = logging.getLogger(__name__)
 
+# Connection timeout for all database operations (30 seconds)
+CONNECTION_TIMEOUT = 30
+
 
 class EarningsRepository:
     """Repository for earnings calendar data."""
@@ -34,7 +37,7 @@ class EarningsRepository:
             Result with None on success or AppError on failure
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
@@ -69,7 +72,7 @@ class EarningsRepository:
             Result with list of (date, timing) tuples
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
@@ -114,7 +117,7 @@ class EarningsRepository:
             Result with list of (ticker, date) tuples
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
@@ -149,7 +152,7 @@ class EarningsRepository:
             Result with count of deleted rows
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
