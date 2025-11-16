@@ -88,6 +88,51 @@ health_check() {
     echo ""
 }
 
+backup_database() {
+    # Auto-backup database to local folder (synced by Google Drive)
+    # Only backup if last backup is >6 hours old to avoid spam
+
+    local backup_dir="backups"
+    local db_file="data/ivcrush.db"
+    local retention_days=30
+
+    # Check if database exists
+    if [ ! -f "$db_file" ]; then
+        return 0  # Silently skip if no database yet
+    fi
+
+    # Create backup directory if it doesn't exist
+    mkdir -p "$backup_dir"
+
+    # Check if we need to backup (skip if last backup <6 hours old)
+    local last_backup
+    last_backup=$(find "$backup_dir" -name "ivcrush_*.db" -type f -mtime -0.25 2>/dev/null | head -1)
+    if [ -n "$last_backup" ]; then
+        return 0  # Recent backup exists, skip
+    fi
+
+    # Create timestamped backup filename
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_file="${backup_dir}/ivcrush_${timestamp}.db"
+
+    # Perform WAL checkpoint for consistency (ignore errors if not in WAL mode)
+    sqlite3 "$db_file" "PRAGMA wal_checkpoint(FULL);" 2>/dev/null || true
+
+    # Copy database to backup location
+    if cp "$db_file" "$backup_file" 2>/dev/null; then
+        # Silent success (no output)
+        :
+    else
+        # Log error but don't fail the script
+        echo -e "${YELLOW}⚠️  Backup failed (continuing anyway)${NC}" >&2
+        return 0
+    fi
+
+    # Cleanup old backups (keep last 30 days)
+    find "$backup_dir" -name "ivcrush_*.db" -type f -mtime +${retention_days} -delete 2>/dev/null || true
+}
+
 show_usage() {
     cat << EOF
 ${BLUE}${BOLD}═══════════════════════════════════════════════════════════════════════${NC}
@@ -402,12 +447,14 @@ case "$1" in
             exit 1
         fi
         health_check
+        backup_database
         scan_earnings "$2"
         show_summary
         ;;
 
     whisper)
         health_check
+        backup_database
         whisper_mode "$2"
         show_summary
         ;;
@@ -419,6 +466,7 @@ case "$1" in
             exit 1
         fi
         health_check
+        backup_database
         analyze_list "$2" "$3" "${4:-1}"
         show_summary
         ;;
@@ -436,6 +484,7 @@ case "$1" in
             exit 1
         fi
         health_check
+        backup_database
         analyze_single "$1" "$2" "$3"
         show_summary
         ;;
