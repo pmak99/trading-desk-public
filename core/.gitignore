@@ -40,3 +40,9 @@ build/
 # Backups (synced to Google Drive)
 backups/*.db
 backups/*.db.gz
+backups/.backup.lock
+backups/*.tmp.*
+!backups/.gitkeep
+
+# Pre-restore safety backups
+data/*.db.pre-restore-*
