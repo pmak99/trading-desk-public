@@ -18,6 +18,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.utils.logging import setup_logging
 from src.container import Container
 from src.config.config import Config
+from src.application.services.pre_trade_risk import PreTradeRiskAnalyzer
+from src.utils.dashboard import format_pre_trade_risk
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +207,47 @@ Notes:
             logger.info("\n" + "=" * 80)
             logger.info("✅ RESULT: TRADEABLE OPPORTUNITY")
             logger.info("=" * 80)
+
+            # Show pre-trade risk analysis
+            if args.strategies and analysis.strategies:
+                rec = analysis.strategies.recommended_strategy
+
+                # Initialize risk analyzer
+                config = Config.from_env()
+                risk_analyzer = PreTradeRiskAnalyzer(config.database.path)
+
+                # Calculate recommended position size (5% default for half-Kelly)
+                position_size_pct = Decimal("5.0")
+
+                # Extract max loss and credit from recommended strategy
+                try:
+                    # Parse max loss (e.g., "$1,234.56" -> 1234.56)
+                    max_loss_str = str(rec.max_loss).replace('$', '').replace(',', '')
+                    max_loss = Decimal(max_loss_str)
+
+                    # Parse credit
+                    credit_str = str(rec.net_credit).replace('$', '').replace(',', '')
+                    credit = Decimal(credit_str)
+
+                    # Run pre-trade risk analysis
+                    pre_trade_risk = risk_analyzer.analyze(
+                        ticker=args.ticker,
+                        position_size_pct=position_size_pct,
+                        max_loss=max_loss,
+                        credit=credit,
+                        vrp_ratio=Decimal(str(analysis.vrp.vrp_ratio)),
+                        sector=None,  # Could be enhanced to fetch sector
+                        implied_move_pct=Decimal(str(analysis.vrp.implied_move_pct).rstrip('%')),
+                        historical_avg_move_pct=Decimal(str(analysis.vrp.historical_mean_move_pct).rstrip('%')),
+                    )
+
+                    # Display pre-trade risk analysis
+                    risk_display = format_pre_trade_risk(pre_trade_risk)
+                    logger.info(risk_display)
+
+                except Exception as e:
+                    logger.debug(f"Could not generate pre-trade risk analysis: {e}")
+
             if args.strategies and analysis.strategies:
                 rec = analysis.strategies.recommended_strategy
                 logger.info(f"\n💡 Recommended Strategy: {rec.strategy_type.value.replace('_', ' ').title()}")

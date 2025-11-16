@@ -8,6 +8,8 @@
 #   ./trade.sh list NVDA,WMT,AMD 2025-11-20       # Multiple tickers
 #   ./trade.sh scan 2025-11-20                     # Scan all earnings for date
 #   ./trade.sh whisper [YYYY-MM-DD]                # Most anticipated earnings (current or specific week)
+#   ./trade.sh positions                           # View open positions dashboard
+#   ./trade.sh performance                         # View performance analytics
 #   ./trade.sh health                              # Health check
 
 set -euo pipefail  # Exit on error, unset vars, pipeline failures
@@ -301,6 +303,21 @@ ${BOLD}COMMANDS${NC}
             $0 whisper                            # Current week
             $0 whisper 2025-11-10                 # Specific week (Monday)
 
+    ${GREEN}positions${NC}
+        View current open positions dashboard.
+        Shows portfolio exposure, sector concentration, and alerts.
+
+        Example:
+            $0 positions
+
+    ${GREEN}performance${NC}
+        View performance analytics and learning loops.
+        Analyzes closed trades by VRP ratio, ticker, strategy, sector.
+        Shows win rates, P&L, and parameter optimization insights.
+
+        Example:
+            $0 performance
+
     ${GREEN}health${NC}
         System health check - verify APIs, database, cache operational.
 
@@ -551,6 +568,14 @@ case "${1:-}" in
 
     health)
         health_check
+        ;;
+
+    positions)
+        python scripts/positions.py
+        ;;
+
+    performance)
+        python scripts/performance.py
         ;;
 
     scan)
