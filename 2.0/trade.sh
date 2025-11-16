@@ -10,7 +10,7 @@
 #   ./trade.sh whisper [YYYY-MM-DD]                # Most anticipated earnings (current or specific week)
 #   ./trade.sh health                              # Health check
 
-set -e
+set -euo pipefail  # Exit on error, unset vars, pipeline failures
 
 # Colors
 RED='\033[0;31m'
@@ -91,46 +91,159 @@ health_check() {
 backup_database() {
     # Auto-backup database to local folder (synced by Google Drive)
     # Only backup if last backup is >6 hours old to avoid spam
+    #
+    # Security improvements:
+    # - Atomic file locking to prevent race conditions
+    # - Absolute paths to prevent directory traversal
+    # - UTC timestamps to avoid DST issues
+    # - WAL checkpoint with retry logic
+    # - Backup verification before committing
+    # - Validated retention_days parameter
 
-    local backup_dir="backups"
-    local db_file="data/ivcrush.db"
+    # Get absolute script directory
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    # Use absolute paths
+    local backup_dir="${script_dir}/backups"
+    local db_file="${script_dir}/data/ivcrush.db"
     local retention_days=30
+    local backup_interval_hours=6
+
+    # Validate retention_days (prevent accidental deletion of all backups)
+    if ! [[ "$retention_days" =~ ^[0-9]+$ ]] || [ "$retention_days" -lt 7 ]; then
+        retention_days=30  # Failsafe default
+    fi
 
     # Check if database exists
     if [ ! -f "$db_file" ]; then
         return 0  # Silently skip if no database yet
     fi
 
-    # Create backup directory if it doesn't exist
-    mkdir -p "$backup_dir"
-
-    # Check if we need to backup (skip if last backup <6 hours old)
-    local last_backup
-    last_backup=$(find "$backup_dir" -name "ivcrush_*.db" -type f -mtime -0.25 2>/dev/null | head -1)
-    if [ -n "$last_backup" ]; then
-        return 0  # Recent backup exists, skip
-    fi
-
-    # Create timestamped backup filename
-    local timestamp
-    timestamp=$(date +%Y%m%d_%H%M%S)
-    local backup_file="${backup_dir}/ivcrush_${timestamp}.db"
-
-    # Perform WAL checkpoint for consistency (ignore errors if not in WAL mode)
-    sqlite3 "$db_file" "PRAGMA wal_checkpoint(FULL);" 2>/dev/null || true
-
-    # Copy database to backup location
-    if cp "$db_file" "$backup_file" 2>/dev/null; then
-        # Silent success (no output)
-        :
-    else
-        # Log error but don't fail the script
-        echo -e "${YELLOW}⚠️  Backup failed (continuing anyway)${NC}" >&2
+    # Ensure backup directory is not a symlink (security)
+    if [ -L "$backup_dir" ]; then
+        echo -e "${YELLOW}⚠️  Backup directory is a symlink (security risk)${NC}" >&2
         return 0
     fi
 
-    # Cleanup old backups (keep last 30 days)
-    find "$backup_dir" -name "ivcrush_*.db" -type f -mtime +${retention_days} -delete 2>/dev/null || true
+    # Create backup directory if it doesn't exist
+    mkdir -p "$backup_dir"
+
+    # Atomic file locking to prevent race conditions
+    local backup_lock="${backup_dir}/.backup.lock"
+
+    # Try to acquire lock (fail if another backup is in progress)
+    if ! mkdir "$backup_lock" 2>/dev/null; then
+        # Another backup is in progress, skip silently
+        return 0
+    fi
+
+    # Ensure lock is removed on exit/error
+    trap 'rmdir "$backup_lock" 2>/dev/null || true' RETURN
+
+    # Check if we need to backup (skip if last backup <6 hours old)
+    local backup_interval_days
+    backup_interval_days=$(echo "scale=4; $backup_interval_hours / 24" | bc)
+
+    local last_backup
+    last_backup=$(find "$backup_dir" -maxdepth 1 -name "ivcrush_*.db" -type f -mtime "-${backup_interval_days}" -print -quit 2>/dev/null)
+
+    if [ -n "$last_backup" ]; then
+        rmdir "$backup_lock" 2>/dev/null
+        trap - RETURN
+        return 0  # Recent backup exists, skip
+    fi
+
+    # Create UTC timestamp to avoid DST issues
+    local timestamp
+    timestamp=$(TZ=UTC date +%Y%m%d_%H%M%S_UTC)
+    local backup_file="${backup_dir}/ivcrush_${timestamp}.db"
+    local temp_backup="${backup_file}.tmp.$$"
+
+    # Ensure temp file is cleaned up on error
+    trap 'rm -f "$temp_backup" 2>/dev/null; rmdir "$backup_lock" 2>/dev/null || true' RETURN
+
+    # Perform WAL checkpoint with retry logic
+    local checkpoint_success=false
+    local retries=3
+    local delay=1
+
+    for ((i=1; i<=retries; i++)); do
+        if sqlite3 "$db_file" "PRAGMA wal_checkpoint(FULL);" 2>/dev/null; then
+            checkpoint_success=true
+            break
+        fi
+
+        if [ $i -lt $retries ]; then
+            sleep $delay
+            delay=$((delay * 2))
+        fi
+    done
+
+    # Warn if checkpoint failed in WAL mode
+    if [ "$checkpoint_success" = false ]; then
+        local journal_mode
+        journal_mode=$(sqlite3 "$db_file" "PRAGMA journal_mode;" 2>/dev/null || echo "unknown")
+
+        if [ "$journal_mode" = "wal" ]; then
+            echo -e "${YELLOW}⚠️  WAL checkpoint failed - backup may be inconsistent${NC}" >&2
+        fi
+    fi
+
+    # Copy to temporary file first (atomic operation)
+    if ! cp "$db_file" "$temp_backup" 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  Backup failed (continuing anyway)${NC}" >&2
+        rm -f "$temp_backup" 2>/dev/null
+        rmdir "$backup_lock" 2>/dev/null
+        trap - RETURN
+        return 0
+    fi
+
+    # Verify backup before committing
+    # 1. Check file sizes match
+    local orig_size temp_size
+    if stat -f%z "$db_file" >/dev/null 2>&1; then
+        # macOS
+        orig_size=$(stat -f%z "$db_file")
+        temp_size=$(stat -f%z "$temp_backup")
+    else
+        # Linux
+        orig_size=$(stat -c%s "$db_file")
+        temp_size=$(stat -c%s "$temp_backup")
+    fi
+
+    if [ "$orig_size" != "$temp_size" ]; then
+        echo -e "${YELLOW}⚠️  Backup size mismatch (continuing anyway)${NC}" >&2
+        rm -f "$temp_backup"
+        rmdir "$backup_lock" 2>/dev/null
+        trap - RETURN
+        return 0
+    fi
+
+    # 2. Verify database can be opened
+    if ! sqlite3 "$temp_backup" "SELECT 1;" >/dev/null 2>&1; then
+        echo -e "${YELLOW}⚠️  Backup verification failed (continuing anyway)${NC}" >&2
+        rm -f "$temp_backup"
+        rmdir "$backup_lock" 2>/dev/null
+        trap - RETURN
+        return 0
+    fi
+
+    # Atomic rename to commit backup
+    if ! mv "$temp_backup" "$backup_file" 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  Backup failed (continuing anyway)${NC}" >&2
+        rm -f "$temp_backup"
+        rmdir "$backup_lock" 2>/dev/null
+        trap - RETURN
+        return 0
+    fi
+
+    # Cleanup old backups (keep last N days)
+    find "$backup_dir" -maxdepth 1 -name "ivcrush_*.db" -type f -mtime "+${retention_days}" -delete 2>/dev/null || true
+
+    # Release lock and clear trap
+    rmdir "$backup_lock" 2>/dev/null
+    trap - RETURN
 }
 
 show_usage() {
@@ -430,7 +543,7 @@ show_summary() {
 }
 
 # Main logic
-case "$1" in
+case "${1:-}" in
     help|--help|-h)
         show_usage
         exit 0
@@ -441,7 +554,7 @@ case "$1" in
         ;;
 
     scan)
-        if [ -z "$2" ]; then
+        if [ -z "${2:-}" ]; then
             echo -e "${RED}Error: Scan date required${NC}"
             echo "Usage: $0 scan YYYY-MM-DD"
             exit 1
@@ -455,12 +568,12 @@ case "$1" in
     whisper)
         health_check
         backup_database
-        whisper_mode "$2"
+        whisper_mode "${2:-}"
         show_summary
         ;;
 
     list)
-        if [ -z "$2" ] || [ -z "$3" ]; then
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
             echo -e "${RED}Error: Tickers and date required${NC}"
             echo "Usage: $0 list TICKER1,TICKER2,... YYYY-MM-DD [offset_days]"
             exit 1
@@ -478,14 +591,14 @@ case "$1" in
 
     *)
         # Single ticker mode
-        if [ -z "$2" ]; then
+        if [ -z "${2:-}" ]; then
             echo -e "${RED}Error: Earnings date required${NC}"
             echo "Usage: $0 $1 YYYY-MM-DD [YYYY-MM-DD]"
             exit 1
         fi
         health_check
         backup_database
-        analyze_single "$1" "$2" "$3"
+        analyze_single "$1" "$2" "${3:-}"
         show_summary
         ;;
 esac
