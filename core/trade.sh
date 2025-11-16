@@ -89,44 +89,119 @@ health_check() {
 }
 
 show_usage() {
-    echo -e "${BOLD}IV Crush 2.0 - Fire-and-Forget Trading${NC}"
-    echo ""
-    echo "Usage:"
-    echo "  $0 TICKER YYYY-MM-DD [YYYY-MM-DD]           # Analyze single ticker"
-    echo "  $0 list TICKERS YYYY-MM-DD [offset_days]    # Analyze multiple tickers"
-    echo "  $0 scan YYYY-MM-DD                           # Scan earnings for date"
-    echo "  $0 whisper [YYYY-MM-DD]                      # Most anticipated earnings"
-    echo "  $0 health                                    # Health check only"
-    echo ""
-    echo "Examples:"
-    echo "  ${GREEN}# Single ticker with strategy recommendations${NC}"
-    echo "  $0 NVDA 2025-11-20"
-    echo "  $0 NVDA 2025-11-20 2025-11-22              # Custom expiration"
-    echo ""
-    echo "  ${GREEN}# Multiple tickers (comma-separated)${NC}"
-    echo "  $0 list NVDA,WMT,AMD 2025-11-20"
-    echo "  $0 list NVDA,WMT,AMD 2025-11-20 1          # With offset days"
-    echo ""
-    echo "  ${GREEN}# Scan all earnings for a specific date${NC}"
-    echo "  $0 scan 2025-11-20"
-    echo ""
-    echo "  ${GREEN}# Most anticipated earnings (from Earnings Whispers)${NC}"
-    echo "  $0 whisper                                  # Current week"
-    echo "  $0 whisper 2025-11-10                       # Specific week (Monday)"
-    echo ""
-    echo "  ${GREEN}# Quick health check${NC}"
-    echo "  $0 health"
-    echo ""
-    echo -e "${YELLOW}Features:${NC}"
-    echo "  ✓ Complete VRP analysis with edge scores"
-    echo "  ✓ Strategy recommendations (Iron Condor, Credit Spreads)"
-    echo "  ✓ Strike selections with P/L calculations"
-    echo "  ✓ Phase 4 metrics (consistency, skew analysis)"
-    echo "  ✓ Auto-backfill historical data (whisper & ticker modes)"
-    echo ""
-    echo -e "${YELLOW}Database:${NC} 675 earnings moves, 52 tickers (2022-2024)"
-    echo -e "${YELLOW}Strategy:${NC} Balanced with Half-Kelly Position Sizing (5% capital per trade)"
-    echo ""
+    cat << EOF
+${BLUE}${BOLD}═══════════════════════════════════════════════════════════════════════${NC}
+${BLUE}${BOLD}                    IV Crush 2.0 - Fire-and-Forget Trading${NC}
+${BLUE}${BOLD}═══════════════════════════════════════════════════════════════════════${NC}
+
+${BOLD}DESCRIPTION${NC}
+    Earnings options trading system that identifies high-probability IV crush
+    opportunities using Volatility Risk Premium (VRP) strategy.
+
+    ${GREEN}Strategy:${NC} Sell options when implied volatility > historical volatility,
+              profit when IV crushes after earnings announcement.
+
+${BOLD}USAGE${NC}
+    $0 TICKER YYYY-MM-DD [YYYY-MM-DD]
+    $0 list TICKERS YYYY-MM-DD [offset_days]
+    $0 scan YYYY-MM-DD
+    $0 whisper [YYYY-MM-DD]
+    $0 health
+    $0 --help | -h | help
+
+${BOLD}COMMANDS${NC}
+    ${GREEN}TICKER analysis${NC}
+        Analyze single ticker for earnings IV crush opportunity.
+        Auto-calculates expiration as earnings_date + 1 day.
+        Auto-backfills historical data if missing (last 3 years).
+
+        Examples:
+            $0 NVDA 2025-11-20
+            $0 AAPL 2025-01-31 2025-02-01        # Custom expiration
+
+    ${GREEN}list${NC}
+        Analyze multiple tickers (comma-separated).
+        Auto-fetches earnings dates via Alpha Vantage API.
+
+        Examples:
+            $0 list NVDA,WMT,AMD 2025-11-20
+            $0 list NVDA,WMT,AMD 2025-11-20 1    # With offset days
+
+    ${GREEN}scan${NC}
+        Scan all earnings for a specific date.
+        Fetches calendar from Alpha Vantage, analyzes all tickers.
+
+        Example:
+            $0 scan 2025-11-20
+
+    ${GREEN}whisper${NC}
+        Fetch and analyze "most anticipated earnings" from Earnings Whispers.
+        Uses Reddit API (r/wallstreetbets) or OCR fallback.
+        Auto-backfills historical data for discovered tickers.
+
+        Examples:
+            $0 whisper                            # Current week
+            $0 whisper 2025-11-10                 # Specific week (Monday)
+
+    ${GREEN}health${NC}
+        System health check - verify APIs, database, cache operational.
+
+        Example:
+            $0 health
+
+    ${GREEN}--help, -h, help${NC}
+        Display this help message.
+
+${BOLD}WHAT YOU GET${NC}
+    ${YELLOW}✓${NC} Implied Move (interpolated straddle price)
+    ${YELLOW}✓${NC} VRP Ratio (2.0x+ = EXCELLENT edge)
+    ${YELLOW}✓${NC} Strategy Recommendations (Iron Condor, Credit Spreads)
+    ${YELLOW}✓${NC} Strike selections with P/L, Greeks, probabilities
+    ${YELLOW}✓${NC} Consistency score (exponentially weighted historical data)
+    ${YELLOW}✓${NC} Skew analysis (polynomial fitting for directional bias)
+    ${YELLOW}✓${NC} TRADEABLE or SKIP recommendation
+
+${BOLD}OUTPUT EXAMPLE${NC}
+    ${GREEN}✅ TRADEABLE OPPORTUNITY${NC}
+    VRP Ratio: 2.26x → EXCELLENT
+
+    ${BOLD}★ RECOMMENDED: BULL PUT SPREAD${NC}
+      Strikes: Short \$177.50P / Long \$170.00P
+      Net Credit: \$2.20
+      Max Profit: \$8,158.50 (37 contracts)
+      Probability of Profit: 69.1%
+      Reward/Risk: 0.42
+      Theta: +\$329/day
+
+${BOLD}FEATURES${NC}
+    ${YELLOW}Database:${NC} 675 earnings moves, 52 tickers (2022-2024)
+    ${YELLOW}Strategy:${NC} Balanced with Half-Kelly Position Sizing (5% capital per trade)
+    ${YELLOW}Validation:${NC} Sharpe 8.07, 100% win rate on 8 selected trades (Q2-Q4 2024)
+    ${YELLOW}Cache:${NC} L1 (memory 30s) + L2 (SQLite 300s) hybrid for performance
+    ${YELLOW}Database:${NC} WAL mode for concurrent access, 30s connection timeouts
+    ${YELLOW}Resilience:${NC} Circuit breakers, retry logic, health monitoring
+
+${BOLD}POSITION SIZING${NC}
+    ${YELLOW}Current:${NC} Half-Kelly (5% of capital per trade)
+    ${YELLOW}Target:${NC} Quarter-Kelly (10%) after live validation
+    ${YELLOW}Basis:${NC} 208 empirical trades from Q2-Q4 2024
+
+${BOLD}REQUIREMENTS${NC}
+    - Tradier API key (TRADIER_API_KEY in .env)
+    - Alpha Vantage API key (ALPHA_VANTAGE_KEY in .env)
+    - Python 3.11+ with venv setup
+
+${BOLD}DOCUMENTATION${NC}
+    README.md               - Full system documentation
+    LIVE_TRADING_GUIDE.md   - Trading operations guide
+    POSITION_SIZING_DEPLOYMENT.md - Position sizing & validation
+
+${BOLD}MORE INFO${NC}
+    Repository: https://github.com/pmak99/trading-desk
+    Issues: Report bugs via GitHub Issues
+
+${BLUE}${BOLD}═══════════════════════════════════════════════════════════════════════${NC}
+EOF
 }
 
 analyze_single() {
@@ -311,6 +386,11 @@ show_summary() {
 
 # Main logic
 case "$1" in
+    help|--help|-h)
+        show_usage
+        exit 0
+        ;;
+
     health)
         health_check
         ;;

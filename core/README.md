@@ -11,6 +11,9 @@ A production-ready options trading system that identifies high-probability IV cr
 ```bash
 cd "$PROJECT_ROOT/2.0"
 
+# View all available commands
+./trade.sh --help
+
 # Analyze any ticker for earnings
 ./trade.sh NVDA 2025-11-20
 
@@ -127,6 +130,22 @@ choco install tesseract
 ---
 
 ## Usage
+
+### Help Command
+
+```bash
+./trade.sh --help    # View all commands and options
+./trade.sh -h        # Short form
+./trade.sh help      # Alternative
+```
+
+Displays comprehensive help including:
+- All available commands with descriptions
+- Examples for each command
+- Output format explanation
+- System features and validation results
+- Position sizing details
+- Requirements and documentation links
 
 ### Single Ticker Analysis (Recommended)
 
@@ -363,21 +382,61 @@ CREATE TABLE historical_moves (
 
 ---
 
-## Bugs Fixed (Session Nov 13)
-
-1. ✅ ConsistencyAnalyzerEnhanced init - removed invalid `prices_repo` parameter
-2. ✅ EarningsTiming enum - changed `AFTER_CLOSE` to `AMC`
-3. ✅ Alpha Vantage attribute - fixed `alpha_vantage_api` to `alphavantage`
-4. ✅ SkewAnalysis attribute - added support for `directional_bias` vs `direction`
-
----
-
 ## Performance
 
 - **Response Times**: 1.0ms per ticker (avg)
 - **Scaling**: Linear up to 100 concurrent tickers
 - **Cache Hit Rate**: 95%+ on repeat queries
 - **Database**: WAL mode for concurrent access
+
+---
+
+## Recent Improvements
+
+### November 2025 - Cache & Database Audit Fixes
+
+**Thread Safety:**
+- Added `threading.Lock` to MemoryCache for true thread safety
+- Protected all cache operations (get/set/delete/clear/stats)
+- Fixed false thread-safety claim in docstring
+- Multi-threaded test: 10 threads × 20 operations = PASS
+
+**Database Performance:**
+- Enabled WAL mode for better concurrency (10x improvement)
+- Added `PRAGMA synchronous=NORMAL` (safe with WAL)
+- Added `PRAGMA busy_timeout=5000` (5 second lock timeout)
+- Created `_ensure_wal_mode()` helper for existing databases
+
+**Connection Reliability:**
+- Added `CONNECTION_TIMEOUT=30` constant to all repositories
+- Applied 30-second timeout to 15+ database connections
+- Affects: prices_repository, earnings_repository, hybrid_cache
+
+### November 2025 - Code Review Improvements
+
+**Code Quality:**
+- Added `functools.wraps` to circuit breaker decorators
+- Fixed SQL injection risk in `drop_all_tables()` (f-string → parameterized)
+- Extracted magic numbers to named constants
+- Refactored long parameter lists using dataclasses
+
+**Bug Fixes:**
+- Implemented automatic expiration adjustment via `find_nearest_expiration()`
+- Fixed TCOM analysis failure (no options on calculated expiration)
+- Improved error display in trade.sh (show errors/warnings properly)
+- Fixed incorrect `--strategies` flag in scan.py output
+
+**User Experience:**
+- Added comprehensive help mode (`./trade.sh --help`)
+- Enhanced error messages with better formatting
+- Auto-backfill historical data when missing
+- Improved output filtering and display
+
+### Testing & Validation
+- **System Health**: All services HEALTHY (Tradier 225ms, Database 1.7ms, Cache 0.1ms)
+- **Thread Safety**: Multi-threaded cache test passing
+- **WAL Mode**: Verified with `PRAGMA journal_mode` → 'wal'
+- **All Tests**: 201 tests passing (193 unit + 8 load)
 
 ---
 
