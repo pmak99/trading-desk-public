@@ -469,7 +469,7 @@ class StrategyGenerator:
 
         # Combined metrics
         net_credit = put_spread.net_credit + call_spread.net_credit
-        max_profit = net_credit  # Total credit collected
+        max_profit = Money(net_credit.amount * 100)  # Total credit collected per contract
         max_loss = max(
             put_spread.max_loss / put_spread.contracts,
             call_spread.max_loss / call_spread.contracts
@@ -478,8 +478,9 @@ class StrategyGenerator:
         # Breakevens (both put and call side)
         breakevens = [put_spread.breakeven[0], call_spread.breakeven[0]]
 
-        # POP for iron condor (approximate)
-        pop = put_spread.probability_of_profit * call_spread.probability_of_profit
+        # POP for iron condor: probability stock stays between both short strikes
+        # P(profit) = P(above short put) + P(below short call) - 1
+        pop = max(0.0, put_spread.probability_of_profit + call_spread.probability_of_profit - 1.0)
 
         # Reward/risk
         reward_risk = float(max_profit.amount / max_loss.amount)
@@ -601,7 +602,8 @@ class StrategyGenerator:
 
         # Estimate: Wider range = higher POP, but iron butterfly is inherently tight
         # Scale: 2% range ≈ 40% POP, 4% range ≈ 60% POP (caps at 70%)
-        pop = min(0.70, max(0.35, 0.20 + (profit_range_pct / 20)))
+        # Linear interpolation: POP = 0.40 + (range - 2) * 0.10
+        pop = min(0.70, max(0.35, 0.40 + (profit_range_pct - 2.0) * 0.10))
 
         # Reward/risk
         reward_risk = float(max_profit.amount / max_loss.amount) if max_loss.amount > 0 else 0.0

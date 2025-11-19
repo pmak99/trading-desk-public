@@ -87,6 +87,8 @@ class TickerScorer:
         if vrp_ratio >= self.thresholds.vrp_good:
             # Linear interpolation between good and excellent
             ratio_range = self.thresholds.vrp_excellent - self.thresholds.vrp_good
+            if ratio_range <= 0:
+                return 75.0
             ratio_above = vrp_ratio - self.thresholds.vrp_good
             return 75.0 + (25.0 * ratio_above / ratio_range)
 
@@ -94,12 +96,14 @@ class TickerScorer:
         if vrp_ratio >= self.thresholds.vrp_marginal:
             # Linear interpolation between marginal and good
             ratio_range = self.thresholds.vrp_good - self.thresholds.vrp_marginal
+            if ratio_range <= 0:
+                return 50.0
             ratio_above = vrp_ratio - self.thresholds.vrp_marginal
             return 50.0 + (25.0 * ratio_above / ratio_range)
 
-        # Below marginal: 0-50 points
-        # Linear from 0 at ratio=0 to 50 at ratio=marginal
-        return 50.0 * (vrp_ratio / self.thresholds.vrp_marginal)
+        # Below marginal: No meaningful edge, return 0
+        # We don't want to reward sub-threshold setups
+        return 0.0
 
     def calculate_consistency_score(
         self,
@@ -127,6 +131,8 @@ class TickerScorer:
                 self.thresholds.consistency_excellent
                 - self.thresholds.consistency_good
             )
+            if range_size <= 0:
+                return 75.0
             above_good = consistency - self.thresholds.consistency_good
             return 75.0 + (25.0 * above_good / range_size)
 
@@ -136,11 +142,13 @@ class TickerScorer:
                 self.thresholds.consistency_good
                 - self.thresholds.consistency_marginal
             )
+            if range_size <= 0:
+                return 50.0
             above_marginal = consistency - self.thresholds.consistency_marginal
             return 50.0 + (25.0 * above_marginal / range_size)
 
-        # Below marginal: 0-50 points
-        return 50.0 * (consistency / self.thresholds.consistency_marginal)
+        # Below marginal: No meaningful consistency, return 0
+        return 0.0
 
     def calculate_skew_score(
         self,
@@ -175,6 +183,8 @@ class TickerScorer:
                 self.thresholds.skew_moderate_range
                 - self.thresholds.skew_neutral_range
             )
+            if range_size <= 0:
+                return 70.0
             above_neutral = abs_skew - self.thresholds.skew_neutral_range
             return 100.0 - (30.0 * above_neutral / range_size)
 
