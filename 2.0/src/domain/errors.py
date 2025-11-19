@@ -58,26 +58,27 @@ class Result(Generic[T, E]):
 
     value: Optional[T] = None
     error: Optional[E] = None
+    _is_ok: bool = True  # Track state explicitly to handle Ok(None)
 
     @classmethod
     def Ok(cls, value: T) -> 'Result[T, AppError]':
         """Create a successful result."""
-        return Result(value=value)
+        return Result(value=value, _is_ok=True)
 
     @classmethod
     def Err(cls, error: AppError) -> 'Result[T, AppError]':
         """Create an error result."""
-        return Result(error=error)
+        return Result(error=error, _is_ok=False)
 
     @property
     def is_ok(self) -> bool:
         """True if result is Ok."""
-        return self.value is not None and self.error is None
+        return self._is_ok and self.error is None
 
     @property
     def is_err(self) -> bool:
         """True if result is Err."""
-        return self.error is not None
+        return not self._is_ok or self.error is not None
 
     def unwrap(self) -> T:
         """

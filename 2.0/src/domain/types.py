@@ -21,8 +21,8 @@ from src.domain.enums import (
 )
 
 # Set Decimal precision for financial calculations
-# 10 digits provides sufficient precision for stock prices and percentages
-getcontext().prec = 10
+# 28 digits is standard for financial calculations, preventing precision loss
+getcontext().prec = 28
 
 # Percentage validation constants
 MIN_PERCENTAGE = -100.0  # Allow -100% for complete losses
