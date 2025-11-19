@@ -80,3 +80,4 @@ src/data/cache/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+3.0/.env
