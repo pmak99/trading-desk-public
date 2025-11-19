@@ -93,6 +93,14 @@ from datetime import datetime
 from result import Result, Ok, Err
 from src.domain.errors import AppError
 from src.infrastructure.cache.unified_cache import UnifiedCache
+from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.rate_limiter import RateLimiter
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Cache version for invalidation on schema changes
+CACHE_VERSION = "v1"
 
 class AlphaVantageMCPAdapter:
     """
@@ -103,6 +111,15 @@ class AlphaVantageMCPAdapter:
     def __init__(self, cache: UnifiedCache):
         self._cache = cache
         self._cache_ttl = 21600  # 6 hours for 25/day limit
+        self._circuit_breaker = CircuitBreaker(
+            failure_threshold=3,
+            reset_timeout=300,
+            half_open_max_calls=1
+        )
+        self._rate_limiter = RateLimiter(
+            max_calls=25,
+            period=86400  # 24 hours
+        )
 
     def get_earnings_calendar(
         self,
@@ -125,23 +142,39 @@ class AlphaVantageMCPAdapter:
             ...
         ]
         """
-        cache_key = f"av_mcp:earnings:{horizon}:{symbol or 'all'}"
+        cache_key = f"{CACHE_VERSION}:av_mcp:earnings:{horizon}:{symbol or 'all'}"
 
         # Check cache first
         cached = self._cache.get(cache_key)
         if cached:
             return Ok(cached)
 
+        # Check circuit breaker state
+        if not self._circuit_breaker.can_execute():
+            logger.warning("Circuit breaker OPEN for Alpha Vantage")
+            return Err(AppError("Alpha Vantage circuit breaker is open"))
+
+        # Check rate limit
+        if not self._rate_limiter.acquire():
+            logger.warning("Rate limit exceeded for Alpha Vantage (25/day)")
+            return Err(AppError("Alpha Vantage rate limit exceeded"))
+
         try:
             # Call MCP tool
             # mcp__alphavantage__EARNINGS_CALENDAR
             result = self._call_mcp_earnings_calendar(symbol, horizon)
+
+            # Record success with circuit breaker
+            self._circuit_breaker.record_success()
 
             # Cache the result
             self._cache.set(cache_key, result, ttl=self._cache_ttl)
 
             return Ok(result)
         except Exception as e:
+            # Record failure with circuit breaker
+            self._circuit_breaker.record_failure()
+            logger.error(f"MCP earnings calendar failed: {e}")
             return Err(AppError(f"MCP earnings calendar failed: {e}"))
 
     def get_daily_prices(
@@ -1584,10 +1617,11 @@ class TradingMemoryProvider:
         pass
 
     def _parse_value(self, value_str: str) -> Any:
-        """Parse stored value back to Python object."""
+        """Parse stored value back to Python object safely."""
+        import ast
         try:
-            return eval(value_str)
-        except:
+            return ast.literal_eval(value_str)
+        except (ValueError, SyntaxError):
             return value_str
 
     async def _create_entity(
@@ -2507,7 +2541,18 @@ class Container:
     def __init__(self, config: Config):
         self._config = config
         self._use_mcp = config.use_mcp
+
+        # Cached provider instances (lazy initialization)
         self._unified_cache = None
+        self._alphavantage = None
+        self._yahoo_finance = None
+        self._thinking = None
+        self._research = None
+        self._backtester = None
+        self._paper_trading = None
+        self._sentiment = None
+        self._technicals = None
+        self._memory = None
         # ... existing init
 
     @property
@@ -2522,51 +2567,69 @@ class Container:
     @property
     def alphavantage(self):
         """Alpha Vantage API - MCP or direct."""
-        if self._use_mcp:
-            return AlphaVantageMCPAdapter(cache=self.unified_cache)
-        else:
-            # Original implementation (fallback)
-            return self._create_alphavantage_api()
+        if self._alphavantage is None:
+            if self._use_mcp:
+                self._alphavantage = AlphaVantageMCPAdapter(cache=self.unified_cache)
+            else:
+                # Original implementation (fallback)
+                self._alphavantage = self._create_alphavantage_api()
+        return self._alphavantage
 
     @property
     def yahoo_finance(self) -> YahooFinanceMCPAdapter:
         """Yahoo Finance MCP adapter."""
-        return YahooFinanceMCPAdapter(cache=self.unified_cache)
+        if self._yahoo_finance is None:
+            self._yahoo_finance = YahooFinanceMCPAdapter(cache=self.unified_cache)
+        return self._yahoo_finance
 
     @property
     def thinking(self) -> SequentialThinkingProvider:
         """Sequential Thinking for complex decisions."""
-        return SequentialThinkingProvider()
+        if self._thinking is None:
+            self._thinking = SequentialThinkingProvider()
+        return self._thinking
 
     @property
     def research(self) -> OctagonResearchProvider:
         """Octagon research provider."""
-        return OctagonResearchProvider(cache=self.unified_cache)
+        if self._research is None:
+            self._research = OctagonResearchProvider(cache=self.unified_cache)
+        return self._research
 
     @property
     def backtester(self) -> ComposerBacktestProvider:
         """Composer backtesting provider."""
-        return ComposerBacktestProvider()
+        if self._backtester is None:
+            self._backtester = ComposerBacktestProvider()
+        return self._backtester
 
     @property
     def paper_trading(self) -> AlpacaPaperTradingProvider:
         """Alpaca paper trading."""
-        return AlpacaPaperTradingProvider()
+        if self._paper_trading is None:
+            self._paper_trading = AlpacaPaperTradingProvider()
+        return self._paper_trading
 
     @property
     def sentiment(self) -> NewsSentimentProvider:
         """News sentiment analysis."""
-        return NewsSentimentProvider(cache=self.unified_cache)
+        if self._sentiment is None:
+            self._sentiment = NewsSentimentProvider(cache=self.unified_cache)
+        return self._sentiment
 
     @property
     def technicals(self) -> TechnicalIndicatorsProvider:
         """Technical indicators (RSI, BBANDS, ATR, MACD)."""
-        return TechnicalIndicatorsProvider(cache=self.unified_cache)
+        if self._technicals is None:
+            self._technicals = TechnicalIndicatorsProvider(cache=self.unified_cache)
+        return self._technicals
 
     @property
     def memory(self) -> TradingMemoryProvider:
         """Persistent memory for preferences and notes."""
-        return TradingMemoryProvider()
+        if self._memory is None:
+            self._memory = TradingMemoryProvider()
+        return self._memory
 ```
 
 ---
@@ -2622,8 +2685,16 @@ class UnifiedCache:
         self._init_db()
 
     def _init_db(self):
-        """Initialize SQLite cache table."""
+        """Initialize SQLite cache table with optimized settings."""
         conn = sqlite3.connect(self._db_path)
+
+        # Enable WAL mode for better concurrency
+        conn.execute("PRAGMA journal_mode=WAL")
+        # Set busy timeout to avoid SQLITE_BUSY errors
+        conn.execute("PRAGMA busy_timeout=5000")
+        # Optimize for performance
+        conn.execute("PRAGMA synchronous=NORMAL")
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS mcp_cache (
                 key TEXT PRIMARY KEY,
