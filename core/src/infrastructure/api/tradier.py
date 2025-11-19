@@ -141,22 +141,22 @@ class TradierAPI:
         Returns:
             Result with OptionChain or AppError
         """
-        # Rate limit check (separate from get_stock_price call)
-        if self.rate_limiter and not self.rate_limiter.acquire():
-            return Err(
-                AppError(
-                    ErrorCode.RATELIMIT,
-                    "Tradier rate limit exceeded",
-                )
-            )
-
         try:
-            # First, get current stock price
+            # First, get current stock price (includes its own rate limit check)
             price_result = self.get_stock_price(ticker)
             if price_result.is_err:
                 return Err(price_result.error)
 
             stock_price = price_result.value
+
+            # Rate limit check for chain request (get_stock_price already consumed 1 token)
+            if self.rate_limiter and not self.rate_limiter.acquire():
+                return Err(
+                    AppError(
+                        ErrorCode.RATELIMIT,
+                        "Tradier rate limit exceeded",
+                    )
+                )
 
             # Get option chain
             response = requests.get(
