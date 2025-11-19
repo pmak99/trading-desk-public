@@ -225,9 +225,11 @@ Notes:
                     max_loss_str = str(rec.max_loss).replace('$', '').replace(',', '')
                     max_loss = Decimal(max_loss_str)
 
-                    # Parse credit
+                    # Parse credit (per-share) and convert to total position credit
                     credit_str = str(rec.net_credit).replace('$', '').replace(',', '')
-                    credit = Decimal(credit_str)
+                    credit_per_share = Decimal(credit_str)
+                    # Total credit = per-share credit × 100 shares × number of contracts
+                    credit = credit_per_share * 100 * rec.contracts
 
                     # Run pre-trade risk analysis
                     pre_trade_risk = risk_analyzer.analyze(

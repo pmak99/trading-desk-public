@@ -135,10 +135,9 @@ class PositionSizer:
         # Estimate odds (profit/loss ratio)
         # For IV crush trades, typical profit is ~50% of premium, loss is 100% of premium
         # So odds are approximately 0.5:1
-        # Adjust based on VRP ratio (higher VRP = better odds)
-        base_odds = 0.5
-        vrp_odds_boost = (vrp_ratio - 1.0) * 0.2  # 20% boost per VRP point above 1.0
-        b = base_odds + vrp_odds_boost
+        # Note: Odds are determined by trade structure, NOT by VRP
+        # VRP already affects probability above - don't double-count
+        b = 0.5  # Fixed based on typical IV crush trade structure
 
         # Calculate Kelly fraction
         # f = (p * b - q) / b

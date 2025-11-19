@@ -102,9 +102,19 @@ class ImpliedMoveCalculator:
             )
 
         # Calculate implied move percentage
-        implied_move_pct = Percentage(
-            float(straddle_cost.amount / stock_price.amount * 100)
-        )
+        straddle_pct = float(straddle_cost.amount / stock_price.amount * 100)
+
+        # Validate straddle cost is reasonable (typically 1-20% for earnings trades)
+        if straddle_pct < 0.5:
+            logger.warning(
+                f"{ticker}: Straddle cost {straddle_pct:.2f}% of stock price seems too low - validate data"
+            )
+        elif straddle_pct > 30.0:
+            logger.warning(
+                f"{ticker}: Straddle cost {straddle_pct:.2f}% of stock price seems too high - validate data"
+            )
+
+        implied_move_pct = Percentage(straddle_pct)
 
         # Calculate bounds
         upper_bound = Money(stock_price.amount + straddle_cost.amount)

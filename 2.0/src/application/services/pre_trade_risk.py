@@ -374,8 +374,9 @@ class PreTradeRiskAnalyzer:
                 "High correlation with existing positions - concentrated risk"
             )
 
-        # Check portfolio stress
-        if max_portfolio_loss > Decimal("10000"):  # $10K threshold
+        # Check portfolio stress - only warn if multiple correlated positions
+        # Single position at $20K is expected, warn if correlated positions add significant risk
+        if max_portfolio_loss > Decimal("25000"):  # Only warn if >$25K (indicates correlated positions)
             warnings.append(
                 f"Max portfolio loss if correlated trades fail: ${max_portfolio_loss:,.0f}"
             )
@@ -405,9 +406,14 @@ class PreTradeRiskAnalyzer:
         # Final recommendation
         if len(warnings) == 0:
             recommendation = "PROCEED"
-        elif len(warnings) <= 2 and vrp_ratio >= Decimal("1.8"):
+        elif len(warnings) <= 2:
+            # 1-2 warnings is acceptable with caution
             recommendation = "CAUTION"
             notes.append("Consider reducing position size or managing existing positions first")
+        elif len(warnings) <= 3 and vrp_ratio >= Decimal("1.8"):
+            # 3 warnings okay if VRP is strong
+            recommendation = "CAUTION"
+            notes.append("Multiple risk factors present - proceed with caution")
         else:
             recommendation = "REJECT"
             notes.append("Too many risk factors - skip this trade or close existing positions")
