@@ -269,9 +269,15 @@ class StrategyGenerator:
             option_chain, OptionType.PUT
         )
 
-        # Fallback to distance-based if delta not available
+        # Verify delta-based strikes are outside implied move zone
+        if strikes:
+            strikes = self._verify_strikes_outside_implied_move(
+                ticker, strikes, option_chain, vrp, below=True
+            )
+
+        # Fallback to distance-based if delta not available or strikes inside implied move
         if not strikes:
-            logger.debug(f"{ticker}: Delta not available, using distance-based selection")
+            logger.debug(f"{ticker}: Using distance-based selection (outside implied move)")
             strikes = self._select_strikes_distance_based(
                 option_chain, vrp, OptionType.PUT, below=True
             )
@@ -364,9 +370,15 @@ class StrategyGenerator:
             option_chain, OptionType.CALL
         )
 
-        # Fallback to distance-based if delta not available
+        # Verify delta-based strikes are outside implied move zone
+        if strikes:
+            strikes = self._verify_strikes_outside_implied_move(
+                ticker, strikes, option_chain, vrp, below=False
+            )
+
+        # Fallback to distance-based if delta not available or strikes inside implied move
         if not strikes:
-            logger.debug(f"{ticker}: Delta not available, using distance-based selection")
+            logger.debug(f"{ticker}: Using distance-based selection (outside implied move)")
             strikes = self._select_strikes_distance_based(
                 option_chain, vrp, OptionType.CALL, below=False
             )
@@ -808,6 +820,55 @@ class StrategyGenerator:
             return None
 
         return min(strikes, key=lambda s: abs(float(s.price) - target_price))
+
+    def _verify_strikes_outside_implied_move(
+        self,
+        ticker: str,
+        strikes: Tuple[Strike, Strike],
+        option_chain: OptionChain,
+        vrp: VRPResult,
+        below: bool,
+    ) -> Optional[Tuple[Strike, Strike]]:
+        """
+        Verify that selected strikes are outside the implied move zone.
+
+        Args:
+            ticker: Ticker symbol
+            strikes: Tuple of (short_strike, long_strike)
+            option_chain: Options chain
+            vrp: VRP analysis
+            below: If True, check below price (puts), else above (calls)
+
+        Returns:
+            Original strikes if valid, None if inside implied move zone
+        """
+        stock_price = float(option_chain.stock_price.amount)
+        implied_move_pct = vrp.implied_move_pct.value / 100
+        implied_move_dollars = stock_price * implied_move_pct
+
+        short_strike, long_strike = strikes
+        short_price = float(short_strike.price)
+
+        if below:
+            # Put spread: short strike must be below lower bound
+            lower_bound = stock_price - implied_move_dollars
+            if short_price >= lower_bound:
+                logger.debug(
+                    f"{ticker}: Short strike ${short_price:.2f} is inside implied move "
+                    f"(lower bound: ${lower_bound:.2f})"
+                )
+                return None
+        else:
+            # Call spread: short strike must be above upper bound
+            upper_bound = stock_price + implied_move_dollars
+            if short_price <= upper_bound:
+                logger.debug(
+                    f"{ticker}: Short strike ${short_price:.2f} is inside implied move "
+                    f"(upper bound: ${upper_bound:.2f})"
+                )
+                return None
+
+        return strikes
 
     def _calculate_spread_metrics(
         self,

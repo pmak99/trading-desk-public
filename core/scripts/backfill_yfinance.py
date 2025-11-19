@@ -22,7 +22,7 @@ import sqlite3
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.utils.logging import setup_logging
-from src.domain.types import EarningsTiming, HistoricalMove, Percentage
+from src.domain.types import EarningsTiming, HistoricalMove, Money, Percentage
 
 try:
     import yfinance as yf
@@ -97,23 +97,26 @@ def calculate_earnings_move(
         earnings_low = float(price_data.loc[str(earnings_date)]['Low'])
         earnings_close = float(price_data.loc[str(earnings_date)]['Close'])
 
-        # Calculate moves
+        # Calculate moves (all percentages use prev_close as denominator for consistency)
         gap_move_pct = abs((earnings_open - prev_close) / prev_close * 100)
-        intraday_move_pct = abs((earnings_high - earnings_low) / earnings_open * 100)
+        intraday_move_pct = abs((earnings_high - earnings_low) / prev_close * 100)
         close_move_pct = abs((earnings_close - prev_close) / prev_close * 100)
 
         # Get volume
         volume_earnings = int(price_data.loc[str(earnings_date)]['Volume'])
-        volume_before = int(price_data.loc[str(prev_date)]['Volume']) if str(prev_date) in price_data.index else 0
+        try:
+            volume_before = int(price_data.loc[str(prev_date)]['Volume'])
+        except KeyError:
+            volume_before = 0
 
         return HistoricalMove(
             ticker=ticker,
             earnings_date=earnings_date,
-            prev_close=prev_close,
-            earnings_open=earnings_open,
-            earnings_high=earnings_high,
-            earnings_low=earnings_low,
-            earnings_close=earnings_close,
+            prev_close=Money(prev_close),
+            earnings_open=Money(earnings_open),
+            earnings_high=Money(earnings_high),
+            earnings_low=Money(earnings_low),
+            earnings_close=Money(earnings_close),
             intraday_move_pct=Percentage(intraday_move_pct),
             gap_move_pct=Percentage(gap_move_pct),
             close_move_pct=Percentage(close_move_pct),

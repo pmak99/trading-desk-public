@@ -686,6 +686,7 @@ def scanning_mode(
             logger.info(
                 f"   {i}. {r['ticker']:6s}: "
                 f"VRP {r['vrp_ratio']:.2f}x | "
+                f"Implied {r['implied_move_pct']} | "
                 f"Edge {r['edge_score']:.2f} | "
                 f"{r['recommendation'].upper()}"
             )
@@ -846,6 +847,7 @@ def ticker_mode(
             logger.info(
                 f"   {i}. {r['ticker']:6s}: "
                 f"VRP {r['vrp_ratio']:.2f}x | "
+                f"Implied {r['implied_move_pct']} | "
                 f"Edge {r['edge_score']:.2f} | "
                 f"{r['recommendation'].upper()} | "
                 f"Earnings {r['earnings_date']}"

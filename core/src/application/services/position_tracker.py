@@ -207,8 +207,12 @@ class PositionTracker:
 
             position = self._row_to_position(row, cursor.description)
 
-            # Calculate P&L percentage
-            pnl_pct = (current_pnl / position.credit_received) * 100
+            # Calculate P&L percentage (avoid division by zero)
+            if position.credit_received == 0:
+                pnl_pct = 0.0
+                logger.warning(f"Position {position_id} has zero credit_received, P&L % set to 0")
+            else:
+                pnl_pct = (current_pnl / position.credit_received) * 100
 
             # Calculate days held
             days_held = (date.today() - position.entry_date).days
@@ -258,6 +262,7 @@ class PositionTracker:
             exit_notes: Optional notes about exit
         """
         conn = sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT)
+        conn.execute('BEGIN IMMEDIATE')  # Explicit transaction
         cursor = conn.cursor()
 
         try:
@@ -266,8 +271,16 @@ class PositionTracker:
             if not position:
                 raise ValueError(f"Position {position_id} not found")
 
-            # Calculate final P&L percentage
-            final_pnl_pct = (final_pnl / position.credit_received) * 100
+            # Check if already closed
+            if position.status == 'CLOSED':
+                raise ValueError(f"Position {position_id} is already closed as of {position.close_date}")
+
+            # Calculate final P&L percentage (avoid division by zero)
+            if position.credit_received == 0:
+                final_pnl_pct = 0.0
+                logger.warning(f"Position {position_id} has zero credit_received, P&L % set to 0")
+            else:
+                final_pnl_pct = (final_pnl / position.credit_received) * 100
 
             # Determine win/loss
             win_loss = "WIN" if final_pnl > 0 else "LOSS"
@@ -305,6 +318,10 @@ class PositionTracker:
                 f"✓ Position closed: {position.ticker} | "
                 f"{win_loss} | P&L: ${final_pnl:.2f} ({final_pnl_pct:.1f}%)"
             )
+
+        except Exception as e:
+            conn.rollback()
+            raise e
 
         finally:
             conn.close()
