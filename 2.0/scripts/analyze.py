@@ -158,8 +158,12 @@ Notes:
                         beat_str = "✓ BEAT" if s.beat else "✗ MISS" if s.beat is False else "? N/A"
                         surprise_str = f"{s.surprise_pct:+.1f}%" if s.surprise_pct else "N/A"
                         logger.info(f"    {s.date}: {beat_str} ({surprise_str})")
+                else:
+                    logger.debug(f"FMP earnings surprises error: {surprises_result.error}")
+            else:
+                logger.debug("FMP API key not configured")
         except Exception as e:
-            logger.debug(f"Could not fetch FMP earnings surprises: {e}")
+            logger.warning(f"Could not fetch FMP earnings surprises: {e}")
 
         # Octagon Sentiment (if available and high VRP)
         try:

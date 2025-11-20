@@ -63,7 +63,7 @@ class OctagonAPI:
         self,
         api_key: Optional[str] = None,
         cache: Optional[HybridCache] = None,
-        base_url: str = "https://api.octagonai.co/v1"
+        base_url: str = "https://api-gateway.octagonagents.com/v1"
     ):
         self.api_key = api_key
         self.base_url = base_url
@@ -157,7 +157,7 @@ Provide a concise analysis with:
 Format as JSON with keys: sentiment, confidence (0-1), topics (list), guidance, summary"""
 
             response = self._client.chat.completions.create(
-                model="octagon-financial-agent",
+                model="octagon-sec-agent",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=500
@@ -221,7 +221,7 @@ Provide:
 Format as JSON with keys: total_pct, change_pct, buyers (list), sellers (list), summary"""
 
             response = self._client.chat.completions.create(
-                model="octagon-financial-agent",
+                model="octagon-sec-agent",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=500
@@ -275,7 +275,7 @@ Format as JSON with keys: total_pct, change_pct, buyers (list), sellers (list), 
 
         try:
             response = self._client.chat.completions.create(
-                model="octagon-financial-agent",
+                model="octagon-agent",
                 messages=[{"role": "user", "content": f"For {ticker}: {query}"}],
                 temperature=0.1,
                 max_tokens=1000
