@@ -138,7 +138,8 @@ class FMPAPI:
                 logger.debug(f"FMP cache hit: {ticker} surprises")
                 return Ok(cached[:limit])
 
-        result = self._request(f"earnings-surprises/{ticker}")
+        # Use historical earning calendar endpoint (free tier)
+        result = self._request(f"historical/earning_calendar/{ticker}", {"limit": limit * 2})
         if result.is_err:
             return Err(result.error)
 
@@ -156,9 +157,9 @@ class FMPAPI:
                 else:
                     continue
 
-                # Parse EPS values
-                actual = item.get("actualEarningResult")
-                estimated = item.get("estimatedEarning")
+                # Parse EPS values (field names differ between endpoints)
+                actual = item.get("eps") or item.get("actualEarningResult")
+                estimated = item.get("epsEstimated") or item.get("estimatedEarning")
 
                 actual_eps = Decimal(str(actual)) if actual is not None else None
                 estimated_eps = Decimal(str(estimated)) if estimated is not None else None
