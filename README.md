@@ -2,21 +2,22 @@
 
 Automated research system for earnings options trading with real-time IV data and AI-powered analysis.
 
-## 📁 Project Structure
+## Project Structure
 
 This repository contains two versions of the IV Crush trading system:
 
-- **`1.0/`** - Current production system (fully functional)
-  - Optimized IV crush analyzer with 80% performance improvements
-  - Real-time IV data from Tradier/ORATS
-  - AI-powered sentiment and strategy generation
-  - See `1.0/src/` for implementation
-
-- **`2.0/`** - Next-generation rewrite (in development)
+- **`2.0/`** - **Production system (RECOMMENDED)**
   - Clean architecture with domain-driven design
   - Production-grade resilience (circuit breakers, retry logic, async processing)
-  - 80%+ test coverage, health checks, monitoring
-  - See `docs/2.0_OVERVIEW.md` and `docs/2.0_IMPLEMENTATION.md`
+  - 201 tests, health checks, monitoring
+  - Empirically validated: Sharpe 8.07, 100% win rate on selected trades
+  - Uses Tradier and Alpha Vantage APIs only
+  - See `2.0/README.md` for usage
+
+- **`1.0/`** - Legacy system (preserved for reference)
+  - Original IV crush analyzer with AI-powered analysis
+  - Uses Perplexity/Gemini for sentiment and strategy generation
+  - See `1.0/src/` for implementation
 
 ---
 
@@ -33,14 +34,54 @@ Analyzes earnings candidates using IV crush strategy:
 
 ---
 
-## 🚀 Quick Start
+## Quick Start (2.0 System)
 
 ### Install
 ```bash
+cd 2.0
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
+
+### Configure (`.env` file in 2.0/)
+```bash
+# Required
+TRADIER_API_KEY=xxx              # Real IV data (free with account)
+ALPHA_VANTAGE_KEY=xxx            # Earnings calendar
+
+# Optional (whisper mode sentiment)
+REDDIT_CLIENT_ID=xxx
+REDDIT_CLIENT_SECRET=xxx
+```
+
+### Run Analysis
+```bash
+cd 2.0
+
+# Analyze any ticker for earnings
+./trade.sh NVDA 2025-11-20
+
+# Scan all earnings for a date
+./trade.sh scan 2025-11-20
+
+# Analyze multiple tickers
+./trade.sh list NVDA,AMD,WMT 2025-11-20
+
+# Health check
+./trade.sh health
+
+# View help
+./trade.sh --help
+```
+
+See `2.0/README.md` for complete documentation.
+
+---
+
+## Legacy 1.0 System
+
+The 1.0 system is preserved for reference. It uses AI-powered analysis (Perplexity/Gemini).
 
 ### Configure (`.env` file)
 ```bash
@@ -64,12 +105,9 @@ python -m 1.0.src.analysis.earnings_analyzer --tickers "NVDA,META,GOOGL" 2025-11
 
 # Scan earnings calendar
 python -m 1.0.src.analysis.earnings_analyzer 2025-11-08 10 --yes
-
-# Override daily limits (uses free Gemini fallback)
-python -m 1.0.src.analysis.earnings_analyzer --tickers "AAPL,MSFT" 2025-11-08 --yes --override
 ```
 
-> **Note**: The 1.0 system is located in the `1.0/` directory. All import paths now start with `1.0.src`
+> **Note**: The 1.0 system is located in the `1.0/` directory. All import paths start with `1.0.src`
 
 ---
 
@@ -253,17 +291,17 @@ pytest 1.0/tests/ -v
 
 ---
 
-## 📚 Documentation
+## Documentation
 
-### 1.0 System
-- `ENHANCEMENTS.md` - Performance tools (benchmarking, profiling, market calendar)
+### 2.0 System (Production)
+- `2.0/README.md` - Complete usage guide and system documentation
+- `2.0/LIVE_TRADING_GUIDE.md` - Trading operations handbook
+- `2.0/POSITION_SIZING_DEPLOYMENT.md` - Position sizing and empirical validation
+- `docs/2.0_OVERVIEW.md` - Architecture and implementation timeline
+
+### 1.0 System (Legacy)
 - `1.0/config/trading_criteria.yaml` - Filter thresholds and scoring weights
 - `1.0/config/budget.yaml` - API budgets and model selection
-
-### 2.0 System (In Development)
-- `docs/2.0_OVERVIEW.md` - Complete architecture, timeline, and implementation plan
-- `docs/2.0_IMPLEMENTATION.md` - Detailed implementation guide with code templates
-- `2.0/README.md` - 2.0 system status and roadmap
 
 ---
 
