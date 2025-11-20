@@ -1027,15 +1027,15 @@ class StrategyGenerator:
         Score and rank strategies in-place.
 
         Scoring factors (when Greeks available):
-        - Reward/risk ratio (35%)
-        - Probability of profit (25%)
+        - Probability of profit (35%)
+        - Reward/risk ratio (25%)
         - VRP edge (20%)
         - Greeks quality (theta/vega) (12%)
         - Position sizing (8%)
 
         Scoring factors (without Greeks):
-        - Reward/risk ratio (40%)
-        - Probability of profit (30%)
+        - Probability of profit (40%)
+        - Reward/risk ratio (30%)
         - VRP edge (20%)
         - Position sizing (10%)
 
@@ -1049,11 +1049,11 @@ class StrategyGenerator:
 
             if has_greeks:
                 # Enhanced scoring with Greeks
-                # Factor 1: Reward/Risk (35%) - Target > 0.30
-                rr_score = min(strategy.reward_risk_ratio / 0.30, 1.0) * 35
+                # Factor 1: Probability of Profit (35%) - Target > 65%
+                pop_score = min(strategy.probability_of_profit / 0.65, 1.0) * 35
 
-                # Factor 2: Probability of Profit (25%) - Target > 65%
-                pop_score = min(strategy.probability_of_profit / 0.65, 1.0) * 25
+                # Factor 2: Reward/Risk (25%) - Target > 0.30
+                rr_score = min(strategy.reward_risk_ratio / 0.30, 1.0) * 25
 
                 # Factor 3: VRP Edge (20%) - Higher is better
                 vrp_score = min(vrp.vrp_ratio / 2.0, 1.0) * 20
@@ -1066,23 +1066,25 @@ class StrategyGenerator:
                 if strategy.position_theta is not None:
                     # Theta: Positive is good (we earn from time decay)
                     # Normalize: $50/day theta = 100% score
-                    theta_score = min(abs(strategy.position_theta) / 50.0, 1.0) * 6
-                    if strategy.position_theta < 0:
-                        # Penalize negative theta (paying time decay)
-                        theta_score *= -0.5
+                    if strategy.position_theta > 0:
+                        theta_score = min(strategy.position_theta / 50.0, 1.0) * 6
+                    else:
+                        # Penalize negative theta (paying time decay) - score 0
+                        theta_score = 0.0
 
                 if strategy.position_vega is not None:
                     # Vega: Negative is good for credit spreads (we benefit from IV crush)
                     # Normalize: -$100 vega = 100% score
-                    vega_score = min(abs(strategy.position_vega) / 100.0, 1.0) * 6
-                    if strategy.position_vega > 0:
-                        # Penalize positive vega (hurt by IV decrease)
-                        vega_score *= -0.5
+                    if strategy.position_vega < 0:
+                        vega_score = min(abs(strategy.position_vega) / 100.0, 1.0) * 6
+                    else:
+                        # Penalize positive vega (hurt by IV decrease) - score 0
+                        vega_score = 0.0
 
-                greeks_score = theta_score + vega_score
+                greeks_score = theta_score + vega_score  # Range: 0-12
 
-                # Factor 5: Position Sizing (8%) - Prefer meaningful size
-                size_score = 8.0 if strategy.contracts >= 10 else 4.0
+                # Factor 5: Position Sizing (8%) - Graduated scoring up to 10 contracts
+                size_score = min(strategy.contracts / 10.0, 1.0) * 8.0
 
                 # Overall score (0-100)
                 overall = rr_score + pop_score + vrp_score + greeks_score + size_score
@@ -1099,17 +1101,17 @@ class StrategyGenerator:
 
             else:
                 # Original scoring without Greeks
-                # Factor 1: Reward/Risk (40%) - Target > 0.30
-                rr_score = min(strategy.reward_risk_ratio / 0.30, 1.0) * 40
+                # Factor 1: Probability of Profit (40%) - Target > 65%
+                pop_score = min(strategy.probability_of_profit / 0.65, 1.0) * 40
 
-                # Factor 2: Probability of Profit (30%) - Target > 65%
-                pop_score = min(strategy.probability_of_profit / 0.65, 1.0) * 30
+                # Factor 2: Reward/Risk (30%) - Target > 0.30
+                rr_score = min(strategy.reward_risk_ratio / 0.30, 1.0) * 30
 
                 # Factor 3: VRP Edge (20%) - Higher is better
                 vrp_score = min(vrp.vrp_ratio / 2.0, 1.0) * 20
 
-                # Factor 4: Position Sizing (10%) - Prefer meaningful size
-                size_score = 10.0 if strategy.contracts >= 10 else 5.0
+                # Factor 4: Position Sizing (10%) - Graduated scoring up to 10 contracts
+                size_score = min(strategy.contracts / 10.0, 1.0) * 10.0
 
                 # Overall score (0-100)
                 overall = rr_score + pop_score + vrp_score + size_score

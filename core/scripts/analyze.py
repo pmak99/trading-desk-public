@@ -24,6 +24,9 @@ from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
+# Position sizing configuration
+DEFAULT_POSITION_SIZE_PCT = Decimal("5.0")  # Half-Kelly (5% of capital per trade)
+
 
 def parse_date(date_str: str) -> date:
     """Parse date string in ISO format."""
@@ -242,12 +245,11 @@ Notes:
             if args.strategies and analysis.strategies:
                 rec = analysis.strategies.recommended_strategy
 
-                # Initialize risk analyzer
-                config = Config.from_env()
+                # Initialize risk analyzer (reuse config loaded earlier)
                 risk_analyzer = PreTradeRiskAnalyzer(config.database.path)
 
-                # Calculate recommended position size (5% default for half-Kelly)
-                position_size_pct = Decimal("5.0")
+                # Calculate recommended position size
+                position_size_pct = DEFAULT_POSITION_SIZE_PCT
 
                 # Extract max loss and credit from recommended strategy
                 try:

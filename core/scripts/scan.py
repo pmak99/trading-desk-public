@@ -57,10 +57,59 @@ logger = logging.getLogger(__name__)
 ALPHA_VANTAGE_CALLS_PER_MINUTE = 5
 RATE_LIMIT_PAUSE_SECONDS = 60
 
+# Cache configuration
+CACHE_L1_TTL_SECONDS = 3600      # 1 hour in-memory cache
+CACHE_L2_TTL_SECONDS = 518400    # 6 days persistent cache (until next Monday)
+CACHE_MAX_L1_SIZE = 100          # Max items in L1 memory cache
+
+# Backfill configuration
+BACKFILL_TIMEOUT_SECONDS = 120   # 2 minutes timeout for backfill subprocess
+BACKFILL_YEARS = 3               # Years of historical data to backfill
+
+# Trading day adjustment
+MAX_TRADING_DAY_ITERATIONS = 10  # Max iterations to find next trading day (handles holiday clusters)
+
+
+# Module-level cache for market cap data (simple dict cache for session)
+_market_cap_cache: Dict[str, Optional[float]] = {}
+
+# Module-level cache for holiday data (per year)
+_holiday_cache: Dict[int, set] = {}
+
+# Shared cache instance (created once per session)
+_shared_cache: Optional[HybridCache] = None
+
+
+def get_shared_cache(container: Container) -> HybridCache:
+    """
+    Get or create a shared cache instance for earnings data.
+
+    This cache is shared between ticker_mode and whisper_mode to avoid
+    duplicate API calls and maintain consistent data across modes.
+
+    Args:
+        container: DI container for config access
+
+    Returns:
+        Shared HybridCache instance
+    """
+    global _shared_cache
+
+    if _shared_cache is None:
+        cache_db_path = container.config.database.path.parent / "scan_cache.db"
+        _shared_cache = HybridCache(
+            db_path=cache_db_path,
+            l1_ttl_seconds=CACHE_L1_TTL_SECONDS,
+            l2_ttl_seconds=CACHE_L2_TTL_SECONDS,
+            max_l1_size=CACHE_MAX_L1_SIZE
+        )
+
+    return _shared_cache
+
 
 def get_market_cap_millions(ticker: str) -> Optional[float]:
     """
-    Get market cap in millions using yfinance.
+    Get market cap in millions using yfinance (with caching).
 
     Args:
         ticker: Stock ticker symbol
@@ -72,6 +121,12 @@ def get_market_cap_millions(ticker: str) -> Optional[float]:
         logger.debug(f"yfinance not available, skipping market cap check for {ticker}")
         return None
 
+    # Check cache first
+    if ticker in _market_cap_cache:
+        cached_value = _market_cap_cache[ticker]
+        logger.debug(f"{ticker}: Market cap from cache: {cached_value}")
+        return cached_value
+
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
@@ -81,13 +136,16 @@ def get_market_cap_millions(ticker: str) -> Optional[float]:
         if market_cap and market_cap > 0:
             market_cap_millions = market_cap / 1_000_000
             logger.debug(f"{ticker}: Market cap ${market_cap_millions:.0f}M")
+            _market_cap_cache[ticker] = market_cap_millions
             return market_cap_millions
 
         logger.debug(f"{ticker}: No market cap data available")
+        _market_cap_cache[ticker] = None
         return None
 
     except Exception as e:
         logger.debug(f"{ticker}: Failed to fetch market cap: {e}")
+        _market_cap_cache[ticker] = None
         return None
 
 
@@ -185,25 +243,151 @@ def parse_date(date_str: str) -> date:
         raise ValueError(f"Invalid date format: {date_str}. Use YYYY-MM-DD")
 
 
+def get_us_market_holidays(year: int) -> set:
+    """
+    Get US stock market holidays for a given year (with caching).
+
+    Returns fixed-date holidays and approximations for floating holidays.
+    Note: Good Friday requires Easter calculation which is complex,
+    so it's omitted here. For production, consider using a library like
+    pandas_market_calendars or exchange_calendars.
+
+    Args:
+        year: The year to get holidays for
+
+    Returns:
+        Set of date objects representing market holidays
+    """
+    # Check cache first
+    if year in _holiday_cache:
+        return _holiday_cache[year]
+
+    holidays = set()
+
+    # Fixed holidays
+    # New Year's Day (Jan 1)
+    new_years = date(year, 1, 1)
+    if new_years.weekday() == 5:  # Saturday -> observed Friday
+        holidays.add(date(year - 1, 12, 31))
+    elif new_years.weekday() == 6:  # Sunday -> observed Monday
+        holidays.add(date(year, 1, 2))
+    else:
+        holidays.add(new_years)
+
+    # Juneteenth (June 19) - observed since 2021
+    if year >= 2021:
+        juneteenth = date(year, 6, 19)
+        if juneteenth.weekday() == 5:
+            holidays.add(date(year, 6, 18))
+        elif juneteenth.weekday() == 6:
+            holidays.add(date(year, 6, 20))
+        else:
+            holidays.add(juneteenth)
+
+    # Independence Day (July 4)
+    july_4th = date(year, 7, 4)
+    if july_4th.weekday() == 5:
+        holidays.add(date(year, 7, 3))
+    elif july_4th.weekday() == 6:
+        holidays.add(date(year, 7, 5))
+    else:
+        holidays.add(july_4th)
+
+    # Christmas Day (Dec 25)
+    christmas = date(year, 12, 25)
+    if christmas.weekday() == 5:
+        holidays.add(date(year, 12, 24))
+    elif christmas.weekday() == 6:
+        holidays.add(date(year, 12, 26))
+    else:
+        holidays.add(christmas)
+
+    # Floating holidays (approximations)
+    # MLK Day (3rd Monday of January)
+    jan_first = date(year, 1, 1)
+    days_to_monday = (7 - jan_first.weekday()) % 7
+    first_monday = jan_first + timedelta(days=days_to_monday)
+    mlk_day = first_monday + timedelta(weeks=2)
+    holidays.add(mlk_day)
+
+    # Presidents' Day (3rd Monday of February)
+    feb_first = date(year, 2, 1)
+    days_to_monday = (7 - feb_first.weekday()) % 7
+    first_monday = feb_first + timedelta(days=days_to_monday)
+    presidents_day = first_monday + timedelta(weeks=2)
+    holidays.add(presidents_day)
+
+    # Memorial Day (last Monday of May)
+    may_last = date(year, 5, 31)
+    days_since_monday = may_last.weekday()
+    memorial_day = may_last - timedelta(days=days_since_monday)
+    holidays.add(memorial_day)
+
+    # Labor Day (1st Monday of September)
+    sep_first = date(year, 9, 1)
+    days_to_monday = (7 - sep_first.weekday()) % 7
+    labor_day = sep_first + timedelta(days=days_to_monday)
+    holidays.add(labor_day)
+
+    # Thanksgiving (4th Thursday of November)
+    nov_first = date(year, 11, 1)
+    days_to_thursday = (3 - nov_first.weekday()) % 7
+    first_thursday = nov_first + timedelta(days=days_to_thursday)
+    thanksgiving = first_thursday + timedelta(weeks=3)
+    holidays.add(thanksgiving)
+
+    # Cache the result
+    _holiday_cache[year] = holidays
+    return holidays
+
+
+def is_market_holiday(target_date: date) -> bool:
+    """
+    Check if a date is a US stock market holiday.
+
+    Args:
+        target_date: Date to check
+
+    Returns:
+        True if the date is a market holiday
+    """
+    holidays = get_us_market_holidays(target_date.year)
+    return target_date in holidays
+
+
 def adjust_to_trading_day(target_date: date) -> date:
     """
-    Adjust date to next trading day if on weekend.
-
-    Note: Does not account for market holidays (e.g., July 4th, Christmas).
-    For full holiday checking, integrate with a market calendar library.
+    Adjust date to next trading day if on weekend or holiday.
 
     Args:
         target_date: Target date to check
 
     Returns:
-        Next trading day (Monday if weekend)
+        Next trading day (skips weekends and US market holidays)
     """
-    weekday = target_date.weekday()
-    if weekday == 5:  # Saturday -> Monday
-        return target_date + timedelta(days=2)
-    elif weekday == 6:  # Sunday -> Monday
-        return target_date + timedelta(days=1)
-    return target_date
+    adjusted = target_date
+
+    # Keep adjusting until we find a trading day
+    for _ in range(MAX_TRADING_DAY_ITERATIONS):
+        weekday = adjusted.weekday()
+
+        # Skip weekends
+        if weekday == 5:  # Saturday -> Monday
+            adjusted = adjusted + timedelta(days=2)
+            continue
+        elif weekday == 6:  # Sunday -> Monday
+            adjusted = adjusted + timedelta(days=1)
+            continue
+
+        # Skip market holidays
+        if is_market_holiday(adjusted):
+            adjusted = adjusted + timedelta(days=1)
+            continue
+
+        # Found a trading day
+        break
+
+    return adjusted
 
 
 def get_next_friday(from_date: date) -> date:
@@ -447,7 +631,7 @@ def analyze_ticker(
                 logger.info(f"📊 Auto-backfilling historical earnings data for {ticker}...")
 
                 # Calculate start date (3 years ago)
-                start_date = (date.today() - timedelta(days=3*365)).isoformat()
+                start_date = (date.today() - timedelta(days=BACKFILL_YEARS*365)).isoformat()
                 end_date = (date.today() - timedelta(days=1)).isoformat()
 
                 try:
@@ -463,7 +647,7 @@ def analyze_ticker(
                         cwd=Path(__file__).parent.parent,
                         capture_output=True,
                         text=True,
-                        timeout=120
+                        timeout=BACKFILL_TIMEOUT_SECONDS
                     )
 
                     if result.returncode == 0:
@@ -724,19 +908,13 @@ def ticker_mode(
     logger.info(f"Tickers: {', '.join(tickers)}")
     logger.info("")
 
-    # Create cache for earnings calendar (6 days TTL)
-    cache_db_path = container.config.database.path.parent / "earnings_cache.db"
-    earnings_cache = HybridCache(
-        db_path=cache_db_path,
-        l1_ttl_seconds=3600,  # 1 hour in memory
-        l2_ttl_seconds=518400,  # 6 days persistent
-        max_l1_size=100
-    )
+    # Use shared cache for earnings data
+    shared_cache = get_shared_cache(container)
 
-    # Fetch full earnings calendar ONCE and cache it (6 day TTL)
+    # Fetch full earnings calendar ONCE and cache it
     logger.info("Fetching full earnings calendar...")
     cache_key = f"earnings_calendar:{date.today().isoformat()}"
-    full_calendar = earnings_cache.get(cache_key)
+    full_calendar = shared_cache.get(cache_key)
 
     if full_calendar is None:
         logger.info("Cache MISS - fetching from Alpha Vantage...")
@@ -745,7 +923,7 @@ def ticker_mode(
             logger.error(f"Failed to fetch earnings calendar: {calendar_result.error}")
             return 1
         full_calendar = calendar_result.value
-        earnings_cache.set(cache_key, full_calendar)
+        shared_cache.set(cache_key, full_calendar)
         logger.info(f"✓ Fetched {len(full_calendar)} total earnings events (cached)")
     else:
         logger.info(f"✓ Cache HIT - using cached calendar ({len(full_calendar)} events)")
@@ -909,17 +1087,11 @@ def whisper_mode(
         logger.info(f"Fallback: {fallback_image}")
     logger.info("")
 
-    # Create cache for whisper data (6 days TTL = until next Monday)
-    cache_db_path = container.config.database.path.parent / "whisper_cache.db"
-    whisper_cache = HybridCache(
-        db_path=cache_db_path,
-        l1_ttl_seconds=3600,  # 1 hour in memory
-        l2_ttl_seconds=518400,  # 6 days persistent (until next Monday)
-        max_l1_size=100
-    )
+    # Use shared cache for earnings data
+    shared_cache = get_shared_cache(container)
 
     logger.info("Fetching ticker list...")
-    scraper = EarningsWhisperScraper(cache=whisper_cache)
+    scraper = EarningsWhisperScraper(cache=shared_cache)
     result = scraper.get_most_anticipated_earnings(
         week_monday=monday.strftime("%Y-%m-%d"),
         fallback_image=fallback_image
@@ -930,14 +1102,28 @@ def whisper_mode(
         return 1
 
     tickers = result.value
+
+    # Validate we got some tickers
+    if not tickers:
+        logger.warning("⚠️  No tickers retrieved from Earnings Whispers")
+        logger.info("   This may indicate:")
+        logger.info("   - Reddit API rate limiting")
+        logger.info("   - No anticipated earnings for this week")
+        logger.info("   - Network connectivity issues")
+        logger.info("")
+        logger.info("📝 Try:")
+        logger.info("   - Use a different week: ./trade.sh whisper 2025-11-17")
+        logger.info("   - Use scan mode: ./trade.sh scan 2025-11-20")
+        return 1
+
     logger.info(f"✓ Retrieved {len(tickers)} most anticipated tickers")
     logger.info(f"Tickers: {', '.join(tickers)}")
     logger.info("")
 
-    # Fetch full earnings calendar ONCE and cache it (6 day TTL)
+    # Fetch full earnings calendar ONCE and cache it
     logger.info("Fetching full earnings calendar...")
     cache_key = f"earnings_calendar:{date.today().isoformat()}"
-    full_calendar = whisper_cache.get(cache_key)
+    full_calendar = shared_cache.get(cache_key)
 
     if full_calendar is None:
         logger.info("Cache MISS - fetching from Alpha Vantage...")
@@ -946,7 +1132,7 @@ def whisper_mode(
             logger.error(f"Failed to fetch earnings calendar: {calendar_result.error}")
             return 1
         full_calendar = calendar_result.value
-        whisper_cache.set(cache_key, full_calendar)
+        shared_cache.set(cache_key, full_calendar)
         logger.info(f"✓ Fetched {len(full_calendar)} total earnings events (cached)")
     else:
         logger.info(f"✓ Cache HIT - using cached calendar ({len(full_calendar)} events)")
