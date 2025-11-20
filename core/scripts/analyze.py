@@ -268,8 +268,8 @@ Notes:
                 logger.info(f"   4. Close position at market open after earnings")
             else:
                 logger.info(f"\n📝 Next Steps:")
-                logger.info(f"   1. Run with --strategies flag to see specific trade setups")
-                logger.info(f"   2. VRP edge detected but strategy generation not enabled")
+                logger.info(f"   1. No specific trade strategies could be generated")
+                logger.info(f"   2. Consider manual strategy setup based on VRP edge detected")
         else:
             logger.info("\n" + "=" * 80)
             logger.info("⏭️  RESULT: SKIP - INSUFFICIENT EDGE")

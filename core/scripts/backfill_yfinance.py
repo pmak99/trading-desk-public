@@ -162,7 +162,7 @@ def save_to_database(
         ''', (ticker, str(earnings_date), timing.value))
 
         # Save historical move
-        # Convert Percentage objects to float values
+        # Convert Money (.amount) and Percentage (.value) objects to float values
         cursor.execute('''
             INSERT OR REPLACE INTO historical_moves
             (ticker, earnings_date, prev_close, earnings_open, earnings_high,
@@ -172,11 +172,11 @@ def save_to_database(
         ''', (
             move.ticker,
             str(move.earnings_date),
-            move.prev_close,
-            move.earnings_open,
-            move.earnings_high,
-            move.earnings_low,
-            move.earnings_close,
+            float(move.prev_close.amount),
+            float(move.earnings_open.amount),
+            float(move.earnings_high.amount),
+            float(move.earnings_low.amount),
+            float(move.earnings_close.amount),
             move.intraday_move_pct.value,
             move.gap_move_pct.value,
             move.close_move_pct.value,

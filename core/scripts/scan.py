@@ -889,7 +889,9 @@ def scanning_mode(
         logger.info(f"\n📝 Recommendation:")
         logger.info(f"   Try scanning a different earnings date or check whisper mode for anticipated earnings")
 
-    return 0 if error_count == 0 else 1
+    # Return 0 if we successfully completed the scan (even if some tickers had errors)
+    # Only return 1 for fatal errors (calendar fetch failure, etc.)
+    return 0
 
 
 def ticker_mode(
@@ -1045,7 +1047,9 @@ def ticker_mode(
         logger.info(f"\n📝 Recommendation:")
         logger.info(f"   Try different tickers or use whisper mode for most anticipated earnings")
 
-    return 0 if error_count == 0 else 1
+    # Return 0 if we successfully completed the scan (even if some tickers had errors)
+    # Only return 1 for fatal errors (calendar fetch failure, etc.)
+    return 0
 
 
 def whisper_mode(
@@ -1082,7 +1086,9 @@ def whisper_mode(
     else:
         monday = get_week_monday()
 
-    logger.info(f"Week: {monday.strftime('%Y-%m-%d')}")
+    # Calculate week range (Monday to Sunday)
+    week_end = monday + timedelta(days=6)
+    logger.info(f"Week: {monday.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
     if fallback_image:
         logger.info(f"Fallback: {fallback_image}")
     logger.info("")
@@ -1165,6 +1171,13 @@ def whisper_mode(
 
         earnings_date, timing = earnings_info
 
+        # Check if earnings date is within target week
+        if not (monday.date() <= earnings_date <= week_end.date()):
+            skip_count += 1
+            logger.info(f"⏭️  {ticker}: Earnings {earnings_date} outside target week ({monday.date()} to {week_end.date()})")
+            pbar.set_postfix_str(f"{ticker}: Outside week")
+            continue
+
         # Calculate expiration date
         expiration_date = calculate_expiration_date(
             earnings_date, timing, expiration_offset
@@ -1215,7 +1228,7 @@ def whisper_mode(
     logger.info("=" * 80)
     logger.info(f"\n🔊 Most Anticipated Earnings Analysis:")
     logger.info(f"   Mode: Earnings Whispers (Reddit r/EarningsWhispers)")
-    logger.info(f"   Week: {monday.strftime('%Y-%m-%d')}")
+    logger.info(f"   Week: {monday.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
     logger.info(f"   Total Tickers: {len(tickers)}")
     logger.info(f"\n📊 Analysis Results:")
     logger.info(f"   🔍 Filtered (Market Cap/Liquidity): {filtered_count}")
@@ -1259,7 +1272,9 @@ def whisper_mode(
         logger.info(f"   High market attention doesn't always mean high VRP")
         logger.info(f"   Try: ./trade.sh scan YYYY-MM-DD for broader earnings scan")
 
-    return 0 if error_count == 0 else 1
+    # Return 0 if we successfully completed the scan (even if some tickers had errors)
+    # Only return 1 for fatal errors (calendar fetch failure, etc.)
+    return 0
 
 
 def main():
