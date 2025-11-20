@@ -1,61 +1,13 @@
-# Trading Desk - Earnings IV Crush Trading System
+# IV Crush Trading System
 
-Automated research system for earnings options trading with real-time IV data and AI-powered analysis.
+Professional options trading system for earnings IV crush strategies using real-time volatility data and empirically validated position sizing.
 
-## Project Structure
-
-This repository contains two versions of the IV Crush trading system:
-
-- **`2.0/`** - **Production system (RECOMMENDED)**
-  - Clean architecture with domain-driven design
-  - Production-grade resilience (circuit breakers, retry logic, async processing)
-  - 201 tests, health checks, monitoring
-  - Empirically validated: Sharpe 8.07, 100% win rate on selected trades
-  - Uses Tradier and Alpha Vantage APIs only
-  - See `2.0/README.md` for usage
-
-- **`1.0/`** - Legacy system (preserved for reference)
-  - Original IV crush analyzer with AI-powered analysis
-  - Uses Perplexity/Gemini for sentiment and strategy generation
-  - See `1.0/src/` for implementation
+**Status:** Production-ready | **Performance:** Sharpe 8.07, 100% win rate (8 trades, Q2-Q4 2024) | **Database:** 675 earnings moves
 
 ---
 
-## 🎯 What It Does
+## Quick Start
 
-Analyzes earnings candidates using IV crush strategy:
-
-1. **Filters** tickers by IV expansion velocity (weekly %), absolute IV level, liquidity, and historical performance
-2. **Analyzes** sentiment from retail/institutional sources (Reddit + AI)
-3. **Generates** 3-4 trade strategies with position sizing ($20K budget)
-4. **Outputs** formatted research reports ready for manual execution
-
-**Performance**: 12-14 seconds (75 tickers) | 80% faster than baseline | 210 API calls
-
----
-
-## Quick Start (2.0 System)
-
-### Install
-```bash
-cd 2.0
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### Configure (`.env` file in 2.0/)
-```bash
-# Required
-TRADIER_API_KEY=xxx              # Real IV data (free with account)
-ALPHA_VANTAGE_KEY=xxx            # Earnings calendar
-
-# Optional (whisper mode sentiment)
-REDDIT_CLIENT_ID=xxx
-REDDIT_CLIENT_SECRET=xxx
-```
-
-### Run Analysis
 ```bash
 cd 2.0
 
@@ -65,263 +17,283 @@ cd 2.0
 # Scan all earnings for a date
 ./trade.sh scan 2025-11-20
 
-# Analyze multiple tickers
-./trade.sh list NVDA,AMD,WMT 2025-11-20
-
 # Health check
 ./trade.sh health
 
-# View help
+# View all commands
 ./trade.sh --help
 ```
 
-See `2.0/README.md` for complete documentation.
+**That's it.** The system auto-backfills historical data, calculates VRP ratios, and recommends strategies.
 
 ---
 
-## Legacy 1.0 System
+## What This System Does
 
-The 1.0 system is preserved for reference. It uses AI-powered analysis (Perplexity/Gemini).
+**Strategy:** Volatility Risk Premium (VRP) - Sell options when implied volatility exceeds historical moves, profit from IV crush after earnings.
 
-### Configure (`.env` file)
-```bash
-# Required
-TRADIER_ACCESS_TOKEN=xxx         # Real IV data (free with account)
-ALPHA_VANTAGE_API_KEY=xxx        # Earnings calendar (25 calls/day free)
+**The Edge:**
+- **VRP Analysis:** Compare market expectations (implied move) vs reality (historical moves)
+- **Polynomial Skew Fitting:** Detect directional bias in volatility surface
+- **Exponential-Weighted Consistency:** Recent earnings weighted appropriately
+- **Hybrid Position Sizing:** Kelly Criterion (10%) + VRP weighting
+- **Empirically Validated:** 208 real trades (Q2-Q4 2024), Sharpe 8.07, 100% win rate on selected trades
 
-# Optional (AI analysis)
-PERPLEXITY_API_KEY=xxx           # Sentiment ($4.98/month cap)
-GOOGLE_API_KEY=xxx               # Fallback (free, 1500/day)
-
-# Optional (sentiment)
-REDDIT_CLIENT_ID=xxx
-REDDIT_CLIENT_SECRET=xxx
-```
-
-### Run Analysis (1.0 System)
-```bash
-# Analyze specific tickers
-python -m 1.0.src.analysis.earnings_analyzer --tickers "NVDA,META,GOOGL" 2025-11-08 --yes
-
-# Scan earnings calendar
-python -m 1.0.src.analysis.earnings_analyzer 2025-11-08 10 --yes
-```
-
-> **Note**: The 1.0 system is located in the `1.0/` directory. All import paths start with `1.0.src`
+**Database:** 675 earnings moves across 52 tickers (2022-2024) + 208 trade validation dataset
 
 ---
 
-## 📊 Key Features
+## Installation
 
-### Real IV Data (Tradier/ORATS)
-- Professional-grade implied volatility (same as $99/month services)
-- Real IV Rank vs yfinance RV proxy
-- Accurate Greeks and expected moves
-- Free with Tradier brokerage account
+### Prerequisites
 
-### Optimized Performance
-- **80% faster** - Batch fetching, smart caching, multiprocessing
-- **69% fewer API calls** - Eliminated duplicates, reuse data
-- **Bounded memory** - LRU caching (360 MB max)
-- See commit history for optimization details
+1. **Python 3.11+**
+2. **Tradier API key** ([get one](https://documentation.tradier.com/))
+3. **Alpha Vantage API key** ([get one](https://www.alphavantage.co/support/#api-key))
 
-### AI-Powered Analysis
-- Sentiment: Perplexity Sonar Pro ($0.005/1k tokens)
-- Strategies: Perplexity Sonar Pro or free Gemini fallback
-- Reddit integration (r/wallstreetbets, r/stocks, r/options)
-- Automatic cascade when budgets reached
-
-### Budget Controls
-- Perplexity: $4.98/month hard cap
-- Total: $5.00/month budget
-- Daily: 40 API calls (10+ tickers)
-- Auto-fallback to free Gemini when limits hit
-- `--override` flag bypasses daily limits
-
----
-
-## 🏗️ Architecture (1.0 System)
-
-```
-1.0/
-├── src/
-│   ├── analysis/              # Core filtering and scoring
-│   │   ├── earnings_analyzer.py  # Main orchestrator
-│   │   ├── ticker_filter.py      # IV crush filtering
-│   │   └── scorers.py            # Scoring strategies
-│   ├── options/               # Options data
-│   │   ├── tradier_client.py     # Real IV (Tradier/ORATS)
-│   │   └── data_client.py        # Fallback (yfinance)
-│   ├── ai/                    # AI analysis
-│   │   ├── sentiment_analyzer.py
-│   │   └── strategy_generator.py
-│   ├── data/calendars/        # Earnings calendars
-│   │   ├── alpha_vantage.py      # NASDAQ vendor (recommended)
-│   │   └── base.py               # Nasdaq free tier
-│   ├── config/                # Configuration
-│   │   └── config_loader.py      # Shared config system
-│   └── core/                  # Utilities
-│       ├── lru_cache.py          # Bounded caching
-│       ├── http_session.py       # Connection pooling
-│       └── usage_tracker_sqlite.py  # Budget tracking
-├── benchmarks/                # Performance tracking
-├── profiling/                 # Code profiling tools
-└── tests/                     # Test suite
-```
-
----
-
-## ⚙️ Configuration
-
-### Budget (`1.0/config/budget.yaml`)
-```yaml
-earnings_source: "alphavantage"  # or "nasdaq"
-perplexity_monthly_limit: 4.98   # Hard stop
-monthly_budget: 5.00
-
-daily_limits:
-  max_tickers: 10
-  max_api_calls: 40
-
-defaults:
-  sentiment_model: "sonar-pro"
-  strategy_model: "sonar-pro"
-
-model_cascade:
-  order: ["perplexity", "google"]  # Auto-fallback
-```
-
-### Trading Criteria (`1.0/config/trading_criteria.yaml`)
-```yaml
-iv_thresholds:
-  minimum: 60      # Hard filter
-  excellent: 80
-
-# NEW: IV expansion thresholds (weekly % change)
-iv_expansion_thresholds:
-  excellent: 80    # +80% weekly change (e.g., 40% → 72%)
-  good: 40         # +40% weekly change
-  moderate: 20     # +20% weekly change
-
-# Optimized for 1-2 day pre-earnings entries
-scoring_weights:
-  iv_expansion_velocity: 0.35  # PRIMARY: Weekly IV % change (tactical timing)
-  options_liquidity: 0.30      # Volume, OI, spreads (execution quality)
-  iv_crush_edge: 0.25          # Historical implied > actual (strategy fit)
-  current_iv_level: 0.25       # Absolute IV level (premium size)
-  fundamentals: 0.05           # Market cap, price
-
-liquidity_thresholds:
-  minimum_volume: 100          # Hard filter
-  minimum_open_interest: 500   # Hard filter
-```
-
----
-
-## 🔧 Advanced Tools
-
-### Performance Benchmarking
-```bash
-python benchmarks/performance_tracker.py --tickers "AAPL,MSFT,GOOGL" --baseline
-python benchmarks/performance_tracker.py --tickers "AAPL,MSFT,GOOGL" --compare
-python benchmarks/performance_tracker.py --history
-```
-
-### Profiling
-```bash
-python profiling/profiler.py --run "python -m src.analysis.earnings_analyzer..."
-python profiling/profiler.py --analyze results/profile.prof
-python profiling/profiler.py --hotspots results/profile.prof
-```
-
-### Market Calendar (Optional)
-```bash
-pip install pandas-market-calendars
-
-python -c "from src.data.calendars.market_calendar import MarketCalendarClient; \
-  calendar = MarketCalendarClient(); \
-  print(f'Trading day: {calendar.is_trading_day(datetime.now())}')"
-```
-
-See `ENHANCEMENTS.md` for complete guide.
-
----
-
-## 🧪 Testing (1.0 System)
+### Setup
 
 ```bash
-# Test individual components
-python -m 1.0.src.options.tradier_client AAPL       # Test Tradier IV data
-python -m 1.0.src.ai.sentiment_analyzer TSLA        # Test sentiment
-python -m 1.0.src.data.calendars.alpha_vantage      # View earnings calendar
-python -m 1.0.src.core.usage_tracker                # Budget dashboard
+# Navigate to 2.0 directory
+cd 2.0
 
-# Component comparison
-python -m 1.0.src.data.calendars.factory            # Compare calendar sources
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Full test suite
-pytest 1.0/tests/ -v
+# Install dependencies
+pip install -r requirements.txt
+
+# Create .env file
+cat > .env << EOF
+TRADIER_API_KEY=your_tradier_key_here
+ALPHA_VANTAGE_KEY=your_alphavantage_key_here
+DB_PATH=data/ivcrush.db
+LOG_LEVEL=INFO
+MIN_HISTORICAL_QUARTERS=2
+EOF
+
+# Initialize database
+mkdir -p data logs backups
+python -c "from src.infrastructure.database.init_schema import initialize_database; initialize_database('./data/ivcrush.db')"
+
+# Verify installation
+python scripts/health_check.py
 ```
 
 ---
 
-## 📈 Strategy
+## Usage
 
-**IV Crush Trading (Optimized for 1-2 Day Pre-Earnings Entries):**
-1. Identify tickers with **strong IV expansion** (weekly IV +40%+ = premium building)
-2. Sell premium **1-2 days before** earnings when IV peaks
-3. Buy back **after** earnings when IV crashes
-4. Profit from IV crush regardless of price direction
+### Single Ticker Analysis
 
-**Primary Filters:**
-- **Weekly IV expansion** >+40% (premium building NOW - tactical timing)
-- **Absolute IV level** >60% (enough premium to crush)
-- **Liquid options** (tight spreads, high OI/volume - execution quality)
-- **Historical crush edge** (implied > actual moves)
-- **Market cap** >$500M, **daily volume** >100K
+```bash
+./trade.sh NVDA 2025-11-20
+./trade.sh AAPL 2025-01-31 2025-02-01  # Custom expiration
+```
 
-**Scoring Breakdown:**
-- 35%: IV Expansion Velocity (is premium building right now?)
-- 30%: Options Liquidity (can we execute efficiently?)
-- 25%: IV Crush Edge (does it historically over-price moves?)
-- 25%: Current IV Level (is there enough premium?)
-- 5%: Fundamentals (market cap, price range)
+**Output Example:**
+```
+✅ TRADEABLE OPPORTUNITY
+VRP Ratio: 2.26x → EXCELLENT
+Implied Move: 8.00%
+Historical Mean: 3.54%
 
-**Output:** Research reports with scores, sentiment, and 3-4 trade strategies (strikes, sizing, risk/reward).
+★ RECOMMENDED: BULL PUT SPREAD
+  Strikes: Short $177.50P / Long $170.00P
+  Net Credit: $2.20
+  Max Profit: $8,158.50 (37 contracts)
+  Probability of Profit: 69.1%
+  Reward/Risk: 0.42
+  Theta: +$329/day
+```
+
+**Auto-Backfill:** If historical data is missing, the system automatically backfills the last 3 years and retries.
+
+### Multiple Tickers
+
+```bash
+./trade.sh list NVDA,WMT,AMD 2025-11-20
+```
+
+### Scan Earnings Date
+
+```bash
+./trade.sh scan 2025-11-20
+```
+
+### Whisper Mode (Most Anticipated Earnings)
+
+```bash
+# Current week's most anticipated earnings
+./trade.sh whisper
+
+# Specific week (provide Monday date)
+./trade.sh whisper 2025-11-10
+```
+
+Fetches "most anticipated earnings" from Earnings Whispers via Reddit r/wallstreetbets threads.
+
+### Health Check
+
+```bash
+./trade.sh health
+```
+
+Verifies Tradier API, database, and cache are operational.
+
+---
+
+## System Architecture
+
+### Production-Grade Features
+
+- **201 Tests** (193 unit + 8 load) - all passing
+- **59.87% Coverage** on core business logic
+- **Circuit Breakers** for API failures
+- **Retry Logic** with exponential backoff
+- **Health Monitoring** for all services
+- **Hybrid Caching** (L1 memory + L2 SQLite)
+- **Automatic Backups** (database backed up every 6 hours to `backups/`)
+
+### Core Components
+
+1. **Domain Layer** (`src/domain/`)
+   - Immutable types: Money, Percentage, Strike, OptionChain
+   - Result pattern for functional error handling
+   - Type safety throughout
+
+2. **Application Layer** (`src/application/`)
+   - **ImpliedMoveCalculatorInterpolated**: Linear interpolation between strikes
+   - **VRPCalculator**: Compare implied vs historical volatility
+   - **SkewAnalyzerEnhanced**: Polynomial fitting for directional bias
+   - **ConsistencyAnalyzerEnhanced**: Exponential-weighted historical analysis
+   - **StrategyGenerator**: Iron Condors, Bull Put/Bear Call Spreads
+
+3. **Infrastructure Layer** (`src/infrastructure/`)
+   - **Tradier API**: Real-time option chains with Greeks
+   - **Alpha Vantage API**: Earnings calendar
+   - **SQLite Database**: Historical moves with WAL mode
+   - **Hybrid Cache**: L1 (memory) + L2 (SQLite)
+
+### Database Schema
+
+```sql
+CREATE TABLE historical_moves (
+    ticker TEXT,
+    earnings_date DATE,
+    prev_close REAL,
+    earnings_close REAL,
+    close_move_pct REAL,  -- Actual historical move
+    volume_before INTEGER,
+    volume_earnings INTEGER
+);
+```
+
+**Current Data:** 675 moves, 52 tickers, 3 years of history
+
+---
+
+## Empirical Validation Results
+
+**Forward Test (Q2-Q4 2024):**
+- Selected Trades: 8 (ENPH, SHOP, AVGO, RDDT)
+- Win Rate: **100%**
+- Sharpe Ratio: **8.07** (with position sizing)
+- Total P&L: **$1,124.71** on $40K capital
+
+**Market Regime Analysis (208 trades):**
+- High Vol (VIX 25+): 83.3% WR, Sharpe 6.06
+- Normal (VIX 15-25): 72.7% WR, Sharpe 3.59
+- Low Vol (VIX <15): 68.8% WR, Sharpe 2.84
+
+**Position Sizing:** Half-Kelly (5%) for conservative start, scales to 10% after validation.
 
 ---
 
 ## Documentation
 
-### 2.0 System (Production)
-- `2.0/README.md` - Complete usage guide and system documentation
-- `2.0/LIVE_TRADING_GUIDE.md` - Trading operations handbook
-- `2.0/POSITION_SIZING_DEPLOYMENT.md` - Position sizing and empirical validation
-- `docs/2.0_OVERVIEW.md` - Architecture and implementation timeline
+### User Guides
+- **[2.0/README.md](2.0/README.md)** - Complete 2.0 system documentation
+- **[2.0/LIVE_TRADING_GUIDE.md](2.0/LIVE_TRADING_GUIDE.md)** - Trading operations handbook
+- **[2.0/BACKTESTING.md](2.0/BACKTESTING.md)** - Backtesting framework
+- **[2.0/POSITION_SIZING_DEPLOYMENT.md](2.0/POSITION_SIZING_DEPLOYMENT.md)** - Position sizing & validation
 
-### 1.0 System (Legacy)
-- `1.0/config/trading_criteria.yaml` - Filter thresholds and scoring weights
-- `1.0/config/budget.yaml` - API budgets and model selection
-
----
-
-## 🎓 Optimization Highlights
-
-**Recent improvements (80-83% faster):**
-- ✅ Batch API fetching (30-50% improvement)
-- ✅ Smart multiprocessing (sequential <3 tickers, parallel ≥3)
-- ✅ LRU caching with automatic eviction (bounded memory)
-- ✅ Eliminated duplicate API calls (save ~150 calls)
-- ✅ Reuse history data across functions
-- ✅ Specific exception handling for better debugging
-
-Total: **71s → 12-14s (80% faster) | 670 → 210 API calls (69% reduction)**
-
-See commit log for implementation details.
+### Technical Guides
+- **[docs/LOGGING_STANDARDS.md](docs/LOGGING_STANDARDS.md)** - Logging conventions
+- **[docs/SECRETS_MANAGEMENT.md](docs/SECRETS_MANAGEMENT.md)** - API key management
+- **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues
 
 ---
 
-## ⚠️ Disclaimer
+## Trading Workflow
+
+1. **Health Check**: `./trade.sh health` - Verify APIs operational
+2. **Analyze**: `./trade.sh TICKER DATE` - Get trade recommendations
+3. **Review Strategy**: Check VRP ratio, strikes, P/L, Greeks
+4. **Execute Trade**: Place order in broker (Tradier, TastyTrade, etc.)
+5. **Track Outcome**: Compare actual move vs implied move
+
+**Position Sizing:** 5% of capital per trade (half-Kelly, conservative). Validated on 208 empirical trades from Q2-Q4 2024.
+
+---
+
+## Performance
+
+- **Response Times**: 1.0ms per ticker (avg)
+- **Scaling**: Linear up to 100 concurrent tickers
+- **Cache Hit Rate**: 95%+ on repeat queries
+- **Database**: WAL mode for concurrent access
+- **Backups**: Automatic every 6 hours, retained 30 days
+
+---
+
+## Database Backups
+
+### Automatic Backups
+
+**Every time you run `./trade.sh`**, the system automatically backs up your database:
+- **Frequency**: Only if last backup is >6 hours old
+- **Location**: `2.0/backups/ivcrush_YYYYMMDD_HHMMSS.db`
+- **Retention**: Last 30 days (automatic cleanup)
+- **Impact**: Silent, non-blocking (<1 second)
+
+### Google Drive Sync (Recommended)
+
+For cloud redundancy, sync the `backups/` folder to Google Drive:
+1. Open Google Drive desktop app
+2. Add `Trading Desk/2.0/backups/` to sync
+3. Verify backups are uploading to the cloud
+
+### Restoring from Backup
+
+```bash
+cd 2.0
+./scripts/restore_database.sh
+```
+
+The restore script will list available backups, create a safety backup, and restore your selection.
+
+---
+
+## Legacy 1.0 System
+
+The original 1.0 system is preserved in the `1.0/` directory for reference. It includes:
+- AI-powered sentiment analysis (Perplexity/Gemini)
+- Original IV crush analyzer
+- Budget controls and tracking
+
+**Note:** The 2.0 system is recommended for all production use. The 1.0 system is maintained only for reference.
+
+---
+
+## License
+
+MIT License - See LICENSE file
+
+---
+
+## Disclaimer
 
 **FOR RESEARCH PURPOSES ONLY. NOT FINANCIAL ADVICE.**
 
@@ -329,12 +301,4 @@ Options trading carries significant risk of loss. This tool provides research da
 
 ---
 
-## 📜 License
-
-MIT License - See LICENSE file
-
----
-
-**Built with Claude Code** 🤖
-
-*Version: Optimized 2025*
+**Built with Claude Code**

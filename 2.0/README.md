@@ -1,8 +1,8 @@
 # IV Crush 2.0 - Earnings Options Trading System
 
-**ONE script. Maximum edge. Zero complexity.**
+**Production-ready options trading system for earnings IV crush strategies.**
 
-A production-ready options trading system that identifies high-probability IV crush opportunities using the Volatility Risk Premium (VRP) strategy.
+**ONE script. Maximum edge. Zero complexity.**
 
 ---
 
@@ -11,27 +11,23 @@ A production-ready options trading system that identifies high-probability IV cr
 ```bash
 cd 2.0
 
-# View all available commands
-./trade.sh --help
-
 # Analyze any ticker for earnings
 ./trade.sh NVDA 2025-11-20
 
-# That's it.
+# View all commands
+./trade.sh --help
 ```
 
 **Output:**
 ```
 ✅ TRADEABLE OPPORTUNITY
 VRP Ratio: 2.26x → EXCELLENT
+Implied Move: 8.00% | Historical Mean: 3.54%
 
 ★ RECOMMENDED: BULL PUT SPREAD
   Strikes: Short $177.50P / Long $170.00P
-  Net Credit: $2.20
-  Max Profit: $8,158.50 (37 contracts)
-  Probability of Profit: 69.1%
-  Reward/Risk: 0.42
-  Theta: +$329/day
+  Net Credit: $2.20 | Max Profit: $8,158.50
+  Probability of Profit: 69.1% | Theta: +$329/day
 ```
 
 ---
@@ -41,11 +37,11 @@ VRP Ratio: 2.26x → EXCELLENT
 **Strategy:** Sell options when implied volatility > historical volatility, profit when IV crushes after earnings.
 
 **The Edge:**
-- VRP Analysis: Compare implied move (market expectations) vs historical moves (reality)
-- Phase 4 Algorithms: Polynomial skew fitting, exponential-weighted consistency, interpolated calculations
-- Hybrid Position Sizing: Kelly Criterion (10%) + VRP weighting, validated with 208 real trades
-- Strategy Generation: Iron Condors, Credit Spreads with optimal strike selection
-- Empirically Validated: Sharpe 8.07, 100% win rate on 8 selected trades (Q2-Q4 2024)
+- **VRP Analysis:** Compare implied move (market expectations) vs historical moves (reality)
+- **Advanced Algorithms:** Polynomial skew fitting, exponential-weighted consistency, interpolated calculations
+- **Hybrid Position Sizing:** Kelly Criterion (10%) + VRP weighting, validated with 208 real trades
+- **Strategy Generation:** Iron Condors, Credit Spreads with optimal strike selection
+- **Empirically Validated:** Sharpe 8.07, 100% win rate on 8 selected trades (Q2-Q4 2024)
 
 **Database:** 675 earnings moves across 52 tickers (2022-2024) + 208 trade validation dataset
 
@@ -82,7 +78,7 @@ MIN_HISTORICAL_QUARTERS=2
 EOF
 
 # Initialize database
-mkdir -p data logs
+mkdir -p data logs backups
 python -c "from src.infrastructure.database.init_schema import initialize_database; initialize_database('./data/ivcrush.db')"
 
 # Verify installation
@@ -91,9 +87,9 @@ python scripts/health_check.py
 
 ### Optional: Whisper Mode Setup
 
-The **Whisper Mode** feature fetches "most anticipated earnings" from Earnings Whispers via Reddit. This is entirely optional.
+The **Whisper Mode** feature fetches "most anticipated earnings" from Earnings Whispers via Reddit (entirely optional).
 
-#### Reddit API (Primary Method)
+#### Reddit API Setup
 
 1. Create a Reddit app at [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps)
    - Choose "script" type
@@ -106,27 +102,6 @@ The **Whisper Mode** feature fetches "most anticipated earnings" from Earnings W
    REDDIT_CLIENT_SECRET=your_secret_here
    ```
 
-#### Tesseract OCR (Fallback Method)
-
-Install OCR dependencies for image-based fallback (if Reddit is unavailable):
-
-```bash
-# Install Python packages
-pip install -e ".[whisper]"
-
-# Install Tesseract binary
-# macOS
-brew install tesseract
-
-# Ubuntu/Debian
-sudo apt-get install tesseract-ocr
-
-# Windows (Chocolatey)
-choco install tesseract
-```
-
-**Note:** Whisper mode works without OCR (Reddit only). OCR fallback is purely optional for manual screenshots.
-
 ---
 
 ## Usage
@@ -136,7 +111,6 @@ choco install tesseract
 ```bash
 ./trade.sh --help    # View all commands and options
 ./trade.sh -h        # Short form
-./trade.sh help      # Alternative
 ```
 
 Displays comprehensive help including:
@@ -145,9 +119,8 @@ Displays comprehensive help including:
 - Output format explanation
 - System features and validation results
 - Position sizing details
-- Requirements and documentation links
 
-### Single Ticker Analysis (Recommended)
+### Single Ticker Analysis
 
 ```bash
 ./trade.sh NVDA 2025-11-20
@@ -187,16 +160,9 @@ Scans all earnings for specific date via Alpha Vantage API.
 
 # Specific week (provide Monday date)
 ./trade.sh whisper 2025-11-10
-
-# With image fallback (if Reddit unavailable)
-python scripts/scan.py --whisper-week --fallback-image data/earnings_screenshot.png
 ```
 
-Fetches "most anticipated earnings" tickers from Earnings Whispers via:
-- **Primary**: Reddit r/wallstreetbets weekly earnings threads (PRAW API)
-- **Fallback**: Image OCR (screenshot of earnings table)
-
-Automatically backfills historical data and analyzes each ticker for VRP opportunities.
+Fetches "most anticipated earnings" tickers from Earnings Whispers via Reddit r/wallstreetbets weekly earnings threads. Automatically backfills historical data and analyzes each ticker for VRP opportunities.
 
 **Setup Required:** See "Optional: Whisper Mode Setup" in Installation section above.
 
@@ -240,10 +206,9 @@ python scripts/analyze.py NVDA --earnings-date 2025-11-20 --expiration 2025-11-2
 python scripts/scan.py --scan-date 2025-11-20
 python scripts/scan.py --tickers NVDA,WMT,AMD
 
-# Whisper mode (most anticipated earnings)
+# Whisper mode
 python scripts/scan.py --whisper-week
 python scripts/scan.py --whisper-week 2025-11-10
-python scripts/scan.py --whisper-week --fallback-image data/earnings.png
 ```
 
 ---
@@ -274,6 +239,7 @@ python scripts/scan.py --whisper-week --fallback-image data/earnings.png
    - Circuit breakers
    - Retry logic with exponential backoff
    - Health checks
+   - Performance tracking
 
 ### Database Schema
 
@@ -293,24 +259,20 @@ CREATE TABLE historical_moves (
 
 ---
 
-## Key Features
-
-### Phase 4 Enhancements ✅
-
-- **Polynomial Skew**: 5+ OTM points, 2nd-degree polynomial, detects directional bias
-- **Exponential Weighting**: Recent quarters weighted 85% per quarter back
-- **Straddle Interpolation**: Smooth calculations between strikes
-- **Trend Detection**: Identifies increasing/decreasing volatility patterns
-
-### Production Ready
+## Production Features
 
 - **201 Tests** (193 unit + 8 load) - all passing
 - **59.87% Coverage** on core business logic
 - **Circuit Breakers** for API failures
 - **Health Monitoring** for all services
-- **Hybrid Caching** for performance
+- **Hybrid Caching** for performance (95%+ hit rate)
+- **Automatic Backups** (database backed up every 6 hours)
+- **WAL Mode** for database concurrency (10x improvement)
+- **Thread Safety** on all cache operations
 
-### Empirical Validation Results
+---
+
+## Empirical Validation Results
 
 **Forward Test (Q2-Q4 2024):**
 - Selected Trades: 8 (ENPH, SHOP, AVGO, RDDT)
@@ -332,8 +294,7 @@ CREATE TABLE historical_moves (
 - **[LIVE_TRADING_GUIDE.md](LIVE_TRADING_GUIDE.md)** - Complete trading operations guide
 - **[POSITION_SIZING_DEPLOYMENT.md](POSITION_SIZING_DEPLOYMENT.md)** - Position sizing deployment & empirical validation
 - **[BACKTESTING.md](BACKTESTING.md)** - Backtesting framework and results
-- **[FORWARD_TEST_RESULTS.md](FORWARD_TEST_RESULTS.md)** - 2024 forward test results (8 configurations)
-- **docs/ENHANCEMENTS_2025_01.md** - Phase 4 algorithmic enhancements
+- **[MCP_USAGE_GUIDE.md](MCP_USAGE_GUIDE.md)** - Model Context Protocol integration
 
 ---
 
@@ -363,8 +324,7 @@ CREATE TABLE historical_moves (
 ├── data/
 │   ├── ivcrush.db          # Historical moves database
 │   └── watchlist.txt       # Permanent ticker watchlist
-├── trade.sh                # 🔥 Fire-and-forget wrapper
-├── LIVE_TRADING_GUIDE.md   # Trading operations
+├── trade.sh                # Fire-and-forget wrapper
 └── README.md               # This file
 ```
 
@@ -430,50 +390,6 @@ cd 2.0
 4. Restore selected backup
 5. Verify database integrity
 
-**Example restore session**:
-```
-Available backups:
-
- 1) 2025-01-15 14:30:22  444KB  (< 1 day)
- 2) 2025-01-14 09:15:10  440KB  (< 7 days)
- 3) 2025-01-13 16:45:33  438KB  (< 7 days)
-
-Current database:
-  data/ivcrush.db - 444KB (modified: Jan 15 14:30)
-
-Select backup number to restore (or 'q' to quit): 2
-
-Selected: ivcrush_20250114_091510.db
-
-WARNING: This will replace your current database!
-
-Create safety backup before restore? (Y/n): y
-Creating safety backup: data/ivcrush.db.pre-restore-20250115_143022
-✓ Safety backup created
-
-Continue with restore? (y/N): y
-
-Restoring database...
-✓ Database file restored
-Verifying database integrity...
-✓ Database integrity check passed
-
-✓ Restore successful
-```
-
-### Manual Backup (Optional)
-
-You can also create manual backups anytime:
-
-```bash
-# Simple copy
-cp data/ivcrush.db backups/ivcrush_manual_$(date +%Y%m%d).db
-
-# With compression
-sqlite3 data/ivcrush.db "PRAGMA wal_checkpoint(FULL); .backup backups/ivcrush_manual.db"
-gzip backups/ivcrush_manual.db
-```
-
 ---
 
 ## Recent Improvements
@@ -483,7 +399,6 @@ gzip backups/ivcrush_manual.db
 **Thread Safety:**
 - Added `threading.Lock` to MemoryCache for true thread safety
 - Protected all cache operations (get/set/delete/clear/stats)
-- Fixed false thread-safety claim in docstring
 - Multi-threaded test: 10 threads × 20 operations = PASS
 
 **Database Performance:**
@@ -495,7 +410,6 @@ gzip backups/ivcrush_manual.db
 **Connection Reliability:**
 - Added `CONNECTION_TIMEOUT=30` constant to all repositories
 - Applied 30-second timeout to 15+ database connections
-- Affects: prices_repository, earnings_repository, hybrid_cache
 
 ### November 2025 - Code Review Improvements
 
@@ -509,7 +423,6 @@ gzip backups/ivcrush_manual.db
 - Implemented automatic expiration adjustment via `find_nearest_expiration()`
 - Fixed TCOM analysis failure (no options on calculated expiration)
 - Improved error display in trade.sh (show errors/warnings properly)
-- Fixed incorrect `--strategies` flag in scan.py output
 
 **User Experience:**
 - Added comprehensive help mode (`./trade.sh --help`)
@@ -531,4 +444,4 @@ MIT
 
 ---
 
-**Note:** The original 1.0 system is preserved in the `1.0/` directory.
+**Note:** The original 1.0 system is preserved in the `../1.0/` directory for reference.
