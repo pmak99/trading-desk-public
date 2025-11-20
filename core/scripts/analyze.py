@@ -143,40 +143,6 @@ Notes:
         logger.info(f"  Edge Score: {analysis.vrp.edge_score:.2f}")
         logger.info(f"  Recommendation: {analysis.vrp.recommendation.value.upper()}")
 
-        # FMP Earnings Surprises (if available)
-        try:
-            fmp = container.fmp
-            if fmp.api_key:
-                surprises_result = fmp.get_earnings_surprises(args.ticker, limit=8)
-                if surprises_result.is_ok:
-                    surprises = surprises_result.value
-                    logger.info(f"\n📈 Earnings History (FMP):")
-                    logger.info(f"  {fmp.format_surprises_summary(surprises)}")
-
-                    # Show individual quarters
-                    for s in surprises[:4]:
-                        beat_str = "✓ BEAT" if s.beat else "✗ MISS" if s.beat is False else "? N/A"
-                        surprise_str = f"{s.surprise_pct:+.1f}%" if s.surprise_pct else "N/A"
-                        logger.info(f"    {s.date}: {beat_str} ({surprise_str})")
-                else:
-                    logger.debug(f"FMP earnings surprises error: {surprises_result.error}")
-            else:
-                logger.debug("FMP API key not configured")
-        except Exception as e:
-            logger.warning(f"Could not fetch FMP earnings surprises: {e}")
-
-        # Octagon Sentiment (if available and high VRP)
-        try:
-            octagon = container.octagon
-            if octagon.is_available() and analysis.vrp.vrp_ratio >= 1.5:
-                sentiment_result = octagon.get_earnings_sentiment(args.ticker)
-                if sentiment_result.is_ok:
-                    sentiment = sentiment_result.value
-                    logger.info(f"\n🎯 Earnings Call Sentiment (Octagon):")
-                    logger.info(f"  {octagon.format_sentiment_summary(sentiment)}")
-        except Exception as e:
-            logger.debug(f"Could not fetch Octagon sentiment: {e}")
-
         # Strategy Recommendations
         if args.strategies and analysis.strategies:
             logger.info("\n" + "=" * 80)

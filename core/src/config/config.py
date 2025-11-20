@@ -20,8 +20,6 @@ class APIConfig:
     tradier_base_url: str = "https://api.tradier.com/v1"
     alpha_vantage_key: str = ""
     alpha_vantage_base_url: str = "https://www.alphavantage.co/query"
-    fmp_api_key: str = ""  # Financial Modeling Prep
-    octagon_api_key: str = ""  # Octagon AI
 
 
 @dataclass(frozen=True)
@@ -166,8 +164,6 @@ class Config:
             alpha_vantage_base_url=os.getenv(
                 "ALPHA_VANTAGE_BASE_URL", "https://www.alphavantage.co/query"
             ),
-            fmp_api_key=os.getenv("FMP_API_KEY", ""),
-            octagon_api_key=os.getenv("OCTAGON_API_KEY", ""),
         )
 
         # Database configuration
