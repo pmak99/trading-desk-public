@@ -71,7 +71,7 @@ calculate_expiration() {
     if [ -z "$expiration" ]; then
         echo -e "${RED}Error: Could not calculate expiration date${NC}"
         echo "Please provide expiration date manually:"
-        echo "  $0 $ticker $earnings_date YYYY-MM-DD"
+        echo "  $0 TICKER EARNINGS_DATE EXPIRATION_DATE"
         exit 1
     fi
 
@@ -418,9 +418,17 @@ analyze_single() {
 
         # Automatically backfill data (last 3 years)
         local start_date
-        start_date=$(date -d "3 years ago" +%Y-%m-%d 2>/dev/null || date -v-3y +%Y-%m-%d 2>/dev/null || echo "2022-01-01")
+        start_date=$(date -d "3 years ago" +%Y-%m-%d 2>/dev/null || date -v-3y +%Y-%m-%d 2>/dev/null)
+        if [ -z "$start_date" ]; then
+            echo -e "${RED}Error: Could not calculate start date for backfill${NC}"
+            return 1
+        fi
         local end_date
-        end_date=$(date -d "yesterday" +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d 2>/dev/null || echo "2025-11-12")
+        end_date=$(date -d "yesterday" +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d 2>/dev/null)
+        if [ -z "$end_date" ]; then
+            echo -e "${RED}Error: Could not calculate end date for backfill${NC}"
+            return 1
+        fi
 
         python scripts/backfill_yfinance.py "$ticker" \
             --start-date "$start_date" \
@@ -533,21 +541,21 @@ whisper_mode() {
     echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
     echo ""
 
-    # Build command
-    local cmd="python scripts/scan.py --whisper-week"
+    # Build command as array to avoid word splitting issues
+    local cmd_args=("python" "scripts/scan.py" "--whisper-week")
     if [ -n "$week_monday" ]; then
-        cmd="$cmd $week_monday"
+        cmd_args+=("$week_monday")
     fi
 
     # Run whisper mode
-    $cmd 2>&1 | \
+    "${cmd_args[@]}" 2>&1 | \
         sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - INFO - //' | \
         sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - ERROR - /⚠️  /' | \
         sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - WARNING - /⚠️  /' | \
-        grep -E "WHISPER MODE|Retrieved|Tickers:|Filtered|VRP|TRADEABLE|SKIP|Analysis|Total|Analyzed|Skipped|Errors|OPPORTUNITIES|SUMMARY|RESULT|Most Anticipated|Why This Matters|Next Steps|Mode:|Week:|⚠️|Failed|^   [0-9]+\.|^   •|Edge|EXCELLENT|GOOD" || {
+        grep -v "^$" || {
         echo -e "${RED}Whisper mode failed${NC}"
         echo -e "${YELLOW}Could not fetch most anticipated earnings${NC}"
-        echo -e "${YELLOW}Tip: Check Twitter access or use a different week${NC}"
+        echo -e "${YELLOW}Tip: Check Reddit API access or use a different week${NC}"
         return 1
     }
     echo ""
