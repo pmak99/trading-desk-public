@@ -13,6 +13,8 @@ from src.config.config import Config
 from src.config.validation import validate_configuration
 from src.infrastructure.api.tradier import TradierAPI
 from src.infrastructure.api.alpha_vantage import AlphaVantageAPI
+from src.infrastructure.api.fmp import FMPAPI
+from src.infrastructure.api.octagon import OctagonAPI
 from src.infrastructure.cache.memory_cache import MemoryCache, CachedOptionsDataProvider
 from src.infrastructure.cache.hybrid_cache import HybridCache
 from src.infrastructure.database.repositories.earnings_repository import (
@@ -62,6 +64,8 @@ class Container:
         self.config = config
         self._tradier: Optional[TradierAPI] = None
         self._alphavantage: Optional[AlphaVantageAPI] = None
+        self._fmp: Optional[FMPAPI] = None
+        self._octagon: Optional[OctagonAPI] = None
         self._cache: Optional[MemoryCache] = None
         self._hybrid_cache: Optional[HybridCache] = None
         self._cached_options_provider: Optional[CachedOptionsDataProvider] = None
@@ -146,6 +150,45 @@ class Container:
             )
             logger.debug("Created AlphaVantageAPI client")
         return self._alphavantage
+
+    @property
+    def fmp(self) -> FMPAPI:
+        """Get Financial Modeling Prep API client."""
+        if self._fmp is None:
+            # Use hybrid cache for FMP data (6 day TTL)
+            fmp_cache = HybridCache(
+                db_path=self.config.database.path.parent / "fmp_cache.db",
+                l1_ttl_seconds=3600,  # 1 hour in memory
+                l2_ttl_seconds=518400,  # 6 days persistent
+                max_l1_size=500
+            )
+            self._fmp = FMPAPI(
+                api_key=self.config.api.fmp_api_key,
+                cache=fmp_cache
+            )
+            logger.debug("Created FMPAPI client")
+        return self._fmp
+
+    @property
+    def octagon(self) -> OctagonAPI:
+        """Get Octagon AI API client."""
+        if self._octagon is None:
+            # Use hybrid cache for Octagon data (14 day TTL - aggressive caching)
+            octagon_cache = HybridCache(
+                db_path=self.config.database.path.parent / "octagon_cache.db",
+                l1_ttl_seconds=3600,  # 1 hour in memory
+                l2_ttl_seconds=1209600,  # 14 days persistent
+                max_l1_size=200
+            )
+            self._octagon = OctagonAPI(
+                api_key=self.config.api.octagon_api_key,
+                cache=octagon_cache
+            )
+            if self._octagon.is_available():
+                logger.debug("Created OctagonAPI client")
+            else:
+                logger.debug("OctagonAPI client created but not configured (no API key)")
+        return self._octagon
 
     @property
     def earnings_repository(self) -> EarningsRepository:
