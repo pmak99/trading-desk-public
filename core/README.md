@@ -9,7 +9,7 @@ A production-ready options trading system that identifies high-probability IV cr
 ## Quick Start
 
 ```bash
-cd "$PROJECT_ROOT/2.0"
+cd 2.0
 
 # View all available commands
 ./trade.sh --help
@@ -62,8 +62,8 @@ VRP Ratio: 2.26x → EXCELLENT
 ### Setup
 
 ```bash
-# Clone repository
-cd "$PROJECT_ROOT/2.0"
+# Navigate to 2.0 directory
+cd 2.0
 
 # Create virtual environment
 python3 -m venv venv
@@ -419,7 +419,7 @@ For cloud redundancy, sync the `backups/` folder to Google Drive:
 If you need to restore your database:
 
 ```bash
-cd "$PROJECT_ROOT/2.0"
+cd 2.0
 ./scripts/restore_database.sh
 ```
 
