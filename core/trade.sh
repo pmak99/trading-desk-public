@@ -4,9 +4,9 @@
 # Position Sizing: Half-Kelly (5%) - Conservative start, validated with 208 empirical trades
 #
 # Usage:
-#   ./trade.sh NVDA 2025-11-20                    # Single ticker
-#   ./trade.sh list NVDA,WMT,AMD 2025-11-20       # Multiple tickers
-#   ./trade.sh scan 2025-11-20                     # Scan all earnings for date
+#   ./trade.sh TSLA 2025-11-25                    # Single ticker
+#   ./trade.sh list TSLA,NVDA,META 2025-11-27       # Multiple tickers
+#   ./trade.sh scan 2025-11-25                     # Scan all earnings for date
 #   ./trade.sh whisper [YYYY-MM-DD]                # Most anticipated earnings (current or specific week)
 #   ./trade.sh positions                           # View open positions dashboard
 #   ./trade.sh performance                         # View performance analytics
@@ -15,12 +15,12 @@
 set -euo pipefail  # Exit on error, unset vars, pipeline failures
 
 # Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-BOLD='\033[1m'
-NC='\033[0m'
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+BLUE=$'\033[0;34m'
+YELLOW=$'\033[1;33m'
+BOLD=$'\033[1m'
+NC=$'\033[0m'
 
 # Change to script directory
 cd "$(dirname "$0")"
@@ -276,23 +276,23 @@ ${BOLD}COMMANDS${NC}
         Auto-backfills historical data if missing (last 3 years).
 
         Examples:
-            $0 NVDA 2025-11-20
-            $0 AAPL 2025-01-31 2025-02-01        # Custom expiration
+            $0 TSLA 2025-11-25
+            $0 AAPL 2025-11-28 2025-11-29        # Custom expiration
 
     ${GREEN}list${NC}
         Analyze multiple tickers (comma-separated).
         Auto-fetches earnings dates via Alpha Vantage API.
 
         Examples:
-            $0 list NVDA,WMT,AMD 2025-11-20
-            $0 list NVDA,WMT,AMD 2025-11-20 1    # With offset days
+            $0 list TSLA,NVDA,META 2025-11-27
+            $0 list TSLA,NVDA,META 2025-11-27 1    # With offset days
 
     ${GREEN}scan${NC}
         Scan all earnings for a specific date.
         Fetches calendar from Alpha Vantage, analyzes all tickers.
 
         Example:
-            $0 scan 2025-11-20
+            $0 scan 2025-11-25
 
     ${GREEN}whisper${NC}
         Fetch and analyze "most anticipated earnings" from Earnings Whispers.
@@ -301,7 +301,7 @@ ${BOLD}COMMANDS${NC}
 
         Examples:
             $0 whisper                            # Current week
-            $0 whisper 2025-11-10                 # Specific week (Monday)
+            $0 whisper 2025-11-24                 # Specific week (Monday)
 
     ${GREEN}positions${NC}
         View current open positions dashboard.
@@ -492,16 +492,23 @@ analyze_list() {
     echo -e "${YELLOW}Expiration Offset:${NC} +${offset_days} days"
     echo ""
 
-    # FIXED: Consistent error handling - return on failure
-    python scripts/scan.py \
-        --tickers "$tickers" \
-        --expiration-offset "$offset_days" 2>&1 | \
-        grep -v "^[0-9]\{4\}-" | \
-        grep -A 500 "Processing\|VRP\|TRADEABLE\|SKIP\|Score\|Strategy\|Analysis Complete\|Total\|Analyzed\|Skipped\|Errors\|OPPORTUNITIES" || {
+    # Run list analysis and capture output
+    local output
+    output=$(python scripts/scan.py --tickers "$tickers" --expiration-offset "$offset_days" 2>&1)
+    local exit_code=$?
+
+    # Check if command succeeded
+    if [ $exit_code -ne 0 ]; then
         echo -e "${RED}Analysis failed${NC}"
         echo -e "${YELLOW}Note: Auto-fetch earnings may not work. Try single ticker mode with explicit dates.${NC}"
         return 1
-    }
+    fi
+
+    # Display output with log filtering
+    echo "$output" | \
+        grep -v "^[0-9]\{4\}-" | \
+        grep -A 500 "Processing\|VRP\|TRADEABLE\|SKIP\|Score\|Strategy\|Analysis Complete\|Total\|Analyzed\|Skipped\|Errors\|OPPORTUNITIES"
+
     echo ""
 }
 
@@ -516,15 +523,23 @@ scan_earnings() {
     echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
     echo ""
 
-    # FIXED: Consistent error handling - return on failure
-    python scripts/scan.py \
-        --scan-date "$scan_date" 2>&1 | \
-        grep -v "^[0-9]\{4\}-" | \
-        grep -A 500 "SCANNING MODE\|Found\|Processing\|VRP\|Score\|TRADEABLE\|Scan Complete\|Total\|Analyzed\|Skipped\|Errors\|OPPORTUNITIES" || {
+    # Run scan mode and capture output
+    local output
+    output=$(python scripts/scan.py --scan-date "$scan_date" 2>&1)
+    local exit_code=$?
+
+    # Check if command succeeded
+    if [ $exit_code -ne 0 ]; then
         echo -e "${RED}Scan failed${NC}"
         echo -e "${YELLOW}No earnings found for this date${NC}"
         return 1
-    }
+    fi
+
+    # Display output with log filtering
+    echo "$output" | \
+        grep -v "^[0-9]\{4\}-" | \
+        grep -A 500 "SCANNING MODE\|Found\|Processing\|VRP\|Score\|TRADEABLE\|Scan Complete\|Total\|Analyzed\|Skipped\|Errors\|OPPORTUNITIES"
+
     echo ""
 }
 
@@ -547,17 +562,26 @@ whisper_mode() {
         cmd_args+=("$week_monday")
     fi
 
-    # Run whisper mode
-    "${cmd_args[@]}" 2>&1 | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - INFO - //' | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - ERROR - /⚠️  /' | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - WARNING - /⚠️  /' | \
-        grep -v "^$" || {
+    # Run whisper mode and capture output
+    local output
+    output=$("${cmd_args[@]}" 2>&1)
+    local exit_code=$?
+
+    # Check if command succeeded
+    if [ $exit_code -ne 0 ]; then
         echo -e "${RED}Whisper mode failed${NC}"
         echo -e "${YELLOW}Could not fetch most anticipated earnings${NC}"
         echo -e "${YELLOW}Tip: Check Reddit API access or use a different week${NC}"
         return 1
-    }
+    fi
+
+    # Display output with log filtering
+    echo "$output" | \
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - INFO - //' | \
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - ERROR - /⚠️  /' | \
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - WARNING - /⚠️  /' | \
+        grep -v "^$"
+
     echo ""
 }
 
