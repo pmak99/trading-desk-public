@@ -452,16 +452,19 @@ analyze_single() {
     # Display analysis results (filter timestamps)
     # Check if analysis succeeded by looking for "ANALYSIS RESULTS" in output
     if echo "$analysis_output" | grep -q "ANALYSIS RESULTS"; then
-        # Show from ANALYSIS RESULTS onward to capture full output including SUMMARY section
+        # Show from ANALYSIS RESULTS onward (strategies are shown BEFORE this section)
+        # Use same sed filtering as other modes for consistency
         echo "$analysis_output" | \
-            sed -n '/ANALYSIS RESULTS/,$p' | \
-            sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - INFO - //'
+            sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - INFO - //' | \
+            sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - /⚠️  /' | \
+            sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - WARNING - /⚠️  /' | \
+            grep -v "^$"
     else
         # Analysis failed - show error messages
         echo -e "${RED}Analysis failed${NC}"
         echo ""
         echo "$analysis_output" | grep -E "ERROR|Analysis failed|No options|No historical" | \
-            sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - ERROR - //' | \
+            sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - //' | \
             while IFS= read -r line; do
                 echo -e "${RED}⚠️  ${line}${NC}"
             done
@@ -504,10 +507,12 @@ analyze_list() {
         return 1
     fi
 
-    # Display output with log filtering
+    # Display output with log filtering (remove timestamp prefix, keep all content)
     echo "$output" | \
-        grep -v "^[0-9]\{4\}-" | \
-        grep -A 500 "Processing\|VRP\|TRADEABLE\|SKIP\|Score\|Strategy\|Analysis Complete\|Total\|Analyzed\|Skipped\|Errors\|OPPORTUNITIES"
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - INFO - //' | \
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - /⚠️  /' | \
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - WARNING - /⚠️  /' | \
+        grep -v "^$"
 
     echo ""
 }
@@ -535,10 +540,12 @@ scan_earnings() {
         return 1
     fi
 
-    # Display output with log filtering
+    # Display output with log filtering (remove timestamp prefix, keep all content)
     echo "$output" | \
-        grep -v "^[0-9]\{4\}-" | \
-        grep -A 500 "SCANNING MODE\|Found\|Processing\|VRP\|Score\|TRADEABLE\|Scan Complete\|Total\|Analyzed\|Skipped\|Errors\|OPPORTUNITIES"
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - INFO - //' | \
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - /⚠️  /' | \
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - WARNING - /⚠️  /' | \
+        grep -v "^$"
 
     echo ""
 }
@@ -577,9 +584,9 @@ whisper_mode() {
 
     # Display output with log filtering
     echo "$output" | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - INFO - //' | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - ERROR - /⚠️  /' | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.\] - [^ ]* - WARNING - /⚠️  /' | \
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - INFO - //' | \
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - /⚠️  /' | \
+        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - WARNING - /⚠️  /' | \
         grep -v "^$"
 
     echo ""
