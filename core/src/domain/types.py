@@ -447,12 +447,14 @@ class StrategyLeg:
         return total if self.is_long else Money(-total.amount)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Strategy:
     """
     Complete options strategy with all legs and calculated metrics.
 
     Supports vertical spreads (bull put, bear call) and iron condors.
+
+    Note: Not frozen to allow score updates during strategy ranking.
     """
 
     ticker: str
@@ -471,6 +473,11 @@ class Strategy:
     # Position sizing
     contracts: int  # Number of spreads for $20K risk budget
     capital_required: Money  # Total capital at risk
+
+    # Commission and fees
+    commission_per_contract: float  # Commission per contract (e.g., $0.30)
+    total_commission: Money  # Total commission for all legs
+    net_profit_after_fees: Money  # max_profit - total_commission
 
     # Scoring
     profitability_score: float  # 0-100

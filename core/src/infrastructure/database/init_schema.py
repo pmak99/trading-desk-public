@@ -112,30 +112,54 @@ def init_database(db_path: Path) -> None:
             )
         ''')
 
-        # Table 4: Analysis Log
+        # Table 4: Analysis Log (Enhanced for meta-analysis)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS analysis_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME NOT NULL,
                 ticker TEXT NOT NULL,
                 earnings_date DATE NOT NULL,
                 expiration DATE NOT NULL,
+
+                -- Core metrics
                 implied_move_pct REAL NOT NULL,
                 historical_mean_pct REAL NOT NULL,
                 vrp_ratio REAL NOT NULL,
-                edge_score REAL NOT NULL,
                 recommendation TEXT NOT NULL,
                 confidence REAL,
-                analyzed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+
+                -- Consistency
+                consistency_score REAL,
+
+                -- Market conditions
+                vix_level REAL,
+                vix_regime TEXT,
+
+                -- Strategy selected
+                strategy_type TEXT,
+                strategy_score REAL,
+                strategy_pop REAL,
+                strategy_rr REAL,
+                contracts INTEGER,
+
+                -- Additional context (JSON serialized full analysis)
+                raw_analysis TEXT
             )
         ''')
         cursor.execute(
             'CREATE INDEX IF NOT EXISTS idx_analysis_ticker ON analysis_log(ticker)'
         )
         cursor.execute(
-            'CREATE INDEX IF NOT EXISTS idx_analysis_date ON analysis_log(analyzed_at)'
+            'CREATE INDEX IF NOT EXISTS idx_analysis_timestamp ON analysis_log(timestamp)'
         )
         cursor.execute(
             'CREATE INDEX IF NOT EXISTS idx_analysis_recommendation ON analysis_log(recommendation)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_regime ON analysis_log(vix_regime)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_strategy ON analysis_log(strategy_type)'
         )
 
         # Table 5: Rate Limits (for tracking API usage)
