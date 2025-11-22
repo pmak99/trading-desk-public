@@ -44,10 +44,10 @@ class CacheConfig:
 class ThresholdsConfig:
     """Trading thresholds and parameters."""
 
-    # VRP ratio thresholds
-    vrp_excellent: float = 2.0
-    vrp_good: float = 1.5
-    vrp_marginal: float = 1.2
+    # VRP ratio thresholds (data-driven from 289-ticker grid scan)
+    vrp_excellent: float = 7.0  # Top 33% - exceptional edge
+    vrp_good: float = 4.0       # Top 67% - strong edge
+    vrp_marginal: float = 1.5   # Baseline edge
 
     # Liquidity filters
     min_open_interest: int = 50
@@ -292,11 +292,11 @@ class Config:
             enabled=os.getenv("CACHE_ENABLED", "true").lower() == "true",
         )
 
-        # Thresholds configuration
+        # Thresholds configuration (data-driven defaults)
         thresholds = ThresholdsConfig(
-            vrp_excellent=float(os.getenv("VRP_EXCELLENT", "2.0")),
-            vrp_good=float(os.getenv("VRP_GOOD", "1.5")),
-            vrp_marginal=float(os.getenv("VRP_MARGINAL", "1.2")),
+            vrp_excellent=float(os.getenv("VRP_EXCELLENT", "7.0")),
+            vrp_good=float(os.getenv("VRP_GOOD", "4.0")),
+            vrp_marginal=float(os.getenv("VRP_MARGINAL", "1.5")),
             min_open_interest=int(os.getenv("MIN_OPEN_INTEREST", "50")),
             max_spread_pct=float(os.getenv("MAX_SPREAD_PCT", "20.0")),
             min_historical_quarters=int(os.getenv("MIN_HISTORICAL_QUARTERS", "4")),

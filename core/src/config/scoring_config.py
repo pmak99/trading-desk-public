@@ -54,10 +54,10 @@ class ScoringThresholds:
     These define the breakpoints for excellent/good/marginal ratings.
     """
 
-    # VRP ratio thresholds (higher is better)
-    vrp_excellent: float = 2.0  # 2x+ implied vs historical
-    vrp_good: float = 1.5  # 1.5-2x
-    vrp_marginal: float = 1.2  # 1.2-1.5x
+    # VRP ratio thresholds (data-driven from 289-ticker grid scan)
+    vrp_excellent: float = 7.0  # Top 33% - exceptional edge
+    vrp_good: float = 4.0  # Top 67% - strong edge
+    vrp_marginal: float = 1.5  # Baseline edge
 
     # Consistency thresholds (higher is better, 0-1 scale)
     consistency_excellent: float = 0.8  # Very predictable moves
@@ -211,9 +211,9 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
                 liquidity_weight=0.15,
             ),
             thresholds=ScoringThresholds(
-                vrp_excellent=1.8,  # Lower thresholds
-                vrp_good=1.4,
-                vrp_marginal=1.1,
+                vrp_excellent=6.3,  # Slightly lower than baseline (aggressive)
+                vrp_good=2.8,
+                vrp_marginal=0.8,
                 min_composite_score=50.0,  # Lower bar
             ),
             max_positions=15,
@@ -232,9 +232,9 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
                 liquidity_weight=0.10,
             ),
             thresholds=ScoringThresholds(
-                vrp_excellent=2.2,  # Higher thresholds
-                vrp_good=1.7,
-                vrp_marginal=1.4,
+                vrp_excellent=7.7,  # Slightly higher than baseline (conservative)
+                vrp_good=4.5,
+                vrp_marginal=1.8,
                 min_composite_score=70.0,  # Higher bar
             ),
             max_positions=6,
