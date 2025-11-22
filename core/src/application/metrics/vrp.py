@@ -46,11 +46,11 @@ class VRPCalculator:
 
     VRP Ratio = Implied Move / Historical Mean Move
 
-    Thresholds:
-        - Excellent: >= 2.0x (implied is 2x historical average)
-        - Good: >= 1.5x
-        - Marginal: >= 1.2x
-        - Skip: < 1.2x (no edge)
+    Thresholds (data-driven from 289-ticker grid scan):
+        - Excellent: >= 7.0x (top 33rd percentile, exceptional edge)
+        - Good: >= 4.0x (top 67th percentile, strong edge)
+        - Marginal: >= 1.5x (baseline edge)
+        - Skip: < 1.5x (insufficient edge)
 
     Edge Score: Risk-adjusted metric using consistency
         edge_score = vrp_ratio / (1 + consistency)
@@ -59,9 +59,9 @@ class VRPCalculator:
 
     def __init__(
         self,
-        threshold_excellent: float = 2.0,
-        threshold_good: float = 1.5,
-        threshold_marginal: float = 1.2,
+        threshold_excellent: float = 7.0,
+        threshold_good: float = 4.0,
+        threshold_marginal: float = 1.5,
         min_quarters: int = 4,
         move_metric: str = "close",  # "close", "intraday", or "gap"
     ):
