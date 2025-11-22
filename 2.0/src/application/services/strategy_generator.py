@@ -29,16 +29,9 @@ from src.domain.types import (
 from src.domain.enums import (
     StrategyType, DirectionalBias, OptionType
 )
+from src.config.config import StrategyConfig
 
 logger = logging.getLogger(__name__)
-
-# Configuration constants
-RISK_BUDGET = 20000  # $20K risk per position
-TARGET_DELTA_SHORT = 0.30  # Sell 30-delta options (70% POP)
-TARGET_DELTA_LONG = 0.20  # Buy 20-delta protection (80% POP)
-MIN_CREDIT_PER_SPREAD = 0.25  # Minimum $0.25 credit per spread
-MIN_REWARD_RISK = 0.25  # Minimum 1:4 risk/reward ratio
-SPREAD_WIDTH_PERCENT = 0.03  # 3% of stock price for spread width
 
 
 class StrategyGenerator:
@@ -49,9 +42,14 @@ class StrategyGenerator:
     based on VRP analysis and market conditions.
     """
 
-    def __init__(self):
-        """Initialize strategy generator."""
-        pass
+    def __init__(self, config: StrategyConfig):
+        """
+        Initialize strategy generator with configuration.
+
+        Args:
+            config: Strategy configuration with all parameters
+        """
+        self.config = config
 
     def generate_strategies(
         self,
@@ -305,7 +303,7 @@ class StrategyGenerator:
             short_quote, long_quote, short_strike, long_strike
         )
 
-        if metrics['net_credit'].amount < MIN_CREDIT_PER_SPREAD:
+        if metrics['net_credit'].amount < self.config.min_credit_per_spread:
             logger.warning(f"{ticker}: Credit too low for bull put spread")
             return None
 
@@ -336,6 +334,13 @@ class StrategyGenerator:
             contracts
         )
 
+        # Calculate commissions
+        # Each leg incurs commission: 2 legs * contracts * commission_per_contract
+        total_commission = Money(2 * contracts * self.config.commission_per_contract)
+        net_profit_after_fees = Money(
+            float(metrics['max_profit'] * contracts) - float(total_commission.amount)
+        )
+
         # Build strategy
         return Strategy(
             ticker=ticker,
@@ -350,6 +355,9 @@ class StrategyGenerator:
             reward_risk_ratio=metrics['reward_risk'],
             contracts=contracts,
             capital_required=metrics['max_loss'] * contracts,
+            commission_per_contract=self.config.commission_per_contract,
+            total_commission=total_commission,
+            net_profit_after_fees=net_profit_after_fees,
             profitability_score=0.0,  # Calculated later
             risk_score=0.0,  # Calculated later
             overall_score=0.0,  # Calculated later
@@ -406,7 +414,7 @@ class StrategyGenerator:
             short_quote, long_quote, short_strike, long_strike
         )
 
-        if metrics['net_credit'].amount < MIN_CREDIT_PER_SPREAD:
+        if metrics['net_credit'].amount < self.config.min_credit_per_spread:
             logger.warning(f"{ticker}: Credit too low for bear call spread")
             return None
 
@@ -437,6 +445,13 @@ class StrategyGenerator:
             contracts
         )
 
+        # Calculate commissions
+        # Each leg incurs commission: 2 legs * contracts * commission_per_contract
+        total_commission = Money(2 * contracts * self.config.commission_per_contract)
+        net_profit_after_fees = Money(
+            float(metrics['max_profit'] * contracts) - float(total_commission.amount)
+        )
+
         # Build strategy
         return Strategy(
             ticker=ticker,
@@ -451,6 +466,9 @@ class StrategyGenerator:
             reward_risk_ratio=metrics['reward_risk'],
             contracts=contracts,
             capital_required=metrics['max_loss'] * contracts,
+            commission_per_contract=self.config.commission_per_contract,
+            total_commission=total_commission,
+            net_profit_after_fees=net_profit_after_fees,
             profitability_score=0.0,  # Calculated later
             risk_score=0.0,  # Calculated later
             overall_score=0.0,  # Calculated later
@@ -491,8 +509,23 @@ class StrategyGenerator:
         breakevens = [put_spread.breakeven[0], call_spread.breakeven[0]]
 
         # POP for iron condor: probability stock stays between both short strikes
-        # P(profit) = P(above short put) + P(below short call) - 1
-        pop = max(0.0, put_spread.probability_of_profit + call_spread.probability_of_profit - 1.0)
+        # More accurate approach: Use deltas of short strikes to estimate probability
+        # P(profit) = 1 - P(below put) - P(above call)
+        # P(below put) ≈ |put delta|, P(above call) ≈ |call delta|
+
+        # Get deltas from short legs (first leg of each spread)
+        put_short_quote = option_chain.puts.get(put_spread.legs[0].strike)
+        call_short_quote = option_chain.calls.get(call_spread.legs[0].strike)
+
+        if put_short_quote and put_short_quote.delta and call_short_quote and call_short_quote.delta:
+            # Delta-based calculation (most accurate)
+            put_short_delta = abs(put_short_quote.delta)  # Prob of expiring ITM
+            call_short_delta = abs(call_short_quote.delta)  # Prob of expiring ITM
+            pop = max(0.0, 1.0 - put_short_delta - call_short_delta)
+        else:
+            # Fallback: Use individual spread POPs as approximation
+            # This is less accurate but better than nothing
+            pop = max(0.0, put_spread.probability_of_profit + call_spread.probability_of_profit - 1.0)
 
         # Reward/risk
         reward_risk = float(max_profit.amount / max_loss.amount)
@@ -502,6 +535,13 @@ class StrategyGenerator:
 
         # Combine position Greeks from both spreads
         position_greeks = self._combine_greeks(put_spread, call_spread)
+
+        # Calculate commissions
+        # Iron condor has 4 legs: 4 legs * contracts * commission_per_contract
+        total_commission = Money(4 * contracts * self.config.commission_per_contract)
+        net_profit_after_fees = Money(
+            float(max_profit * contracts) - float(total_commission.amount)
+        )
 
         return Strategy(
             ticker=ticker,
@@ -516,6 +556,9 @@ class StrategyGenerator:
             reward_risk_ratio=reward_risk,
             contracts=contracts,
             capital_required=max_loss * contracts,
+            commission_per_contract=self.config.commission_per_contract,
+            total_commission=total_commission,
+            net_profit_after_fees=net_profit_after_fees,
             profitability_score=0.0,  # Calculated later
             risk_score=0.0,  # Calculated later
             overall_score=0.0,  # Calculated later
@@ -549,9 +592,9 @@ class StrategyGenerator:
             logger.warning(f"{ticker}: Could not find ATM strike: {e}")
             return None
 
-        # Calculate wing width (1.5-2% of stock price or $3, whichever is larger)
+        # Calculate wing width (configurable % of stock price or $3, whichever is larger)
         # Tighter than condor since we expect minimal movement
-        wing_width = max(stock_price * 0.015, 3.0)
+        wing_width = max(stock_price * self.config.iron_butterfly_wing_width_pct, 3.0)
 
         # Find protection strikes (equal distance from ATM)
         available_strikes = sorted(option_chain.strikes, key=lambda s: float(s.price))
@@ -592,7 +635,7 @@ class StrategyGenerator:
         debit_paid = wing_call.mid.amount + wing_put.mid.amount
         net_credit = Money(credit_collected - debit_paid)
 
-        if net_credit.amount < MIN_CREDIT_PER_SPREAD:
+        if net_credit.amount < self.config.min_credit_per_spread:
             logger.warning(f"{ticker}: Credit too low for iron butterfly")
             return None
 
@@ -612,13 +655,22 @@ class StrategyGenerator:
         profit_range = 2 * float(net_credit.amount)  # Total width of profit zone
         profit_range_pct = profit_range / stock_price * 100
 
-        # Estimate: Wider range = higher POP, but iron butterfly is inherently tight
-        # Scale: 2% range ≈ 40% POP, 4% range ≈ 60% POP (caps at 70%)
-        # Linear interpolation: POP = 0.40 + (range - 2) * 0.10
-        pop = min(0.70, max(0.35, 0.40 + (profit_range_pct - 2.0) * 0.10))
+        # Configurable POP estimation formula
+        # Linear interpolation: POP = base + (range - reference) * sensitivity
+        # Clamped between min and max
+        pop = min(
+            self.config.ib_pop_max,
+            max(
+                self.config.ib_pop_min,
+                self.config.ib_pop_base + (profit_range_pct - self.config.ib_pop_reference_range) * self.config.ib_pop_sensitivity
+            )
+        )
 
         # Reward/risk
-        reward_risk = float(max_profit.amount / max_loss.amount) if max_loss.amount > 0 else 0.0
+        if max_loss.amount <= 0:
+            logger.error(f"{ticker}: Invalid max_loss ${max_loss.amount:.2f} for iron butterfly - skipping")
+            return None
+        reward_risk = float(max_profit.amount / max_loss.amount)
 
         # Position sizing
         contracts = self._calculate_contracts(max_loss)
@@ -668,6 +720,13 @@ class StrategyGenerator:
             ),
         ]
 
+        # Calculate commissions
+        # Iron butterfly has 4 legs: 4 legs * contracts * commission_per_contract
+        total_commission = Money(4 * contracts * self.config.commission_per_contract)
+        net_profit_after_fees = Money(
+            float(max_profit * contracts) - float(total_commission.amount)
+        )
+
         return Strategy(
             ticker=ticker,
             strategy_type=StrategyType.IRON_BUTTERFLY,
@@ -681,6 +740,9 @@ class StrategyGenerator:
             reward_risk_ratio=reward_risk,
             contracts=contracts,
             capital_required=max_loss * contracts,
+            commission_per_contract=self.config.commission_per_contract,
+            total_commission=total_commission,
+            net_profit_after_fees=net_profit_after_fees,
             profitability_score=0.0,  # Calculated later
             risk_score=0.0,  # Calculated later
             overall_score=0.0,  # Calculated later
@@ -695,8 +757,8 @@ class StrategyGenerator:
         self,
         option_chain: OptionChain,
         option_type: OptionType,
-        target_delta_short: float = TARGET_DELTA_SHORT,
-        target_delta_long: float = TARGET_DELTA_LONG,
+        target_delta_short: Optional[float] = None,
+        target_delta_long: Optional[float] = None,
     ) -> Optional[Tuple[Strike, Strike]]:
         """
         Select strikes based on delta (probability-based selection).
@@ -706,12 +768,18 @@ class StrategyGenerator:
         Args:
             option_chain: Options chain with greeks
             option_type: CALL or PUT
-            target_delta_short: Target delta for short strike (default 0.30)
-            target_delta_long: Target delta for long strike (default 0.20)
+            target_delta_short: Target delta for short strike (default from config)
+            target_delta_long: Target delta for long strike (default from config)
 
         Returns:
             Tuple of (short_strike, long_strike) or None
         """
+        # Use config values if not specified
+        if target_delta_short is None:
+            target_delta_short = self.config.target_delta_short
+        if target_delta_long is None:
+            target_delta_long = self.config.target_delta_long
+
         chain = option_chain.puts if option_type == OptionType.PUT else option_chain.calls
 
         # Find strikes with deltas closest to targets
@@ -783,8 +851,8 @@ class StrategyGenerator:
         # Add 10% buffer beyond implied move
         buffer = implied_move_dollars * 0.10
 
-        # Spread width (3% of stock price or $5, whichever is larger)
-        spread_width = max(stock_price * SPREAD_WIDTH_PERCENT, 5.0)
+        # Spread width (configurable % of stock price or $5, whichever is larger)
+        spread_width = max(stock_price * self.config.spread_width_percent, 5.0)
 
         if below:
             # Put spread: Position below lower bound
@@ -928,7 +996,7 @@ class StrategyGenerator:
 
     def _calculate_contracts(self, max_loss_per_spread: Money) -> int:
         """
-        Calculate number of contracts for $20K risk budget.
+        Calculate number of contracts based on configured risk budget.
 
         Args:
             max_loss_per_spread: Max loss per single spread
@@ -939,10 +1007,10 @@ class StrategyGenerator:
         if max_loss_per_spread.amount <= 0:
             return 0
 
-        contracts = int(RISK_BUDGET / float(max_loss_per_spread.amount))
+        contracts = int(self.config.risk_budget_per_trade / float(max_loss_per_spread.amount))
 
-        # Minimum 1 contract, maximum 100 for safety
-        return max(1, min(contracts, 100))
+        # Minimum 1 contract, maximum from config for safety
+        return max(1, min(contracts, self.config.max_contracts))
 
     def _calculate_position_greeks(
         self,
@@ -1026,39 +1094,44 @@ class StrategyGenerator:
         """
         Score and rank strategies in-place.
 
+        Uses configured scoring weights (see StrategyConfig.scoring_weights).
+
         Scoring factors (when Greeks available):
-        - Probability of profit (45%) - Higher weight for win rate
-        - Reward/risk ratio (20%)
-        - VRP edge (20%)
-        - Greeks quality (theta/vega) (10%)
-        - Position sizing (5%)
+        - Probability of profit (configured weight, default 45%)
+        - Reward/risk ratio (configured weight, default 20%)
+        - VRP edge (configured weight, default 20%)
+        - Greeks quality (theta/vega) (configured weight, default 10%)
+        - Position sizing (configured weight, default 5%)
 
         Scoring factors (without Greeks):
-        - Probability of profit (50%) - Higher weight for win rate
-        - Reward/risk ratio (25%)
-        - VRP edge (20%)
-        - Position sizing (5%)
+        - Greeks weight is redistributed to other factors
 
         Args:
             strategies: List of strategies to score
             vrp: VRP analysis for context
         """
+        # Get scoring weights from config (create default if None)
+        weights = self.config.scoring_weights
+        if weights is None:
+            from src.config.config import ScoringWeights
+            weights = ScoringWeights()
+
         for strategy in strategies:
             # Check if Greeks are available
             has_greeks = strategy.position_theta is not None and strategy.position_vega is not None
 
             if has_greeks:
                 # Enhanced scoring with Greeks
-                # Factor 1: Probability of Profit (45%) - Target > 65%
-                pop_score = min(strategy.probability_of_profit / 0.65, 1.0) * 45
+                # Factor 1: Probability of Profit - Compare against target
+                pop_score = min(strategy.probability_of_profit / weights.target_pop, 1.0) * weights.pop_weight
 
-                # Factor 2: Reward/Risk (20%) - Target > 0.30
-                rr_score = min(strategy.reward_risk_ratio / 0.30, 1.0) * 20
+                # Factor 2: Reward/Risk - Compare against target
+                rr_score = min(strategy.reward_risk_ratio / weights.target_rr, 1.0) * weights.reward_risk_weight
 
-                # Factor 3: VRP Edge (20%) - Higher is better
-                vrp_score = min(vrp.vrp_ratio / 2.0, 1.0) * 20
+                # Factor 3: VRP Edge - Compare against target
+                vrp_score = min(vrp.vrp_ratio / weights.target_vrp, 1.0) * weights.vrp_weight
 
-                # Factor 4: Greeks Quality (10%) - Theta and Vega
+                # Factor 4: Greeks Quality - Theta and Vega
                 # For credit spreads: Positive theta is excellent, negative vega is excellent
                 theta_score = 0.0
                 vega_score = 0.0
@@ -1067,7 +1140,7 @@ class StrategyGenerator:
                     # Theta: Positive is good (we earn from time decay)
                     # Normalize: $50/day theta = 100% score
                     if strategy.position_theta > 0:
-                        theta_score = min(strategy.position_theta / 50.0, 1.0) * 5
+                        theta_score = min(strategy.position_theta / 50.0, 1.0) * (weights.greeks_weight / 2)
                     else:
                         # Penalize negative theta (paying time decay) - score 0
                         theta_score = 0.0
@@ -1076,15 +1149,15 @@ class StrategyGenerator:
                     # Vega: Negative is good for credit spreads (we benefit from IV crush)
                     # Normalize: -$100 vega = 100% score
                     if strategy.position_vega < 0:
-                        vega_score = min(abs(strategy.position_vega) / 100.0, 1.0) * 5
+                        vega_score = min(abs(strategy.position_vega) / 100.0, 1.0) * (weights.greeks_weight / 2)
                     else:
                         # Penalize positive vega (hurt by IV decrease) - score 0
                         vega_score = 0.0
 
-                greeks_score = theta_score + vega_score  # Range: 0-10
+                greeks_score = theta_score + vega_score
 
-                # Factor 5: Position Sizing (5%) - Graduated scoring up to 10 contracts
-                size_score = min(strategy.contracts / 10.0, 1.0) * 5.0
+                # Factor 5: Position Sizing - Graduated scoring up to 10 contracts
+                size_score = min(strategy.contracts / 10.0, 1.0) * weights.size_weight
 
                 # Overall score (0-100)
                 overall = rr_score + pop_score + vrp_score + greeks_score + size_score
@@ -1100,18 +1173,22 @@ class StrategyGenerator:
                 risk = base_risk + vega_risk
 
             else:
-                # Original scoring without Greeks
-                # Factor 1: Probability of Profit (50%) - Target > 65%
-                pop_score = min(strategy.probability_of_profit / 0.65, 1.0) * 50
+                # Scoring without Greeks - Redistribute greeks weight to other factors
+                # Total weight without greeks should still add to 100
+                total_base_weight = weights.pop_weight + weights.reward_risk_weight + weights.vrp_weight + weights.size_weight
+                scale_factor = 100.0 / total_base_weight if total_base_weight > 0 else 1.0
 
-                # Factor 2: Reward/Risk (25%) - Target > 0.30
-                rr_score = min(strategy.reward_risk_ratio / 0.30, 1.0) * 25
+                # Factor 1: Probability of Profit - Scaled
+                pop_score = min(strategy.probability_of_profit / weights.target_pop, 1.0) * weights.pop_weight * scale_factor
 
-                # Factor 3: VRP Edge (20%) - Higher is better
-                vrp_score = min(vrp.vrp_ratio / 2.0, 1.0) * 20
+                # Factor 2: Reward/Risk - Scaled
+                rr_score = min(strategy.reward_risk_ratio / weights.target_rr, 1.0) * weights.reward_risk_weight * scale_factor
 
-                # Factor 4: Position Sizing (5%) - Graduated scoring up to 10 contracts
-                size_score = min(strategy.contracts / 10.0, 1.0) * 5.0
+                # Factor 3: VRP Edge - Scaled
+                vrp_score = min(vrp.vrp_ratio / weights.target_vrp, 1.0) * weights.vrp_weight * scale_factor
+
+                # Factor 4: Position Sizing - Scaled
+                size_score = min(strategy.contracts / 10.0, 1.0) * weights.size_weight * scale_factor
 
                 # Overall score (0-100)
                 overall = rr_score + pop_score + vrp_score + size_score
@@ -1123,14 +1200,14 @@ class StrategyGenerator:
                 # Based on POP (higher POP = lower risk)
                 risk = (1.0 - strategy.probability_of_profit) * 100
 
-            # Update strategy (use object.__setattr__ for frozen dataclass)
-            object.__setattr__(strategy, 'overall_score', overall)
-            object.__setattr__(strategy, 'profitability_score', profitability)
-            object.__setattr__(strategy, 'risk_score', risk)
+            # Update strategy (now mutable since not frozen)
+            strategy.overall_score = overall
+            strategy.profitability_score = profitability
+            strategy.risk_score = risk
 
             # Generate rationale
             rationale = self._generate_strategy_rationale(strategy, vrp)
-            object.__setattr__(strategy, 'rationale', rationale)
+            strategy.rationale = rationale
 
     def _generate_strategy_rationale(self, strategy: Strategy, vrp: VRPResult) -> str:
         """Generate brief rationale for strategy."""

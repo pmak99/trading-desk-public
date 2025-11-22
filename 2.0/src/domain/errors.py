@@ -5,9 +5,12 @@ This module provides a functional error handling approach that makes errors
 explicit in type signatures and prevents silent failures.
 """
 
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import TypeVar, Generic, Callable, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ErrorCode(Enum):
@@ -103,13 +106,27 @@ class Result(Generic[T, E]):
         return self.value if self.is_ok else default
 
     def map(self, func: Callable[[T], Any]) -> 'Result[Any, E]':
-        """Transform the value if Ok, otherwise propagate error."""
+        """
+        Transform the value if Ok, otherwise propagate error.
+
+        Catches expected calculation errors (ValueError, TypeError, ArithmeticError, ZeroDivisionError)
+        and converts them to CALCULATION errors. Logs unexpected exceptions as warnings before
+        converting them.
+        """
         if self.is_err:
             return Result.Err(self.error)
         try:
             return Result.Ok(func(self.value))
-        except Exception as e:
+        except (ValueError, TypeError, ArithmeticError, ZeroDivisionError) as e:
+            # Expected calculation errors - convert to CALCULATION error
             return Result.Err(AppError(ErrorCode.CALCULATION, str(e)))
+        except Exception as e:
+            # Unexpected error - log as warning before converting
+            logger.warning(
+                f"Unexpected error in Result.map: {type(e).__name__}: {str(e)}",
+                exc_info=True
+            )
+            return Result.Err(AppError(ErrorCode.CALCULATION, f"Unexpected error: {str(e)}"))
 
     def and_then(self, func: Callable[[T], 'Result[Any, E]']) -> 'Result[Any, E]':
         """Chain operations that return Results."""

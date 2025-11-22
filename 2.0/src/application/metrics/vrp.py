@@ -3,6 +3,25 @@ VRP (Volatility Risk Premium) Calculator - Tier 1 Core Metric
 
 Compares implied move to historical mean move to identify edge.
 This is the core signal for the IV Crush strategy.
+
+Metric Selection:
+==================
+The VRP calculation compares implied move (from ATM straddle) to historical moves.
+Three historical move metrics are available:
+
+1. close_move_pct: Earnings close vs previous close (RECOMMENDED)
+   - Matches ATM straddle expectation (close-to-close movement)
+   - Most consistent with how straddle is priced
+
+2. intraday_move_pct: High-low range on earnings day
+   - Captures intraday volatility
+   - May be higher than close-to-close move
+
+3. gap_move_pct: Earnings open vs previous close
+   - Gap move only, ignores intraday action
+   - Useful for overnight-only strategies
+
+Default: close_move_pct for apples-to-apples comparison with implied move.
 """
 
 import logging
@@ -44,6 +63,7 @@ class VRPCalculator:
         threshold_good: float = 1.5,
         threshold_marginal: float = 1.2,
         min_quarters: int = 4,
+        move_metric: str = "close",  # "close", "intraday", or "gap"
     ):
         self.thresholds = {
             'excellent': threshold_excellent,
@@ -51,6 +71,14 @@ class VRPCalculator:
             'marginal': threshold_marginal,
         }
         self.min_quarters = min_quarters
+        self.move_metric = move_metric
+
+        # Validate metric
+        if move_metric not in ["close", "intraday", "gap"]:
+            raise ValueError(
+                f"Invalid move_metric: {move_metric}. "
+                f"Must be 'close', 'intraday', or 'gap'"
+            )
 
     def calculate(
         self,
@@ -71,7 +99,7 @@ class VRPCalculator:
         Returns:
             Result with VRPResult or AppError
         """
-        logger.info(f"Calculating VRP: {ticker}")
+        logger.info(f"Calculating VRP: {ticker} (metric={self.move_metric})")
 
         # Validate historical data
         if not historical_moves:
@@ -90,11 +118,26 @@ class VRPCalculator:
                 )
             )
 
-        # Extract historical move percentages
-        # Use intraday_move_pct (high-low range during earnings day)
-        historical_pcts = [
-            float(move.intraday_move_pct.value) for move in historical_moves
-        ]
+        # Extract historical move percentages based on configured metric
+        if self.move_metric == "close":
+            historical_pcts = [
+                float(move.close_move_pct.value) for move in historical_moves
+            ]
+        elif self.move_metric == "intraday":
+            historical_pcts = [
+                float(move.intraday_move_pct.value) for move in historical_moves
+            ]
+        elif self.move_metric == "gap":
+            historical_pcts = [
+                float(move.gap_move_pct.value) for move in historical_moves
+            ]
+        else:
+            return Err(
+                AppError(
+                    ErrorCode.CONFIGURATION,
+                    f"Invalid move_metric: {self.move_metric}",
+                )
+            )
 
         # Calculate mean historical move
         mean_move = np.mean(historical_pcts)
@@ -168,10 +211,19 @@ class VRPCalculator:
         if vrp_result.is_err:
             return vrp_result
 
-        # Calculate detailed consistency metrics
-        historical_pcts = [
-            float(move.intraday_move_pct.value) for move in historical_moves
-        ]
+        # Calculate detailed consistency metrics using the same metric as VRP
+        if self.move_metric == "close":
+            historical_pcts = [
+                float(move.close_move_pct.value) for move in historical_moves
+            ]
+        elif self.move_metric == "intraday":
+            historical_pcts = [
+                float(move.intraday_move_pct.value) for move in historical_moves
+            ]
+        else:  # gap
+            historical_pcts = [
+                float(move.gap_move_pct.value) for move in historical_moves
+            ]
 
         mean = np.mean(historical_pcts)
         median = np.median(historical_pcts)
