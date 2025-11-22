@@ -6,7 +6,7 @@ All configuration is immutable and validated at startup.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List
 from dotenv import load_dotenv
@@ -60,6 +60,108 @@ class ThresholdsConfig:
     # Market cap filters
     min_market_cap_millions: float = 1000.0
 
+    # Strike selection
+    implied_move_buffer: float = 0.10  # 10% beyond implied move for safety
+
+    # Skew analysis
+    skew_strong_threshold: float = 5.0  # 5% IV difference = strong skew
+    skew_moderate_threshold: float = 2.0  # 2% = moderate skew
+
+    # Consistency
+    high_consistency_threshold: float = 0.7  # CV < 0.7 = consistent
+    acceptable_consistency_threshold: float = 1.0
+
+    # Greeks thresholds
+    min_theta_good: float = 30.0  # $30/day = good theta
+    min_vega_good: float = -50.0  # -$50 = good vega exposure
+
+
+@dataclass(frozen=True)
+class ScoringWeights:
+    """
+    Strategy scoring weights configuration.
+
+    Weights determine how much each factor contributes to overall strategy score.
+    All weights should sum to 100 for interpretability.
+
+    Rationale:
+    - POP (45%): Primary driver of win rate. Higher weight because
+                 winning more often reduces drawdowns.
+    - R/R (20%): Important but secondary. A 0.30 R/R means risking $300
+                 to make $100, which is acceptable with 65%+ POP.
+    - VRP (20%): Measures edge quality. Higher VRP = more overpriced IV.
+    - Greeks (10%): Theta/vega provide additional edge but are secondary
+                    to core probability and reward/risk metrics.
+    - Size (5%): Minor factor. Larger positions are better but capped
+                 by risk limits anyway.
+
+    Note: These weights should be validated through backtesting and
+          potentially optimized using grid search on historical trades.
+    """
+
+    # Scoring weights with Greeks available (sum = 100)
+    pop_weight: float = 45.0          # Probability of profit
+    reward_risk_weight: float = 20.0  # Reward/risk ratio
+    vrp_weight: float = 20.0           # VRP edge strength
+    greeks_weight: float = 10.0        # Theta/vega quality
+    size_weight: float = 5.0           # Position sizing
+
+    # Scoring weights without Greeks (sum = 100)
+    pop_weight_no_greeks: float = 50.0
+    reward_risk_weight_no_greeks: float = 25.0
+    vrp_weight_no_greeks: float = 20.0
+    size_weight_no_greeks: float = 5.0
+
+    # Target values for normalization
+    target_pop: float = 0.65      # 65% POP is target
+    target_rr: float = 0.30        # 30% R/R is target
+    target_vrp: float = 2.0        # 2.0x VRP is excellent
+    target_theta: float = 50.0     # $50/day theta is excellent
+    target_vega: float = 100.0     # -$100 vega is excellent
+
+
+@dataclass(frozen=True)
+class StrategyConfig:
+    """
+    Strategy generation configuration.
+
+    Controls how strategies are selected and constructed.
+    """
+
+    # Strike selection - Delta-based (probability-based)
+    target_delta_short: float = 0.30  # Sell 30-delta (70% POP)
+    target_delta_long: float = 0.20   # Buy 20-delta (80% protection)
+
+    # Strike selection - Distance-based (fallback)
+    spread_width_percent: float = 0.03  # 3% of stock price
+
+    # Quality filters
+    min_credit_per_spread: float = 0.25  # $0.25 minimum credit
+    min_reward_risk: float = 0.25  # Minimum 1:4 ratio (25% reward/risk)
+
+    # Position sizing
+    risk_budget_per_trade: float = 20000.0  # $20K max loss per position
+    max_contracts: int = 100  # Safety cap on contract size
+
+    # Commission and fees
+    commission_per_contract: float = 0.30  # $0.30 per contract
+
+    # Iron butterfly specific
+    iron_butterfly_wing_width_pct: float = 0.015  # 1.5% for tighter profit zone
+    iron_butterfly_min_wing_width: float = 3.0    # Minimum $3 wing width
+
+    # Iron butterfly POP estimation parameters
+    # Formula: POP = base_pop + (range_pct - reference_range) * sensitivity
+    # Example: 2% range → 40% POP, 4% range → 60% POP
+    ib_pop_base: float = 0.40          # Base POP at reference range
+    ib_pop_reference_range: float = 2.0  # Reference profit range (%)
+    ib_pop_sensitivity: float = 0.10   # POP change per 1% range
+    ib_pop_min: float = 0.35           # Minimum POP cap
+    ib_pop_max: float = 0.70           # Maximum POP cap
+
+    # Scoring configuration
+    scoring_weights: ScoringWeights = field(default_factory=ScoringWeights)
+
 
 @dataclass(frozen=True)
 class RateLimitConfig:
@@ -106,6 +208,14 @@ class AlgorithmConfig:
     consistency_decay_factor: float = 0.85  # Exponential weight decay
     interpolation_tolerance: float = 0.01   # Strike match tolerance (dollars)
 
+    # VRP calculation metric selection
+    vrp_move_metric: str = "close"  # "close", "intraday", or "gap"
+    # Rationale:
+    # - "close": Earnings close vs prev close (matches ATM straddle expectation)
+    # - "intraday": High-low range on earnings day (captures intraday volatility)
+    # - "gap": Open vs prev close (gap move only)
+    # Recommended: "close" for apples-to-apples with implied move
+
 
 @dataclass(frozen=True)
 class LoggingConfig:
@@ -125,6 +235,7 @@ class Config:
     database: DatabaseConfig
     cache: CacheConfig
     thresholds: ThresholdsConfig
+    strategy: StrategyConfig
     rate_limits: RateLimitConfig
     resilience: ResilienceConfig
     algorithms: AlgorithmConfig
@@ -222,6 +333,25 @@ class Config:
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", "30")),
         )
 
+        # Strategy configuration
+        strategy = StrategyConfig(
+            target_delta_short=float(os.getenv("TARGET_DELTA_SHORT", "0.30")),
+            target_delta_long=float(os.getenv("TARGET_DELTA_LONG", "0.20")),
+            spread_width_percent=float(os.getenv("SPREAD_WIDTH_PERCENT", "0.03")),
+            min_credit_per_spread=float(os.getenv("MIN_CREDIT_PER_SPREAD", "0.25")),
+            min_reward_risk=float(os.getenv("MIN_REWARD_RISK", "0.25")),
+            risk_budget_per_trade=float(os.getenv("RISK_BUDGET_PER_TRADE", "20000.0")),
+            max_contracts=int(os.getenv("MAX_CONTRACTS", "100")),
+            commission_per_contract=float(os.getenv("COMMISSION_PER_CONTRACT", "0.30")),
+            iron_butterfly_wing_width_pct=float(os.getenv("IB_WING_WIDTH_PCT", "0.015")),
+            iron_butterfly_min_wing_width=float(os.getenv("IB_MIN_WING_WIDTH", "3.0")),
+            ib_pop_base=float(os.getenv("IB_POP_BASE", "0.40")),
+            ib_pop_reference_range=float(os.getenv("IB_POP_REFERENCE_RANGE", "2.0")),
+            ib_pop_sensitivity=float(os.getenv("IB_POP_SENSITIVITY", "0.10")),
+            ib_pop_min=float(os.getenv("IB_POP_MIN", "0.35")),
+            ib_pop_max=float(os.getenv("IB_POP_MAX", "0.70")),
+        )
+
         # Algorithms (Phase 4)
         algorithms = AlgorithmConfig(
             use_interpolated_move=os.getenv("USE_INTERPOLATED_MOVE", "true").lower() == "true",
@@ -230,6 +360,7 @@ class Config:
             skew_min_points=int(os.getenv("SKEW_MIN_POINTS", "5")),
             consistency_decay_factor=float(os.getenv("CONSISTENCY_DECAY_FACTOR", "0.85")),
             interpolation_tolerance=float(os.getenv("INTERPOLATION_TOLERANCE", "0.01")),
+            vrp_move_metric=os.getenv("VRP_MOVE_METRIC", "close"),
         )
 
         # Logging
@@ -249,6 +380,7 @@ class Config:
             database=database,
             cache=cache,
             thresholds=thresholds,
+            strategy=strategy,
             rate_limits=rate_limits,
             resilience=resilience,
             algorithms=algorithms,

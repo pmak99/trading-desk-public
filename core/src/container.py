@@ -23,10 +23,13 @@ from src.infrastructure.database.repositories.prices_repository import (
 )
 from src.application.metrics.implied_move import ImpliedMoveCalculator
 from src.application.metrics.vrp import VRPCalculator
+from src.application.metrics.liquidity_scorer import LiquidityScorer
+from src.application.metrics.market_conditions import MarketConditionsAnalyzer
 from src.application.services.analyzer import TickerAnalyzer
 from src.application.services.strategy_generator import StrategyGenerator
 from src.application.services.health import HealthCheckService
 from src.application.async_metrics.vrp_analyzer_async import AsyncTickerAnalyzer
+from src.infrastructure.database.repositories.analysis_repository import AnalysisRepository
 from src.utils.rate_limiter import (
     create_alpha_vantage_limiter,
     create_tradier_limiter,
@@ -71,9 +74,12 @@ class Container:
         self._vrp_calc: Optional[VRPCalculator] = None
         self._skew_analyzer = "uninitialized"  # SkewAnalyzerEnhanced or None (Phase 4)
         self._consistency_analyzer = "uninitialized"  # ConsistencyAnalyzerEnhanced or None (Phase 4)
+        self._liquidity_scorer: Optional[LiquidityScorer] = None
+        self._market_conditions: Optional[MarketConditionsAnalyzer] = None
         self._strategy_generator: Optional[StrategyGenerator] = None
         self._analyzer: Optional[TickerAnalyzer] = None
         self._async_analyzer: Optional[AsyncTickerAnalyzer] = None
+        self._analysis_repo: Optional[AnalysisRepository] = None
         self._health_check_service: Optional[HealthCheckService] = None
         self._tradier_breaker: Optional[CircuitBreaker] = None
         self._alpha_vantage_breaker: Optional[CircuitBreaker] = None
@@ -198,8 +204,9 @@ class Container:
                 threshold_good=self.config.thresholds.vrp_good,
                 threshold_marginal=self.config.thresholds.vrp_marginal,
                 min_quarters=self.config.thresholds.min_historical_quarters,
+                move_metric=self.config.algorithms.vrp_move_metric,
             )
-            logger.debug("Created VRPCalculator")
+            logger.debug(f"Created VRPCalculator (metric={self.config.algorithms.vrp_move_metric})")
         return self._vrp_calc
 
     @property
@@ -232,6 +239,35 @@ class Container:
                 logger.debug("Consistency analysis disabled (use_enhanced_consistency=false)")
         return self._consistency_analyzer
 
+    @property
+    def liquidity_scorer(self) -> LiquidityScorer:
+        """Get liquidity scorer."""
+        if self._liquidity_scorer is None:
+            self._liquidity_scorer = LiquidityScorer(
+                min_oi=50,
+                good_oi=500,
+                excellent_oi=2000,
+                min_volume=20,
+                good_volume=100,
+                excellent_volume=500,
+                max_spread_pct=10.0,
+                good_spread_pct=5.0,
+                excellent_spread_pct=2.0,
+            )
+            logger.debug("Created LiquidityScorer")
+        return self._liquidity_scorer
+
+    @property
+    def market_conditions_analyzer(self) -> MarketConditionsAnalyzer:
+        """Get market conditions analyzer (VIX regime detection)."""
+        if self._market_conditions is None:
+            self._market_conditions = MarketConditionsAnalyzer(
+                provider=self.tradier,
+                vix_symbol="VIX",
+            )
+            logger.debug("Created MarketConditionsAnalyzer")
+        return self._market_conditions
+
     # ========================================================================
     # Application Layer - Services
     # ========================================================================
@@ -240,8 +276,8 @@ class Container:
     def strategy_generator(self) -> StrategyGenerator:
         """Get strategy generator service."""
         if self._strategy_generator is None:
-            self._strategy_generator = StrategyGenerator()
-            logger.debug("Created StrategyGenerator")
+            self._strategy_generator = StrategyGenerator(config=self.config.strategy)
+            logger.debug("Created StrategyGenerator with StrategyConfig")
         return self._strategy_generator
 
     @property
@@ -267,6 +303,16 @@ class Container:
             self._health_check_service = HealthCheckService(self)
             logger.debug("Created HealthCheckService")
         return self._health_check_service
+
+    @property
+    def analysis_repository(self) -> AnalysisRepository:
+        """Get analysis repository for logging analysis results."""
+        if self._analysis_repo is None:
+            self._analysis_repo = AnalysisRepository(
+                db_path=str(self.config.database.path)
+            )
+            logger.debug("Created AnalysisRepository")
+        return self._analysis_repo
 
     # ========================================================================
     # Utility Methods

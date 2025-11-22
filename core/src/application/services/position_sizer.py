@@ -21,6 +21,7 @@ class PositionSizeInput:
         ticker: Stock symbol
         vrp_ratio: Implied move / Historical mean move ratio
         consistency_score: Consistency score (0-1) from consistency analyzer
+        strategy_reward_risk: Strategy's reward/risk ratio (profit/loss ratio)
         historical_win_rate: Historical win rate for this setup (optional)
         num_historical_trades: Number of historical trades (for confidence)
     """
@@ -28,6 +29,7 @@ class PositionSizeInput:
     ticker: str
     vrp_ratio: float
     consistency_score: float
+    strategy_reward_risk: float
     historical_win_rate: Optional[float] = None
     num_historical_trades: Optional[int] = None
 
@@ -111,6 +113,7 @@ class PositionSizer:
         ticker = input_params.ticker
         vrp_ratio = input_params.vrp_ratio
         consistency_score = input_params.consistency_score
+        strategy_reward_risk = input_params.strategy_reward_risk
         historical_win_rate = input_params.historical_win_rate
         num_historical_trades = input_params.num_historical_trades
 
@@ -132,12 +135,10 @@ class PositionSizer:
 
             p = min(0.75, base_p + consistency_boost + vrp_boost)
 
-        # Estimate odds (profit/loss ratio)
-        # For IV crush trades, typical profit is ~50% of premium, loss is 100% of premium
-        # So odds are approximately 0.5:1
-        # Note: Odds are determined by trade structure, NOT by VRP
-        # VRP already affects probability above - don't double-count
-        b = 0.5  # Fixed based on typical IV crush trade structure
+        # Use actual strategy reward/risk ratio as odds (b in Kelly formula)
+        # This reflects the true profit/loss ratio of the specific strategy
+        # Example: If strategy has max_profit=$100 and max_loss=$300, b = 0.33
+        b = strategy_reward_risk
 
         # Calculate Kelly fraction
         # f = (p * b - q) / b
