@@ -370,6 +370,7 @@ ${BOLD}DOCUMENTATION${NC}
     README.md               - Full system documentation
     LIVE_TRADING_GUIDE.md   - Trading operations guide
     POSITION_SIZING_DEPLOYMENT.md - Position sizing & validation
+    docs/METRICS_GUIDE.md   - Understanding VRP, Edge Score, and metrics
 
 ${BOLD}MORE INFO${NC}
     Repository: https://github.com/pmak99/trading-desk
@@ -495,24 +496,16 @@ analyze_list() {
     echo -e "${YELLOW}Expiration Offset:${NC} +${offset_days} days"
     echo ""
 
-    # Run list analysis and capture output
-    local output
-    output=$(python scripts/scan.py --tickers "$tickers" --expiration-offset "$offset_days" 2>&1)
-    local exit_code=$?
-
-    # Check if command succeeded
-    if [ $exit_code -ne 0 ]; then
+    # Run list analysis with real-time output (unbuffered Python + direct piping)
+    if ! python -u scripts/scan.py --tickers "$tickers" --expiration-offset "$offset_days" 2>&1 | \
+        sed -u 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - INFO - //' | \
+        sed -u 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - /⚠️  /' | \
+        sed -u 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - WARNING - /⚠️  /' | \
+        grep -v "^$"; then
         echo -e "${RED}Analysis failed${NC}"
         echo -e "${YELLOW}Note: Auto-fetch earnings may not work. Try single ticker mode with explicit dates.${NC}"
         return 1
     fi
-
-    # Display output with log filtering (remove timestamp prefix, keep all content)
-    echo "$output" | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - INFO - //' | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - /⚠️  /' | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - WARNING - /⚠️  /' | \
-        grep -v "^$"
 
     echo ""
 }
@@ -528,24 +521,16 @@ scan_earnings() {
     echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
     echo ""
 
-    # Run scan mode and capture output
-    local output
-    output=$(python scripts/scan.py --scan-date "$scan_date" 2>&1)
-    local exit_code=$?
-
-    # Check if command succeeded
-    if [ $exit_code -ne 0 ]; then
+    # Run scan mode with real-time output (unbuffered Python + direct piping)
+    if ! python -u scripts/scan.py --scan-date "$scan_date" 2>&1 | \
+        sed -u 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - INFO - //' | \
+        sed -u 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - /⚠️  /' | \
+        sed -u 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - WARNING - /⚠️  /' | \
+        grep -v "^$"; then
         echo -e "${RED}Scan failed${NC}"
         echo -e "${YELLOW}No earnings found for this date${NC}"
         return 1
     fi
-
-    # Display output with log filtering (remove timestamp prefix, keep all content)
-    echo "$output" | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - INFO - //' | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - /⚠️  /' | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - WARNING - /⚠️  /' | \
-        grep -v "^$"
 
     echo ""
 }
@@ -563,31 +548,23 @@ whisper_mode() {
     echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
     echo ""
 
-    # Build command as array to avoid word splitting issues
-    local cmd_args=("python" "scripts/scan.py" "--whisper-week")
+    # Run whisper mode with real-time output (unbuffered Python + direct piping)
+    # Build command with unbuffered flag
+    local base_cmd="python -u scripts/scan.py --whisper-week"
     if [ -n "$week_monday" ]; then
-        cmd_args+=("$week_monday")
+        base_cmd="$base_cmd $week_monday"
     fi
 
-    # Run whisper mode and capture output
-    local output
-    output=$("${cmd_args[@]}" 2>&1)
-    local exit_code=$?
-
-    # Check if command succeeded
-    if [ $exit_code -ne 0 ]; then
+    if ! eval "$base_cmd" 2>&1 | \
+        sed -u 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - INFO - //' | \
+        sed -u 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - /⚠️  /' | \
+        sed -u 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - WARNING - /⚠️  /' | \
+        grep -v "^$"; then
         echo -e "${RED}Whisper mode failed${NC}"
         echo -e "${YELLOW}Could not fetch most anticipated earnings${NC}"
         echo -e "${YELLOW}Tip: Check Reddit API access or use a different week${NC}"
         return 1
     fi
-
-    # Display output with log filtering
-    echo "$output" | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - INFO - //' | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - /⚠️  /' | \
-        sed 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - WARNING - /⚠️  /' | \
-        grep -v "^$"
 
     echo ""
 }

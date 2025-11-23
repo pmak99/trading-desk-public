@@ -793,16 +793,20 @@ def scanning_mode(
     skip_count = 0
     filtered_count = 0
 
-    # Progress bar for scanning
+    # Progress bar for scanning (force real-time updates)
     pbar = tqdm(
         earnings_events,
         desc="Scanning earnings",
         unit="ticker",
-        bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}'
+        bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}',
+        file=sys.stderr,  # Use stderr to avoid interfering with output capture
+        mininterval=0.1,  # Update every 0.1 seconds
+        maxinterval=1.0   # Maximum 1 second between updates
     )
 
     for ticker, earnings_date, timing in pbar:
         pbar.set_postfix_str(f"Current: {ticker}")
+        sys.stderr.flush()  # Force flush after each update
 
         # Calculate expiration date
         expiration_date = calculate_expiration_date(
@@ -820,6 +824,7 @@ def scanning_mode(
             filtered_count += 1
             logger.info(f"⏭️  {ticker}: Filtered ({filter_reason})")
             pbar.set_postfix_str(f"{ticker}: Filtered")
+            sys.stderr.flush()
             continue
 
         # Analyze ticker (no auto-backfill in scan mode to avoid excessive delays)
@@ -842,6 +847,7 @@ def scanning_mode(
         else:
             error_count += 1
             pbar.set_postfix_str(f"{ticker}: ✗ Error")
+        sys.stderr.flush()
 
     pbar.close()
 
@@ -874,10 +880,16 @@ def scanning_mode(
                 f"Edge {r['edge_score']:.2f} | "
                 f"{r['recommendation'].upper()}"
             )
+        logger.info(f"\n📝 Understanding the Metrics:")
+        logger.info(f"   • VRP Ratio = Implied Move ÷ Historical Move (Higher = Better Edge)")
+        logger.info(f"   • Implied Move = Market's expectation (from options prices)")
+        logger.info(f"   • Edge Score = Statistical confidence (Higher = More reliable)")
+        logger.info(f"   • EXCELLENT (>4.0x), GOOD (2.5-4.0x), MARGINAL (1.5-2.5x), SKIP (<1.5x)")
         logger.info(f"\n📝 Next Steps:")
         logger.info(f"   1. Analyze individual tickers with: ./trade.sh TICKER {scan_date}")
         logger.info(f"   2. Review strategy recommendations for each opportunity")
         logger.info(f"   3. Check broker pricing before entering positions")
+        logger.info(f"   4. For detailed metrics guide: cat docs/METRICS_GUIDE.md")
     else:
         logger.info(f"\n" + "=" * 80)
         logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
@@ -937,16 +949,20 @@ def ticker_mode(
     skip_count = 0
     filtered_count = 0
 
-    # Progress bar for ticker processing
+    # Progress bar for ticker processing (force real-time updates)
     pbar = tqdm(
         tickers,
         desc="Analyzing tickers",
         unit="ticker",
-        bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}'
+        bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}',
+        file=sys.stderr,  # Use stderr to avoid interfering with output capture
+        mininterval=0.1,  # Update every 0.1 seconds
+        maxinterval=1.0   # Maximum 1 second between updates
     )
 
     for ticker in pbar:
         pbar.set_postfix_str(f"Current: {ticker}")
+        sys.stderr.flush()  # Force flush after each update
 
         # Fetch earnings date for ticker (using cached full calendar - no API call!)
         earnings_info = fetch_earnings_for_ticker(container, ticker, cached_calendar=full_calendar)
@@ -954,6 +970,7 @@ def ticker_mode(
         if not earnings_info:
             skip_count += 1
             pbar.set_postfix_str(f"{ticker}: No earnings")
+            sys.stderr.flush()
             continue
 
         earnings_date, timing = earnings_info
@@ -974,10 +991,12 @@ def ticker_mode(
             filtered_count += 1
             logger.info(f"⏭️  {ticker}: Filtered ({filter_reason})")
             pbar.set_postfix_str(f"{ticker}: Filtered")
+            sys.stderr.flush()
             continue
 
         # Update progress
         pbar.set_postfix_str(f"{ticker}: Analyzing VRP")
+        sys.stderr.flush()
 
         # Analyze ticker (with auto-backfill enabled for ticker mode)
         result = analyze_ticker(
@@ -999,6 +1018,7 @@ def ticker_mode(
         else:
             error_count += 1
             pbar.set_postfix_str(f"{ticker}: ✗ Error")
+        sys.stderr.flush()
 
     pbar.close()
 
@@ -1032,11 +1052,17 @@ def ticker_mode(
                 f"{r['recommendation'].upper()} | "
                 f"Earnings {r['earnings_date']}"
             )
+        logger.info(f"\n📝 Understanding the Metrics:")
+        logger.info(f"   • VRP Ratio = Implied Move ÷ Historical Move (Higher = Better Edge)")
+        logger.info(f"   • Implied Move = Market's expectation (from options prices)")
+        logger.info(f"   • Edge Score = Statistical confidence (Higher = More reliable)")
+        logger.info(f"   • EXCELLENT (>4.0x), GOOD (2.5-4.0x), MARGINAL (1.5-2.5x), SKIP (<1.5x)")
         logger.info(f"\n📝 Next Steps:")
         logger.info(f"   1. Analyze top opportunities with: ./trade.sh TICKER YYYY-MM-DD")
         logger.info(f"   2. Review detailed strategy recommendations")
         logger.info(f"   3. Prioritize by VRP ratio and edge score")
         logger.info(f"   4. Verify earnings dates and check broker pricing")
+        logger.info(f"   5. For detailed metrics guide: cat docs/METRICS_GUIDE.md")
     else:
         logger.info(f"\n" + "=" * 80)
         logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
@@ -1150,16 +1176,20 @@ def whisper_mode(
     skip_count = 0
     filtered_count = 0
 
-    # Progress bar for ticker processing
+    # Progress bar for ticker processing (force real-time updates)
     pbar = tqdm(
         tickers,
         desc="Analyzing tickers",
         unit="ticker",
-        bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}'
+        bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}',
+        file=sys.stderr,  # Use stderr to avoid interfering with output capture
+        mininterval=0.1,  # Update every 0.1 seconds
+        maxinterval=1.0   # Maximum 1 second between updates
     )
 
     for ticker in pbar:
         pbar.set_postfix_str(f"Current: {ticker}")
+        sys.stderr.flush()  # Force flush after each update
 
         # Fetch earnings date for ticker (using cached full calendar - no API call!)
         earnings_info = fetch_earnings_for_ticker(container, ticker, cached_calendar=full_calendar)
@@ -1167,6 +1197,7 @@ def whisper_mode(
         if not earnings_info:
             skip_count += 1
             pbar.set_postfix_str(f"{ticker}: No earnings")
+            sys.stderr.flush()
             continue
 
         earnings_date, timing = earnings_info
@@ -1176,6 +1207,7 @@ def whisper_mode(
             skip_count += 1
             logger.info(f"⏭️  {ticker}: Earnings {earnings_date} outside target week ({monday.date()} to {week_end.date()})")
             pbar.set_postfix_str(f"{ticker}: Outside week")
+            sys.stderr.flush()
             continue
 
         # Calculate expiration date
@@ -1194,10 +1226,12 @@ def whisper_mode(
             filtered_count += 1
             logger.info(f"⏭️  {ticker}: Filtered ({filter_reason})")
             pbar.set_postfix_str(f"{ticker}: Filtered")
+            sys.stderr.flush()
             continue
 
         # Update progress with current action
         pbar.set_postfix_str(f"{ticker}: Analyzing VRP")
+        sys.stderr.flush()
 
         # Analyze ticker (with auto-backfill enabled like ticker mode)
         result = analyze_ticker(
@@ -1219,6 +1253,7 @@ def whisper_mode(
         else:
             error_count += 1
             pbar.set_postfix_str(f"{ticker}: ✗ Error")
+        sys.stderr.flush()
 
     pbar.close()
 
@@ -1247,6 +1282,7 @@ def whisper_mode(
             logger.info(
                 f"   {i}. {r['ticker']:6s}: "
                 f"VRP {r['vrp_ratio']:.2f}x | "
+                f"Implied {r['implied_move_pct']} | "
                 f"Edge {r['edge_score']:.2f} | "
                 f"{r['recommendation'].upper()} | "
                 f"Earnings {r['earnings_date']}"
@@ -1256,11 +1292,17 @@ def whisper_mode(
         logger.info(f"   • High retail/market attention (Most Anticipated)")
         logger.info(f"   • Strong statistical edge (VRP ratio)")
         logger.info(f"   • Better liquidity expected (High volume)")
+        logger.info(f"\n📝 Understanding the Metrics:")
+        logger.info(f"   • VRP Ratio = Implied Move ÷ Historical Move (Higher = Better Edge)")
+        logger.info(f"   • Implied Move = Market's expectation (from options prices)")
+        logger.info(f"   • Edge Score = Statistical confidence (Higher = More reliable)")
+        logger.info(f"   • EXCELLENT (>4.0x), GOOD (2.5-4.0x), MARGINAL (1.5-2.5x), SKIP (<1.5x)")
         logger.info(f"\n📝 Next Steps:")
         logger.info(f"   1. Analyze top opportunities with: ./trade.sh TICKER YYYY-MM-DD")
         logger.info(f"   2. Review detailed strategy recommendations")
         logger.info(f"   3. Prioritize by VRP ratio and market attention")
         logger.info(f"   4. Check broker for tight bid-ask spreads")
+        logger.info(f"   5. For detailed metrics guide: cat docs/METRICS_GUIDE.md")
     else:
         logger.info(f"\n" + "=" * 80)
         logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
