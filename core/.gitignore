@@ -37,7 +37,7 @@ dist/
 build/
 *.egg-info/
 
-# Backups (synced to Google Drive)
+# Backups (auto-synced to Google Drive/My Drive/Trading/Database Backups)
 backups/*.db
 backups/*.db.gz
 backups/.backup.lock
