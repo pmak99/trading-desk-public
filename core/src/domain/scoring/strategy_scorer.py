@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from typing import List
 
 from src.config.config import ScoringWeights
-from src.domain.models import Strategy, VRPResult, StrategyType, DirectionalBias
+from src.domain.types import Strategy, VRPResult
+from src.domain.enums import StrategyType, DirectionalBias
 
 
 @dataclass
