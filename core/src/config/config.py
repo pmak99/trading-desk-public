@@ -119,6 +119,14 @@ class ScoringWeights:
     target_theta: float = 50.0     # $50/day theta is excellent
     target_vega: float = 100.0     # -$100 vega is excellent
 
+    # Rationale generation thresholds
+    vrp_excellent_threshold: float = 2.0   # VRP >= 2.0 is "excellent"
+    vrp_strong_threshold: float = 1.5      # VRP >= 1.5 is "strong"
+    rr_favorable_threshold: float = 0.35   # R/R >= 0.35 is "favorable"
+    pop_high_threshold: float = 0.70       # POP >= 70% is "high"
+    theta_positive_threshold: float = 30.0  # Theta > $30/day mentioned in rationale
+    vega_beneficial_threshold: float = -50.0  # Vega < -$50 benefits from IV crush
+
 
 @dataclass(frozen=True)
 class StrategyConfig:
