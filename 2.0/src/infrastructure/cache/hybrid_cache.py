@@ -95,19 +95,22 @@ class HybridCache:
                         expiration TEXT
                     )
                 ''')
+
+                # Migration: Add expiration column if it doesn't exist (for existing caches)
+                # IMPORTANT: Must check and add column BEFORE creating index on it
+                cursor = conn.execute("PRAGMA table_info(cache)")
+                columns = [row[1] for row in cursor.fetchall()]
+                if 'expiration' not in columns:
+                    logger.info("Migrating cache schema: adding expiration column")
+                    conn.execute('ALTER TABLE cache ADD COLUMN expiration TEXT')
+
+                # Create indexes (after ensuring columns exist)
                 conn.execute(
                     'CREATE INDEX IF NOT EXISTS idx_cache_timestamp ON cache(timestamp)'
                 )
                 conn.execute(
                     'CREATE INDEX IF NOT EXISTS idx_cache_expiration ON cache(expiration)'
                 )
-
-                # Migration: Add expiration column if it doesn't exist (for existing caches)
-                cursor = conn.execute("PRAGMA table_info(cache)")
-                columns = [row[1] for row in cursor.fetchall()]
-                if 'expiration' not in columns:
-                    logger.info("Migrating cache schema: adding expiration column")
-                    conn.execute('ALTER TABLE cache ADD COLUMN expiration TEXT')
 
                 conn.commit()
                 logger.debug(f"L2 cache schema initialized with WAL mode: {self.db_path}")
