@@ -356,7 +356,7 @@ class StrategyGenerator:
         # Calculate commissions
         total_commission = Money(2 * contracts * self.config.commission_per_contract)
         net_profit_after_fees = Money(
-            float(metrics['max_profit'] * contracts) - float(total_commission.amount)
+            float(metrics['max_profit'].amount * contracts) - float(total_commission.amount)
         )
 
         # Build strategy
@@ -473,7 +473,7 @@ class StrategyGenerator:
         # Iron condor has 4 legs: 4 legs * contracts * commission_per_contract
         total_commission = Money(4 * contracts * self.config.commission_per_contract)
         net_profit_after_fees = Money(
-            float(max_profit * contracts) - float(total_commission.amount)
+            float(max_profit.amount * contracts) - float(total_commission.amount)
         )
 
         return Strategy(
@@ -657,7 +657,7 @@ class StrategyGenerator:
         # Iron butterfly has 4 legs: 4 legs * contracts * commission_per_contract
         total_commission = Money(4 * contracts * self.config.commission_per_contract)
         net_profit_after_fees = Money(
-            float(max_profit * contracts) - float(total_commission.amount)
+            float(max_profit.amount * contracts) - float(total_commission.amount)
         )
 
         return Strategy(
