@@ -65,8 +65,6 @@ class GracefulShutdown:
 
         self.is_shutting_down = True
 
-        logger.info(f"Executing {len(self.shutdown_callbacks)} cleanup callbacks...")
-
         # Execute callbacks in reverse order (LIFO)
         for callback in reversed(self.shutdown_callbacks):
             try:
@@ -74,8 +72,6 @@ class GracefulShutdown:
                 callback()
             except Exception as e:
                 logger.error(f"Error in shutdown callback {callback.__name__}: {e}")
-
-        logger.info("Graceful shutdown complete")
 
 
 # Global shutdown handler (singleton)
