@@ -259,27 +259,43 @@ class StrategyGenerator:
             logger.warning(f"{ticker}: Strategy type {strategy_type} not implemented")
             return None
 
-    def _build_bull_put_spread(
-        self, ticker: str, option_chain: OptionChain, vrp: VRPResult
+    def _build_vertical_spread(
+        self,
+        ticker: str,
+        option_chain: OptionChain,
+        vrp: VRPResult,
+        option_type: OptionType,
+        strategy_type: StrategyType,
+        below: bool
     ) -> Optional[Strategy]:
-        """Build bull put spread (credit spread below price)."""
+        """
+        Build a vertical credit spread (common logic for bull put and bear call).
 
+        Args:
+            ticker: Ticker symbol
+            option_chain: Options chain
+            vrp: VRP analysis
+            option_type: PUT or CALL
+            strategy_type: BULL_PUT_SPREAD or BEAR_CALL_SPREAD
+            below: True for put spread (below price), False for call spread (above)
+
+        Returns:
+            Strategy or None if construction fails
+        """
         # Try delta-based selection first (more precise if Greeks available)
-        strikes = self._select_strikes_delta_based(
-            option_chain, OptionType.PUT
-        )
+        strikes = self._select_strikes_delta_based(option_chain, option_type)
 
         # Verify delta-based strikes are outside implied move zone
         if strikes:
             strikes = self._verify_strikes_outside_implied_move(
-                ticker, strikes, option_chain, vrp, below=True
+                ticker, strikes, option_chain, vrp, below=below
             )
 
         # Fallback to distance-based if delta not available or strikes inside implied move
         if not strikes:
             logger.debug(f"{ticker}: Using distance-based selection (outside implied move)")
             strikes = self._select_strikes_distance_based(
-                option_chain, vrp, OptionType.PUT, below=True
+                option_chain, vrp, option_type, below=below
             )
 
         if not strikes:
@@ -288,16 +304,17 @@ class StrategyGenerator:
         short_strike, long_strike = strikes
 
         # Get option quotes
-        if short_strike not in option_chain.puts or long_strike not in option_chain.puts:
-            logger.warning(f"{ticker}: Strikes not found in puts chain")
+        option_chain_side = option_chain.puts if option_type == OptionType.PUT else option_chain.calls
+        if short_strike not in option_chain_side or long_strike not in option_chain_side:
+            logger.warning(f"{ticker}: Strikes not found in {option_type.value}s chain")
             return None
 
-        short_quote = option_chain.puts[short_strike]
-        long_quote = option_chain.puts[long_strike]
+        short_quote = option_chain_side[short_strike]
+        long_quote = option_chain_side[long_strike]
 
         # Validate liquidity
         if not short_quote.is_liquid or not long_quote.is_liquid:
-            logger.warning(f"{ticker}: Insufficient liquidity for bull put spread")
+            logger.warning(f"{ticker}: Insufficient liquidity for {strategy_type.value}")
             return None
 
         # Calculate metrics
@@ -306,21 +323,21 @@ class StrategyGenerator:
         )
 
         if metrics['net_credit'].amount < self.config.min_credit_per_spread:
-            logger.warning(f"{ticker}: Credit too low for bull put spread")
+            logger.warning(f"{ticker}: Credit too low for {strategy_type.value}")
             return None
 
         # Build legs
         legs = [
             StrategyLeg(
                 strike=short_strike,
-                option_type=OptionType.PUT,
+                option_type=option_type,
                 action="SELL",
                 contracts=1,
                 premium=short_quote.mid,
             ),
             StrategyLeg(
                 strike=long_strike,
-                option_type=OptionType.PUT,
+                option_type=option_type,
                 action="BUY",
                 contracts=1,
                 premium=long_quote.mid,
@@ -337,7 +354,6 @@ class StrategyGenerator:
         )
 
         # Calculate commissions
-        # Each leg incurs commission: 2 legs * contracts * commission_per_contract
         total_commission = Money(2 * contracts * self.config.commission_per_contract)
         net_profit_after_fees = Money(
             float(metrics['max_profit'] * contracts) - float(total_commission.amount)
@@ -346,7 +362,7 @@ class StrategyGenerator:
         # Build strategy
         return Strategy(
             ticker=ticker,
-            strategy_type=StrategyType.BULL_PUT_SPREAD,
+            strategy_type=strategy_type,
             expiration=option_chain.expiration,
             legs=legs,
             net_credit=metrics['net_credit'],
@@ -368,117 +384,32 @@ class StrategyGenerator:
             position_gamma=position_greeks['gamma'],
             position_theta=position_greeks['theta'],
             position_vega=position_greeks['vega'],
+        )
+
+    def _build_bull_put_spread(
+        self, ticker: str, option_chain: OptionChain, vrp: VRPResult
+    ) -> Optional[Strategy]:
+        """Build bull put spread (credit spread below price)."""
+        return self._build_vertical_spread(
+            ticker=ticker,
+            option_chain=option_chain,
+            vrp=vrp,
+            option_type=OptionType.PUT,
+            strategy_type=StrategyType.BULL_PUT_SPREAD,
+            below=True
         )
 
     def _build_bear_call_spread(
         self, ticker: str, option_chain: OptionChain, vrp: VRPResult
     ) -> Optional[Strategy]:
         """Build bear call spread (credit spread above price)."""
-
-        # Try delta-based selection first (more precise if Greeks available)
-        strikes = self._select_strikes_delta_based(
-            option_chain, OptionType.CALL
-        )
-
-        # Verify delta-based strikes are outside implied move zone
-        if strikes:
-            strikes = self._verify_strikes_outside_implied_move(
-                ticker, strikes, option_chain, vrp, below=False
-            )
-
-        # Fallback to distance-based if delta not available or strikes inside implied move
-        if not strikes:
-            logger.debug(f"{ticker}: Using distance-based selection (outside implied move)")
-            strikes = self._select_strikes_distance_based(
-                option_chain, vrp, OptionType.CALL, below=False
-            )
-
-        if not strikes:
-            return None
-
-        short_strike, long_strike = strikes
-
-        # Get option quotes
-        if short_strike not in option_chain.calls or long_strike not in option_chain.calls:
-            logger.warning(f"{ticker}: Strikes not found in calls chain")
-            return None
-
-        short_quote = option_chain.calls[short_strike]
-        long_quote = option_chain.calls[long_strike]
-
-        # Validate liquidity
-        if not short_quote.is_liquid or not long_quote.is_liquid:
-            logger.warning(f"{ticker}: Insufficient liquidity for bear call spread")
-            return None
-
-        # Calculate metrics
-        metrics = self._calculate_spread_metrics(
-            short_quote, long_quote, short_strike, long_strike
-        )
-
-        if metrics['net_credit'].amount < self.config.min_credit_per_spread:
-            logger.warning(f"{ticker}: Credit too low for bear call spread")
-            return None
-
-        # Build legs
-        legs = [
-            StrategyLeg(
-                strike=short_strike,
-                option_type=OptionType.CALL,
-                action="SELL",
-                contracts=1,
-                premium=short_quote.mid,
-            ),
-            StrategyLeg(
-                strike=long_strike,
-                option_type=OptionType.CALL,
-                action="BUY",
-                contracts=1,
-                premium=long_quote.mid,
-            ),
-        ]
-
-        # Position sizing
-        contracts = self._calculate_contracts(metrics['max_loss'])
-
-        # Calculate position Greeks
-        position_greeks = self._calculate_position_greeks(
-            [(short_strike, short_quote, -1), (long_strike, long_quote, 1)],
-            contracts
-        )
-
-        # Calculate commissions
-        # Each leg incurs commission: 2 legs * contracts * commission_per_contract
-        total_commission = Money(2 * contracts * self.config.commission_per_contract)
-        net_profit_after_fees = Money(
-            float(metrics['max_profit'] * contracts) - float(total_commission.amount)
-        )
-
-        # Build strategy
-        return Strategy(
+        return self._build_vertical_spread(
             ticker=ticker,
+            option_chain=option_chain,
+            vrp=vrp,
+            option_type=OptionType.CALL,
             strategy_type=StrategyType.BEAR_CALL_SPREAD,
-            expiration=option_chain.expiration,
-            legs=legs,
-            net_credit=metrics['net_credit'],
-            max_profit=metrics['max_profit'] * contracts,
-            max_loss=metrics['max_loss'] * contracts,
-            breakeven=[metrics['breakeven']],
-            probability_of_profit=metrics['pop'],
-            reward_risk_ratio=metrics['reward_risk'],
-            contracts=contracts,
-            capital_required=metrics['max_loss'] * contracts,
-            commission_per_contract=self.config.commission_per_contract,
-            total_commission=total_commission,
-            net_profit_after_fees=net_profit_after_fees,
-            profitability_score=0.0,  # Calculated later
-            risk_score=0.0,  # Calculated later
-            overall_score=0.0,  # Calculated later
-            rationale="",  # Generated later
-            position_delta=position_greeks['delta'],
-            position_gamma=position_greeks['gamma'],
-            position_theta=position_greeks['theta'],
-            position_vega=position_greeks['vega'],
+            below=False
         )
 
     def _build_iron_condor(

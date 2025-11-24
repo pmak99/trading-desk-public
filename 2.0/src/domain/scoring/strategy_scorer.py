@@ -214,9 +214,9 @@ class StrategyScorer:
 
         if strategy.position_theta is not None:
             # Theta: Positive is good (we earn from time decay)
-            # Normalize: $50/day theta = 100% score
+            # Normalize using target_theta from config
             if strategy.position_theta > 0:
-                theta_score = min(strategy.position_theta / 50.0, 1.0) * (
+                theta_score = min(strategy.position_theta / self.weights.target_theta, 1.0) * (
                     self.weights.greeks_weight / 2
                 )
             else:
@@ -225,9 +225,9 @@ class StrategyScorer:
 
         if strategy.position_vega is not None:
             # Vega: Negative is good for credit spreads (we benefit from IV crush)
-            # Normalize: -$100 vega = 100% score
+            # Normalize using target_vega from config
             if strategy.position_vega < 0:
-                vega_score = min(abs(strategy.position_vega) / 100.0, 1.0) * (
+                vega_score = min(abs(strategy.position_vega) / self.weights.target_vega, 1.0) * (
                     self.weights.greeks_weight / 2
                 )
             else:
@@ -250,24 +250,24 @@ class StrategyScorer:
         parts = []
 
         # VRP edge
-        if vrp.vrp_ratio >= 2.0:
+        if vrp.vrp_ratio >= self.weights.vrp_excellent_threshold:
             parts.append("Excellent VRP edge")
-        elif vrp.vrp_ratio >= 1.5:
+        elif vrp.vrp_ratio >= self.weights.vrp_strong_threshold:
             parts.append("Strong VRP")
 
         # Reward/risk
-        if strategy.reward_risk_ratio >= 0.35:
+        if strategy.reward_risk_ratio >= self.weights.rr_favorable_threshold:
             parts.append("favorable R/R")
 
         # Probability of profit
-        if strategy.probability_of_profit >= 0.70:
+        if strategy.probability_of_profit >= self.weights.pop_high_threshold:
             parts.append("high POP")
 
         # Greeks information if available
-        if strategy.position_theta is not None and strategy.position_theta > 30:
+        if strategy.position_theta is not None and strategy.position_theta > self.weights.theta_positive_threshold:
             parts.append(f"positive theta (${strategy.position_theta:.0f}/day)")
 
-        if strategy.position_vega is not None and strategy.position_vega < -50:
+        if strategy.position_vega is not None and strategy.position_vega < self.weights.vega_beneficial_threshold:
             parts.append("benefits from IV crush")
 
         # Strategy type specific
@@ -305,13 +305,13 @@ class StrategyScorer:
             parts.append("Bear Call Spread best")
 
         # Why it's best
-        if vrp.vrp_ratio >= 2.0:
-            parts.append("excellent VRP (>2.0x)")
+        if vrp.vrp_ratio >= self.weights.vrp_excellent_threshold:
+            parts.append(f"excellent VRP (>{self.weights.vrp_excellent_threshold:.1f}x)")
 
-        if strategy.reward_risk_ratio >= 0.35:
+        if strategy.reward_risk_ratio >= self.weights.rr_favorable_threshold:
             parts.append(f"strong R/R ({strategy.reward_risk_ratio:.2f})")
 
-        if strategy.probability_of_profit >= 0.70:
+        if strategy.probability_of_profit >= self.weights.pop_high_threshold:
             parts.append(f"high POP ({strategy.probability_of_profit:.0%})")
 
         # Position sizing
