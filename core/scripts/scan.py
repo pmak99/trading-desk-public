@@ -920,16 +920,7 @@ def scanning_mode(
                 f"Edge {r['edge_score']:.2f} | "
                 f"{r['recommendation'].upper()}"
             )
-        logger.info(f"\n📝 Understanding the Metrics:")
-        logger.info(f"   • VRP Ratio = Implied Move ÷ Historical Move (Higher = Better Edge)")
-        logger.info(f"   • Implied Move = Market's expectation (from options prices)")
-        logger.info(f"   • Edge Score = Statistical confidence (Higher = More reliable)")
-        logger.info(f"   • EXCELLENT (>4.0x), GOOD (2.5-4.0x), MARGINAL (1.5-2.5x), SKIP (<1.5x)")
-        logger.info(f"\n📝 Next Steps:")
-        logger.info(f"   1. Analyze individual tickers with: ./trade.sh TICKER {scan_date}")
-        logger.info(f"   2. Review strategy recommendations for each opportunity")
-        logger.info(f"   3. Check broker pricing before entering positions")
-        logger.info(f"   4. For detailed metrics guide: cat docs/METRICS_GUIDE.md")
+        logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:
         logger.info(f"\n" + "=" * 80)
         logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
@@ -1092,17 +1083,7 @@ def ticker_mode(
                 f"{r['recommendation'].upper()} | "
                 f"Earnings {r['earnings_date']}"
             )
-        logger.info(f"\n📝 Understanding the Metrics:")
-        logger.info(f"   • VRP Ratio = Implied Move ÷ Historical Move (Higher = Better Edge)")
-        logger.info(f"   • Implied Move = Market's expectation (from options prices)")
-        logger.info(f"   • Edge Score = Statistical confidence (Higher = More reliable)")
-        logger.info(f"   • EXCELLENT (>4.0x), GOOD (2.5-4.0x), MARGINAL (1.5-2.5x), SKIP (<1.5x)")
-        logger.info(f"\n📝 Next Steps:")
-        logger.info(f"   1. Analyze top opportunities with: ./trade.sh TICKER YYYY-MM-DD")
-        logger.info(f"   2. Review detailed strategy recommendations")
-        logger.info(f"   3. Prioritize by VRP ratio and edge score")
-        logger.info(f"   4. Verify earnings dates and check broker pricing")
-        logger.info(f"   5. For detailed metrics guide: cat docs/METRICS_GUIDE.md")
+        logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:
         logger.info(f"\n" + "=" * 80)
         logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
@@ -1327,22 +1308,7 @@ def whisper_mode(
                 f"{r['recommendation'].upper()} | "
                 f"Earnings {r['earnings_date']}"
             )
-        logger.info(f"\n💡 Why This Matters:")
-        logger.info(f"   These tickers combine:")
-        logger.info(f"   • High retail/market attention (Most Anticipated)")
-        logger.info(f"   • Strong statistical edge (VRP ratio)")
-        logger.info(f"   • Better liquidity expected (High volume)")
-        logger.info(f"\n📝 Understanding the Metrics:")
-        logger.info(f"   • VRP Ratio = Implied Move ÷ Historical Move (Higher = Better Edge)")
-        logger.info(f"   • Implied Move = Market's expectation (from options prices)")
-        logger.info(f"   • Edge Score = Statistical confidence (Higher = More reliable)")
-        logger.info(f"   • EXCELLENT (>4.0x), GOOD (2.5-4.0x), MARGINAL (1.5-2.5x), SKIP (<1.5x)")
-        logger.info(f"\n📝 Next Steps:")
-        logger.info(f"   1. Analyze top opportunities with: ./trade.sh TICKER YYYY-MM-DD")
-        logger.info(f"   2. Review detailed strategy recommendations")
-        logger.info(f"   3. Prioritize by VRP ratio and market attention")
-        logger.info(f"   4. Check broker for tight bid-ask spreads")
-        logger.info(f"   5. For detailed metrics guide: cat docs/METRICS_GUIDE.md")
+        logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:
         logger.info(f"\n" + "=" * 80)
         logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
@@ -1450,9 +1416,7 @@ Notes:
         # Register graceful shutdown callbacks
         def shutdown_cleanup():
             """Cleanup on shutdown."""
-            logger.info("Initiating graceful shutdown...")
             reset_container()
-            logger.info("Shutdown complete")
 
         register_shutdown_callback(shutdown_cleanup)
 

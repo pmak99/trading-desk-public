@@ -240,8 +240,20 @@ backup_database() {
         return 0
     fi
 
+    # Sync to Google Drive (async, non-blocking)
+    local gdrive_backup_dir="$HOME/Library/CloudStorage/GoogleDrive-pmakwana99@gmail.com/My Drive/Trading/Database Backups"
+    if [ -d "$gdrive_backup_dir" ]; then
+        # Copy in background to avoid blocking
+        (cp "$backup_file" "$gdrive_backup_dir/" 2>/dev/null || true) &
+    fi
+
     # Cleanup old backups (keep last N days)
     find "$backup_dir" -maxdepth 1 -name "ivcrush_*.db" -type f -mtime "+${retention_days}" -delete 2>/dev/null || true
+
+    # Cleanup old Google Drive backups (keep last N days)
+    if [ -d "$gdrive_backup_dir" ]; then
+        find "$gdrive_backup_dir" -maxdepth 1 -name "ivcrush_*.db" -type f -mtime "+${retention_days}" -delete 2>/dev/null || true
+    fi
 
     # Release lock and clear trap
     rmdir "$backup_lock" 2>/dev/null
