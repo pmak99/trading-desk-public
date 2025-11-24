@@ -60,7 +60,6 @@ class PricesRepository:
             conn = sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT)
             try:
                 yield conn
-                conn.commit()
             finally:
                 conn.close()
 
