@@ -2,15 +2,21 @@
 Hybrid cache with L1 (memory) + L2 (SQLite persistence).
 
 Phase 2: Persistent cache that survives restarts.
+
+Security: Uses JSON serialization instead of pickle to avoid
+arbitrary code execution vulnerabilities.
 """
 
 import sqlite3
 import logging
-import pickle
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Any, Dict
 from threading import Lock
+from collections import OrderedDict
+
+from src.utils.serialization import serialize, deserialize
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +65,8 @@ class HybridCache:
         self.l2_ttl = l2_ttl_seconds
         self.max_l1_size = max_l1_size
 
-        # L1 cache (in-memory)
-        self._l1_cache: Dict[str, Any] = {}
+        # L1 cache (in-memory) - using OrderedDict for O(1) eviction
+        self._l1_cache: OrderedDict[str, Any] = OrderedDict()
         self._l1_timestamps: Dict[str, datetime] = {}
         self._lock = Lock()  # Thread safety for L1 mutations
 
@@ -73,22 +79,36 @@ class HybridCache:
         )
 
     def _init_db(self) -> None:
-        """Initialize SQLite schema for L2 cache."""
+        """Initialize SQLite schema for L2 cache with migration support."""
         try:
             with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                 # Enable WAL mode for better write concurrency
                 conn.execute('PRAGMA journal_mode=WAL')
+
+                # Create table with expiration column for per-key TTL
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS cache (
                         key TEXT PRIMARY KEY,
                         value BLOB NOT NULL,
                         timestamp TEXT NOT NULL,
-                        version TEXT DEFAULT 'v1'
+                        version TEXT DEFAULT 'v1',
+                        expiration TEXT
                     )
                 ''')
                 conn.execute(
                     'CREATE INDEX IF NOT EXISTS idx_cache_timestamp ON cache(timestamp)'
                 )
+                conn.execute(
+                    'CREATE INDEX IF NOT EXISTS idx_cache_expiration ON cache(expiration)'
+                )
+
+                # Migration: Add expiration column if it doesn't exist (for existing caches)
+                cursor = conn.execute("PRAGMA table_info(cache)")
+                columns = [row[1] for row in cursor.fetchall()]
+                if 'expiration' not in columns:
+                    logger.info("Migrating cache schema: adding expiration column")
+                    conn.execute('ALTER TABLE cache ADD COLUMN expiration TEXT')
+
                 conn.commit()
                 logger.debug(f"L2 cache schema initialized with WAL mode: {self.db_path}")
         except sqlite3.Error as e:
@@ -124,19 +144,30 @@ class HybridCache:
         try:
             with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                 row = conn.execute(
-                    'SELECT value, timestamp FROM cache WHERE key = ?',
+                    'SELECT value, timestamp, expiration FROM cache WHERE key = ?',
                     (key,)
                 ).fetchone()
 
             if row:
-                value_blob, timestamp_str = row
+                value_blob, timestamp_str, expiration_str = row
                 stored_time = datetime.fromisoformat(timestamp_str)
 
+                # Use per-key TTL if available, otherwise use instance TTL
+                if expiration_str:
+                    expiration_time = datetime.fromisoformat(expiration_str)
+                    is_expired = now >= expiration_time
+                else:
+                    # Fallback: use elapsed time
+                    elapsed = (now - stored_time).total_seconds()
+                    is_expired = elapsed >= self.l2_ttl
+
                 elapsed = (now - stored_time).total_seconds()
-                if elapsed < self.l2_ttl:
+                if not is_expired:
                     # L2 hit → promote to L1
                     try:
-                        value = pickle.loads(value_blob)
+                        # Deserialize from JSON
+                        json_str = value_blob.decode('utf-8')
+                        value = deserialize(json_str)
                         logger.debug(f"Cache L2 HIT: {key} (age: {elapsed:.1f}s)")
 
                         # Promote to L1
@@ -147,8 +178,8 @@ class HybridCache:
                             self._l1_timestamps[key] = now
 
                         return value
-                    except (pickle.UnpicklingError, EOFError, AttributeError) as e:
-                        logger.warning(f"Failed to unpickle cached value for {key}: {e}")
+                    except (json.JSONDecodeError, ValueError, KeyError) as e:
+                        logger.warning(f"Failed to deserialize cached value for {key}: {e}")
                         # Delete corrupted entry
                         with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                             conn.execute('DELETE FROM cache WHERE key = ?', (key,))
@@ -170,38 +201,50 @@ class HybridCache:
 
         Args:
             key: Cache key
-            value: Value to cache (must be picklable)
-            ttl: Ignored for HybridCache (uses configured L1/L2 TTLs).
-                 Included for CacheProvider protocol compliance.
+            value: Value to cache (must be JSON-serializable)
+            ttl: Optional TTL override in seconds. If None, uses configured L2 TTL.
 
         Note:
-            HybridCache uses instance-configured TTLs (l1_ttl, l2_ttl) for all entries.
-            The ttl parameter is accepted for protocol compatibility but not used.
+            Per-key TTL is stored but L1 still uses instance l1_ttl for consistency.
+            L2 respects per-key TTL on retrieval.
         """
         now = datetime.now()
+        effective_l2_ttl = ttl if ttl is not None else self.l2_ttl
 
-        # Set in L1
+        # Set in L1 (always uses instance l1_ttl for eviction)
         with self._lock:
             if len(self._l1_cache) >= self.max_l1_size and key not in self._l1_cache:
                 self._evict_oldest_l1()
 
+            # Move to end for LRU ordering
+            if key in self._l1_cache:
+                self._l1_cache.move_to_end(key)
+            else:
+                self._l1_cache[key] = value
+
             self._l1_cache[key] = value
             self._l1_timestamps[key] = now
 
-        # Set in L2 (SQLite)
+        # Set in L2 (SQLite) with JSON serialization
         try:
-            value_blob = pickle.dumps(value)
+            # Serialize to JSON
+            json_str = serialize(value)
+            value_blob = json_str.encode('utf-8')
+
+            # Calculate expiration timestamp for per-key TTL
+            expiration = (now + timedelta(seconds=effective_l2_ttl)).isoformat()
+
             with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
                 conn.execute(
                     '''
-                    INSERT OR REPLACE INTO cache (key, value, timestamp, version)
-                    VALUES (?, ?, ?, ?)
+                    INSERT OR REPLACE INTO cache (key, value, timestamp, version, expiration)
+                    VALUES (?, ?, ?, ?, ?)
                     ''',
-                    (key, value_blob, now.isoformat(), CACHE_VERSION)
+                    (key, value_blob, now.isoformat(), CACHE_VERSION, expiration)
                 )
                 conn.commit()
-            logger.debug(f"Cache SET: {key} (L1+L2)")
-        except (pickle.PicklingError, TypeError, sqlite3.Error) as e:
+            logger.debug(f"Cache SET: {key} (L1+L2, TTL={effective_l2_ttl}s)")
+        except (ValueError, TypeError, sqlite3.Error) as e:
             logger.error(f"Failed to write to L2 cache for {key}: {e}")
             # L1 still has the value, so partial success
             logger.debug(f"Cache SET: {key} (L1 only, L2 failed)")
@@ -268,13 +311,17 @@ class HybridCache:
             return 0
 
     def _evict_oldest_l1(self) -> None:
-        """Evict oldest entry from L1 cache (called with lock held)."""
-        if not self._l1_timestamps:
+        """Evict oldest entry from L1 cache (called with lock held).
+
+        Uses OrderedDict for O(1) eviction of least recently used item.
+        """
+        if not self._l1_cache:
             return
 
-        oldest_key = min(self._l1_timestamps, key=self._l1_timestamps.get)
-        del self._l1_cache[oldest_key]
-        del self._l1_timestamps[oldest_key]
+        # OrderedDict: first item is oldest (FIFO)
+        oldest_key, _ = self._l1_cache.popitem(last=False)
+        if oldest_key in self._l1_timestamps:
+            del self._l1_timestamps[oldest_key]
         logger.debug(f"L1 evicted: {oldest_key}")
 
     def stats(self) -> Dict[str, int]:
