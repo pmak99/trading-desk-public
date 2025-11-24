@@ -35,6 +35,8 @@ from src.utils.rate_limiter import (
     create_tradier_limiter,
 )
 from src.utils.circuit_breaker import CircuitBreaker
+from src.infrastructure.database.connection_pool import ConnectionPool
+from src.infrastructure.database.migrations import MigrationManager
 
 logger = logging.getLogger(__name__)
 
@@ -51,18 +53,23 @@ class Container:
     - No circular dependencies
     """
 
-    def __init__(self, config: Config, skip_validation: bool = False):
+    def __init__(self, config: Config, skip_validation: bool = False, run_migrations: bool = True):
         """
         Initialize container with configuration.
 
         Args:
             config: Configuration instance
             skip_validation: If True, skip configuration validation (useful for testing)
+            run_migrations: If True, run database migrations on initialization (default: True)
         """
         if not skip_validation:
             validate_configuration(config)
 
         self.config = config
+
+        # Run database migrations automatically
+        if run_migrations:
+            self._run_migrations()
         self._tradier: Optional[TradierAPI] = None
         self._alphavantage: Optional[AlphaVantageAPI] = None
         self._cache: Optional[MemoryCache] = None
@@ -83,6 +90,7 @@ class Container:
         self._health_check_service: Optional[HealthCheckService] = None
         self._tradier_breaker: Optional[CircuitBreaker] = None
         self._alpha_vantage_breaker: Optional[CircuitBreaker] = None
+        self._db_pool: Optional[ConnectionPool] = None
 
     # ========================================================================
     # Infrastructure Layer
@@ -154,23 +162,38 @@ class Container:
         return self._alphavantage
 
     @property
+    def db_pool(self) -> ConnectionPool:
+        """Get database connection pool."""
+        if self._db_pool is None:
+            self._db_pool = ConnectionPool(
+                db_path=self.config.database.path,
+                pool_size=5,
+                max_overflow=10,
+                connection_timeout=self.config.database.timeout,
+            )
+            logger.debug("Created ConnectionPool")
+        return self._db_pool
+
+    @property
     def earnings_repository(self) -> EarningsRepository:
-        """Get earnings repository."""
+        """Get earnings repository with connection pooling."""
         if self._earnings_repo is None:
             self._earnings_repo = EarningsRepository(
-                db_path=str(self.config.database.path)
+                db_path=str(self.config.database.path),
+                pool=self.db_pool
             )
-            logger.debug("Created EarningsRepository")
+            logger.debug("Created EarningsRepository with connection pool")
         return self._earnings_repo
 
     @property
     def prices_repository(self) -> PricesRepository:
-        """Get prices repository."""
+        """Get prices repository with connection pooling."""
         if self._prices_repo is None:
             self._prices_repo = PricesRepository(
-                db_path=str(self.config.database.path)
+                db_path=str(self.config.database.path),
+                pool=self.db_pool
             )
-            logger.debug("Created PricesRepository")
+            logger.debug("Created PricesRepository with connection pool")
         return self._prices_repo
 
     # ========================================================================
@@ -306,12 +329,13 @@ class Container:
 
     @property
     def analysis_repository(self) -> AnalysisRepository:
-        """Get analysis repository for logging analysis results."""
+        """Get analysis repository for logging analysis results with connection pooling."""
         if self._analysis_repo is None:
             self._analysis_repo = AnalysisRepository(
-                db_path=str(self.config.database.path)
+                db_path=str(self.config.database.path),
+                pool=self.db_pool
             )
-            logger.debug("Created AnalysisRepository")
+            logger.debug("Created AnalysisRepository with connection pool")
         return self._analysis_repo
 
     # ========================================================================
@@ -428,6 +452,31 @@ class Container:
         config = Config.from_env(env_file)
         return cls(config)
 
+    def _run_migrations(self):
+        """
+        Run database migrations on container initialization.
+
+        Automatically applies pending schema migrations to ensure
+        database is at the latest version.
+        """
+        try:
+            manager = MigrationManager(self.config.database.path)
+            current_version = manager.get_current_version()
+            pending = manager.get_pending_migrations()
+
+            if pending:
+                logger.info(
+                    f"Applying {len(pending)} database migration(s) "
+                    f"(current version: {current_version})..."
+                )
+                manager.migrate()
+                logger.info(f"Database migrations complete (version: {manager.get_current_version()})")
+            else:
+                logger.debug(f"Database up to date (version: {current_version})")
+        except Exception as e:
+            logger.error(f"Database migration failed: {e}")
+            raise RuntimeError(f"Failed to apply database migrations: {e}") from e
+
     def with_mock_tradier(self, mock_tradier) -> 'Container':
         """
         Replace Tradier client with mock (for testing).
@@ -482,6 +531,10 @@ def get_container() -> Container:
 def reset_container() -> None:
     """
     Reset global container (useful for testing).
+
+    Closes connection pool if exists.
     """
     global _container
+    if _container and _container._db_pool:
+        _container._db_pool.close_all()
     _container = None

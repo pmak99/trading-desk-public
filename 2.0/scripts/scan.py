@@ -30,12 +30,14 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from tqdm import tqdm
+import atexit
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.utils.logging import setup_logging
-from src.container import Container
+from src.utils.shutdown import register_shutdown_callback
+from src.container import Container, reset_container
 from src.config.config import Config
 from src.domain.enums import EarningsTiming
 from src.infrastructure.data_sources.earnings_whisper_scraper import (
@@ -70,13 +72,51 @@ BACKFILL_YEARS = 3               # Years of historical data to backfill
 MAX_TRADING_DAY_ITERATIONS = 10  # Max iterations to find next trading day (handles holiday clusters)
 
 
-# Module-level cache for market cap data (simple dict cache for session)
+class ScanContext:
+    """
+    Encapsulates scan session state (replaces module-level globals).
+
+    Holds caches and session-specific state that was previously in
+    module-level variables. This makes the code more testable and
+    eliminates hidden global state.
+
+    Attributes:
+        market_cap_cache: Cache for market cap lookups
+        holiday_cache: Cache for holiday data by year
+        shared_cache: Shared HybridCache instance for earnings data
+    """
+
+    def __init__(self):
+        """Initialize scan context with empty caches."""
+        self.market_cap_cache: Dict[str, Optional[float]] = {}
+        self.holiday_cache: Dict[int, set] = {}
+        self.shared_cache: Optional[HybridCache] = None
+
+    def get_shared_cache(self, container: Container) -> HybridCache:
+        """
+        Get or create a shared cache instance for earnings data.
+
+        Args:
+            container: DI container for config access
+
+        Returns:
+            Shared HybridCache instance
+        """
+        if self.shared_cache is None:
+            cache_db_path = container.config.database.path.parent / "scan_cache.db"
+            self.shared_cache = HybridCache(
+                db_path=cache_db_path,
+                l1_ttl_seconds=CACHE_L1_TTL_SECONDS,
+                l2_ttl_seconds=CACHE_L2_TTL_SECONDS,
+                max_l1_size=CACHE_MAX_L1_SIZE
+            )
+        return self.shared_cache
+
+
+# Legacy global variables (DEPRECATED - use ScanContext instead)
+# Kept for backward compatibility during transition
 _market_cap_cache: Dict[str, Optional[float]] = {}
-
-# Module-level cache for holiday data (per year)
 _holiday_cache: Dict[int, set] = {}
-
-# Shared cache instance (created once per session)
 _shared_cache: Optional[HybridCache] = None
 
 
@@ -1406,6 +1446,15 @@ Notes:
         # Load configuration
         config = Config.from_env()
         container = Container(config)
+
+        # Register graceful shutdown callbacks
+        def shutdown_cleanup():
+            """Cleanup on shutdown."""
+            logger.info("Initiating graceful shutdown...")
+            reset_container()
+            logger.info("Shutdown complete")
+
+        register_shutdown_callback(shutdown_cleanup)
 
         # Execute appropriate mode
         if args.scan_date:

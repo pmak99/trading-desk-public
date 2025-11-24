@@ -30,6 +30,7 @@ from src.domain.enums import (
     StrategyType, DirectionalBias, OptionType
 )
 from src.config.config import StrategyConfig
+from src.domain.scoring import StrategyScorer
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class StrategyGenerator:
             config: Strategy configuration with all parameters
         """
         self.config = config
+        self.scorer = StrategyScorer(config.scoring_weights)
 
     def generate_strategies(
         self,
@@ -96,12 +98,12 @@ class StrategyGenerator:
             raise ValueError(f"Could not generate any valid strategies for {ticker}")
 
         # Score and rank strategies
-        self._score_strategies(strategies, vrp)
+        self.scorer.score_strategies(strategies, vrp)
         strategies.sort(key=lambda s: s.overall_score, reverse=True)
 
         # Select best strategy
         recommended_idx = 0
-        rationale = self._generate_recommendation_rationale(strategies[0], vrp, bias)
+        rationale = self.scorer.generate_recommendation_rationale(strategies[0], vrp, bias)
 
         return StrategyRecommendation(
             ticker=ticker,
@@ -1090,181 +1092,3 @@ class StrategyGenerator:
             'vega': combine_greek(spread1.position_vega, spread2.position_vega),
         }
 
-    def _score_strategies(self, strategies: List[Strategy], vrp: VRPResult) -> None:
-        """
-        Score and rank strategies in-place.
-
-        Uses configured scoring weights (see StrategyConfig.scoring_weights).
-
-        Scoring factors (when Greeks available):
-        - Probability of profit (configured weight, default 45%)
-        - Reward/risk ratio (configured weight, default 20%)
-        - VRP edge (configured weight, default 20%)
-        - Greeks quality (theta/vega) (configured weight, default 10%)
-        - Position sizing (configured weight, default 5%)
-
-        Scoring factors (without Greeks):
-        - Greeks weight is redistributed to other factors
-
-        Args:
-            strategies: List of strategies to score
-            vrp: VRP analysis for context
-        """
-        # Get scoring weights from config (create default if None)
-        weights = self.config.scoring_weights
-        if weights is None:
-            from src.config.config import ScoringWeights
-            weights = ScoringWeights()
-
-        for strategy in strategies:
-            # Check if Greeks are available
-            has_greeks = strategy.position_theta is not None and strategy.position_vega is not None
-
-            if has_greeks:
-                # Enhanced scoring with Greeks
-                # Factor 1: Probability of Profit - Compare against target
-                pop_score = min(strategy.probability_of_profit / weights.target_pop, 1.0) * weights.pop_weight
-
-                # Factor 2: Reward/Risk - Compare against target
-                rr_score = min(strategy.reward_risk_ratio / weights.target_rr, 1.0) * weights.reward_risk_weight
-
-                # Factor 3: VRP Edge - Compare against target
-                vrp_score = min(vrp.vrp_ratio / weights.target_vrp, 1.0) * weights.vrp_weight
-
-                # Factor 4: Greeks Quality - Theta and Vega
-                # For credit spreads: Positive theta is excellent, negative vega is excellent
-                theta_score = 0.0
-                vega_score = 0.0
-
-                if strategy.position_theta is not None:
-                    # Theta: Positive is good (we earn from time decay)
-                    # Normalize: $50/day theta = 100% score
-                    if strategy.position_theta > 0:
-                        theta_score = min(strategy.position_theta / 50.0, 1.0) * (weights.greeks_weight / 2)
-                    else:
-                        # Penalize negative theta (paying time decay) - score 0
-                        theta_score = 0.0
-
-                if strategy.position_vega is not None:
-                    # Vega: Negative is good for credit spreads (we benefit from IV crush)
-                    # Normalize: -$100 vega = 100% score
-                    if strategy.position_vega < 0:
-                        vega_score = min(abs(strategy.position_vega) / 100.0, 1.0) * (weights.greeks_weight / 2)
-                    else:
-                        # Penalize positive vega (hurt by IV decrease) - score 0
-                        vega_score = 0.0
-
-                greeks_score = theta_score + vega_score
-
-                # Factor 5: Position Sizing - Graduated scoring up to 10 contracts
-                size_score = min(strategy.contracts / 10.0, 1.0) * weights.size_weight
-
-                # Overall score (0-100)
-                overall = rr_score + pop_score + vrp_score + greeks_score + size_score
-
-                # Profitability score (include theta benefit)
-                base_profitability = min(strategy.reward_risk_ratio / 0.40 * 80, 80)
-                theta_benefit = min(strategy.position_theta / 50.0 * 20, 20) if strategy.position_theta and strategy.position_theta > 0 else 0
-                profitability = base_profitability + theta_benefit
-
-                # Risk score (lower is safer) - Include vega risk
-                base_risk = (1.0 - strategy.probability_of_profit) * 70
-                vega_risk = min(abs(strategy.position_vega) / 100.0 * 30, 30) if strategy.position_vega and strategy.position_vega > 0 else 0
-                risk = base_risk + vega_risk
-
-            else:
-                # Scoring without Greeks - Redistribute greeks weight to other factors
-                # Total weight without greeks should still add to 100
-                total_base_weight = weights.pop_weight + weights.reward_risk_weight + weights.vrp_weight + weights.size_weight
-                scale_factor = 100.0 / total_base_weight if total_base_weight > 0 else 1.0
-
-                # Factor 1: Probability of Profit - Scaled
-                pop_score = min(strategy.probability_of_profit / weights.target_pop, 1.0) * weights.pop_weight * scale_factor
-
-                # Factor 2: Reward/Risk - Scaled
-                rr_score = min(strategy.reward_risk_ratio / weights.target_rr, 1.0) * weights.reward_risk_weight * scale_factor
-
-                # Factor 3: VRP Edge - Scaled
-                vrp_score = min(vrp.vrp_ratio / weights.target_vrp, 1.0) * weights.vrp_weight * scale_factor
-
-                # Factor 4: Position Sizing - Scaled
-                size_score = min(strategy.contracts / 10.0, 1.0) * weights.size_weight * scale_factor
-
-                # Overall score (0-100)
-                overall = rr_score + pop_score + vrp_score + size_score
-
-                # Profitability score (focus on reward/risk)
-                profitability = min(strategy.reward_risk_ratio / 0.40 * 100, 100)
-
-                # Risk score (lower is safer)
-                # Based on POP (higher POP = lower risk)
-                risk = (1.0 - strategy.probability_of_profit) * 100
-
-            # Update strategy (now mutable since not frozen)
-            strategy.overall_score = overall
-            strategy.profitability_score = profitability
-            strategy.risk_score = risk
-
-            # Generate rationale
-            rationale = self._generate_strategy_rationale(strategy, vrp)
-            strategy.rationale = rationale
-
-    def _generate_strategy_rationale(self, strategy: Strategy, vrp: VRPResult) -> str:
-        """Generate brief rationale for strategy."""
-        parts = []
-
-        if vrp.vrp_ratio >= 2.0:
-            parts.append("Excellent VRP edge")
-        elif vrp.vrp_ratio >= 1.5:
-            parts.append("Strong VRP")
-
-        if strategy.reward_risk_ratio >= 0.35:
-            parts.append("favorable R/R")
-
-        if strategy.probability_of_profit >= 0.70:
-            parts.append("high POP")
-
-        # Add Greeks information if available
-        if strategy.position_theta is not None and strategy.position_theta > 30:
-            parts.append(f"positive theta (${strategy.position_theta:.0f}/day)")
-
-        if strategy.position_vega is not None and strategy.position_vega < -50:
-            parts.append("benefits from IV crush")
-
-        if strategy.strategy_type == StrategyType.IRON_CONDOR:
-            parts.append("wide profit zone")
-        elif strategy.strategy_type == StrategyType.IRON_BUTTERFLY:
-            parts.append("max profit at current price")
-
-        return ", ".join(parts) if parts else "Defined risk outside expected move"
-
-    def _generate_recommendation_rationale(
-        self, strategy: Strategy, vrp: VRPResult, bias: DirectionalBias
-    ) -> str:
-        """Generate rationale for recommended strategy."""
-        parts = []
-
-        # Strategy type
-        if strategy.strategy_type == StrategyType.IRON_CONDOR:
-            parts.append("Iron Condor optimal")
-        elif strategy.strategy_type == StrategyType.IRON_BUTTERFLY:
-            parts.append("Iron Butterfly best")
-        elif strategy.strategy_type == StrategyType.BULL_PUT_SPREAD:
-            parts.append("Bull Put Spread best")
-        else:
-            parts.append("Bear Call Spread best")
-
-        # Why it's best
-        if vrp.vrp_ratio >= 2.0:
-            parts.append("excellent VRP (>2.0x)")
-
-        if strategy.reward_risk_ratio >= 0.35:
-            parts.append(f"strong R/R ({strategy.reward_risk_ratio:.2f})")
-
-        if strategy.probability_of_profit >= 0.70:
-            parts.append(f"high POP ({strategy.probability_of_profit:.0%})")
-
-        # Position sizing
-        parts.append(f"{strategy.contracts} contracts")
-
-        return "; ".join(parts)

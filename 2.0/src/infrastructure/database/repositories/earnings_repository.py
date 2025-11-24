@@ -1,14 +1,22 @@
 """
 Earnings calendar repository for persisting earnings data.
+
+Supports both connection pooling (for production) and direct connections (for testing).
 """
 
 import sqlite3
 import logging
 from datetime import date
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+from contextlib import contextmanager
 from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 from src.domain.enums import EarningsTiming
+
+# TYPE_CHECKING import to avoid circular dependency
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.infrastructure.database.connection_pool import ConnectionPool
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +25,43 @@ CONNECTION_TIMEOUT = 30
 
 
 class EarningsRepository:
-    """Repository for earnings calendar data."""
+    """
+    Repository for earnings calendar data.
 
-    def __init__(self, db_path: str | Path):
+    Supports connection pooling for better concurrent performance.
+    Falls back to direct connections if pool not provided (backward compatible).
+    """
+
+    def __init__(self, db_path: str | Path, pool: Optional['ConnectionPool'] = None):
+        """
+        Initialize repository.
+
+        Args:
+            db_path: Path to SQLite database
+            pool: Optional connection pool (uses direct connections if None)
+        """
         self.db_path = str(db_path)
+        self.pool = pool
+
+    @contextmanager
+    def _get_connection(self):
+        """
+        Get database connection from pool or create direct connection.
+
+        Yields:
+            Database connection
+        """
+        if self.pool:
+            # Use connection pool
+            with self.pool.get_connection() as conn:
+                yield conn
+        else:
+            # Fallback to direct connection
+            conn = sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT)
+            try:
+                yield conn
+            finally:
+                conn.close()
 
     def save_earnings_event(
         self, ticker: str, earnings_date: date, timing: EarningsTiming
@@ -37,7 +78,7 @@ class EarningsRepository:
             Result with None on success or AppError on failure
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
@@ -72,7 +113,7 @@ class EarningsRepository:
             Result with list of (date, timing) tuples
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
