@@ -1,7 +1,41 @@
 """
 Migration manager for database schema versioning.
 
-Provides a formal, repeatable system for applying database schema changes.
+Provides a formal, repeatable system for applying database schema changes
+with version tracking, rollback support, and transaction safety.
+
+Overview:
+    The migration system tracks schema changes in a `schema_migrations` table,
+    ensuring that each migration is applied exactly once and in the correct order.
+
+    Migrations are defined as Migration objects with:
+    - version: Sequential integer (1, 2, 3, ...)
+    - name: Descriptive name (e.g., "add_cache_expiration_column")
+    - sql_up: SQL to apply the migration
+    - sql_down: SQL to rollback (optional)
+
+Benefits:
+    - Repeatable deployments: Same migrations work across all environments
+    - Audit trail: schema_migrations table shows what changed and when
+    - Safe rollbacks: Undo changes with sql_down if needed
+    - Transaction safety: All-or-nothing application prevents partial migrations
+    - Version control: Schema changes tracked alongside code
+
+Usage:
+    # Automatic (via Container):
+    container = Container(config, run_migrations=True)  # Applies pending migrations
+
+    # Manual (via CLI):
+    python scripts/migrate.py status   # Check current version
+    python scripts/migrate.py migrate  # Apply all pending
+    python scripts/migrate.py rollback 1  # Rollback to version 1
+
+    # Programmatic:
+    manager = MigrationManager(db_path)
+    manager.migrate()  # Apply all pending migrations
+
+Architecture Decision:
+    See docs/adr/005-database-migration-system.md for detailed rationale.
 """
 
 import sqlite3
@@ -16,7 +50,38 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Migration:
-    """Represents a single database migration."""
+    """
+    Represents a single database migration.
+
+    Each migration is a versioned schema change that can be applied
+    and optionally rolled back.
+
+    Attributes:
+        version: Sequential version number (1, 2, 3, ...). Must be unique.
+        name: Descriptive name (e.g., "add_user_table", "add_index_on_ticker")
+        sql_up: SQL statements to apply the migration (forward)
+        sql_down: SQL statements to rollback the migration (reverse, optional)
+
+    Example:
+        Migration(
+            version=3,
+            name="add_greeks_columns",
+            sql_up=\"\"\"
+                ALTER TABLE strategies ADD COLUMN theta REAL;
+                ALTER TABLE strategies ADD COLUMN vega REAL;
+            \"\"\",
+            sql_down=\"\"\"
+                ALTER TABLE strategies DROP COLUMN theta;
+                ALTER TABLE strategies DROP COLUMN vega;
+            \"\"\"
+        )
+
+    Notes:
+        - Version numbers must be sequential and unique
+        - sql_up is required, sql_down is optional
+        - Multi-statement SQL is supported (separated by semicolons)
+        - Migrations are applied in version order
+    """
     version: int
     name: str
     sql_up: str

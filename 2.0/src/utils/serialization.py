@@ -23,10 +23,39 @@ from src.domain.enums import (
 
 
 class DomainJSONEncoder(json.JSONEncoder):
-    """JSON encoder that handles domain value objects."""
+    """
+    JSON encoder that handles domain value objects.
+
+    Provides secure serialization of all domain types without the security
+    risks of pickle. Each domain object type is explicitly handled with
+    a type tag for safe reconstruction during deserialization.
+
+    Supported types:
+        - Value objects: Money, Percentage, Strike
+        - Market data: OptionQuote, OptionChain
+        - Analysis results: ImpliedMove, VRPResult
+        - Strategies: StrategyLeg, Strategy, StrategyRecommendation
+        - Enums: All domain enums (StrategyType, OptionType, etc.)
+        - Standard types: datetime, date, Decimal
+
+    Security:
+        Unlike pickle, this encoder only reconstructs explicitly whitelisted
+        domain types. Malicious payloads cannot execute arbitrary code.
+    """
 
     def default(self, obj):
-        """Convert domain objects to JSON-serializable dicts."""
+        """
+        Convert domain objects to JSON-serializable dicts.
+
+        Args:
+            obj: Object to serialize
+
+        Returns:
+            JSON-serializable dict with __type__ tag
+
+        Raises:
+            TypeError: If object type is not supported
+        """
 
         # Handle datetime/date
         if isinstance(obj, datetime):
@@ -119,7 +148,23 @@ class DomainJSONEncoder(json.JSONEncoder):
 
 
 def domain_object_hook(dct: Dict[str, Any]) -> Any:
-    """Decode JSON dicts back to domain objects."""
+    """
+    Decode JSON dicts back to domain objects.
+
+    This function is the deserialization counterpart to DomainJSONEncoder.
+    It reconstructs domain objects from their JSON representation by checking
+    the __type__ tag and calling the appropriate constructor.
+
+    Args:
+        dct: Dictionary potentially containing a __type__ tag
+
+    Returns:
+        Reconstructed domain object or original dict if no __type__ tag
+
+    Security:
+        Only explicitly whitelisted types are reconstructed. Unknown __type__
+        values are returned as plain dicts, preventing code execution attacks.
+    """
 
     if '__type__' not in dct:
         return dct
@@ -215,10 +260,78 @@ def domain_object_hook(dct: Dict[str, Any]) -> Any:
 
 
 def serialize(obj: Any) -> str:
-    """Serialize domain object to JSON string."""
+    """
+    Serialize domain object to JSON string.
+
+    Converts any domain object (Money, Strategy, OptionChain, etc.) into a
+    compact JSON string representation. Safe to store in databases or transmit
+    over networks.
+
+    Args:
+        obj: Domain object, list of objects, or dict containing domain objects
+
+    Returns:
+        Compact JSON string (no indentation)
+
+    Examples:
+        >>> from src.domain.types import Money
+        >>> price = Money("42.50")
+        >>> json_str = serialize(price)
+        >>> json_str
+        '{"__type__":"Money","amount":"42.50"}'
+
+        >>> from src.domain.types import Strike
+        >>> strikes = [Strike("100"), Strike("105"), Strike("110")]
+        >>> serialize(strikes)
+        '[{"__type__":"Strike","price":"100"},...}]'
+
+    Security:
+        This function is a secure replacement for pickle.dumps(). Unlike pickle,
+        the output cannot be used to execute arbitrary code during deserialization.
+
+    See Also:
+        deserialize: Reconstruct objects from JSON string
+        DomainJSONEncoder: The encoder handling all domain types
+    """
     return json.dumps(obj, cls=DomainJSONEncoder, indent=None, separators=(',', ':'))
 
 
 def deserialize(json_str: str) -> Any:
-    """Deserialize JSON string to domain object."""
+    """
+    Deserialize JSON string to domain object.
+
+    Reconstructs domain objects from JSON string created by serialize().
+    Only explicitly whitelisted domain types are reconstructed.
+
+    Args:
+        json_str: JSON string from serialize()
+
+    Returns:
+        Reconstructed domain object(s)
+
+    Raises:
+        json.JSONDecodeError: If json_str is not valid JSON
+
+    Examples:
+        >>> json_str = '{"__type__":"Money","amount":"42.50"}'
+        >>> money = deserialize(json_str)
+        >>> money
+        Money(amount=Decimal('42.50'))
+
+        >>> # Round-trip serialization
+        >>> from src.domain.types import Percentage
+        >>> original = Percentage(0.65)
+        >>> json_str = serialize(original)
+        >>> restored = deserialize(json_str)
+        >>> restored == original
+        True
+
+    Security:
+        This function is a secure replacement for pickle.loads(). Unknown
+        __type__ tags are ignored, preventing code execution attacks.
+
+    See Also:
+        serialize: Convert objects to JSON string
+        domain_object_hook: The decoder handling reconstruction
+    """
     return json.loads(json_str, object_hook=domain_object_hook)
