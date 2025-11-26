@@ -24,6 +24,7 @@ Auto-Backfill:
 import sys
 import argparse
 import logging
+import re
 import time
 import subprocess
 from datetime import date, datetime, timedelta
@@ -116,6 +117,7 @@ class ScanContext:
 # Legacy global variables (DEPRECATED - use ScanContext instead)
 # Kept for backward compatibility during transition
 _market_cap_cache: Dict[str, Optional[float]] = {}
+_ticker_name_cache: Dict[str, Optional[str]] = {}
 _holiday_cache: Dict[int, set] = {}
 _shared_cache: Optional[HybridCache] = None
 
@@ -186,6 +188,94 @@ def get_market_cap_millions(ticker: str) -> Optional[float]:
     except Exception as e:
         logger.debug(f"{ticker}: Failed to fetch market cap: {e}")
         _market_cap_cache[ticker] = None
+        return None
+
+
+def clean_company_name(name: str) -> str:
+    """
+    Clean company name by removing formal suffixes for colloquial display.
+
+    Args:
+        name: Full company name
+
+    Returns:
+        Cleaned colloquial name
+
+    Examples:
+        "Apple Inc." -> "Apple"
+        "Tesla, Inc." -> "Tesla"
+        "NVIDIA Corporation" -> "NVIDIA"
+        "Meta Platforms, Inc." -> "Meta Platforms"
+    """
+    # List of formal suffixes to remove (case insensitive)
+    suffixes = [
+        r',?\s+Inc\.?$',
+        r',?\s+Incorporated$',
+        r',?\s+Corp\.?$',
+        r',?\s+Corporation$',
+        r',?\s+Ltd\.?$',
+        r',?\s+Limited$',
+        r',?\s+LLC$',
+        r',?\s+L\.L\.C\.?$',
+        r',?\s+Co\.?$',
+        r',?\s+Company$',
+        r',?\s+PLC$',
+        r',?\s+P\.L\.C\.?$',
+        r',?\s+Plc$',
+        r',?\s+LP$',
+        r',?\s+L\.P\.?$',
+    ]
+
+    cleaned = name
+    for suffix in suffixes:
+        cleaned = re.sub(suffix, '', cleaned, flags=re.IGNORECASE)
+
+    # Remove trailing ampersand left by "& Co." removal
+    cleaned = re.sub(r'\s*&\s*$', '', cleaned)
+
+    return cleaned.strip()
+
+
+def get_ticker_name(ticker: str) -> Optional[str]:
+    """
+    Get colloquial company name using yfinance (with caching).
+
+    Args:
+        ticker: Stock ticker symbol
+
+    Returns:
+        Colloquial company name or None if unavailable
+    """
+    if not YFINANCE_AVAILABLE:
+        logger.debug(f"yfinance not available, skipping company name lookup for {ticker}")
+        return None
+
+    # Check cache first
+    if ticker in _ticker_name_cache:
+        cached_value = _ticker_name_cache[ticker]
+        logger.debug(f"{ticker}: Company name from cache: {cached_value}")
+        return cached_value
+
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        # Try shortName first, fallback to longName
+        company_name = info.get('shortName') or info.get('longName')
+        if company_name:
+            # Clean up formal suffixes for colloquial display
+            cleaned_name = clean_company_name(company_name)
+            logger.debug(f"{ticker}: Company name: {cleaned_name} (original: {company_name})")
+            _ticker_name_cache[ticker] = cleaned_name
+            return cleaned_name
+
+        logger.debug(f"{ticker}: No company name available")
+        _ticker_name_cache[ticker] = None
+        return None
+
+    except Exception as e:
+        logger.debug(f"{ticker}: Failed to fetch company name: {e}")
+        _ticker_name_cache[ticker] = None
         return None
 
 
@@ -634,6 +724,9 @@ def analyze_ticker(
         logger.info(f"Earnings Date: {earnings_date}")
         logger.info(f"Expiration: {expiration_date}")
 
+        # Fetch company name early (for result dictionaries)
+        company_name = get_ticker_name(ticker)
+
         # Validate expiration date
         validation_error = validate_expiration_date(expiration_date, earnings_date, ticker)
         if validation_error:
@@ -701,6 +794,7 @@ def analyze_ticker(
                             logger.warning(f"✗ Still no historical data after backfill: {hist_result.error}")
                             return {
                                 'ticker': ticker,
+                                'ticker_name': company_name,
                                 'earnings_date': str(earnings_date),
                                 'expiration_date': str(expiration_date),
                                 'implied_move_pct': str(implied_move.implied_move_pct),
@@ -712,6 +806,7 @@ def analyze_ticker(
                         logger.warning(f"✗ Backfill failed for {ticker}: {result.stderr}")
                         return {
                             'ticker': ticker,
+                            'ticker_name': company_name,
                             'earnings_date': str(earnings_date),
                             'expiration_date': str(expiration_date),
                             'implied_move_pct': str(implied_move.implied_move_pct),
@@ -724,6 +819,7 @@ def analyze_ticker(
                     logger.warning(f"✗ Backfill timeout for {ticker}")
                     return {
                         'ticker': ticker,
+                        'ticker_name': company_name,
                         'earnings_date': str(earnings_date),
                         'expiration_date': str(expiration_date),
                         'implied_move_pct': str(implied_move.implied_move_pct),
@@ -735,6 +831,7 @@ def analyze_ticker(
                     logger.warning(f"✗ Backfill error for {ticker}: {e}")
                     return {
                         'ticker': ticker,
+                        'ticker_name': company_name,
                         'earnings_date': str(earnings_date),
                         'expiration_date': str(expiration_date),
                         'implied_move_pct': str(implied_move.implied_move_pct),
@@ -747,6 +844,7 @@ def analyze_ticker(
                 logger.info("   Run: python scripts/backfill_yfinance.py " + ticker)
                 return {
                     'ticker': ticker,
+                    'ticker_name': company_name,
                     'earnings_date': str(earnings_date),
                     'expiration_date': str(expiration_date),
                     'implied_move_pct': str(implied_move.implied_move_pct),
@@ -786,6 +884,7 @@ def analyze_ticker(
 
         return {
             'ticker': ticker,
+            'ticker_name': company_name,
             'earnings_date': str(earnings_date),
             'expiration_date': str(expiration_date),
             'stock_price': float(implied_move.stock_price.amount),
@@ -912,14 +1011,24 @@ def scanning_mode(
         logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
         logger.info("=" * 80)
         logger.info(f"\n🎯 Ranked by VRP Ratio:")
+
+        # Table header
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*8} {'-'*9} {'-'*7} {'-'*15}")
+
+        # Table rows
         for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
+            ticker = r['ticker']
+            name = r.get('ticker_name', '')[:20] if r.get('ticker_name') else ''
+            vrp = f"{r['vrp_ratio']:.2f}x"
+            implied = str(r['implied_move_pct'])
+            edge = f"{r['edge_score']:.2f}"
+            rec = r['recommendation'].upper()
+
             logger.info(
-                f"   {i}. {r['ticker']:6s}: "
-                f"VRP {r['vrp_ratio']:.2f}x | "
-                f"Implied {r['implied_move_pct']} | "
-                f"Edge {r['edge_score']:.2f} | "
-                f"{r['recommendation'].upper()}"
+                f"   {i:<3} {ticker:<8} {name:<20} {vrp:<8} {implied:<9} {edge:<7} {rec:<15}"
             )
+
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:
         logger.info(f"\n" + "=" * 80)
@@ -1074,15 +1183,25 @@ def ticker_mode(
         logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
         logger.info("=" * 80)
         logger.info(f"\n🎯 Ranked by VRP Ratio:")
+
+        # Table header
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
+
+        # Table rows
         for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
+            ticker = r['ticker']
+            name = r.get('ticker_name', '')[:20] if r.get('ticker_name') else ''
+            vrp = f"{r['vrp_ratio']:.2f}x"
+            implied = str(r['implied_move_pct'])
+            edge = f"{r['edge_score']:.2f}"
+            rec = r['recommendation'].upper()
+            earnings = r['earnings_date']
+
             logger.info(
-                f"   {i}. {r['ticker']:6s}: "
-                f"VRP {r['vrp_ratio']:.2f}x | "
-                f"Implied {r['implied_move_pct']} | "
-                f"Edge {r['edge_score']:.2f} | "
-                f"{r['recommendation'].upper()} | "
-                f"Earnings {r['earnings_date']}"
+                f"   {i:<3} {ticker:<8} {name:<20} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12}"
             )
+
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:
         logger.info(f"\n" + "=" * 80)
@@ -1299,15 +1418,25 @@ def whisper_mode(
         logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
         logger.info("=" * 80)
         logger.info(f"\n🎯 Most Anticipated + High VRP (Ranked by VRP Ratio):")
+
+        # Table header
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
+
+        # Table rows
         for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
+            ticker = r['ticker']
+            name = r.get('ticker_name', '')[:20] if r.get('ticker_name') else ''
+            vrp = f"{r['vrp_ratio']:.2f}x"
+            implied = str(r['implied_move_pct'])
+            edge = f"{r['edge_score']:.2f}"
+            rec = r['recommendation'].upper()
+            earnings = r['earnings_date']
+
             logger.info(
-                f"   {i}. {r['ticker']:6s}: "
-                f"VRP {r['vrp_ratio']:.2f}x | "
-                f"Implied {r['implied_move_pct']} | "
-                f"Edge {r['edge_score']:.2f} | "
-                f"{r['recommendation'].upper()} | "
-                f"Earnings {r['earnings_date']}"
+                f"   {i:<3} {ticker:<8} {name:<20} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12}"
             )
+
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:
         logger.info(f"\n" + "=" * 80)
