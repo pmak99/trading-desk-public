@@ -1013,20 +1013,20 @@ def scanning_mode(
         logger.info(f"\n🎯 Ranked by VRP Ratio:")
 
         # Table header
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*8} {'-'*9} {'-'*7} {'-'*15}")
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15}")
 
         # Table rows
         for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
             ticker = r['ticker']
-            name = r.get('ticker_name', '')[:20] if r.get('ticker_name') else ''
+            name = r.get('ticker_name', '')[:28] if r.get('ticker_name') else ''
             vrp = f"{r['vrp_ratio']:.2f}x"
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
             rec = r['recommendation'].upper()
 
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<20} {vrp:<8} {implied:<9} {edge:<7} {rec:<15}"
+                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
@@ -1185,13 +1185,13 @@ def ticker_mode(
         logger.info(f"\n🎯 Ranked by VRP Ratio:")
 
         # Table header
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
 
         # Table rows
         for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
             ticker = r['ticker']
-            name = r.get('ticker_name', '')[:20] if r.get('ticker_name') else ''
+            name = r.get('ticker_name', '')[:28] if r.get('ticker_name') else ''
             vrp = f"{r['vrp_ratio']:.2f}x"
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
@@ -1199,7 +1199,7 @@ def ticker_mode(
             earnings = r['earnings_date']
 
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<20} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12}"
+                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
@@ -1420,13 +1420,13 @@ def whisper_mode(
         logger.info(f"\n🎯 Most Anticipated + High VRP (Ranked by VRP Ratio):")
 
         # Table header
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
 
         # Table rows
         for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
             ticker = r['ticker']
-            name = r.get('ticker_name', '')[:20] if r.get('ticker_name') else ''
+            name = r.get('ticker_name', '')[:28] if r.get('ticker_name') else ''
             vrp = f"{r['vrp_ratio']:.2f}x"
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
@@ -1434,7 +1434,7 @@ def whisper_mode(
             earnings = r['earnings_date']
 
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<20} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12}"
+                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
