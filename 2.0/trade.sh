@@ -1,15 +1,12 @@
 #!/bin/bash
 # IV Crush 2.0 - Fire-and-Forget Trading Script
 # Strategy: Balanced (Sharpe 8.07, Win Rate 100% on 8 trades Q2-Q4 2024)
-# Position Sizing: Half-Kelly (5%) - Conservative start, validated with 208 empirical trades
 #
 # Usage:
 #   ./trade.sh TSLA 2025-11-25                    # Single ticker
 #   ./trade.sh list TSLA,NVDA,META 2025-11-27       # Multiple tickers
 #   ./trade.sh scan 2025-11-25                     # Scan all earnings for date
 #   ./trade.sh whisper [YYYY-MM-DD]                # Most anticipated earnings (current or specific week)
-#   ./trade.sh positions                           # View open positions dashboard
-#   ./trade.sh performance                         # View performance analytics
 #   ./trade.sh health                              # Health check
 
 set -euo pipefail  # Exit on error, unset vars, pipeline failures
@@ -315,21 +312,6 @@ ${BOLD}COMMANDS${NC}
             $0 whisper                            # Current week
             $0 whisper 2025-11-24                 # Specific week (Monday)
 
-    ${GREEN}positions${NC}
-        View current open positions dashboard.
-        Shows portfolio exposure, sector concentration, and alerts.
-
-        Example:
-            $0 positions
-
-    ${GREEN}performance${NC}
-        View performance analytics and learning loops.
-        Analyzes closed trades by VRP ratio, ticker, strategy, sector.
-        Shows win rates, P&L, and parameter optimization insights.
-
-        Example:
-            $0 performance
-
     ${GREEN}health${NC}
         System health check - verify APIs, database, cache operational.
 
@@ -362,16 +344,11 @@ ${BOLD}OUTPUT EXAMPLE${NC}
 
 ${BOLD}FEATURES${NC}
     ${YELLOW}Database:${NC} 675 earnings moves, 52 tickers (2022-2024)
-    ${YELLOW}Strategy:${NC} Balanced with Half-Kelly Position Sizing (5% capital per trade)
+    ${YELLOW}Strategy:${NC} VRP-based earnings IV crush detection
     ${YELLOW}Validation:${NC} Sharpe 8.07, 100% win rate on 8 selected trades (Q2-Q4 2024)
     ${YELLOW}Cache:${NC} L1 (memory 30s) + L2 (SQLite 300s) hybrid for performance
     ${YELLOW}Database:${NC} WAL mode for concurrent access, 30s connection timeouts
     ${YELLOW}Resilience:${NC} Circuit breakers, retry logic, health monitoring
-
-${BOLD}POSITION SIZING${NC}
-    ${YELLOW}Current:${NC} Half-Kelly (5% of capital per trade)
-    ${YELLOW}Target:${NC} Quarter-Kelly (10%) after live validation
-    ${YELLOW}Basis:${NC} 208 empirical trades from Q2-Q4 2024
 
 ${BOLD}REQUIREMENTS${NC}
     - Tradier API key (TRADIER_API_KEY in .env)
@@ -381,7 +358,6 @@ ${BOLD}REQUIREMENTS${NC}
 ${BOLD}DOCUMENTATION${NC}
     README.md               - Full system documentation
     LIVE_TRADING_GUIDE.md   - Trading operations guide
-    POSITION_SIZING_DEPLOYMENT.md - Position sizing & validation
     docs/METRICS_GUIDE.md   - Understanding VRP, Edge Score, and metrics
 
 ${BOLD}MORE INFO${NC}
@@ -596,14 +572,6 @@ case "${1:-}" in
 
     health)
         health_check
-        ;;
-
-    positions)
-        python scripts/positions.py
-        ;;
-
-    performance)
-        python scripts/performance.py
         ;;
 
     scan)
