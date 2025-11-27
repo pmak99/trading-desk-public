@@ -8,7 +8,6 @@ from src.application.services.backtest_engine import (
     BacktestResult,
     BacktestTrade,
 )
-from src.application.services.position_sizer import PositionSizer, PositionSize
 
 __all__ = [
     "TickerAnalyzer",
@@ -18,6 +17,4 @@ __all__ = [
     "BacktestEngine",
     "BacktestResult",
     "BacktestTrade",
-    "PositionSizer",
-    "PositionSize",
 ]
