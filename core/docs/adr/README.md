@@ -35,13 +35,6 @@ Each ADR follows this template:
   - **Impact**: P0 (Critical) - Performance improvement (55% faster scans)
   - **Status**: Accepted (November 2024)
 
-### Trading & Risk Management
-- [ADR-003: Half-Kelly Position Sizing](./003-half-kelly-position-sizing.md)
-  - **Decision**: Use Half-Kelly (5% capital per trade) for position sizing
-  - **Rationale**: Balance growth vs volatility, empirically validated
-  - **Impact**: P1 (High) - Risk management foundation
-  - **Status**: Accepted (November 2024)
-
 ### Code Architecture
 - [ADR-004: Extract Strategy Scoring](./004-extract-strategy-scoring.md)
   - **Decision**: Separate scoring logic from strategy generation

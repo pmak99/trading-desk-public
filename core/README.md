@@ -39,7 +39,6 @@ Implied Move: 8.00% | Historical Mean: 3.54%
 **The Edge:**
 - **VRP Analysis:** Compare implied move (market expectations) vs historical moves (reality)
 - **Advanced Algorithms:** Polynomial skew fitting, exponential-weighted consistency, interpolated calculations
-- **Hybrid Position Sizing:** Kelly Criterion (10%) + VRP weighting, validated with 208 real trades
 - **Strategy Generation:** Iron Condors, Credit Spreads with optimal strike selection
 - **Empirically Validated:** Sharpe 8.07, 100% win rate on 8 selected trades (Q2-Q4 2024)
 
@@ -118,7 +117,6 @@ Displays comprehensive help including:
 - Examples for each command
 - Output format explanation
 - System features and validation results
-- Position sizing details
 
 ### Single Ticker Analysis
 
@@ -277,7 +275,7 @@ CREATE TABLE historical_moves (
 **Forward Test (Q2-Q4 2024):**
 - Selected Trades: 8 (ENPH, SHOP, AVGO, RDDT)
 - Win Rate: **100%**
-- Sharpe Ratio: **8.07** (with position sizing)
+- Sharpe Ratio: **8.07**
 - Total P&L: **$1,124.71** on $40K capital
 
 **Market Regime Analysis (208 trades):**
@@ -285,14 +283,11 @@ CREATE TABLE historical_moves (
 - Normal (VIX 15-25): 72.7% WR, Sharpe 3.59
 - Low Vol (VIX <15): 68.8% WR, Sharpe 2.84
 
-**Position Sizing:** Half-Kelly (5%) for conservative start, scales to 10% after validation.
-
 ---
 
 ## Documentation
 
 - **[LIVE_TRADING_GUIDE.md](LIVE_TRADING_GUIDE.md)** - Complete trading operations guide
-- **[POSITION_SIZING_DEPLOYMENT.md](POSITION_SIZING_DEPLOYMENT.md)** - Position sizing deployment & empirical validation
 - **[BACKTESTING.md](BACKTESTING.md)** - Backtesting framework and results
 - **[MCP_USAGE_GUIDE.md](MCP_USAGE_GUIDE.md)** - Model Context Protocol integration
 
@@ -337,8 +332,6 @@ CREATE TABLE historical_moves (
 3. **Review Strategy**: Check VRP ratio, strikes, P/L, Greeks
 4. **Execute Trade**: Place order in broker (Tradier, TastyTrade, etc.)
 5. **Track Outcome**: Compare actual move vs implied move
-
-**Position Sizing:** 5% of capital per trade (half-Kelly, conservative). Validated on 208 empirical trades from Q2-Q4 2024. Can scale to 10% (full quarter-Kelly) after live validation.
 
 ---
 
