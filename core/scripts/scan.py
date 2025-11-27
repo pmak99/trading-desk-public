@@ -41,6 +41,10 @@ from src.utils.shutdown import register_shutdown_callback
 from src.container import Container, reset_container
 from src.config.config import Config
 from src.domain.enums import EarningsTiming
+from src.domain.liquidity import (
+    analyze_chain_liquidity,
+    LiquidityTier
+)
 from src.infrastructure.data_sources.earnings_whisper_scraper import (
     EarningsWhisperScraper,
     get_week_monday
@@ -281,7 +285,11 @@ def get_ticker_name(ticker: str) -> Optional[str]:
 
 def check_basic_liquidity(ticker: str, expiration: date, container: Container) -> bool:
     """
-    Quick liquidity check: Do options exist with reasonable OI?
+    Quick liquidity check using 3-tier system (UPDATED POST-LOSS ANALYSIS).
+
+    This is the PRE-FILTER check that runs before full VRP analysis.
+    Only rejects tickers in REJECT tier. WARNING tier is allowed through
+    but will be flagged prominently in output.
 
     Args:
         ticker: Stock ticker symbol
@@ -289,7 +297,7 @@ def check_basic_liquidity(ticker: str, expiration: date, container: Container) -
         container: DI container for Tradier access
 
     Returns:
-        True if liquidity is acceptable, False otherwise
+        True if liquidity is acceptable (WARNING or EXCELLENT), False if REJECT tier
     """
     try:
         # Get option chain
@@ -302,30 +310,87 @@ def check_basic_liquidity(ticker: str, expiration: date, container: Container) -
 
         chain = chain_result.value
 
-        # Check if we have any options with decent OI
-        min_oi = container.config.thresholds.min_open_interest
+        # Use new 3-tier liquidity analysis
+        has_liquidity, rejection_reason = analyze_chain_liquidity(
+            chain.calls,
+            chain.puts,
+            container.config.thresholds
+        )
 
-        # Check both calls and puts
-        total_options = len(chain.calls) + len(chain.puts)
-        if total_options == 0:
-            logger.debug(f"{ticker}: No options found")
+        if not has_liquidity:
+            logger.debug(f"{ticker}: {rejection_reason}")
             return False
 
-        # Check if at least some options have acceptable OI
-        # chain.calls and chain.puts are Dict[Strike, OptionQuote]
-        acceptable_calls = sum(1 for strike, opt in chain.calls.items() if opt.open_interest >= min_oi)
-        acceptable_puts = sum(1 for strike, opt in chain.puts.items() if opt.open_interest >= min_oi)
-
-        if acceptable_calls == 0 or acceptable_puts == 0:
-            logger.debug(f"{ticker}: Insufficient open interest (min {min_oi})")
-            return False
-
-        logger.debug(f"{ticker}: Liquidity OK ({acceptable_calls} calls, {acceptable_puts} puts with OI>={min_oi})")
+        logger.debug(f"{ticker}: Liquidity check passed (WARNING or EXCELLENT tier)")
         return True
 
     except Exception as e:
         logger.debug(f"{ticker}: Liquidity check failed: {e}")
         return False
+
+
+def get_liquidity_tier_for_display(ticker: str, expiration: date, container: Container) -> str:
+    """
+    Get liquidity tier for display in scan output (ADDED POST-LOSS ANALYSIS).
+
+    This provides a simple tier classification to warn users about low liquidity
+    tickers before they execute trades.
+
+    Args:
+        ticker: Stock ticker symbol
+        expiration: Options expiration date
+        container: DI container
+
+    Returns:
+        String representation: "EXCELLENT", "WARNING", or "REJECT"
+    """
+    try:
+        # Get option chain
+        tradier = container.tradier
+        chain_result = tradier.get_option_chain(ticker, expiration)
+
+        if chain_result.is_err:
+            return "REJECT"
+
+        chain = chain_result.value
+
+        # Quick heuristic: Check average liquidity of ATM options
+        # For a more detailed check, we'd need to know which strikes will be traded
+        calls_list = list(chain.calls.items())
+        puts_list = list(chain.puts.items())
+
+        if not calls_list or not puts_list:
+            return "REJECT"
+
+        # Get midpoint options (closest to ATM)
+        mid_call = calls_list[len(calls_list) // 2][1]
+        mid_put = puts_list[len(puts_list) // 2][1]
+
+        # Check thresholds
+        thresholds = container.config.thresholds
+
+        # EXCELLENT tier check
+        if (mid_call.open_interest >= thresholds.liquidity_excellent_min_oi
+            and mid_put.open_interest >= thresholds.liquidity_excellent_min_oi
+            and mid_call.spread_pct <= thresholds.liquidity_excellent_max_spread_pct
+            and mid_put.spread_pct <= thresholds.liquidity_excellent_max_spread_pct
+            and mid_call.volume >= thresholds.liquidity_excellent_min_volume
+            and mid_put.volume >= thresholds.liquidity_excellent_min_volume):
+            return "EXCELLENT"
+
+        # REJECT tier check
+        if (mid_call.open_interest < thresholds.liquidity_reject_min_oi
+            or mid_put.open_interest < thresholds.liquidity_reject_min_oi
+            or mid_call.spread_pct > thresholds.liquidity_reject_max_spread_pct
+            or mid_put.spread_pct > thresholds.liquidity_reject_max_spread_pct):
+            return "REJECT"
+
+        # Otherwise WARNING
+        return "WARNING"
+
+    except Exception as e:
+        logger.debug(f"{ticker}: Liquidity tier check failed: {e}")
+        return "WARNING"
 
 
 def should_filter_ticker(
@@ -877,6 +942,18 @@ def analyze_ticker(
         logger.info(f"  Edge Score: {vrp.edge_score:.2f}")
         logger.info(f"  Recommendation: {vrp.recommendation.value.upper()}")
 
+        # CRITICAL: Check liquidity tier (POST-LOSS ANALYSIS ADDITION)
+        liquidity_tier = get_liquidity_tier_for_display(ticker, expiration_date, container)
+        logger.info(f"  Liquidity Tier: {liquidity_tier}")
+
+        if liquidity_tier == "WARNING":
+            logger.warning(f"\n⚠️  WARNING: Low liquidity detected for {ticker}")
+            logger.warning(f"   This ticker has moderate liquidity - expect wider spreads and potential slippage")
+            logger.warning(f"   Consider reducing position size or skipping this trade")
+        elif liquidity_tier == "REJECT":
+            logger.warning(f"\n❌ CRITICAL: Very low liquidity for {ticker}")
+            logger.warning(f"   This ticker has very poor liquidity - DO NOT TRADE")
+
         if vrp.is_tradeable:
             logger.info("\n✅ TRADEABLE OPPORTUNITY")
         else:
@@ -894,6 +971,7 @@ def analyze_ticker(
             'edge_score': float(vrp.edge_score),
             'recommendation': vrp.recommendation.value,
             'is_tradeable': vrp.is_tradeable,
+            'liquidity_tier': liquidity_tier,  # CRITICAL ADDITION
             'status': 'SUCCESS'
         }
 
@@ -1012,9 +1090,9 @@ def scanning_mode(
         logger.info("=" * 80)
         logger.info(f"\n🎯 Ranked by VRP Ratio:")
 
-        # Table header
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15}")
+        # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column)
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Liquidity':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
 
         # Table rows
         for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
@@ -1025,8 +1103,17 @@ def scanning_mode(
             edge = f"{r['edge_score']:.2f}"
             rec = r['recommendation'].upper()
 
+            # CRITICAL: Display liquidity tier with color coding
+            liquidity_tier = r.get('liquidity_tier', 'UNKNOWN')
+            if liquidity_tier == "EXCELLENT":
+                liq_display = "✓ High"
+            elif liquidity_tier == "WARNING":
+                liq_display = "⚠️  Low"
+            else:
+                liq_display = "❌ REJECT"
+
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15}"
+                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {liq_display:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
@@ -1184,9 +1271,9 @@ def ticker_mode(
         logger.info("=" * 80)
         logger.info(f"\n🎯 Ranked by VRP Ratio:")
 
-        # Table header
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
+        # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column)
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12} {'Liquidity':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12} {'-'*12}")
 
         # Table rows
         for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
@@ -1198,8 +1285,17 @@ def ticker_mode(
             rec = r['recommendation'].upper()
             earnings = r['earnings_date']
 
+            # CRITICAL: Display liquidity tier with color coding
+            liquidity_tier = r.get('liquidity_tier', 'UNKNOWN')
+            if liquidity_tier == "EXCELLENT":
+                liq_display = "✓ High"
+            elif liquidity_tier == "WARNING":
+                liq_display = "⚠️  Low"
+            else:
+                liq_display = "❌ REJECT"
+
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12}"
+                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12} {liq_display:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
@@ -1419,9 +1515,9 @@ def whisper_mode(
         logger.info("=" * 80)
         logger.info(f"\n🎯 Most Anticipated + High VRP (Ranked by VRP Ratio):")
 
-        # Table header
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
+        # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column)
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12} {'Liquidity':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12} {'-'*12}")
 
         # Table rows
         for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
@@ -1433,8 +1529,17 @@ def whisper_mode(
             rec = r['recommendation'].upper()
             earnings = r['earnings_date']
 
+            # CRITICAL: Display liquidity tier with color coding
+            liquidity_tier = r.get('liquidity_tier', 'UNKNOWN')
+            if liquidity_tier == "EXCELLENT":
+                liq_display = "✓ High"
+            elif liquidity_tier == "WARNING":
+                liq_display = "⚠️  Low"
+            else:
+                liq_display = "❌ REJECT"
+
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12}"
+                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12} {liq_display:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")

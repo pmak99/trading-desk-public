@@ -49,9 +49,25 @@ class ThresholdsConfig:
     vrp_good: float = 4.0       # Top 67% - strong edge
     vrp_marginal: float = 1.5   # Baseline edge
 
-    # Liquidity filters
-    min_open_interest: int = 50
-    max_spread_pct: float = 20.0
+    # Liquidity filters - 3-TIER SYSTEM (CRITICAL UPDATE POST-LOSS ANALYSIS)
+    # REJECT tier: Auto-filter, no override possible
+    liquidity_reject_min_oi: int = 100        # Absolute minimum OI
+    liquidity_reject_max_spread_pct: float = 50.0  # Max bid-ask spread %
+    liquidity_reject_min_volume: int = 10     # Minimum daily option volume
+
+    # WARNING tier: Flag prominently, discourage trading
+    liquidity_warning_min_oi: int = 500       # Low but tradeable OI
+    liquidity_warning_max_spread_pct: float = 10.0  # Moderate spread
+    liquidity_warning_min_volume: int = 50    # Moderate volume
+
+    # EXCELLENT tier: Green light for trading
+    liquidity_excellent_min_oi: int = 5000    # High OI
+    liquidity_excellent_max_spread_pct: float = 5.0  # Tight spread
+    liquidity_excellent_min_volume: int = 500  # High volume
+
+    # Legacy thresholds (DEPRECATED - use tier system instead)
+    min_open_interest: int = 100  # Now matches REJECT tier
+    max_spread_pct: float = 50.0  # Now matches REJECT tier
 
     # Data quality
     min_historical_quarters: int = 4
@@ -84,33 +100,40 @@ class ScoringWeights:
     Weights determine how much each factor contributes to overall strategy score.
     All weights should sum to 100 for interpretability.
 
-    Rationale:
-    - POP (45%): Primary driver of win rate. Higher weight because
-                 winning more often reduces drawdowns.
-    - R/R (20%): Important but secondary. A 0.30 R/R means risking $300
-                 to make $100, which is acceptable with 65%+ POP.
-    - VRP (20%): Measures edge quality. Higher VRP = more overpriced IV.
-    - Greeks (10%): Theta/vega provide additional edge but are secondary
-                    to core probability and reward/risk metrics.
-    - Size (5%): Minor factor. Larger positions are better but capped
-                 by risk limits anyway.
+    UPDATED POST-LOSS ANALYSIS (Nov 2025):
+    After -$26,930 loss from WDAY/ZS/SYM, TRUE P&L analysis revealed:
+    - Position sizing was fine (collected $3k-$10k credits)
+    - VRP edge was real (8x, 5x, 4x ratios)
+    - PROBLEM: Catastrophic directional moves (3x-8x collected premium)
+    - PROBLEM: Poor liquidity made exits expensive (slippage)
+    - PROBLEM: No stop losses (held to 45-110% of max loss)
 
-    Note: These weights should be validated through backtesting and
-          potentially optimized using grid search on historical trades.
+    Revised Rationale:
+    - LIQUIDITY (25%): CRITICAL - Can't profit from good setups with bad fills
+                       Raised from 0% to 25% after liquidity-driven losses
+    - POP (30%): Still primary but reduced to make room for liquidity
+    - VRP (20%): Edge quality remains important
+    - R/R (15%): Reduced - was overshadowed by directional risk
+    - Greeks (10%): Unchanged - secondary edge indicators
+
+    OLD weights: POP 45%, R/R 20%, VRP 20%, Greeks 10%, Size 5%
+    NEW weights: POP 30%, LIQUIDITY 25%, VRP 20%, R/R 15%, Greeks 10%
     """
 
     # Scoring weights with Greeks available (sum = 100)
-    pop_weight: float = 45.0          # Probability of profit
-    reward_risk_weight: float = 20.0  # Reward/risk ratio
-    vrp_weight: float = 20.0           # VRP edge strength
-    greeks_weight: float = 10.0        # Theta/vega quality
-    size_weight: float = 5.0           # Position sizing
+    pop_weight: float = 30.0          # Probability of profit (reduced from 45%)
+    liquidity_weight: float = 25.0    # NEW: Liquidity quality (critical addition)
+    vrp_weight: float = 20.0          # VRP edge strength (unchanged)
+    reward_risk_weight: float = 15.0  # Reward/risk ratio (reduced from 20%)
+    greeks_weight: float = 10.0       # Theta/vega quality (unchanged)
+    size_weight: float = 0.0          # Removed (position sizing is handled separately)
 
     # Scoring weights without Greeks (sum = 100)
-    pop_weight_no_greeks: float = 50.0
-    reward_risk_weight_no_greeks: float = 25.0
-    vrp_weight_no_greeks: float = 20.0
-    size_weight_no_greeks: float = 5.0
+    pop_weight_no_greeks: float = 35.0        # Reduced from 50%
+    liquidity_weight_no_greeks: float = 30.0  # NEW: Even more critical without Greeks
+    vrp_weight_no_greeks: float = 20.0        # Unchanged
+    reward_risk_weight_no_greeks: float = 15.0  # Reduced from 25%
+    size_weight_no_greeks: float = 0.0        # Removed
 
     # Target values for normalization
     target_pop: float = 0.65      # 65% POP is target
@@ -119,6 +142,11 @@ class ScoringWeights:
     target_theta: float = 50.0     # $50/day theta is excellent
     target_vega: float = 100.0     # -$100 vega is excellent
 
+    # NEW: Liquidity scoring targets (post-loss analysis addition)
+    target_liquidity_oi: float = 5000.0      # Target open interest
+    target_liquidity_spread: float = 5.0     # Target bid-ask spread %
+    target_liquidity_volume: float = 500.0   # Target daily volume
+
     # Rationale generation thresholds
     vrp_excellent_threshold: float = 2.0   # VRP >= 2.0 is "excellent"
     vrp_strong_threshold: float = 1.5      # VRP >= 1.5 is "strong"
@@ -126,6 +154,10 @@ class ScoringWeights:
     pop_high_threshold: float = 0.70       # POP >= 70% is "high"
     theta_positive_threshold: float = 30.0  # Theta > $30/day mentioned in rationale
     vega_beneficial_threshold: float = -50.0  # Vega < -$50 benefits from IV crush
+
+    # NEW: Liquidity thresholds for rationale
+    liquidity_excellent_threshold: str = "EXCELLENT"  # Liquidity tier = EXCELLENT
+    liquidity_acceptable_threshold: str = "WARNING"   # Minimum acceptable = WARNING
 
 
 @dataclass(frozen=True)
@@ -305,8 +337,19 @@ class Config:
             vrp_excellent=float(os.getenv("VRP_EXCELLENT", "7.0")),
             vrp_good=float(os.getenv("VRP_GOOD", "4.0")),
             vrp_marginal=float(os.getenv("VRP_MARGINAL", "1.5")),
-            min_open_interest=int(os.getenv("MIN_OPEN_INTEREST", "50")),
-            max_spread_pct=float(os.getenv("MAX_SPREAD_PCT", "20.0")),
+            # 3-tier liquidity system (post-loss analysis update)
+            liquidity_reject_min_oi=int(os.getenv("LIQUIDITY_REJECT_MIN_OI", "100")),
+            liquidity_reject_max_spread_pct=float(os.getenv("LIQUIDITY_REJECT_MAX_SPREAD_PCT", "50.0")),
+            liquidity_reject_min_volume=int(os.getenv("LIQUIDITY_REJECT_MIN_VOLUME", "10")),
+            liquidity_warning_min_oi=int(os.getenv("LIQUIDITY_WARNING_MIN_OI", "500")),
+            liquidity_warning_max_spread_pct=float(os.getenv("LIQUIDITY_WARNING_MAX_SPREAD_PCT", "10.0")),
+            liquidity_warning_min_volume=int(os.getenv("LIQUIDITY_WARNING_MIN_VOLUME", "50")),
+            liquidity_excellent_min_oi=int(os.getenv("LIQUIDITY_EXCELLENT_MIN_OI", "5000")),
+            liquidity_excellent_max_spread_pct=float(os.getenv("LIQUIDITY_EXCELLENT_MAX_SPREAD_PCT", "5.0")),
+            liquidity_excellent_min_volume=int(os.getenv("LIQUIDITY_EXCELLENT_MIN_VOLUME", "500")),
+            # Legacy (deprecated)
+            min_open_interest=int(os.getenv("MIN_OPEN_INTEREST", "100")),
+            max_spread_pct=float(os.getenv("MAX_SPREAD_PCT", "50.0")),
             min_historical_quarters=int(os.getenv("MIN_HISTORICAL_QUARTERS", "4")),
             max_historical_quarters=int(os.getenv("MAX_HISTORICAL_QUARTERS", "12")),
             min_market_cap_millions=float(
