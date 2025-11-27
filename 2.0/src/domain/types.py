@@ -493,6 +493,12 @@ class Strategy:
     position_theta: Optional[float] = None  # Net theta (daily P/L from decay)
     position_vega: Optional[float] = None   # Net vega (IV sensitivity)
 
+    # Liquidity metrics (POST-LOSS ANALYSIS - Added Nov 2025)
+    liquidity_tier: Optional[str] = None  # "EXCELLENT", "WARNING", or "REJECT"
+    min_open_interest: Optional[int] = None  # Minimum OI across all legs
+    max_spread_pct: Optional[float] = None  # Maximum bid-ask spread % across all legs
+    min_volume: Optional[int] = None  # Minimum volume across all legs
+
     @property
     def strike_description(self) -> str:
         """Human-readable strike description."""

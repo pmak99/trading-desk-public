@@ -26,15 +26,22 @@ class StrategyScorer:
     """
     Scores and ranks trading strategies based on multiple factors.
 
+    POST-LOSS ANALYSIS UPDATE (Nov 2025):
+    After -$26,930 loss from WDAY/ZS/SYM, scoring weights were rebalanced
+    to prioritize liquidity. TRUE P&L analysis showed position sizing was
+    fine but poor liquidity caused expensive exits and amplified losses.
+
     Scoring factors (when Greeks available):
-    - Probability of profit (POP) - default 45% weight
-    - Reward/risk ratio (R/R) - default 20% weight
-    - VRP edge - default 20% weight
-    - Greeks quality (theta/vega) - default 10% weight
-    - Position sizing - default 5% weight
+    - Probability of profit (POP) - default 30% weight (reduced from 45%)
+    - Liquidity quality - default 25% weight (NEW - critical addition)
+    - VRP edge - default 20% weight (unchanged)
+    - Reward/risk ratio (R/R) - default 15% weight (reduced from 20%)
+    - Greeks quality (theta/vega) - default 10% weight (unchanged)
+    - Position sizing - default 0% weight (removed - handled separately)
 
     When Greeks are not available, the greeks weight is redistributed
-    proportionally to other factors.
+    proportionally to other factors, making liquidity even MORE important
+    since we have less visibility into option pricing quality.
     """
 
     def __init__(self, weights: ScoringWeights | None = None):
@@ -99,6 +106,10 @@ class StrategyScorer:
         """
         Score strategy with Greeks available.
 
+        POST-LOSS ANALYSIS UPDATE (Nov 2025):
+        Added liquidity scoring (25% weight) after -$26,930 loss.
+        New weights: POP 30%, Liquidity 25%, VRP 20%, R/R 15%, Greeks 10%
+
         Returns:
             Tuple of (overall_score, profitability_score, risk_score)
         """
@@ -107,24 +118,27 @@ class StrategyScorer:
             strategy.probability_of_profit / self.weights.target_pop, 1.0
         ) * self.weights.pop_weight
 
-        # Factor 2: Reward/Risk - Compare against target
-        rr_score = min(
-            strategy.reward_risk_ratio / self.weights.target_rr, 1.0
-        ) * self.weights.reward_risk_weight
+        # Factor 2: Liquidity Quality - NEW (POST-LOSS ANALYSIS)
+        liquidity_score = self._calculate_liquidity_score(strategy)
 
         # Factor 3: VRP Edge - Compare against target
         vrp_score = min(
             vrp.vrp_ratio / self.weights.target_vrp, 1.0
         ) * self.weights.vrp_weight
 
-        # Factor 4: Greeks Quality - Theta and Vega
+        # Factor 4: Reward/Risk - Compare against target
+        rr_score = min(
+            strategy.reward_risk_ratio / self.weights.target_rr, 1.0
+        ) * self.weights.reward_risk_weight
+
+        # Factor 5: Greeks Quality - Theta and Vega
         greeks_score = self._calculate_greeks_score(strategy)
 
-        # Factor 5: Position Sizing - Graduated scoring up to 10 contracts
+        # Factor 6: Position Sizing - Graduated scoring up to 10 contracts
         size_score = min(strategy.contracts / 10.0, 1.0) * self.weights.size_weight
 
         # Overall score (0-100)
-        overall = rr_score + pop_score + vrp_score + greeks_score + size_score
+        overall = pop_score + liquidity_score + vrp_score + rr_score + greeks_score + size_score
 
         # Profitability score (include theta benefit)
         base_profitability = min(strategy.reward_risk_ratio / 0.40 * 80, 80)
@@ -152,12 +166,16 @@ class StrategyScorer:
         """
         Score strategy without Greeks available.
 
-        Redistributes greeks weight to other factors proportionally.
+        POST-LOSS ANALYSIS UPDATE (Nov 2025):
+        Added liquidity scoring. Redistributes greeks weight to other factors proportionally.
+        Liquidity weight is HIGHER (30% vs 25%) when Greeks unavailable since we have
+        less visibility into option pricing quality.
 
         Returns:
             Tuple of (overall_score, profitability_score, risk_score)
         """
         # Redistribute greeks weight to other factors
+        # NOTE: liquidity_weight is NOT scaled because it's always important
         total_base_weight = (
             self.weights.pop_weight
             + self.weights.reward_risk_weight
@@ -171,21 +189,26 @@ class StrategyScorer:
             strategy.probability_of_profit / self.weights.target_pop, 1.0
         ) * self.weights.pop_weight * scale_factor
 
-        # Factor 2: Reward/Risk - Scaled
-        rr_score = min(
-            strategy.reward_risk_ratio / self.weights.target_rr, 1.0
-        ) * self.weights.reward_risk_weight * scale_factor
+        # Factor 2: Liquidity Quality - NEW (POST-LOSS ANALYSIS)
+        # Not scaled - always use full weight since liquidity is critical
+        liquidity_score = self._calculate_liquidity_score(strategy)
 
         # Factor 3: VRP Edge - Scaled
         vrp_score = min(
             vrp.vrp_ratio / self.weights.target_vrp, 1.0
         ) * self.weights.vrp_weight * scale_factor
 
-        # Factor 4: Position Sizing - Scaled
+        # Factor 4: Reward/Risk - Scaled
+        rr_score = min(
+            strategy.reward_risk_ratio / self.weights.target_rr, 1.0
+        ) * self.weights.reward_risk_weight * scale_factor
+
+        # Factor 5: Position Sizing - Scaled
         size_score = min(strategy.contracts / 10.0, 1.0) * self.weights.size_weight * scale_factor
 
         # Overall score (0-100)
-        overall = rr_score + pop_score + vrp_score + size_score
+        # NOTE: When Greeks unavailable, liquidity becomes MORE important (scaled weights + full liquidity)
+        overall = pop_score + liquidity_score + vrp_score + rr_score + size_score
 
         # Profitability score (focus on reward/risk)
         profitability = min(strategy.reward_risk_ratio / 0.40 * 100, 100)
@@ -237,9 +260,53 @@ class StrategyScorer:
 
         return theta_score + vega_score
 
+    def _calculate_liquidity_score(self, strategy: Strategy) -> float:
+        """
+        Calculate liquidity quality score (POST-LOSS ANALYSIS - Added Nov 2025).
+
+        After -$26,930 loss from WDAY/ZS/SYM, liquidity became critical.
+        Poor liquidity caused:
+        - Wide bid-ask spreads on entry/exit
+        - Slippage amplified losses by ~20%
+        - Expensive fills when trying to close positions
+
+        Scoring logic (3-tier system):
+        - EXCELLENT tier: 100% of liquidity_weight (25 points max)
+        - WARNING tier: 50% of liquidity_weight (12.5 points max)
+        - REJECT tier: 0% (should be filtered before scoring)
+        - No tier info: 100% (assume EXCELLENT for backward compatibility)
+
+        Args:
+            strategy: Strategy with optional liquidity metrics
+
+        Returns:
+            Liquidity score (0-25)
+        """
+        # If no liquidity tier info, assume EXCELLENT (backward compatibility)
+        if strategy.liquidity_tier is None:
+            return self.weights.liquidity_weight
+
+        tier = strategy.liquidity_tier.upper()
+
+        if tier == "EXCELLENT":
+            # Full score for excellent liquidity
+            return self.weights.liquidity_weight
+        elif tier == "WARNING":
+            # Half score for warning liquidity (risky but tradeable)
+            return self.weights.liquidity_weight * 0.5
+        elif tier == "REJECT":
+            # Zero score for reject tier (should be filtered before this)
+            return 0.0
+        else:
+            # Unknown tier, assume EXCELLENT
+            return self.weights.liquidity_weight
+
     def _generate_strategy_rationale(self, strategy: Strategy, vrp: VRPResult) -> str:
         """
         Generate brief rationale for strategy.
+
+        POST-LOSS ANALYSIS UPDATE (Nov 2025):
+        Added liquidity warnings to rationale to make liquidity issues visible.
 
         Args:
             strategy: Strategy to generate rationale for
@@ -249,6 +316,16 @@ class StrategyScorer:
             Human-readable rationale string
         """
         parts = []
+
+        # Liquidity warning (POST-LOSS ANALYSIS - Added to prevent repeating WDAY/ZS mistakes)
+        if strategy.liquidity_tier is not None:
+            tier = strategy.liquidity_tier.upper()
+            if tier == "WARNING":
+                parts.append("⚠️ LOW LIQUIDITY")
+            elif tier == "REJECT":
+                parts.append("❌ VERY LOW LIQUIDITY")
+            elif tier == "EXCELLENT":
+                parts.append("✓ High liquidity")
 
         # VRP edge
         if vrp.vrp_ratio >= self.weights.vrp_excellent_threshold:
