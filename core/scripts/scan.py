@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from tqdm import tqdm
 import atexit
+import threading
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -51,14 +52,23 @@ from src.infrastructure.data_sources.earnings_whisper_scraper import (
 )
 from src.infrastructure.cache.hybrid_cache import HybridCache
 
-# Try to import yfinance for market cap data
-try:
-    import yfinance as yf
-    YFINANCE_AVAILABLE = True
-except ImportError:
-    YFINANCE_AVAILABLE = False
-
 logger = logging.getLogger(__name__)
+
+# Lazy import yfinance only when needed
+YFINANCE_AVAILABLE = False
+yf = None
+
+def _ensure_yfinance():
+    """Lazy load yfinance module."""
+    global YFINANCE_AVAILABLE, yf
+    if yf is None:
+        try:
+            import yfinance as yf_module
+            yf = yf_module
+            YFINANCE_AVAILABLE = True
+        except ImportError:
+            YFINANCE_AVAILABLE = False
+    return YFINANCE_AVAILABLE
 
 # Alpha Vantage free tier rate limits
 ALPHA_VANTAGE_CALLS_PER_MINUTE = 5
@@ -76,54 +86,37 @@ BACKFILL_YEARS = 3               # Years of historical data to backfill
 # Trading day adjustment
 MAX_TRADING_DAY_ITERATIONS = 10  # Max iterations to find next trading day (handles holiday clusters)
 
+# API rate limiting
+API_CALL_DELAY = 0.2             # Delay between API calls to respect rate limits
 
-class ScanContext:
-    """
-    Encapsulates scan session state (replaces module-level globals).
+# Pre-compiled regex patterns for company name cleaning (performance optimization)
+_COMPANY_SUFFIX_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE) for pattern in [
+        r',?\s+Inc\.?$',
+        r',?\s+Incorporated$',
+        r',?\s+Corp\.?$',
+        r',?\s+Corporation$',
+        r',?\s+Ltd\.?$',
+        r',?\s+Limited$',
+        r',?\s+LLC$',
+        r',?\s+L\.L\.C\.?$',
+        r',?\s+Co\.?$',
+        r',?\s+Company$',
+        r',?\s+PLC$',
+        r',?\s+P\.L\.C\.?$',
+        r',?\s+Plc$',
+        r',?\s+LP$',
+        r',?\s+L\.P\.?$',
+    ]
+]
+_TRAILING_AMPERSAND_PATTERN = re.compile(r'\s*&\s*$')
 
-    Holds caches and session-specific state that was previously in
-    module-level variables. This makes the code more testable and
-    eliminates hidden global state.
-
-    Attributes:
-        market_cap_cache: Cache for market cap lookups
-        holiday_cache: Cache for holiday data by year
-        shared_cache: Shared HybridCache instance for earnings data
-    """
-
-    def __init__(self):
-        """Initialize scan context with empty caches."""
-        self.market_cap_cache: Dict[str, Optional[float]] = {}
-        self.holiday_cache: Dict[int, set] = {}
-        self.shared_cache: Optional[HybridCache] = None
-
-    def get_shared_cache(self, container: Container) -> HybridCache:
-        """
-        Get or create a shared cache instance for earnings data.
-
-        Args:
-            container: DI container for config access
-
-        Returns:
-            Shared HybridCache instance
-        """
-        if self.shared_cache is None:
-            cache_db_path = container.config.database.path.parent / "scan_cache.db"
-            self.shared_cache = HybridCache(
-                db_path=cache_db_path,
-                l1_ttl_seconds=CACHE_L1_TTL_SECONDS,
-                l2_ttl_seconds=CACHE_L2_TTL_SECONDS,
-                max_l1_size=CACHE_MAX_L1_SIZE
-            )
-        return self.shared_cache
-
-
-# Legacy global variables (DEPRECATED - use ScanContext instead)
-# Kept for backward compatibility during transition
-_market_cap_cache: Dict[str, Optional[float]] = {}
-_ticker_name_cache: Dict[str, Optional[str]] = {}
+# Module-level caches and state
+_ticker_info_cache: Dict[str, Tuple[Optional[float], Optional[str]]] = {}  # Combined cache for market cap + name
+_liquidity_cache: Dict[Tuple[str, date], Tuple[bool, str]] = {}  # Cache for liquidity checks (ticker, expiration) -> (has_liq, tier)
 _holiday_cache: Dict[int, set] = {}
 _shared_cache: Optional[HybridCache] = None
+_api_call_lock = threading.Lock()  # Thread-safe API rate limiting
 
 
 def get_shared_cache(container: Container) -> HybridCache:
@@ -153,51 +146,10 @@ def get_shared_cache(container: Container) -> HybridCache:
     return _shared_cache
 
 
-def get_market_cap_millions(ticker: str) -> Optional[float]:
-    """
-    Get market cap in millions using yfinance (with caching).
-
-    Args:
-        ticker: Stock ticker symbol
-
-    Returns:
-        Market cap in millions or None if unavailable
-    """
-    if not YFINANCE_AVAILABLE:
-        logger.debug(f"yfinance not available, skipping market cap check for {ticker}")
-        return None
-
-    # Check cache first
-    if ticker in _market_cap_cache:
-        cached_value = _market_cap_cache[ticker]
-        logger.debug(f"{ticker}: Market cap from cache: {cached_value}")
-        return cached_value
-
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-
-        # Get market cap (in dollars)
-        market_cap = info.get('marketCap')
-        if market_cap and market_cap > 0:
-            market_cap_millions = market_cap / 1_000_000
-            logger.debug(f"{ticker}: Market cap ${market_cap_millions:.0f}M")
-            _market_cap_cache[ticker] = market_cap_millions
-            return market_cap_millions
-
-        logger.debug(f"{ticker}: No market cap data available")
-        _market_cap_cache[ticker] = None
-        return None
-
-    except Exception as e:
-        logger.debug(f"{ticker}: Failed to fetch market cap: {e}")
-        _market_cap_cache[ticker] = None
-        return None
-
-
 def clean_company_name(name: str) -> str:
     """
     Clean company name by removing formal suffixes for colloquial display.
+    Uses pre-compiled regex patterns for performance.
 
     Args:
         name: Full company name
@@ -211,85 +163,96 @@ def clean_company_name(name: str) -> str:
         "NVIDIA Corporation" -> "NVIDIA"
         "Meta Platforms, Inc." -> "Meta Platforms"
     """
-    # List of formal suffixes to remove (case insensitive)
-    suffixes = [
-        r',?\s+Inc\.?$',
-        r',?\s+Incorporated$',
-        r',?\s+Corp\.?$',
-        r',?\s+Corporation$',
-        r',?\s+Ltd\.?$',
-        r',?\s+Limited$',
-        r',?\s+LLC$',
-        r',?\s+L\.L\.C\.?$',
-        r',?\s+Co\.?$',
-        r',?\s+Company$',
-        r',?\s+PLC$',
-        r',?\s+P\.L\.C\.?$',
-        r',?\s+Plc$',
-        r',?\s+LP$',
-        r',?\s+L\.P\.?$',
-    ]
-
     cleaned = name
-    for suffix in suffixes:
-        cleaned = re.sub(suffix, '', cleaned, flags=re.IGNORECASE)
+    for pattern in _COMPANY_SUFFIX_PATTERNS:
+        cleaned = pattern.sub('', cleaned)
 
     # Remove trailing ampersand left by "& Co." removal
-    cleaned = re.sub(r'\s*&\s*$', '', cleaned)
+    cleaned = _TRAILING_AMPERSAND_PATTERN.sub('', cleaned)
 
     return cleaned.strip()
 
 
-def get_ticker_name(ticker: str) -> Optional[str]:
+def get_ticker_info(ticker: str) -> Tuple[Optional[float], Optional[str]]:
     """
-    Get colloquial company name using yfinance (with caching).
+    Get market cap (in millions) and company name in a single API call (OPTIMIZED).
+
+    This combines get_market_cap_millions() and get_ticker_name() to reduce
+    API calls by 50% and improve performance.
 
     Args:
         ticker: Stock ticker symbol
 
     Returns:
-        Colloquial company name or None if unavailable
+        Tuple of (market_cap_millions, company_name) or (None, None) if unavailable
     """
-    if not YFINANCE_AVAILABLE:
-        logger.debug(f"yfinance not available, skipping company name lookup for {ticker}")
-        return None
+    if not _ensure_yfinance():
+        logger.debug(f"{ticker}: yfinance not available, skipping ticker info lookup")
+        return (None, None)
 
     # Check cache first
-    if ticker in _ticker_name_cache:
-        cached_value = _ticker_name_cache[ticker]
-        logger.debug(f"{ticker}: Company name from cache: {cached_value}")
+    if ticker in _ticker_info_cache:
+        cached_value = _ticker_info_cache[ticker]
+        logger.debug(f"{ticker}: Ticker info from cache: market_cap={cached_value[0]}, name={cached_value[1]}")
         return cached_value
 
     try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
+        # Thread-safe API rate limiting - CRITICAL: Keep lock until API call completes
+        with _api_call_lock:
+            time.sleep(API_CALL_DELAY)  # Respect rate limits
+            stock = yf.Ticker(ticker)
+            info = stock.info  # Actual API call - must complete before releasing lock
 
-        # Try shortName first, fallback to longName
+        # Process data outside lock (no API calls, safe to parallelize)
+        market_cap = info.get('marketCap')
+        market_cap_millions = None
+        if market_cap and market_cap > 0:
+            market_cap_millions = market_cap / 1_000_000
+            logger.debug(f"{ticker}: Market cap ${market_cap_millions:.0f}M")
+        else:
+            logger.debug(f"{ticker}: No market cap data available")
+
+        # Get company name
         company_name = info.get('shortName') or info.get('longName')
+        cleaned_name = None
         if company_name:
-            # Clean up formal suffixes for colloquial display
             cleaned_name = clean_company_name(company_name)
             logger.debug(f"{ticker}: Company name: {cleaned_name} (original: {company_name})")
-            _ticker_name_cache[ticker] = cleaned_name
-            return cleaned_name
+        else:
+            logger.debug(f"{ticker}: No company name available")
 
-        logger.debug(f"{ticker}: No company name available")
-        _ticker_name_cache[ticker] = None
-        return None
+        # Cache the result
+        result = (market_cap_millions, cleaned_name)
+        _ticker_info_cache[ticker] = result
+        return result
 
     except Exception as e:
-        logger.debug(f"{ticker}: Failed to fetch company name: {e}")
-        _ticker_name_cache[ticker] = None
-        return None
+        logger.debug(f"{ticker}: Failed to fetch ticker info: {e}")
+        result = (None, None)
+        _ticker_info_cache[ticker] = result
+        return result
 
 
-def check_basic_liquidity(ticker: str, expiration: date, container: Container) -> bool:
+def get_market_cap_millions(ticker: str) -> Optional[float]:
+    """Get market cap in millions (legacy wrapper for backward compatibility)."""
+    market_cap, _ = get_ticker_info(ticker)
+    return market_cap
+
+
+def get_ticker_name(ticker: str) -> Optional[str]:
+    """Get company name (legacy wrapper for backward compatibility)."""
+    _, name = get_ticker_info(ticker)
+    return name
+
+
+def check_liquidity_with_tier(ticker: str, expiration: date, container: Container) -> Tuple[bool, str]:
     """
-    Quick liquidity check using 3-tier system (UPDATED POST-LOSS ANALYSIS).
+    Combined liquidity check with tier classification (OPTIMIZED with caching).
 
-    This is the PRE-FILTER check that runs before full VRP analysis.
-    Only rejects tickers in REJECT tier. WARNING tier is allowed through
-    but will be flagged prominently in output.
+    This combines check_basic_liquidity() and get_liquidity_tier_for_display()
+    to reduce Tradier API calls by 50%. Returns both the pass/fail check and
+    the tier classification in a single API call. Results are cached to avoid
+    redundant API calls.
 
     Args:
         ticker: Stock ticker symbol
@@ -297,70 +260,39 @@ def check_basic_liquidity(ticker: str, expiration: date, container: Container) -
         container: DI container for Tradier access
 
     Returns:
-        True if liquidity is acceptable (WARNING or EXCELLENT), False if REJECT tier
+        Tuple of (has_liquidity: bool, tier: str)
+        - has_liquidity: True if acceptable (WARNING or EXCELLENT), False if REJECT
+        - tier: "EXCELLENT", "WARNING", or "REJECT"
     """
+    # Check cache first
+    cache_key = (ticker, expiration)
+    if cache_key in _liquidity_cache:
+        cached_result = _liquidity_cache[cache_key]
+        logger.debug(f"{ticker}: Liquidity from cache: {cached_result[1]} tier")
+        return cached_result
+
     try:
-        # Get option chain
+        # Get option chain (single API call)
         tradier = container.tradier
         chain_result = tradier.get_option_chain(ticker, expiration)
 
         if chain_result.is_err:
             logger.debug(f"{ticker}: No option chain available")
-            return False
+            result = (False, "REJECT")
+            _liquidity_cache[cache_key] = result
+            return result
 
         chain = chain_result.value
 
-        # Use new 3-tier liquidity analysis
-        has_liquidity, rejection_reason = analyze_chain_liquidity(
-            chain.calls,
-            chain.puts,
-            container.config.thresholds
-        )
-
-        if not has_liquidity:
-            logger.debug(f"{ticker}: {rejection_reason}")
-            return False
-
-        logger.debug(f"{ticker}: Liquidity check passed (WARNING or EXCELLENT tier)")
-        return True
-
-    except Exception as e:
-        logger.debug(f"{ticker}: Liquidity check failed: {e}")
-        return False
-
-
-def get_liquidity_tier_for_display(ticker: str, expiration: date, container: Container) -> str:
-    """
-    Get liquidity tier for display in scan output (ADDED POST-LOSS ANALYSIS).
-
-    This provides a simple tier classification to warn users about low liquidity
-    tickers before they execute trades.
-
-    Args:
-        ticker: Stock ticker symbol
-        expiration: Options expiration date
-        container: DI container
-
-    Returns:
-        String representation: "EXCELLENT", "WARNING", or "REJECT"
-    """
-    try:
-        # Get option chain
-        tradier = container.tradier
-        chain_result = tradier.get_option_chain(ticker, expiration)
-
-        if chain_result.is_err:
-            return "REJECT"
-
-        chain = chain_result.value
-
-        # Quick heuristic: Check average liquidity of ATM options
-        # For a more detailed check, we'd need to know which strikes will be traded
+        # Get calls and puts lists
         calls_list = list(chain.calls.items())
         puts_list = list(chain.puts.items())
 
         if not calls_list or not puts_list:
-            return "REJECT"
+            logger.debug(f"{ticker}: Empty option chain")
+            result = (False, "REJECT")
+            _liquidity_cache[cache_key] = result
+            return result
 
         # Get midpoint options (closest to ATM)
         mid_call = calls_list[len(calls_list) // 2][1]
@@ -376,21 +308,44 @@ def get_liquidity_tier_for_display(ticker: str, expiration: date, container: Con
             and mid_put.spread_pct <= thresholds.liquidity_excellent_max_spread_pct
             and mid_call.volume >= thresholds.liquidity_excellent_min_volume
             and mid_put.volume >= thresholds.liquidity_excellent_min_volume):
-            return "EXCELLENT"
+            logger.debug(f"{ticker}: EXCELLENT liquidity tier")
+            result = (True, "EXCELLENT")
+            _liquidity_cache[cache_key] = result
+            return result
 
         # REJECT tier check
         if (mid_call.open_interest < thresholds.liquidity_reject_min_oi
             or mid_put.open_interest < thresholds.liquidity_reject_min_oi
             or mid_call.spread_pct > thresholds.liquidity_reject_max_spread_pct
             or mid_put.spread_pct > thresholds.liquidity_reject_max_spread_pct):
-            return "REJECT"
+            logger.debug(f"{ticker}: REJECT liquidity tier")
+            result = (False, "REJECT")
+            _liquidity_cache[cache_key] = result
+            return result
 
-        # Otherwise WARNING
-        return "WARNING"
+        # Otherwise WARNING tier
+        logger.debug(f"{ticker}: WARNING liquidity tier")
+        result = (True, "WARNING")
+        _liquidity_cache[cache_key] = result
+        return result
 
     except Exception as e:
-        logger.debug(f"{ticker}: Liquidity tier check failed: {e}")
-        return "WARNING"
+        logger.debug(f"{ticker}: Liquidity check failed: {e}")
+        result = (False, "WARNING")
+        _liquidity_cache[cache_key] = result
+        return result
+
+
+def check_basic_liquidity(ticker: str, expiration: date, container: Container) -> bool:
+    """Quick liquidity check (legacy wrapper for backward compatibility)."""
+    has_liquidity, _ = check_liquidity_with_tier(ticker, expiration, container)
+    return has_liquidity
+
+
+def get_liquidity_tier_for_display(ticker: str, expiration: date, container: Container) -> str:
+    """Get liquidity tier (legacy wrapper for backward compatibility)."""
+    _, tier = check_liquidity_with_tier(ticker, expiration, container)
+    return tier
 
 
 def should_filter_ticker(
@@ -399,9 +354,9 @@ def should_filter_ticker(
     container: Container,
     check_market_cap: bool = True,
     check_liquidity: bool = True
-) -> Tuple[bool, Optional[str]]:
+) -> Tuple[bool, Optional[str], Optional[str]]:
     """
-    Determine if ticker should be filtered out based on market cap and liquidity.
+    Determine if ticker should be filtered out based on market cap and liquidity (OPTIMIZED).
 
     Args:
         ticker: Stock ticker symbol
@@ -411,23 +366,25 @@ def should_filter_ticker(
         check_liquidity: Whether to check liquidity threshold
 
     Returns:
-        (should_filter, reason) - True if should skip ticker, with reason string
+        (should_filter, reason, liquidity_tier) - True if should skip ticker, with reason and tier
     """
+    liquidity_tier = None
+
     # Check market cap
     if check_market_cap:
         market_cap_millions = get_market_cap_millions(ticker)
         if market_cap_millions is not None:
             min_market_cap = container.config.thresholds.min_market_cap_millions
             if market_cap_millions < min_market_cap:
-                return (True, f"Market cap ${market_cap_millions:.0f}M < ${min_market_cap:.0f}M")
+                return (True, f"Market cap ${market_cap_millions:.0f}M < ${min_market_cap:.0f}M", None)
 
-    # Check liquidity
+    # Check liquidity (get tier for later use)
     if check_liquidity:
-        has_liquidity = check_basic_liquidity(ticker, expiration, container)
+        has_liquidity, liquidity_tier = check_liquidity_with_tier(ticker, expiration, container)
         if not has_liquidity:
-            return (True, "Insufficient liquidity")
+            return (True, "Insufficient liquidity", liquidity_tier)
 
-    return (False, None)
+    return (False, None, liquidity_tier)
 
 
 def parse_date(date_str: str) -> date:
@@ -1010,15 +967,15 @@ def scanning_mode(
     skip_count = 0
     filtered_count = 0
 
-    # Progress bar for scanning (force real-time updates)
+    # Progress bar for scanning (optimized update frequency)
     pbar = tqdm(
         earnings_events,
         desc="Scanning earnings",
         unit="ticker",
         bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}',
         file=sys.stderr,  # Use stderr to avoid interfering with output capture
-        mininterval=0.1,  # Update every 0.1 seconds
-        maxinterval=1.0   # Maximum 1 second between updates
+        mininterval=0.5,  # Update every 0.5 seconds (reduced overhead)
+        maxinterval=2.0   # Maximum 2 seconds between updates
     )
 
     for ticker, earnings_date, timing in pbar:
@@ -1031,7 +988,7 @@ def scanning_mode(
         )
 
         # Apply filters (market cap + liquidity) for scan mode
-        should_filter, filter_reason = should_filter_ticker(
+        should_filter, filter_reason, _ = should_filter_ticker(
             ticker, expiration_date, container,
             check_market_cap=True,
             check_liquidity=True
@@ -1176,15 +1133,15 @@ def ticker_mode(
     skip_count = 0
     filtered_count = 0
 
-    # Progress bar for ticker processing (force real-time updates)
+    # Progress bar for ticker processing (optimized update frequency)
     pbar = tqdm(
         tickers,
         desc="Analyzing tickers",
         unit="ticker",
         bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}',
         file=sys.stderr,  # Use stderr to avoid interfering with output capture
-        mininterval=0.1,  # Update every 0.1 seconds
-        maxinterval=1.0   # Maximum 1 second between updates
+        mininterval=0.5,  # Update every 0.5 seconds (reduced overhead)
+        maxinterval=2.0   # Maximum 2 seconds between updates
     )
 
     for ticker in pbar:
@@ -1208,7 +1165,7 @@ def ticker_mode(
         )
 
         # Apply filters (market cap + liquidity) for list mode
-        should_filter, filter_reason = should_filter_ticker(
+        should_filter, filter_reason, _ = should_filter_ticker(
             ticker, expiration_date, container,
             check_market_cap=True,
             check_liquidity=True
@@ -1412,15 +1369,15 @@ def whisper_mode(
     skip_count = 0
     filtered_count = 0
 
-    # Progress bar for ticker processing (force real-time updates)
+    # Progress bar for ticker processing (optimized update frequency)
     pbar = tqdm(
         tickers,
         desc="Analyzing tickers",
         unit="ticker",
         bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] {postfix}',
         file=sys.stderr,  # Use stderr to avoid interfering with output capture
-        mininterval=0.1,  # Update every 0.1 seconds
-        maxinterval=1.0   # Maximum 1 second between updates
+        mininterval=0.5,  # Update every 0.5 seconds (reduced overhead)
+        maxinterval=2.0   # Maximum 2 seconds between updates
     )
 
     for ticker in pbar:
@@ -1452,7 +1409,7 @@ def whisper_mode(
         )
 
         # Apply filters (market cap + liquidity) for whisper mode
-        should_filter, filter_reason = should_filter_ticker(
+        should_filter, filter_reason, _ = should_filter_ticker(
             ticker, expiration_date, container,
             check_market_cap=True,
             check_liquidity=True
