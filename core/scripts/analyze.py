@@ -161,6 +161,15 @@ Notes:
                 logger.info(f"  Reward/Risk: {strategy.reward_risk_ratio:.2f}")
                 logger.info(f"  Score: {strategy.overall_score:.1f}/100")
 
+                # Display liquidity tier if available
+                if strategy.liquidity_tier:
+                    tier_icon = {
+                        "EXCELLENT": "✅",
+                        "WARNING": "⚠️ ",
+                        "REJECT": "❌"
+                    }.get(strategy.liquidity_tier, "ℹ️ ")
+                    logger.info(f"  Liquidity: {tier_icon} {strategy.liquidity_tier}")
+
                 # Display Greeks if available
                 if strategy.position_delta is not None:
                     logger.info(f"  Greeks:")
@@ -214,6 +223,13 @@ Notes:
                 logger.info(f"   Max Loss: {rec.max_loss}")
                 logger.info(f"   Reward/Risk: {rec.reward_risk_ratio:.2f}")
                 logger.info(f"   Win Probability: {rec.probability_of_profit:.1%}")
+                if rec.liquidity_tier:
+                    tier_icon = {
+                        "EXCELLENT": "✅",
+                        "WARNING": "⚠️ ",
+                        "REJECT": "❌"
+                    }.get(rec.liquidity_tier, "ℹ️ ")
+                    logger.info(f"   Liquidity: {tier_icon} {rec.liquidity_tier}")
                 logger.info(f"\n📝 Next Steps:")
                 logger.info(f"   1. Review strategy details above")
                 logger.info(f"   2. Check your broker for exact pricing")
