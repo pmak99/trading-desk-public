@@ -49,21 +49,26 @@ class ThresholdsConfig:
     vrp_good: float = 4.0       # Top 67% - strong edge
     vrp_marginal: float = 1.5   # Baseline edge
 
-    # Liquidity filters - 3-TIER SYSTEM (CRITICAL UPDATE POST-LOSS ANALYSIS)
-    # REJECT tier: Auto-filter, no override possible
-    liquidity_reject_min_oi: int = 100        # Absolute minimum OI
-    liquidity_reject_max_spread_pct: float = 50.0  # Max bid-ask spread %
-    liquidity_reject_min_volume: int = 10     # Minimum daily option volume
+    # Liquidity filters - 3-TIER SYSTEM (USER CALIBRATED FOR 50-200 CONTRACT TRADES)
+    # Classification logic: EXCELLENT if all excellent thresholds met,
+    #                       REJECT if any reject threshold fails,
+    #                       WARNING for everything in between (catch-all tier)
 
-    # WARNING tier: Flag prominently, discourage trading
-    liquidity_warning_min_oi: int = 500       # Low but tradeable OI
-    liquidity_warning_max_spread_pct: float = 10.0  # Moderate spread
-    liquidity_warning_min_volume: int = 50    # Moderate volume
+    # REJECT tier: Hard minimums - any metric below these = REJECT
+    liquidity_reject_min_oi: int = 20         # Absolute minimum OI
+    liquidity_reject_max_spread_pct: float = 100.0  # Maximum acceptable spread %
+    liquidity_reject_min_volume: int = 0      # Allow zero volume (future options may not have traded today)
 
-    # EXCELLENT tier: Green light for trading
-    liquidity_excellent_min_oi: int = 5000    # High OI
-    liquidity_excellent_max_spread_pct: float = 5.0  # Tight spread
-    liquidity_excellent_min_volume: int = 500  # High volume
+    # WARNING tier: Used for scoring only (not classification boundaries)
+    # These thresholds help score options 0-100 but don't filter
+    liquidity_warning_min_oi: int = 200       # "Good" OI for scoring
+    liquidity_warning_max_spread_pct: float = 15.0  # "Good" spread for scoring
+    liquidity_warning_min_volume: int = 0     # Allow zero volume
+
+    # EXCELLENT tier: All metrics must meet these thresholds
+    liquidity_excellent_min_oi: int = 1000    # High OI threshold
+    liquidity_excellent_max_spread_pct: float = 8.0  # Tight spread threshold
+    liquidity_excellent_min_volume: int = 100  # High volume threshold
 
     # Legacy thresholds (DEPRECATED - use tier system instead)
     min_open_interest: int = 100  # Now matches REJECT tier
@@ -337,16 +342,16 @@ class Config:
             vrp_excellent=float(os.getenv("VRP_EXCELLENT", "7.0")),
             vrp_good=float(os.getenv("VRP_GOOD", "4.0")),
             vrp_marginal=float(os.getenv("VRP_MARGINAL", "1.5")),
-            # 3-tier liquidity system (post-loss analysis update)
-            liquidity_reject_min_oi=int(os.getenv("LIQUIDITY_REJECT_MIN_OI", "100")),
-            liquidity_reject_max_spread_pct=float(os.getenv("LIQUIDITY_REJECT_MAX_SPREAD_PCT", "50.0")),
-            liquidity_reject_min_volume=int(os.getenv("LIQUIDITY_REJECT_MIN_VOLUME", "10")),
-            liquidity_warning_min_oi=int(os.getenv("LIQUIDITY_WARNING_MIN_OI", "500")),
-            liquidity_warning_max_spread_pct=float(os.getenv("LIQUIDITY_WARNING_MAX_SPREAD_PCT", "10.0")),
-            liquidity_warning_min_volume=int(os.getenv("LIQUIDITY_WARNING_MIN_VOLUME", "50")),
-            liquidity_excellent_min_oi=int(os.getenv("LIQUIDITY_EXCELLENT_MIN_OI", "5000")),
-            liquidity_excellent_max_spread_pct=float(os.getenv("LIQUIDITY_EXCELLENT_MAX_SPREAD_PCT", "5.0")),
-            liquidity_excellent_min_volume=int(os.getenv("LIQUIDITY_EXCELLENT_MIN_VOLUME", "500")),
+            # 3-tier liquidity system (calibrated for 50-200 contract trades)
+            liquidity_reject_min_oi=int(os.getenv("LIQUIDITY_REJECT_MIN_OI", "20")),
+            liquidity_reject_max_spread_pct=float(os.getenv("LIQUIDITY_REJECT_MAX_SPREAD_PCT", "100.0")),
+            liquidity_reject_min_volume=int(os.getenv("LIQUIDITY_REJECT_MIN_VOLUME", "0")),
+            liquidity_warning_min_oi=int(os.getenv("LIQUIDITY_WARNING_MIN_OI", "200")),
+            liquidity_warning_max_spread_pct=float(os.getenv("LIQUIDITY_WARNING_MAX_SPREAD_PCT", "15.0")),
+            liquidity_warning_min_volume=int(os.getenv("LIQUIDITY_WARNING_MIN_VOLUME", "0")),
+            liquidity_excellent_min_oi=int(os.getenv("LIQUIDITY_EXCELLENT_MIN_OI", "1000")),
+            liquidity_excellent_max_spread_pct=float(os.getenv("LIQUIDITY_EXCELLENT_MAX_SPREAD_PCT", "8.0")),
+            liquidity_excellent_min_volume=int(os.getenv("LIQUIDITY_EXCELLENT_MIN_VOLUME", "100")),
             # Legacy (deprecated)
             min_open_interest=int(os.getenv("MIN_OPEN_INTEREST", "100")),
             max_spread_pct=float(os.getenv("MAX_SPREAD_PCT", "50.0")),

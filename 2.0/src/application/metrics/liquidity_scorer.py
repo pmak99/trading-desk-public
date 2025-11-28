@@ -163,15 +163,8 @@ class LiquidityScorer:
                 spread_score * weights['spread']
             )
 
-        # Determine liquidity tier
-        if overall >= 80:
-            tier = "excellent"
-        elif overall >= 65:
-            tier = "good"
-        elif overall >= 50:
-            tier = "fair"
-        else:
-            tier = "poor"
+        # Determine liquidity tier using 3-tier system (EXCELLENT/WARNING/REJECT)
+        tier = self._classify_tier(oi, volume, spread_pct)
 
         # Check if meets minimum standards
         is_liquid = (
@@ -193,6 +186,85 @@ class LiquidityScorer:
             is_liquid=is_liquid,
             liquidity_tier=tier,
         )
+
+    def _classify_tier(self, oi: int, volume: int, spread_pct: float) -> str:
+        """
+        Classify liquidity into 3-tier system (EXCELLENT/WARNING/REJECT).
+
+        This is the single source of truth for tier classification across all modes.
+        Uses strict threshold-based rules (not score-based) for consistency.
+
+        Args:
+            oi: Open interest
+            volume: Daily volume
+            spread_pct: Bid-ask spread percentage
+
+        Returns:
+            "EXCELLENT", "WARNING", or "REJECT"
+        """
+        # EXCELLENT tier: All metrics meet excellent thresholds
+        if (oi >= self.excellent_oi
+            and volume >= self.excellent_volume
+            and spread_pct <= self.excellent_spread_pct):
+            return "EXCELLENT"
+
+        # REJECT tier: Any metric fails minimum thresholds
+        if (oi < self.min_oi
+            or volume < self.min_volume
+            or spread_pct > self.max_spread_pct):
+            return "REJECT"
+
+        # WARNING tier: Meets minimums but not excellent
+        return "WARNING"
+
+    def classify_option_tier(self, option: OptionQuote) -> str:
+        """
+        Classify a single option's liquidity tier (public method).
+
+        Args:
+            option: Option quote with market data
+
+        Returns:
+            "EXCELLENT", "WARNING", or "REJECT"
+        """
+        oi = option.open_interest or 0
+        volume = option.volume or 0
+
+        if option.bid and option.ask:
+            spread = float(option.ask.amount - option.bid.amount)
+            mid = float(option.mid.amount)
+            spread_pct = (spread / mid * 100) if mid > 0 else 100.0
+        else:
+            spread_pct = 100.0
+
+        return self._classify_tier(oi, volume, spread_pct)
+
+    def classify_straddle_tier(self, call: OptionQuote, put: OptionQuote) -> str:
+        """
+        Classify liquidity tier for a straddle (call + put).
+
+        Uses the worse tier of the two legs to be conservative.
+
+        Args:
+            call: Call option quote
+            put: Put option quote
+
+        Returns:
+            "EXCELLENT", "WARNING", or "REJECT"
+        """
+        call_tier = self.classify_option_tier(call)
+        put_tier = self.classify_option_tier(put)
+
+        # Tier priority: REJECT > WARNING > EXCELLENT
+        # If either leg is REJECT, entire straddle is REJECT
+        if call_tier == "REJECT" or put_tier == "REJECT":
+            return "REJECT"
+        # If either leg is WARNING, entire straddle is WARNING
+        elif call_tier == "WARNING" or put_tier == "WARNING":
+            return "WARNING"
+        # Both are EXCELLENT
+        else:
+            return "EXCELLENT"
 
     def _redistribute_weights_without_depth(self) -> dict:
         """

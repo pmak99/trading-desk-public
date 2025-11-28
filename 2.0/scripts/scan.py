@@ -247,17 +247,15 @@ def get_ticker_name(ticker: str) -> Optional[str]:
 
 def check_liquidity_with_tier(ticker: str, expiration: date, container: Container) -> Tuple[bool, str]:
     """
-    Combined liquidity check with tier classification (OPTIMIZED with caching).
+    Check liquidity tier using LiquidityScorer (single source of truth).
 
-    This combines check_basic_liquidity() and get_liquidity_tier_for_display()
-    to reduce Tradier API calls by 50%. Returns both the pass/fail check and
-    the tier classification in a single API call. Results are cached to avoid
-    redundant API calls.
+    This is now a thin wrapper around the LiquidityScorer class, which provides
+    the single source of truth for all liquidity tier classification across all modes.
 
     Args:
         ticker: Stock ticker symbol
         expiration: Options expiration date
-        container: DI container for Tradier access
+        container: DI container for LiquidityScorer access
 
     Returns:
         Tuple of (has_liquidity: bool, tier: str)
@@ -298,34 +296,18 @@ def check_liquidity_with_tier(ticker: str, expiration: date, container: Containe
         mid_call = calls_list[len(calls_list) // 2][1]
         mid_put = puts_list[len(puts_list) // 2][1]
 
-        # Check thresholds
-        thresholds = container.config.thresholds
+        # Use LiquidityScorer to classify tier (single source of truth)
+        liquidity_scorer = container.liquidity_scorer
+        tier = liquidity_scorer.classify_straddle_tier(mid_call, mid_put)
 
-        # EXCELLENT tier check
-        if (mid_call.open_interest >= thresholds.liquidity_excellent_min_oi
-            and mid_put.open_interest >= thresholds.liquidity_excellent_min_oi
-            and mid_call.spread_pct <= thresholds.liquidity_excellent_max_spread_pct
-            and mid_put.spread_pct <= thresholds.liquidity_excellent_max_spread_pct
-            and mid_call.volume >= thresholds.liquidity_excellent_min_volume
-            and mid_put.volume >= thresholds.liquidity_excellent_min_volume):
-            logger.debug(f"{ticker}: EXCELLENT liquidity tier")
-            result = (True, "EXCELLENT")
-            _liquidity_cache[cache_key] = result
-            return result
+        # Determine if has acceptable liquidity (WARNING or EXCELLENT = True, REJECT = False)
+        has_liquidity = tier != "REJECT"
 
-        # REJECT tier check
-        if (mid_call.open_interest < thresholds.liquidity_reject_min_oi
-            or mid_put.open_interest < thresholds.liquidity_reject_min_oi
-            or mid_call.spread_pct > thresholds.liquidity_reject_max_spread_pct
-            or mid_put.spread_pct > thresholds.liquidity_reject_max_spread_pct):
-            logger.debug(f"{ticker}: REJECT liquidity tier")
-            result = (False, "REJECT")
-            _liquidity_cache[cache_key] = result
-            return result
+        logger.debug(f"{ticker}: {tier} liquidity tier (call OI={mid_call.open_interest}, put OI={mid_put.open_interest}, "
+                    f"call vol={mid_call.volume}, put vol={mid_put.volume}, "
+                    f"call spread={mid_call.spread_pct:.1f}%, put spread={mid_put.spread_pct:.1f}%)")
 
-        # Otherwise WARNING tier
-        logger.debug(f"{ticker}: WARNING liquidity tier")
-        result = (True, "WARNING")
+        result = (has_liquidity, tier)
         _liquidity_cache[cache_key] = result
         return result
 
@@ -356,21 +338,25 @@ def should_filter_ticker(
     check_liquidity: bool = True
 ) -> Tuple[bool, Optional[str], Optional[str]]:
     """
-    Determine if ticker should be filtered out based on market cap and liquidity (OPTIMIZED).
+    Determine if ticker should be filtered out based on market cap (LIQUIDITY NO LONGER FILTERS).
+
+    IMPORTANT: Liquidity tier is checked and returned for display purposes, but does NOT
+    cause filtering. All tradeable opportunities are shown regardless of liquidity tier,
+    with appropriate warnings in the output.
 
     Args:
         ticker: Stock ticker symbol
         expiration: Options expiration date
         container: DI container
         check_market_cap: Whether to check market cap threshold
-        check_liquidity: Whether to check liquidity threshold
+        check_liquidity: Whether to check liquidity tier (for display only, doesn't filter)
 
     Returns:
         (should_filter, reason, liquidity_tier) - True if should skip ticker, with reason and tier
     """
     liquidity_tier = None
 
-    # Check market cap
+    # Check market cap (still filters)
     if check_market_cap:
         market_cap_millions = get_market_cap_millions(ticker)
         if market_cap_millions is not None:
@@ -378,11 +364,11 @@ def should_filter_ticker(
             if market_cap_millions < min_market_cap:
                 return (True, f"Market cap ${market_cap_millions:.0f}M < ${min_market_cap:.0f}M", None)
 
-    # Check liquidity (get tier for later use)
+    # Check liquidity tier (for display only - does NOT filter anymore)
     if check_liquidity:
         has_liquidity, liquidity_tier = check_liquidity_with_tier(ticker, expiration, container)
-        if not has_liquidity:
-            return (True, "Insufficient liquidity", liquidity_tier)
+        # NOTE: We no longer filter based on liquidity tier
+        # All opportunities are shown with their tier displayed as a warning
 
     return (False, None, liquidity_tier)
 
@@ -1034,7 +1020,7 @@ def scanning_mode(
     logger.info(f"   Date: {scan_date}")
     logger.info(f"   Total Earnings Found: {len(earnings_events)}")
     logger.info(f"\n📊 Analysis Results:")
-    logger.info(f"   🔍 Filtered (Market Cap/Liquidity): {filtered_count}")
+    logger.info(f"   🔍 Filtered (Market Cap Only): {filtered_count}")
     logger.info(f"   ✓ Successfully Analyzed: {success_count}")
     logger.info(f"   ⏭️  Skipped (No Data): {skip_count}")
     logger.info(f"   ✗ Errors: {error_count}")
@@ -1215,7 +1201,7 @@ def ticker_mode(
     logger.info(f"   Tickers Requested: {len(tickers)}")
     logger.info(f"   Tickers Analyzed: {', '.join(tickers)}")
     logger.info(f"\n📊 Analysis Results:")
-    logger.info(f"   🔍 Filtered (Market Cap/Liquidity): {filtered_count}")
+    logger.info(f"   🔍 Filtered (Market Cap Only): {filtered_count}")
     logger.info(f"   ✓ Successfully Analyzed: {success_count}")
     logger.info(f"   ⏭️  Skipped (No Earnings/Data): {skip_count}")
     logger.info(f"   ✗ Errors: {error_count}")
@@ -1459,7 +1445,7 @@ def whisper_mode(
     logger.info(f"   Week: {monday.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
     logger.info(f"   Total Tickers: {len(tickers)}")
     logger.info(f"\n📊 Analysis Results:")
-    logger.info(f"   🔍 Filtered (Market Cap/Liquidity): {filtered_count}")
+    logger.info(f"   🔍 Filtered (Market Cap Only): {filtered_count}")
     logger.info(f"   ✓ Successfully Analyzed: {success_count}")
     logger.info(f"   ⏭️  Skipped (No Earnings/Data): {skip_count}")
     logger.info(f"   ✗ Errors: {error_count}")
