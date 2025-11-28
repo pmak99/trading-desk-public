@@ -264,20 +264,38 @@ class Container:
 
     @property
     def liquidity_scorer(self) -> LiquidityScorer:
-        """Get liquidity scorer."""
+        """
+        Get liquidity scorer with thresholds from config.
+
+        Uses the 3-tier system calibrated for 50-200 contract trades:
+        - EXCELLENT: High liquidity for smooth fills
+        - WARNING: Tradeable but watch for slippage
+        - REJECT: Truly untradeable
+        """
         if self._liquidity_scorer is None:
+            # Use config thresholds to ensure consistency across all modes
+            thresholds = self.config.thresholds
+
             self._liquidity_scorer = LiquidityScorer(
-                min_oi=50,
-                good_oi=500,
-                excellent_oi=2000,
-                min_volume=20,
-                good_volume=100,
-                excellent_volume=500,
-                max_spread_pct=10.0,
-                good_spread_pct=5.0,
-                excellent_spread_pct=2.0,
+                # REJECT tier (minimum acceptable)
+                min_oi=thresholds.liquidity_reject_min_oi,
+                min_volume=thresholds.liquidity_reject_min_volume,
+                max_spread_pct=thresholds.liquidity_reject_max_spread_pct,
+
+                # WARNING tier (good = WARNING in config)
+                good_oi=thresholds.liquidity_warning_min_oi,
+                good_volume=thresholds.liquidity_warning_min_volume,
+                good_spread_pct=thresholds.liquidity_warning_max_spread_pct,
+
+                # EXCELLENT tier
+                excellent_oi=thresholds.liquidity_excellent_min_oi,
+                excellent_volume=thresholds.liquidity_excellent_min_volume,
+                excellent_spread_pct=thresholds.liquidity_excellent_max_spread_pct,
             )
-            logger.debug("Created LiquidityScorer")
+            logger.debug(f"Created LiquidityScorer with config thresholds: "
+                        f"EXCELLENT={thresholds.liquidity_excellent_min_oi} OI, "
+                        f"WARNING={thresholds.liquidity_warning_min_oi} OI, "
+                        f"REJECT={thresholds.liquidity_reject_min_oi} OI")
         return self._liquidity_scorer
 
     @property
