@@ -15,6 +15,7 @@ import numpy as np
 from src.domain.types import Money, Percentage, Strike, OptionChain
 from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 from src.domain.protocols import OptionsDataProvider
+from src.domain.enums import DirectionalBias
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +32,11 @@ class SkewAnalysis:
         skew_atm: Skew at ATM (positive = puts expensive)
         curvature: Second derivative (smile vs smirk)
         strength: Classification (smile, smirk, flat)
-        directional_bias: Put bias vs call bias
+        directional_bias: Directional bias enum (7-level scale)
         confidence: Fit quality (R-squared)
         num_points: Number of data points used in fit
+        slope_atm: First derivative at ATM (for bias strength)
+        bias_confidence: Bias prediction confidence (0-1, R² adjusted by slope strength)
     """
     ticker: str
     expiration: date
@@ -41,9 +44,11 @@ class SkewAnalysis:
     skew_atm: Percentage
     curvature: float
     strength: str
-    directional_bias: str
+    directional_bias: DirectionalBias
     confidence: float
     num_points: int
+    slope_atm: float
+    bias_confidence: float
 
 
 class SkewAnalyzerEnhanced:
@@ -74,11 +79,15 @@ class SkewAnalyzerEnhanced:
     # Empirically derived from typical equity skew patterns
     SMILE_THRESHOLD = 1.0
 
-    # Directional bias threshold (in IV%/moneyness units)
-    # Slope > 0.5 indicates put bias (puts relatively more expensive)
-    # Slope < -0.5 indicates call bias (calls relatively more expensive)
+    # Directional bias thresholds (7-level scale, in IV%/moneyness units)
     # Based on typical single-stock skew slopes of 5-15% IV across 10% moneyness
-    DIRECTIONAL_BIAS_THRESHOLD = 0.5
+    THRESHOLD_NEUTRAL = 0.3   # |slope| <= 0.3 → NEUTRAL
+    THRESHOLD_WEAK = 0.8      # 0.3 < |slope| <= 0.8 → WEAK bias
+    THRESHOLD_STRONG = 1.5    # |slope| > 1.5 → STRONG bias
+
+    # Bias confidence thresholds
+    MIN_CONFIDENCE = 0.3      # Minimum confidence to trust bias signal
+    MAX_TYPICAL_SLOPE = 2.0   # Maximum typical slope for normalization
 
     def __init__(self, provider: OptionsDataProvider):
         self.provider = provider
@@ -249,13 +258,40 @@ class SkewAnalyzerEnhanced:
         else:
             strength = "smirk"  # Normal asymmetric skew
 
-        # Determine directional bias
-        if slope_atm > self.DIRECTIONAL_BIAS_THRESHOLD:
-            directional_bias = "put_bias"  # Puts more expensive as we go OTM
-        elif slope_atm < -self.DIRECTIONAL_BIAS_THRESHOLD:
-            directional_bias = "call_bias"  # Calls more expensive as we go OTM
-        else:
-            directional_bias = "neutral"
+        # Determine directional bias with 7-level strength scale
+        abs_slope = abs(slope_atm)
+
+        if abs_slope <= self.THRESHOLD_NEUTRAL:
+            directional_bias = DirectionalBias.NEUTRAL
+        elif slope_atm > 0:  # Positive slope = put bias (puts more expensive)
+            if abs_slope > self.THRESHOLD_STRONG:
+                directional_bias = DirectionalBias.STRONG_BEARISH
+            elif abs_slope > self.THRESHOLD_WEAK:
+                directional_bias = DirectionalBias.BEARISH
+            else:  # THRESHOLD_NEUTRAL < abs_slope <= THRESHOLD_WEAK
+                directional_bias = DirectionalBias.WEAK_BEARISH
+        else:  # Negative slope = call bias (calls more expensive)
+            if abs_slope > self.THRESHOLD_STRONG:
+                directional_bias = DirectionalBias.STRONG_BULLISH
+            elif abs_slope > self.THRESHOLD_WEAK:
+                directional_bias = DirectionalBias.BULLISH
+            else:  # THRESHOLD_NEUTRAL < abs_slope <= THRESHOLD_WEAK
+                directional_bias = DirectionalBias.WEAK_BULLISH
+
+        # Calculate bias confidence (R² adjusted by slope strength)
+        # Normalize slope strength based on typical slope range
+        slope_strength = min(1.0, abs_slope / self.MAX_TYPICAL_SLOPE)
+        bias_confidence = r_squared * slope_strength
+
+        # If confidence is too low, force NEUTRAL
+        # Keep original bias_confidence to distinguish weak signal from true neutral
+        if bias_confidence < self.MIN_CONFIDENCE and directional_bias != DirectionalBias.NEUTRAL:
+            logger.debug(
+                f"{ticker}: Low bias confidence {bias_confidence:.2f}, "
+                f"forcing NEUTRAL (was {directional_bias.value})"
+            )
+            directional_bias = DirectionalBias.NEUTRAL
+            # Keep bias_confidence as-is to preserve signal strength information
 
         return SkewAnalysis(
             ticker=ticker,
@@ -266,5 +302,7 @@ class SkewAnalyzerEnhanced:
             strength=strength,
             directional_bias=directional_bias,
             confidence=r_squared,
-            num_points=len(points)
+            num_points=len(points),
+            slope_atm=slope_atm,
+            bias_confidence=bias_confidence,
         )

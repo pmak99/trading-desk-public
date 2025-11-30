@@ -73,8 +73,59 @@ class StrategyType(Enum):
 
 
 class DirectionalBias(Enum):
-    """Market directional bias from skew analysis."""
+    """
+    Market directional bias from skew analysis with strength levels.
 
-    BULLISH = "bullish"      # Calls relatively cheaper (positive skew)
-    BEARISH = "bearish"      # Puts relatively cheaper (negative skew)
-    NEUTRAL = "neutral"      # Balanced IV between puts and calls
+    Thresholds are defined in SkewAnalyzerEnhanced:
+    - THRESHOLD_NEUTRAL = 0.3   (|slope| <= 0.3 → NEUTRAL)
+    - THRESHOLD_WEAK = 0.8      (0.3 < |slope| <= 0.8 → WEAK)
+    - THRESHOLD_STRONG = 1.5    (|slope| > 1.5 → STRONG)
+    - Default (0.8 < |slope| <= 1.5) → MODERATE (no prefix)
+    """
+
+    STRONG_BEARISH = "strong_bearish"    # |slope| > THRESHOLD_STRONG, slope > 0 (puts very expensive)
+    BEARISH = "bearish"                  # THRESHOLD_WEAK < |slope| <= THRESHOLD_STRONG, slope > 0
+    WEAK_BEARISH = "weak_bearish"        # THRESHOLD_NEUTRAL < |slope| <= THRESHOLD_WEAK, slope > 0
+    NEUTRAL = "neutral"                  # |slope| <= THRESHOLD_NEUTRAL (balanced IV)
+    WEAK_BULLISH = "weak_bullish"        # THRESHOLD_NEUTRAL < |slope| <= THRESHOLD_WEAK, slope < 0
+    BULLISH = "bullish"                  # THRESHOLD_WEAK < |slope| <= THRESHOLD_STRONG, slope < 0
+    STRONG_BULLISH = "strong_bullish"    # |slope| > THRESHOLD_STRONG, slope < 0 (calls very expensive)
+
+    def is_bullish(self) -> bool:
+        """Check if bias is bullish (any strength)."""
+        return self in {
+            DirectionalBias.WEAK_BULLISH,
+            DirectionalBias.BULLISH,
+            DirectionalBias.STRONG_BULLISH,
+        }
+
+    def is_bearish(self) -> bool:
+        """Check if bias is bearish (any strength)."""
+        return self in {
+            DirectionalBias.WEAK_BEARISH,
+            DirectionalBias.BEARISH,
+            DirectionalBias.STRONG_BEARISH,
+        }
+
+    def is_neutral(self) -> bool:
+        """Check if bias is neutral."""
+        return self == DirectionalBias.NEUTRAL
+
+    def strength(self) -> int:
+        """
+        Return bias strength level.
+
+        Returns:
+            0 = NEUTRAL
+            1 = WEAK
+            2 = MODERATE (no prefix)
+            3 = STRONG
+        """
+        if self == DirectionalBias.NEUTRAL:
+            return 0
+        elif self in {DirectionalBias.WEAK_BULLISH, DirectionalBias.WEAK_BEARISH}:
+            return 1
+        elif self in {DirectionalBias.BULLISH, DirectionalBias.BEARISH}:
+            return 2
+        else:  # STRONG
+            return 3

@@ -44,6 +44,16 @@ class StrategyGenerator:
     based on VRP analysis and market conditions.
     """
 
+    # Delta adjustment magnitudes for asymmetric positioning
+    DELTA_ADJUSTMENT_STRONG = 0.10    # ±10Δ for STRONG bias
+    DELTA_ADJUSTMENT_MODERATE = 0.05  # ±5Δ for MODERATE bias
+    DELTA_ADJUSTMENT_WEAK = 0.02      # ±2Δ for WEAK bias
+
+    # Delta bounds and spread requirements
+    MIN_DELTA = 0.10        # Minimum delta (10Δ, far OTM)
+    MAX_DELTA = 0.40        # Maximum delta (40Δ, closer to ATM)
+    MIN_SPREAD = 0.05       # Minimum delta spread between short and long
+
     def __init__(self, config: StrategyConfig, liquidity_scorer: LiquidityScorer):
         """
         Initialize strategy generator with configuration.
@@ -131,29 +141,37 @@ class StrategyGenerator:
 
     def _determine_bias(self, skew: Optional[SkewResult]) -> DirectionalBias:
         """
-        Determine directional bias from IV skew.
+        Determine directional bias from IV skew with 7-level strength scale.
 
         Args:
             skew: Skew analysis (optional)
 
         Returns:
-            DirectionalBias enum
+            DirectionalBias enum (7 levels)
         """
         if not skew:
             return DirectionalBias.NEUTRAL
 
-        # Handle both old SkewResult and new SkewAnalysis types
-        # SkewResult has: direction = 'bearish', 'bullish', 'neutral'
-        # SkewAnalysis has: directional_bias = 'put_bias', 'call_bias', 'neutral'
-
-        # Try new SkewAnalysis format first
+        # Handle SkewAnalysis with DirectionalBias enum (new format)
         if hasattr(skew, 'directional_bias'):
-            if skew.directional_bias == 'put_bias':
-                return DirectionalBias.BEARISH
-            elif skew.directional_bias == 'call_bias':
-                return DirectionalBias.BULLISH
-            else:
-                return DirectionalBias.NEUTRAL
+            # Already an enum, return directly
+            if isinstance(skew.directional_bias, DirectionalBias):
+                return skew.directional_bias
+
+            # Legacy string support (backward compatibility)
+            bias_str = skew.directional_bias
+            bias_map = {
+                'strong_bearish': DirectionalBias.STRONG_BEARISH,
+                'bearish': DirectionalBias.BEARISH,
+                'weak_bearish': DirectionalBias.WEAK_BEARISH,
+                'neutral': DirectionalBias.NEUTRAL,
+                'weak_bullish': DirectionalBias.WEAK_BULLISH,
+                'bullish': DirectionalBias.BULLISH,
+                'strong_bullish': DirectionalBias.STRONG_BULLISH,
+                'put_bias': DirectionalBias.BEARISH,
+                'call_bias': DirectionalBias.BULLISH,
+            }
+            return bias_map.get(bias_str, DirectionalBias.NEUTRAL)
 
         # Fallback to old SkewResult format
         elif hasattr(skew, 'direction'):
@@ -170,26 +188,34 @@ class StrategyGenerator:
         self, vrp: VRPResult, bias: DirectionalBias
     ) -> List[StrategyType]:
         """
-        Select 2-3 strategy types based on VRP and bias.
+        Select 2-3 strategy types based on VRP and bias (7-level scale).
 
         Logic:
         - Very High VRP (>2.5) + Neutral: Include iron butterfly
         - High VRP (>2.0): Include iron condor + both spreads
         - Moderate VRP (1.5-2.0): Include directional spread + iron condor
-        - Bullish: Prefer bull put spread
-        - Bearish: Prefer bear call spread
-        - Neutral: Prefer iron condor/butterfly
+        - Bias strength affects strategy mix:
+          * STRONG (3): Skip opposite-direction spread entirely
+          * MODERATE (2): Include all strategies but prioritize aligned spread
+          * WEAK (1): Treat similar to neutral
+          * NEUTRAL (0): Equal weighting
 
         Args:
             vrp: VRP analysis
-            bias: Directional bias
+            bias: Directional bias (7-level scale)
 
         Returns:
             List of 2-3 strategy types to generate
         """
         types = []
 
-        if vrp.vrp_ratio >= 2.5 and bias == DirectionalBias.NEUTRAL:
+        # Use enum helper methods
+        is_bullish = bias.is_bullish()
+        is_bearish = bias.is_bearish()
+        is_neutral = bias.is_neutral()
+        strength = bias.strength()  # 0=NEUTRAL, 1=WEAK, 2=MODERATE, 3=STRONG
+
+        if vrp.vrp_ratio >= 2.5 and is_neutral:
             # Very high VRP + neutral = iron butterfly optimal
             types = [
                 StrategyType.IRON_BUTTERFLY,
@@ -197,43 +223,77 @@ class StrategyGenerator:
                 StrategyType.BULL_PUT_SPREAD,
             ]
         elif vrp.vrp_ratio >= 2.0:
-            # Excellent VRP - all strategies viable
-            if bias == DirectionalBias.NEUTRAL:
+            # Excellent VRP - strategy mix depends on bias strength
+            if is_neutral or strength == 1:
+                # NEUTRAL or WEAK bias: include all strategies
                 types = [
                     StrategyType.IRON_CONDOR,
                     StrategyType.BULL_PUT_SPREAD,
                     StrategyType.BEAR_CALL_SPREAD,
                 ]
-            elif bias == DirectionalBias.BULLISH:
-                types = [
-                    StrategyType.BULL_PUT_SPREAD,
-                    StrategyType.IRON_CONDOR,
-                    StrategyType.BEAR_CALL_SPREAD,
-                ]
-            else:  # BEARISH
-                types = [
-                    StrategyType.BEAR_CALL_SPREAD,
-                    StrategyType.IRON_CONDOR,
-                    StrategyType.BULL_PUT_SPREAD,
-                ]
+            elif is_bullish:
+                if strength == 3:
+                    # STRONG BULLISH: skip bearish spread
+                    types = [
+                        StrategyType.BULL_PUT_SPREAD,
+                        StrategyType.IRON_CONDOR,
+                    ]
+                else:
+                    # MODERATE BULLISH: include all but prioritize bullish
+                    types = [
+                        StrategyType.BULL_PUT_SPREAD,
+                        StrategyType.IRON_CONDOR,
+                        StrategyType.BEAR_CALL_SPREAD,
+                    ]
+            else:  # is_bearish
+                if strength == 3:
+                    # STRONG BEARISH: skip bullish spread
+                    types = [
+                        StrategyType.BEAR_CALL_SPREAD,
+                        StrategyType.IRON_CONDOR,
+                    ]
+                else:
+                    # MODERATE BEARISH: include all but prioritize bearish
+                    types = [
+                        StrategyType.BEAR_CALL_SPREAD,
+                        StrategyType.IRON_CONDOR,
+                        StrategyType.BULL_PUT_SPREAD,
+                    ]
 
         elif vrp.vrp_ratio >= 1.5:
-            # Good VRP - 2 strategies
-            if bias == DirectionalBias.NEUTRAL:
+            # Good VRP - 2 strategies, strength affects hedging
+            if is_neutral or strength == 1:
+                # NEUTRAL or WEAK: neutral strategies
                 types = [StrategyType.IRON_CONDOR, StrategyType.BULL_PUT_SPREAD]
-            elif bias == DirectionalBias.BULLISH:
-                types = [StrategyType.BULL_PUT_SPREAD, StrategyType.IRON_CONDOR]
-            else:  # BEARISH
-                types = [StrategyType.BEAR_CALL_SPREAD, StrategyType.IRON_CONDOR]
+            elif is_bullish:
+                if strength == 3:
+                    # STRONG BULLISH: only aligned strategies
+                    types = [StrategyType.BULL_PUT_SPREAD, StrategyType.IRON_CONDOR]
+                else:
+                    # MODERATE BULLISH: same as before
+                    types = [StrategyType.BULL_PUT_SPREAD, StrategyType.IRON_CONDOR]
+            else:  # is_bearish
+                if strength == 3:
+                    # STRONG BEARISH: only aligned strategies
+                    types = [StrategyType.BEAR_CALL_SPREAD, StrategyType.IRON_CONDOR]
+                else:
+                    # MODERATE BEARISH: same as before
+                    types = [StrategyType.BEAR_CALL_SPREAD, StrategyType.IRON_CONDOR]
 
         else:
             # Marginal VRP - single best strategy
-            if bias == DirectionalBias.BULLISH:
+            if is_bullish:
                 types = [StrategyType.BULL_PUT_SPREAD]
-            elif bias == DirectionalBias.BEARISH:
+            elif is_bearish:
                 types = [StrategyType.BEAR_CALL_SPREAD]
             else:
                 types = [StrategyType.BULL_PUT_SPREAD]  # Default to bull put
+
+        logger.debug(
+            f"Strategy selection: VRP={vrp.vrp_ratio:.2f}, "
+            f"Bias={bias.value} (strength={strength}), "
+            f"Selected={[t.value for t in types]}"
+        )
 
         return types
 
@@ -253,22 +313,117 @@ class StrategyGenerator:
             strategy_type: Type of strategy to build
             option_chain: Options chain
             vrp: VRP analysis
-            bias: Directional bias
+            bias: Directional bias (used for asymmetric strike placement)
 
         Returns:
             Complete Strategy object or None if not viable
         """
         if strategy_type == StrategyType.BULL_PUT_SPREAD:
-            return self._build_bull_put_spread(ticker, option_chain, vrp)
+            return self._build_bull_put_spread(ticker, option_chain, vrp, bias)
         elif strategy_type == StrategyType.BEAR_CALL_SPREAD:
-            return self._build_bear_call_spread(ticker, option_chain, vrp)
+            return self._build_bear_call_spread(ticker, option_chain, vrp, bias)
         elif strategy_type == StrategyType.IRON_CONDOR:
-            return self._build_iron_condor(ticker, option_chain, vrp)
+            return self._build_iron_condor(ticker, option_chain, vrp, bias)
         elif strategy_type == StrategyType.IRON_BUTTERFLY:
             return self._build_iron_butterfly(ticker, option_chain, vrp)
         else:
             logger.warning(f"{ticker}: Strategy type {strategy_type} not implemented")
             return None
+
+    def _get_asymmetric_deltas(
+        self,
+        option_type: OptionType,
+        bias: DirectionalBias,
+    ) -> Tuple[float, float]:
+        """
+        Calculate asymmetric delta targets based on directional bias.
+
+        Strategy:
+        - BULLISH bias → Put spread safer (lower delta), Call spread riskier (higher delta)
+        - BEARISH bias → Call spread safer (lower delta), Put spread riskier (higher delta)
+        - NEUTRAL → Balanced deltas
+        - Strength determines magnitude of adjustment
+
+        Args:
+            option_type: PUT or CALL
+            bias: Directional bias with strength
+
+        Returns:
+            Tuple of (target_delta_short, target_delta_long)
+        """
+        # Default balanced deltas (from config)
+        base_short = self.config.target_delta_short  # 0.25
+        base_long = self.config.target_delta_long    # 0.20
+
+        # Delta adjustments based on bias strength
+        adjustment = 0.0
+
+        if bias in {DirectionalBias.STRONG_BULLISH, DirectionalBias.STRONG_BEARISH}:
+            adjustment = self.DELTA_ADJUSTMENT_STRONG
+        elif bias in {DirectionalBias.BULLISH, DirectionalBias.BEARISH}:
+            adjustment = self.DELTA_ADJUSTMENT_MODERATE
+        elif bias in {DirectionalBias.WEAK_BULLISH, DirectionalBias.WEAK_BEARISH}:
+            adjustment = self.DELTA_ADJUSTMENT_WEAK
+        else:  # NEUTRAL
+            adjustment = 0.0
+
+        # Apply adjustment based on bias direction
+        is_bullish = bias in {DirectionalBias.WEAK_BULLISH, DirectionalBias.BULLISH, DirectionalBias.STRONG_BULLISH}
+        is_bearish = bias in {DirectionalBias.WEAK_BEARISH, DirectionalBias.BEARISH, DirectionalBias.STRONG_BEARISH}
+
+        if option_type == OptionType.PUT:
+            # Put spread
+            if is_bullish:
+                # Bullish bias → put spread safer (lower delta = further OTM)
+                delta_short = base_short - adjustment
+                delta_long = base_long - adjustment
+            elif is_bearish:
+                # Bearish bias → put spread riskier (higher delta = closer to ATM)
+                delta_short = base_short + adjustment
+                delta_long = base_long + adjustment
+            else:
+                delta_short = base_short
+                delta_long = base_long
+        else:  # CALL
+            # Call spread
+            if is_bearish:
+                # Bearish bias → call spread safer (lower delta = further OTM)
+                delta_short = base_short - adjustment
+                delta_long = base_long - adjustment
+            elif is_bullish:
+                # Bullish bias → call spread riskier (higher delta = closer to ATM)
+                delta_short = base_short + adjustment
+                delta_long = base_long + adjustment
+            else:
+                delta_short = base_short
+                delta_long = base_long
+
+        # Enforce spread BEFORE clamping (critical order!)
+        # Ensure long is always lower delta than short (further OTM)
+        if delta_long >= delta_short:
+            delta_long = delta_short - self.MIN_SPREAD
+
+        # NOW clamp to valid ranges (after spread is enforced)
+        delta_short = max(self.MIN_DELTA, min(self.MAX_DELTA, delta_short))
+        delta_long = max(self.MIN_DELTA, min(self.MAX_DELTA, delta_long))
+
+        # Final safety check: clamping might have violated spread
+        if delta_long >= delta_short:
+            logger.warning(
+                f"Delta conflict after clamping: short={delta_short:.2f}, "
+                f"long={delta_long:.2f}. Using fallback deltas."
+            )
+            # Fallback to safe defaults
+            delta_short = 0.25
+            delta_long = 0.20
+
+        logger.debug(
+            f"Asymmetric deltas: {option_type.value} {bias.value} → "
+            f"short={delta_short:.2f}Δ, long={delta_long:.2f}Δ "
+            f"(adjustment={adjustment:+.2f})"
+        )
+
+        return delta_short, delta_long
 
     def _build_vertical_spread(
         self,
@@ -277,10 +432,11 @@ class StrategyGenerator:
         vrp: VRPResult,
         option_type: OptionType,
         strategy_type: StrategyType,
-        below: bool
+        below: bool,
+        bias: DirectionalBias
     ) -> Optional[Strategy]:
         """
-        Build a vertical credit spread (common logic for bull put and bear call).
+        Build a vertical credit spread with asymmetric strike placement based on bias.
 
         Args:
             ticker: Ticker symbol
@@ -289,12 +445,20 @@ class StrategyGenerator:
             option_type: PUT or CALL
             strategy_type: BULL_PUT_SPREAD or BEAR_CALL_SPREAD
             below: True for put spread (below price), False for call spread (above)
+            bias: Directional bias for asymmetric positioning
 
         Returns:
             Strategy or None if construction fails
         """
+        # Calculate asymmetric delta targets based on bias
+        target_delta_short, target_delta_long = self._get_asymmetric_deltas(
+            option_type, bias
+        )
+
         # Try delta-based selection first (more precise if Greeks available)
-        strikes = self._select_strikes_delta_based(option_chain, option_type)
+        strikes = self._select_strikes_delta_based(
+            option_chain, option_type, target_delta_short, target_delta_long
+        )
 
         # Verify delta-based strikes are outside implied move zone
         if strikes:
@@ -398,43 +562,45 @@ class StrategyGenerator:
         )
 
     def _build_bull_put_spread(
-        self, ticker: str, option_chain: OptionChain, vrp: VRPResult
+        self, ticker: str, option_chain: OptionChain, vrp: VRPResult, bias: DirectionalBias
     ) -> Optional[Strategy]:
-        """Build bull put spread (credit spread below price)."""
+        """Build bull put spread (credit spread below price) with asymmetric positioning."""
         return self._build_vertical_spread(
             ticker=ticker,
             option_chain=option_chain,
             vrp=vrp,
             option_type=OptionType.PUT,
             strategy_type=StrategyType.BULL_PUT_SPREAD,
-            below=True
+            below=True,
+            bias=bias
         )
 
     def _build_bear_call_spread(
-        self, ticker: str, option_chain: OptionChain, vrp: VRPResult
+        self, ticker: str, option_chain: OptionChain, vrp: VRPResult, bias: DirectionalBias
     ) -> Optional[Strategy]:
-        """Build bear call spread (credit spread above price)."""
+        """Build bear call spread (credit spread above price) with asymmetric positioning."""
         return self._build_vertical_spread(
             ticker=ticker,
             option_chain=option_chain,
             vrp=vrp,
             option_type=OptionType.CALL,
             strategy_type=StrategyType.BEAR_CALL_SPREAD,
-            below=False
+            below=False,
+            bias=bias
         )
 
     def _build_iron_condor(
-        self, ticker: str, option_chain: OptionChain, vrp: VRPResult
+        self, ticker: str, option_chain: OptionChain, vrp: VRPResult, bias: DirectionalBias
     ) -> Optional[Strategy]:
-        """Build iron condor (put spread + call spread)."""
+        """Build iron condor (put spread + call spread) with asymmetric positioning."""
 
         # Build put spread (lower side)
-        put_spread = self._build_bull_put_spread(ticker, option_chain, vrp)
+        put_spread = self._build_bull_put_spread(ticker, option_chain, vrp, bias)
         if not put_spread:
             return None
 
         # Build call spread (upper side)
-        call_spread = self._build_bear_call_spread(ticker, option_chain, vrp)
+        call_spread = self._build_bear_call_spread(ticker, option_chain, vrp, bias)
         if not call_spread:
             return None
 
