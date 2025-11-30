@@ -1041,11 +1041,15 @@ class StrategyGenerator:
         legs: List[StrategyLeg]
     ) -> dict:
         """
-        Calculate liquidity metrics for all strategy legs.
+        Calculate liquidity metrics for strategy (package order optimized).
 
-        Evaluates liquidity quality across all legs and returns the WORST tier
-        to ensure conservative risk assessment (a strategy is only as liquid as
-        its least liquid leg).
+        For package orders (spreads/condors traded as single order), only SHORT legs
+        matter for liquidity. Short strikes determine premium collected and fill quality.
+        Long strikes are cheap protection - their liquidity is less important.
+
+        Strategy types:
+        - Vertical spreads (bull put, bear call): Check SHORT leg only
+        - Iron condors/butterflies: Check BOTH short legs, use worst
 
         Args:
             ticker: Ticker symbol (for logging)
@@ -1055,8 +1059,8 @@ class StrategyGenerator:
         Returns:
             Dict with:
             - liquidity_tier: "EXCELLENT", "WARNING", or "REJECT"
-            - min_open_interest: Minimum OI across all legs
-            - max_spread_pct: Maximum spread % across all legs
+            - min_open_interest: Minimum OI across SHORT legs only
+            - max_spread_pct: Maximum spread % across SHORT legs only
         """
         # Guard clause: Empty legs should never happen, but be defensive
         if not legs:
@@ -1067,12 +1071,23 @@ class StrategyGenerator:
                 'max_spread_pct': 100.0,
             }
 
+        # For package orders: Only evaluate SHORT legs (where premium is collected)
+        short_legs = [leg for leg in legs if leg.is_short]
+
+        if not short_legs:
+            logger.warning(f"{ticker}: No short legs found in strategy")
+            return {
+                'liquidity_tier': "REJECT",
+                'min_open_interest': 0,
+                'max_spread_pct': 100.0,
+            }
+
         tiers = []
         oi_values = []
         spread_pcts = []
 
-        for leg in legs:
-            # Get the quote for this leg
+        for leg in short_legs:
+            # Get the quote for this SHORT leg
             chain = option_chain.calls if leg.option_type == OptionType.CALL else option_chain.puts
             quote = chain.get(leg.strike)
 
@@ -1091,7 +1106,7 @@ class StrategyGenerator:
             oi_values.append(quote.open_interest or 0)
             spread_pcts.append(self.liquidity_scorer.calculate_spread_pct(quote))
 
-        # Overall tier = worst tier (most conservative)
+        # Overall tier = worst tier of SHORT legs only
         # Priority: REJECT > WARNING > EXCELLENT
         if "REJECT" in tiers:
             overall_tier = "REJECT"
@@ -1104,8 +1119,8 @@ class StrategyGenerator:
         max_spread = max(spread_pcts)
 
         logger.debug(
-            f"{ticker}: Strategy liquidity: {overall_tier} "
-            f"(min_oi={min_oi}, max_spread={max_spread:.1f}%)"
+            f"{ticker}: Strategy liquidity (SHORT legs only): {overall_tier} "
+            f"(min_oi={min_oi}, max_spread={max_spread:.1f}%, {len(short_legs)} short legs checked)"
         )
 
         return {
