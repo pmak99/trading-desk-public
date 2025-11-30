@@ -6,10 +6,13 @@ All configuration is immutable and validated at startup.
 """
 
 import os
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -175,10 +178,14 @@ class StrategyConfig:
 
     # Strike selection - Delta-based (probability-based)
     target_delta_short: float = 0.25  # Sell 25-delta (75% POP, balanced approach)
-    target_delta_long: float = 0.25   # Not used - fixed dollar width instead
 
-    # Strike selection - Distance-based (fallback)
-    spread_width_percent: float = 0.03  # Deprecated - using fixed widths instead
+    # DEPRECATED: Long strike selection now uses fixed dollar width
+    # TODO(v3.0): Remove this parameter - kept for backward compatibility only
+    target_delta_long: float = 0.25
+
+    # DEPRECATED: Spread width now uses fixed dollar amounts
+    # TODO(v3.0): Remove this parameter - kept for backward compatibility only
+    spread_width_percent: float = 0.03
 
     # Spread width - Fixed dollar amounts (user strategy)
     spread_width_high_price: float = 5.0  # $5 for stocks >= $20
@@ -393,6 +400,20 @@ class Config:
             ),
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", "30")),
         )
+
+        # Check for deprecated env vars and warn users
+        if os.getenv("TARGET_DELTA_LONG") and os.getenv("TARGET_DELTA_LONG") != "0.25":
+            logger.warning(
+                "TARGET_DELTA_LONG is deprecated and ignored. "
+                "Long strike selection now uses fixed dollar spread widths. "
+                "Use SPREAD_WIDTH_HIGH_PRICE and SPREAD_WIDTH_LOW_PRICE instead."
+            )
+
+        if os.getenv("SPREAD_WIDTH_PERCENT") and os.getenv("SPREAD_WIDTH_PERCENT") != "0.03":
+            logger.warning(
+                "SPREAD_WIDTH_PERCENT is deprecated and ignored. "
+                "Use SPREAD_WIDTH_HIGH_PRICE (default $5) and SPREAD_WIDTH_LOW_PRICE (default $3) instead."
+            )
 
         # Strategy configuration
         strategy = StrategyConfig(
