@@ -174,14 +174,19 @@ class StrategyConfig:
     """
 
     # Strike selection - Delta-based (probability-based)
-    target_delta_short: float = 0.30  # Sell 30-delta (70% POP)
-    target_delta_long: float = 0.20   # Buy 20-delta (80% protection)
+    target_delta_short: float = 0.25  # Sell 25-delta (75% POP, balanced approach)
+    target_delta_long: float = 0.25   # Not used - fixed dollar width instead
 
     # Strike selection - Distance-based (fallback)
-    spread_width_percent: float = 0.03  # 3% of stock price
+    spread_width_percent: float = 0.03  # Deprecated - using fixed widths instead
+
+    # Spread width - Fixed dollar amounts (user strategy)
+    spread_width_high_price: float = 5.0  # $5 for stocks >= $20
+    spread_width_low_price: float = 3.0   # $3 for stocks < $20
+    spread_width_threshold: float = 20.0  # Price threshold
 
     # Quality filters
-    min_credit_per_spread: float = 0.25  # $0.25 minimum credit
+    min_credit_per_spread: float = 0.20  # $0.20 minimum credit (balanced for 25-delta)
     min_reward_risk: float = 0.25  # Minimum 1:4 ratio (25% reward/risk)
 
     # Position sizing
@@ -391,10 +396,13 @@ class Config:
 
         # Strategy configuration
         strategy = StrategyConfig(
-            target_delta_short=float(os.getenv("TARGET_DELTA_SHORT", "0.30")),
-            target_delta_long=float(os.getenv("TARGET_DELTA_LONG", "0.20")),
+            target_delta_short=float(os.getenv("TARGET_DELTA_SHORT", "0.25")),
+            target_delta_long=float(os.getenv("TARGET_DELTA_LONG", "0.25")),
             spread_width_percent=float(os.getenv("SPREAD_WIDTH_PERCENT", "0.03")),
-            min_credit_per_spread=float(os.getenv("MIN_CREDIT_PER_SPREAD", "0.25")),
+            spread_width_high_price=float(os.getenv("SPREAD_WIDTH_HIGH_PRICE", "5.0")),
+            spread_width_low_price=float(os.getenv("SPREAD_WIDTH_LOW_PRICE", "3.0")),
+            spread_width_threshold=float(os.getenv("SPREAD_WIDTH_THRESHOLD", "20.0")),
+            min_credit_per_spread=float(os.getenv("MIN_CREDIT_PER_SPREAD", "0.20")),
             min_reward_risk=float(os.getenv("MIN_REWARD_RISK", "0.25")),
             risk_budget_per_trade=float(os.getenv("RISK_BUDGET_PER_TRADE", "20000.0")),
             max_contracts=int(os.getenv("MAX_CONTRACTS", "100")),

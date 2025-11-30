@@ -795,8 +795,13 @@ class StrategyGenerator:
         # Add 10% buffer beyond implied move
         buffer = implied_move_dollars * 0.10
 
-        # Spread width (configurable % of stock price or $5, whichever is larger)
-        spread_width = max(stock_price * self.config.spread_width_percent, 5.0)
+        # Spread width - Fixed dollar amounts based on stock price (user strategy)
+        # >= $20: Use $5 spread width
+        # < $20:  Use $3 spread width
+        if stock_price >= self.config.spread_width_threshold:
+            spread_width = self.config.spread_width_high_price
+        else:
+            spread_width = self.config.spread_width_low_price
 
         if below:
             # Put spread: Position below lower bound
