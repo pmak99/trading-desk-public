@@ -397,6 +397,10 @@ analyze_single() {
         expiration=$(calculate_expiration "$earnings_date")
     fi
 
+    # Store bias prediction for later validation (silent, non-blocking)
+    # This builds our accuracy tracking dataset over time
+    python scripts/store_bias_prediction.py "$ticker" >/dev/null 2>&1 || true
+
     # Run analysis with strategy generation
     # Capture full output to check for missing data error
     local analysis_output
@@ -573,6 +577,12 @@ show_summary() {
     # No additional summary needed
     :
 }
+
+# Validate past bias predictions (silent, non-blocking)
+# Run once per session to check if any predictions need validation
+if [[ "${1:-}" != "help" && "${1:-}" != "--help" && "${1:-}" != "-h" && "${1:-}" != "health" ]]; then
+    python scripts/validate_bias_predictions.py >/dev/null 2>&1 || true
+fi
 
 # Main logic
 case "${1:-}" in
