@@ -31,6 +31,7 @@ from src.domain.enums import (
 )
 from src.config.config import StrategyConfig
 from src.domain.scoring import StrategyScorer
+from src.application.metrics.liquidity_scorer import LiquidityScorer
 
 logger = logging.getLogger(__name__)
 
@@ -43,15 +44,17 @@ class StrategyGenerator:
     based on VRP analysis and market conditions.
     """
 
-    def __init__(self, config: StrategyConfig):
+    def __init__(self, config: StrategyConfig, liquidity_scorer: LiquidityScorer):
         """
         Initialize strategy generator with configuration.
 
         Args:
             config: Strategy configuration with all parameters
+            liquidity_scorer: Liquidity scorer for evaluating option liquidity
         """
         self.config = config
         self.scorer = StrategyScorer(config.scoring_weights)
+        self.liquidity_scorer = liquidity_scorer
 
     def generate_strategies(
         self,
@@ -90,6 +93,14 @@ class StrategyGenerator:
                     ticker, strategy_type, option_chain, vrp, bias
                 )
                 if strategy:
+                    # Calculate and populate liquidity metrics
+                    liquidity_metrics = self._calculate_strategy_liquidity(
+                        ticker, option_chain, strategy.legs
+                    )
+                    strategy.liquidity_tier = liquidity_metrics['liquidity_tier']
+                    strategy.min_open_interest = liquidity_metrics['min_open_interest']
+                    strategy.max_spread_pct = liquidity_metrics['max_spread_pct']
+
                     strategies.append(strategy)
             except Exception as e:
                 logger.warning(f"{ticker}: Failed to build {strategy_type.value}: {e}")
@@ -1021,5 +1032,85 @@ class StrategyGenerator:
             'gamma': combine_greek(spread1.position_gamma, spread2.position_gamma),
             'theta': combine_greek(spread1.position_theta, spread2.position_theta),
             'vega': combine_greek(spread1.position_vega, spread2.position_vega),
+        }
+
+    def _calculate_strategy_liquidity(
+        self,
+        ticker: str,
+        option_chain: OptionChain,
+        legs: List[StrategyLeg]
+    ) -> dict:
+        """
+        Calculate liquidity metrics for all strategy legs.
+
+        Evaluates liquidity quality across all legs and returns the WORST tier
+        to ensure conservative risk assessment (a strategy is only as liquid as
+        its least liquid leg).
+
+        Args:
+            ticker: Ticker symbol (for logging)
+            option_chain: Options chain with quotes
+            legs: List of strategy legs with strikes
+
+        Returns:
+            Dict with:
+            - liquidity_tier: "EXCELLENT", "WARNING", or "REJECT"
+            - min_open_interest: Minimum OI across all legs
+            - max_spread_pct: Maximum spread % across all legs
+        """
+        # Guard clause: Empty legs should never happen, but be defensive
+        if not legs:
+            logger.warning(f"{ticker}: Empty legs list in liquidity calculation")
+            return {
+                'liquidity_tier': "REJECT",
+                'min_open_interest': 0,
+                'max_spread_pct': 100.0,
+            }
+
+        tiers = []
+        oi_values = []
+        spread_pcts = []
+
+        for leg in legs:
+            # Get the quote for this leg
+            chain = option_chain.calls if leg.option_type == OptionType.CALL else option_chain.puts
+            quote = chain.get(leg.strike)
+
+            if not quote:
+                # No quote found - mark as REJECT
+                tiers.append("REJECT")
+                oi_values.append(0)
+                spread_pcts.append(100.0)
+                continue
+
+            # Score this individual option
+            tier = self.liquidity_scorer.classify_option_tier(quote)
+            tiers.append(tier)
+
+            # Track metrics (use LiquidityScorer method for consistency)
+            oi_values.append(quote.open_interest or 0)
+            spread_pcts.append(self.liquidity_scorer.calculate_spread_pct(quote))
+
+        # Overall tier = worst tier (most conservative)
+        # Priority: REJECT > WARNING > EXCELLENT
+        if "REJECT" in tiers:
+            overall_tier = "REJECT"
+        elif "WARNING" in tiers:
+            overall_tier = "WARNING"
+        else:
+            overall_tier = "EXCELLENT"
+
+        min_oi = min(oi_values)
+        max_spread = max(spread_pcts)
+
+        logger.debug(
+            f"{ticker}: Strategy liquidity: {overall_tier} "
+            f"(min_oi={min_oi}, max_spread={max_spread:.1f}%)"
+        )
+
+        return {
+            'liquidity_tier': overall_tier,
+            'min_open_interest': min_oi,
+            'max_spread_pct': max_spread,
         }
 
