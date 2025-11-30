@@ -553,35 +553,31 @@ def calculate_expiration_date(
     Returns:
         Expiration date for options (adjusted to trading day if needed)
 
-    Strategy:
-        - BMO: Same day (0DTE) if Friday, otherwise next Friday
-        - AMC: Next day if Thursday, otherwise next Friday
-        - UNKNOWN: Next Friday (conservative)
+    Strategy (aligned with user's trading workflow):
+        - Mon/Tue/Wed earnings → Friday of same week
+        - Thu/Fri earnings → Friday 1 week out (avoid 0DTE risk)
         - Custom offset: earnings_date + offset_days (adjusted to trading day)
+
+    User enters positions at 3-4pm on earnings day (or day before for BMO),
+    exits next trading day at 9:30-10:30am, using Friday weekly expirations.
     """
     if offset_days is not None:
         target_date = earnings_date + timedelta(days=offset_days)
         return adjust_to_trading_day(target_date)
 
-    # For BMO (before market open)
-    if timing == EarningsTiming.BMO:
-        # If earnings is on Friday, use 0DTE (same day)
-        if earnings_date.weekday() == 4:  # Friday
-            return earnings_date
-        # Otherwise use next Friday
-        return get_next_friday(earnings_date)
+    # User strategy: Thursday or Friday earnings → Use Friday 1 week out
+    # This avoids 0DTE risk and provides buffer for exit
+    weekday = earnings_date.weekday()
 
-    # For AMC (after market close)
-    elif timing == EarningsTiming.AMC:
-        # If earnings is on Thursday, use next day (Friday) for 1DTE
-        if earnings_date.weekday() == 3:  # Thursday
-            return earnings_date + timedelta(days=1)
-        # Otherwise use next Friday
-        return get_next_friday(earnings_date)
+    if weekday in [3, 4]:  # Thursday or Friday
+        # Use next Friday (1 week out)
+        if weekday == 3:  # Thursday
+            return earnings_date + timedelta(days=8)  # Thu + 8 = next Fri
+        else:  # Friday
+            return earnings_date + timedelta(days=7)  # Fri + 7 = next Fri
 
-    # For UNKNOWN timing, use conservative next Friday
-    else:
-        return get_next_friday(earnings_date)
+    # Mon/Tue/Wed: Use Friday of same week
+    return get_next_friday(earnings_date)
 
 
 def validate_expiration_date(
