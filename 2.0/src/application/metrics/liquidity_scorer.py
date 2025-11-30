@@ -110,6 +110,22 @@ class LiquidityScorer:
         self.spread_weight = 0.25
         self.depth_weight = 0.05
 
+    def calculate_spread_pct(self, option: OptionQuote) -> float:
+        """
+        Calculate bid-ask spread as percentage of mid price.
+
+        Args:
+            option: Option quote with bid/ask data
+
+        Returns:
+            Spread percentage (0-100+), or 100.0 if no bid/ask available
+        """
+        if option.bid and option.ask:
+            spread = float(option.ask.amount - option.bid.amount)
+            mid = float(option.mid.amount)
+            return (spread / mid * 100) if mid > 0 else 100.0
+        return 100.0
+
     def score_option(self, option: OptionQuote) -> LiquidityScore:
         """
         Score liquidity for a single option.
@@ -125,15 +141,14 @@ class LiquidityScorer:
         volume = option.volume or 0
 
         # Calculate bid-ask spread
+        spread_pct = self.calculate_spread_pct(option)
+
         if option.bid and option.ask:
             spread = float(option.ask.amount - option.bid.amount)
             effective_spread = Money(spread)
-            mid = float(option.mid.amount)
-            spread_pct = (spread / mid * 100) if mid > 0 else 100.0
         else:
             # No bid/ask available - use worst case
             effective_spread = Money(999.99)
-            spread_pct = 100.0
 
         # Score each factor
         oi_score = self._score_open_interest(oi)
@@ -229,13 +244,7 @@ class LiquidityScorer:
         """
         oi = option.open_interest or 0
         volume = option.volume or 0
-
-        if option.bid and option.ask:
-            spread = float(option.ask.amount - option.bid.amount)
-            mid = float(option.mid.amount)
-            spread_pct = (spread / mid * 100) if mid > 0 else 100.0
-        else:
-            spread_pct = 100.0
+        spread_pct = self.calculate_spread_pct(option)
 
         return self._classify_tier(oi, volume, spread_pct)
 

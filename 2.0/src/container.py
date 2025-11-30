@@ -315,10 +315,13 @@ class Container:
 
     @property
     def strategy_generator(self) -> StrategyGenerator:
-        """Get strategy generator service."""
+        """Get strategy generator service with liquidity scoring."""
         if self._strategy_generator is None:
-            self._strategy_generator = StrategyGenerator(config=self.config.strategy)
-            logger.debug("Created StrategyGenerator with StrategyConfig")
+            self._strategy_generator = StrategyGenerator(
+                config=self.config.strategy,
+                liquidity_scorer=self.liquidity_scorer
+            )
+            logger.debug("Created StrategyGenerator with StrategyConfig and LiquidityScorer")
         return self._strategy_generator
 
     @property
