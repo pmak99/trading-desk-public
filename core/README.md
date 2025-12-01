@@ -121,7 +121,7 @@ python scripts/health_check.py
 ```bash
 USE_KELLY_SIZING=true          # Enable Kelly Criterion (default)
 KELLY_FRACTION=0.25            # 25% of full Kelly (conservative)
-KELLY_MIN_EDGE=0.05            # Minimum 5% edge required
+KELLY_MIN_EDGE=0.02            # Minimum 2% edge required (credit spreads: 2-4%)
 ```
 
 Kelly Criterion automatically adjusts position size based on:
@@ -353,7 +353,7 @@ VRP_GOOD=1.4                     # Override profile default
 # Kelly Criterion
 USE_KELLY_SIZING=true
 KELLY_FRACTION=0.25              # 25% of full Kelly
-KELLY_MIN_EDGE=0.05              # 5% minimum edge
+KELLY_MIN_EDGE=0.02              # 2% minimum edge
 KELLY_MIN_CONTRACTS=1
 ```
 
