@@ -899,12 +899,13 @@ def analyze_ticker(
             logger.info("\n⏭️  SKIP - Insufficient edge")
 
         # Get directional bias from skew analysis
-        directional_bias = "NEUTRAL"  # Default if skew analysis unavailable
+        directional_bias = "Neutral"  # Default if skew analysis unavailable
         skew_analyzer = container.skew_analyzer
         if skew_analyzer:
             skew_result = skew_analyzer.analyze_skew_curve(ticker, expiration_date)
             if skew_result.is_ok:
-                directional_bias = skew_result.value.directional_bias.value.upper()
+                # Format: "Strong Bearish" instead of "STRONG_BEARISH"
+                directional_bias = skew_result.value.directional_bias.value.replace('_', ' ').title()
                 logger.info(f"  Directional Bias: {directional_bias}")
 
         return {
@@ -1244,7 +1245,7 @@ def ticker_mode(
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
             rec = r['recommendation'].upper()
-            bias = r.get('directional_bias', 'NEUTRAL')  # NEW: Display directional bias
+            bias = r.get('directional_bias', 'Neutral')  # NEW: Display directional bias
             earnings = r['earnings_date']
 
             # CRITICAL: Display liquidity tier with color coding
@@ -1505,7 +1506,7 @@ def whisper_mode(
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
             rec = r['recommendation'].upper()
-            bias = r.get('directional_bias', 'NEUTRAL')  # NEW: Display directional bias
+            bias = r.get('directional_bias', 'Neutral')  # NEW: Display directional bias
             earnings = r['earnings_date']
 
             # CRITICAL: Display liquidity tier with color coding
