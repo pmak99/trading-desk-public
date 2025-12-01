@@ -188,50 +188,68 @@ class StrategyScorer:
         Score strategy without Greeks available.
 
         POST-LOSS ANALYSIS UPDATE (Nov 2025):
-        Added liquidity scoring. Redistributes greeks weight to other factors proportionally.
-        Liquidity weight is HIGHER (30% vs 25%) when Greeks unavailable since we have
-        less visibility into option pricing quality.
+        Added liquidity scoring. When Greeks unavailable, use config-defined no-Greeks
+        weights which redistribute the 8% Greeks weight to other factors.
 
         KELLY EDGE FIX (Dec 2025):
         Replaced R/R scoring with Kelly edge scoring (same as with Greeks version).
 
+        BUG FIX (Dec 2025):
+        Fixed scoring inflation bug. Previous code used broken scaling that caused
+        scores to exceed 100% by 22 points. Now uses config-defined no-Greeks weights
+        that properly sum to 100%.
+
         Returns:
             Tuple of (overall_score, profitability_score, risk_score)
         """
-        # Redistribute greeks weight to other factors
-        # NOTE: liquidity_weight is NOT scaled because it's always important
-        total_base_weight = (
-            self.weights.pop_weight
-            + self.weights.reward_risk_weight
-            + self.weights.vrp_weight
-            + self.weights.size_weight
-        )
-        scale_factor = 100.0 / total_base_weight if total_base_weight > 0 else 1.0
+        # Use config-defined no-Greeks weights (sum to 100%)
+        # These weights redistribute the 8% Greeks weight to other factors:
+        # POP: 40% → 45% (+5%)
+        # Liquidity: 22% → 26% (+4%) - Higher when we have less pricing visibility
+        # VRP: 17% → 17% (unchanged)
+        # Edge: 13% → 12% (-1%) - Slight reduction due to rounding
+        # Size: 0% → 0% (position sizing handled separately)
 
-        # Factor 1: Probability of Profit - Scaled
+        # Factor 1: Probability of Profit
         pop_score = min(
             strategy.probability_of_profit / self.weights.target_pop, 1.0
-        ) * self.weights.pop_weight * scale_factor
+        ) * self.weights.pop_weight_no_greeks
 
-        # Factor 2: Liquidity Quality - NEW (POST-LOSS ANALYSIS)
-        # Not scaled - always use full weight since liquidity is critical
-        liquidity_score = self._calculate_liquidity_score(strategy)
+        # Factor 2: Liquidity Quality - CRITICAL when Greeks unavailable
+        # Use liquidity tier for scoring (EXCELLENT=full, WARNING=half, REJECT=zero)
+        if strategy.liquidity_tier is None:
+            liquidity_score = self.weights.liquidity_weight_no_greeks
+        else:
+            tier = strategy.liquidity_tier.upper()
+            if tier == "EXCELLENT":
+                liquidity_score = self.weights.liquidity_weight_no_greeks
+            elif tier == "WARNING":
+                liquidity_score = self.weights.liquidity_weight_no_greeks * 0.5
+            elif tier == "REJECT":
+                liquidity_score = 0.0
+            else:
+                liquidity_score = self.weights.liquidity_weight_no_greeks
 
-        # Factor 3: VRP Edge - Scaled
+        # Factor 3: VRP Edge
         vrp_score = min(
             vrp.vrp_ratio / self.weights.target_vrp, 1.0
-        ) * self.weights.vrp_weight * scale_factor
+        ) * self.weights.vrp_weight_no_greeks
 
-        # Factor 4: Kelly Edge - Scaled (KELLY EDGE FIX Dec 2025)
-        edge_score = self._calculate_kelly_edge_score(
-            strategy.probability_of_profit,
-            strategy.reward_risk_ratio
-        ) * scale_factor
+        # Factor 4: Kelly Edge (KELLY EDGE FIX Dec 2025)
+        # Calculate Kelly edge: (p × b) - q
+        q = 1.0 - strategy.probability_of_profit
+        edge = strategy.probability_of_profit * strategy.reward_risk_ratio - q
+        if edge <= 0:
+            edge_score = 0.0
+        else:
+            target_edge = 0.10
+            normalized_edge = min(edge / target_edge, 1.0)
+            edge_score = normalized_edge * self.weights.reward_risk_weight_no_greeks
 
-        # Factor 5: Position Sizing - Scaled
-        size_score = min(strategy.contracts / 10.0, 1.0) * self.weights.size_weight * scale_factor
+        # Factor 5: Position Sizing
+        size_score = min(strategy.contracts / 10.0, 1.0) * self.weights.size_weight_no_greeks
 
-        # Calculate base score
+        # Calculate base score (should sum to ~100 max)
         base_score = pop_score + liquidity_score + vrp_score + edge_score + size_score
 
         # PROFIT ZONE FIX: Apply penalty for narrow profit zones vs implied move
