@@ -391,6 +391,21 @@ class Config:
         profile = vrp_profiles[vrp_mode]
         logger.info(f"Using VRP threshold profile: {vrp_mode}")
 
+        # Check for individual threshold overrides and warn
+        overrides = []
+        if os.getenv("VRP_EXCELLENT"):
+            overrides.append(f"VRP_EXCELLENT={os.getenv('VRP_EXCELLENT')} (profile default: {profile['excellent']})")
+        if os.getenv("VRP_GOOD"):
+            overrides.append(f"VRP_GOOD={os.getenv('VRP_GOOD')} (profile default: {profile['good']})")
+        if os.getenv("VRP_MARGINAL"):
+            overrides.append(f"VRP_MARGINAL={os.getenv('VRP_MARGINAL')} (profile default: {profile['marginal']})")
+
+        if overrides:
+            logger.warning(
+                f"Individual VRP threshold env vars are overriding {vrp_mode} profile: "
+                + ", ".join(overrides)
+            )
+
         thresholds = ThresholdsConfig(
             vrp_threshold_mode=vrp_mode,
             vrp_excellent=float(os.getenv("VRP_EXCELLENT", str(profile["excellent"]))),
