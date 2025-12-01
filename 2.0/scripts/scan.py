@@ -898,6 +898,15 @@ def analyze_ticker(
         else:
             logger.info("\n⏭️  SKIP - Insufficient edge")
 
+        # Get directional bias from skew analysis
+        directional_bias = "NEUTRAL"  # Default if skew analysis unavailable
+        skew_analyzer = container.skew_analyzer
+        if skew_analyzer:
+            skew_result = skew_analyzer.analyze_skew_curve(ticker, expiration_date)
+            if skew_result.is_ok:
+                directional_bias = skew_result.value.directional_bias.value.upper()
+                logger.info(f"  Directional Bias: {directional_bias}")
+
         return {
             'ticker': ticker,
             'ticker_name': company_name,
@@ -911,6 +920,7 @@ def analyze_ticker(
             'recommendation': vrp.recommendation.value,
             'is_tradeable': vrp.is_tradeable,
             'liquidity_tier': liquidity_tier,  # CRITICAL ADDITION
+            'directional_bias': directional_bias,  # NEW: Directional bias from skew
             'status': 'SUCCESS'
         }
 
@@ -1216,9 +1226,9 @@ def ticker_mode(
         logger.info("=" * 80)
         logger.info(f"\n🎯 Sorted by Earnings Date, VRP, Liquidity:")
 
-        # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column)
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12} {'Liquidity':<12}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12} {'-'*12}")
+        # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column; Added Bias column Dec 2025)
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<18} {'Earnings':<12} {'Liquidity':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
 
         # Sort by: 1) Earnings date (ascending), 2) VRP (descending), 3) Liquidity (EXCELLENT, WARNING, REJECT)
         def sort_key_ticker(x):
@@ -1234,6 +1244,7 @@ def ticker_mode(
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
             rec = r['recommendation'].upper()
+            bias = r.get('directional_bias', 'NEUTRAL')  # NEW: Display directional bias
             earnings = r['earnings_date']
 
             # CRITICAL: Display liquidity tier with color coding
@@ -1246,7 +1257,7 @@ def ticker_mode(
                 liq_display = "❌ REJECT"
 
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12} {liq_display:<12}"
+                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<18} {earnings:<12} {liq_display:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
@@ -1466,9 +1477,9 @@ def whisper_mode(
         logger.info("=" * 80)
         logger.info(f"\n🎯 Most Anticipated + High VRP (Sorted by Earnings Date, VRP, Liquidity):")
 
-        # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column)
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12} {'Liquidity':<12}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12} {'-'*12}")
+        # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column; Added Bias column Dec 2025)
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<18} {'Earnings':<12} {'Liquidity':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
 
         # Sort by: 1) Earnings date (ascending), 2) VRP (descending), 3) Liquidity (EXCELLENT, WARNING, REJECT)
         def sort_key(x):
@@ -1494,6 +1505,7 @@ def whisper_mode(
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
             rec = r['recommendation'].upper()
+            bias = r.get('directional_bias', 'NEUTRAL')  # NEW: Display directional bias
             earnings = r['earnings_date']
 
             # CRITICAL: Display liquidity tier with color coding
@@ -1506,7 +1518,7 @@ def whisper_mode(
                 liq_display = "❌ REJECT"
 
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {earnings:<12} {liq_display:<12}"
+                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<18} {earnings:<12} {liq_display:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
