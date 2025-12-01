@@ -1186,6 +1186,14 @@ class StrategyGenerator:
             logger.warning("Invalid max_profit <= 0, returning minimum contracts")
             return self.config.kelly_min_contracts
 
+        # Validate probability_of_profit is in valid range [0.0, 1.0]
+        if not (0.0 <= probability_of_profit <= 1.0):
+            logger.warning(
+                f"Invalid probability_of_profit={probability_of_profit:.3f} "
+                f"(must be 0.0-1.0), returning minimum contracts"
+            )
+            return self.config.kelly_min_contracts
+
         # Calculate win/loss ratio (b in Kelly formula)
         # This is the odds received: how much we win relative to how much we risk
         win_loss_ratio = float(max_profit.amount / max_loss.amount)
