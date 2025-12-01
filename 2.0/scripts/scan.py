@@ -1498,7 +1498,8 @@ def whisper_mode(
                 liquidity_priority.get(tier, 3)  # Then by liquidity (EXCELLENT first, REJECT last)
             )
 
-        # Table rows
+        # Table rows with day separators
+        prev_earnings_date = None
         for i, r in enumerate(sorted(tradeable, key=sort_key), 1):
             ticker = r['ticker']
             name = r.get('ticker_name', '')[:28] if r.get('ticker_name') else ''
@@ -1508,6 +1509,11 @@ def whisper_mode(
             rec = r['recommendation'].upper()
             bias = r.get('directional_bias', 'Neutral')  # NEW: Display directional bias
             earnings = r['earnings_date']
+
+            # Add separator between different earnings dates
+            if prev_earnings_date is not None and earnings != prev_earnings_date:
+                logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
+            prev_earnings_date = earnings
 
             # CRITICAL: Display liquidity tier with color coding
             liquidity_tier = r.get('liquidity_tier', 'UNKNOWN')
