@@ -1027,14 +1027,20 @@ def scanning_mode(
         logger.info(f"\n" + "=" * 80)
         logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
         logger.info("=" * 80)
-        logger.info(f"\n🎯 Ranked by VRP Ratio:")
+        logger.info(f"\n🎯 Sorted by VRP Ratio, Liquidity:")
 
         # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column)
         logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Liquidity':<12}")
         logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
 
+        # Sort by: 1) VRP (descending), 2) Liquidity (EXCELLENT, WARNING, REJECT)
+        def sort_key_scan(x):
+            liquidity_priority = {'EXCELLENT': 0, 'WARNING': 1, 'REJECT': 2, 'UNKNOWN': 3}
+            tier = x.get('liquidity_tier', 'UNKNOWN')
+            return (-x['vrp_ratio'], liquidity_priority.get(tier, 3))
+
         # Table rows
-        for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
+        for i, r in enumerate(sorted(tradeable, key=sort_key_scan), 1):
             ticker = r['ticker']
             name = r.get('ticker_name', '')[:28] if r.get('ticker_name') else ''
             vrp = f"{r['vrp_ratio']:.2f}x"
@@ -1208,14 +1214,20 @@ def ticker_mode(
         logger.info(f"\n" + "=" * 80)
         logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
         logger.info("=" * 80)
-        logger.info(f"\n🎯 Ranked by VRP Ratio:")
+        logger.info(f"\n🎯 Sorted by Earnings Date, VRP, Liquidity:")
 
         # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column)
         logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12} {'Liquidity':<12}")
         logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12} {'-'*12}")
 
+        # Sort by: 1) Earnings date (ascending), 2) VRP (descending), 3) Liquidity (EXCELLENT, WARNING, REJECT)
+        def sort_key_ticker(x):
+            liquidity_priority = {'EXCELLENT': 0, 'WARNING': 1, 'REJECT': 2, 'UNKNOWN': 3}
+            tier = x.get('liquidity_tier', 'UNKNOWN')
+            return (x['earnings_date'], -x['vrp_ratio'], liquidity_priority.get(tier, 3))
+
         # Table rows
-        for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
+        for i, r in enumerate(sorted(tradeable, key=sort_key_ticker), 1):
             ticker = r['ticker']
             name = r.get('ticker_name', '')[:28] if r.get('ticker_name') else ''
             vrp = f"{r['vrp_ratio']:.2f}x"
@@ -1452,14 +1464,30 @@ def whisper_mode(
         logger.info(f"\n" + "=" * 80)
         logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
         logger.info("=" * 80)
-        logger.info(f"\n🎯 Most Anticipated + High VRP (Ranked by VRP Ratio):")
+        logger.info(f"\n🎯 Most Anticipated + High VRP (Sorted by Earnings Date, VRP, Liquidity):")
 
         # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column)
         logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Earnings':<12} {'Liquidity':<12}")
         logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12} {'-'*12}")
 
+        # Sort by: 1) Earnings date (ascending), 2) VRP (descending), 3) Liquidity (EXCELLENT, WARNING, REJECT)
+        def sort_key(x):
+            # Liquidity tier priority: EXCELLENT=0, WARNING=1, REJECT=2
+            liquidity_priority = {
+                'EXCELLENT': 0,
+                'WARNING': 1,
+                'REJECT': 2,
+                'UNKNOWN': 3
+            }
+            tier = x.get('liquidity_tier', 'UNKNOWN')
+            return (
+                x['earnings_date'],          # Sort by date (ascending - soonest first)
+                -x['vrp_ratio'],             # Then by VRP (descending - highest first)
+                liquidity_priority.get(tier, 3)  # Then by liquidity (EXCELLENT first, REJECT last)
+            )
+
         # Table rows
-        for i, r in enumerate(sorted(tradeable, key=lambda x: x['vrp_ratio'], reverse=True), 1):
+        for i, r in enumerate(sorted(tradeable, key=sort_key), 1):
             ticker = r['ticker']
             name = r.get('ticker_name', '')[:28] if r.get('ticker_name') else ''
             vrp = f"{r['vrp_ratio']:.2f}x"
