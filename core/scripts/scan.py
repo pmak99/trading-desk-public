@@ -234,13 +234,13 @@ def get_ticker_info(ticker: str) -> Tuple[Optional[float], Optional[str]]:
 
 
 def get_market_cap_millions(ticker: str) -> Optional[float]:
-    """Get market cap in millions (legacy wrapper for backward compatibility)."""
+    """Get market cap in millions (convenience wrapper)."""
     market_cap, _ = get_ticker_info(ticker)
     return market_cap
 
 
 def get_ticker_name(ticker: str) -> Optional[str]:
-    """Get company name (legacy wrapper for backward compatibility)."""
+    """Get company name (convenience wrapper)."""
     _, name = get_ticker_info(ticker)
     return name
 
@@ -319,13 +319,13 @@ def check_liquidity_with_tier(ticker: str, expiration: date, container: Containe
 
 
 def check_basic_liquidity(ticker: str, expiration: date, container: Container) -> bool:
-    """Quick liquidity check (legacy wrapper for backward compatibility)."""
+    """Quick liquidity check (convenience wrapper)."""
     has_liquidity, _ = check_liquidity_with_tier(ticker, expiration, container)
     return has_liquidity
 
 
 def get_liquidity_tier_for_display(ticker: str, expiration: date, container: Container) -> str:
-    """Get liquidity tier (legacy wrapper for backward compatibility)."""
+    """Get liquidity tier (convenience wrapper)."""
     _, tier = check_liquidity_with_tier(ticker, expiration, container)
     return tier
 
