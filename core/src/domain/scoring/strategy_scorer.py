@@ -110,6 +110,14 @@ class StrategyScorer:
         Added liquidity scoring (25% weight) after -$26,930 loss.
         New weights: POP 30%, Liquidity 25%, VRP 20%, R/R 15%, Greeks 10%
 
+        KELLY EDGE FIX (Dec 2025):
+        Replaced R/R scoring with Kelly edge scoring to prevent negative EV trades
+        from outscoring positive EV trades. Kelly edge = (p × b) - q where:
+        - p = probability of profit
+        - b = reward/risk ratio
+        - q = 1 - p
+        Negative edge trades score 0 points for edge component.
+
         Returns:
             Tuple of (overall_score, profitability_score, risk_score)
         """
@@ -126,10 +134,13 @@ class StrategyScorer:
             vrp.vrp_ratio / self.weights.target_vrp, 1.0
         ) * self.weights.vrp_weight
 
-        # Factor 4: Reward/Risk - Compare against target
-        rr_score = min(
-            strategy.reward_risk_ratio / self.weights.target_rr, 1.0
-        ) * self.weights.reward_risk_weight
+        # Factor 4: Kelly Edge - Replaces raw R/R scoring (KELLY EDGE FIX Dec 2025)
+        # Kelly edge = (p × b) - q combines POP and R/R into expected value
+        # This prevents negative EV trades from scoring high due to R/R alone
+        edge_score = self._calculate_kelly_edge_score(
+            strategy.probability_of_profit,
+            strategy.reward_risk_ratio
+        )
 
         # Factor 5: Greeks Quality - Theta and Vega
         greeks_score = self._calculate_greeks_score(strategy)
@@ -138,7 +149,7 @@ class StrategyScorer:
         size_score = min(strategy.contracts / 10.0, 1.0) * self.weights.size_weight
 
         # Overall score (0-100)
-        overall = pop_score + liquidity_score + vrp_score + rr_score + greeks_score + size_score
+        overall = pop_score + liquidity_score + vrp_score + edge_score + greeks_score + size_score
 
         # Profitability score (include theta benefit)
         base_profitability = min(strategy.reward_risk_ratio / 0.40 * 80, 80)
@@ -171,6 +182,9 @@ class StrategyScorer:
         Liquidity weight is HIGHER (30% vs 25%) when Greeks unavailable since we have
         less visibility into option pricing quality.
 
+        KELLY EDGE FIX (Dec 2025):
+        Replaced R/R scoring with Kelly edge scoring (same as with Greeks version).
+
         Returns:
             Tuple of (overall_score, profitability_score, risk_score)
         """
@@ -198,17 +212,18 @@ class StrategyScorer:
             vrp.vrp_ratio / self.weights.target_vrp, 1.0
         ) * self.weights.vrp_weight * scale_factor
 
-        # Factor 4: Reward/Risk - Scaled
-        rr_score = min(
-            strategy.reward_risk_ratio / self.weights.target_rr, 1.0
-        ) * self.weights.reward_risk_weight * scale_factor
+        # Factor 4: Kelly Edge - Scaled (KELLY EDGE FIX Dec 2025)
+        edge_score = self._calculate_kelly_edge_score(
+            strategy.probability_of_profit,
+            strategy.reward_risk_ratio
+        ) * scale_factor
 
         # Factor 5: Position Sizing - Scaled
         size_score = min(strategy.contracts / 10.0, 1.0) * self.weights.size_weight * scale_factor
 
         # Overall score (0-100)
         # NOTE: When Greeks unavailable, liquidity becomes MORE important (scaled weights + full liquidity)
-        overall = pop_score + liquidity_score + vrp_score + rr_score + size_score
+        overall = pop_score + liquidity_score + vrp_score + edge_score + size_score
 
         # Profitability score (focus on reward/risk)
         profitability = min(strategy.reward_risk_ratio / 0.40 * 100, 100)
@@ -300,6 +315,53 @@ class StrategyScorer:
         else:
             # Unknown tier, assume EXCELLENT
             return self.weights.liquidity_weight
+
+    def _calculate_kelly_edge_score(self, pop: float, rr: float) -> float:
+        """
+        Calculate Kelly edge score (KELLY EDGE FIX - Added Dec 2025).
+
+        Replaces raw R/R scoring to prevent negative EV trades from outscoring
+        positive EV trades. The Kelly edge combines POP and R/R into a single
+        metric that represents expected value.
+
+        Kelly Edge Formula:
+            edge = (p × b) - q
+            where:
+                p = probability of profit (POP)
+                b = reward/risk ratio (R/R)
+                q = 1 - p
+
+        Scoring Logic:
+        - Negative edge (EV < 0): 0 points (reject)
+        - Zero edge (break-even): 0 points
+        - Positive edge: Score proportional to edge
+        - Target edge: 0.10 (10%) for full reward_risk_weight points
+
+        Example:
+        - IC: 59.5% POP, 0.38 R/R → edge = -17.89% → 0 points
+        - BPS: 84.6% POP, 0.21 R/R → edge = +2.37% → 3.6 points
+
+        Args:
+            pop: Probability of profit (0.0 to 1.0)
+            rr: Reward/risk ratio
+
+        Returns:
+            Kelly edge score (0 to reward_risk_weight, typically 15 points max)
+        """
+        # Calculate Kelly edge
+        q = 1.0 - pop
+        edge = pop * rr - q
+
+        # Negative edge scores 0 (reject negative EV trades)
+        if edge <= 0:
+            return 0.0
+
+        # Positive edge: Score proportional to edge
+        # Target 10% edge for full points (aggressive but achievable with VRP)
+        target_edge = 0.10
+        normalized_edge = min(edge / target_edge, 1.0)
+
+        return normalized_edge * self.weights.reward_risk_weight
 
     def _generate_strategy_rationale(self, strategy: Strategy, vrp: VRPResult) -> str:
         """
