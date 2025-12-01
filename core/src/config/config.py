@@ -47,10 +47,23 @@ class CacheConfig:
 class ThresholdsConfig:
     """Trading thresholds and parameters."""
 
-    # VRP ratio thresholds (data-driven from 289-ticker grid scan)
-    vrp_excellent: float = 7.0  # Top 33% - exceptional edge
-    vrp_good: float = 4.0       # Top 67% - strong edge
-    vrp_marginal: float = 1.5   # Baseline edge
+    # VRP ratio thresholds - REVISED (Nov 2025)
+    # Previous values (7.0x/4.0x) were overfitted to small sample (8 trades)
+    # Academic literature: VRP of 1.2-1.5x is typically tradeable
+    # Market research: Consistent edge appears at 1.5x+, excellent at 2.0x+
+    #
+    # THRESHOLD PROFILES (select via vrp_threshold_mode):
+    # - CONSERVATIVE: 2.0x/1.5x/1.2x - Higher selectivity, fewer trades, stronger edge
+    # - BALANCED:     1.8x/1.4x/1.2x - Moderate selectivity, good edge/frequency balance (DEFAULT)
+    # - AGGRESSIVE:   1.5x/1.3x/1.1x - More opportunities, acceptable edge
+    # - LEGACY:       7.0x/4.0x/1.5x - Original overfitted values (NOT RECOMMENDED)
+
+    vrp_threshold_mode: str = "BALANCED"  # CONSERVATIVE, BALANCED, AGGRESSIVE, or LEGACY
+
+    # Active thresholds (set based on mode, can be overridden)
+    vrp_excellent: float = 1.8  # BALANCED default
+    vrp_good: float = 1.4       # BALANCED default
+    vrp_marginal: float = 1.2   # BALANCED default
 
     # Liquidity filters - 3-TIER SYSTEM (USER CALIBRATED FOR 50-200 CONTRACT TRADES)
     # Classification logic: EXCELLENT if all excellent thresholds met,
@@ -196,9 +209,15 @@ class StrategyConfig:
     min_credit_per_spread: float = 0.20  # $0.20 minimum credit (balanced for 25-delta)
     min_reward_risk: float = 0.25  # Minimum 1:4 ratio (25% reward/risk)
 
-    # Position sizing
-    risk_budget_per_trade: float = 20000.0  # $20K max loss per position
+    # Position sizing - Kelly Criterion based
+    risk_budget_per_trade: float = 20000.0  # $20K max loss per position (used as account equity proxy)
     max_contracts: int = 100  # Safety cap on contract size
+
+    # Kelly Criterion parameters
+    use_kelly_sizing: bool = True           # Use Kelly Criterion (True) or fixed risk budget (False)
+    kelly_fraction: float = 0.25            # Fractional Kelly (0.25 = use 25% of full Kelly, conservative)
+    kelly_min_edge: float = 0.05            # Minimum edge required for Kelly (5%)
+    kelly_min_contracts: int = 1            # Minimum contracts even if Kelly suggests 0
 
     # Commission and fees
     commission_per_contract: float = 0.30  # $0.30 per contract
@@ -349,11 +368,34 @@ class Config:
             enabled=os.getenv("CACHE_ENABLED", "true").lower() == "true",
         )
 
-        # Thresholds configuration (data-driven defaults)
+        # Thresholds configuration with profile support
+        # VRP threshold profiles (can be overridden via env vars)
+        vrp_mode = os.getenv("VRP_THRESHOLD_MODE", "BALANCED").upper()
+
+        # Define threshold profiles
+        vrp_profiles = {
+            "CONSERVATIVE": {"excellent": 2.0, "good": 1.5, "marginal": 1.2},
+            "BALANCED":     {"excellent": 1.8, "good": 1.4, "marginal": 1.2},
+            "AGGRESSIVE":   {"excellent": 1.5, "good": 1.3, "marginal": 1.1},
+            "LEGACY":       {"excellent": 7.0, "good": 4.0, "marginal": 1.5},
+        }
+
+        # Apply profile (with env var override capability)
+        if vrp_mode not in vrp_profiles:
+            logger.warning(
+                f"Invalid VRP_THRESHOLD_MODE '{vrp_mode}', defaulting to BALANCED. "
+                f"Valid modes: {', '.join(vrp_profiles.keys())}"
+            )
+            vrp_mode = "BALANCED"
+
+        profile = vrp_profiles[vrp_mode]
+        logger.info(f"Using VRP threshold profile: {vrp_mode}")
+
         thresholds = ThresholdsConfig(
-            vrp_excellent=float(os.getenv("VRP_EXCELLENT", "7.0")),
-            vrp_good=float(os.getenv("VRP_GOOD", "4.0")),
-            vrp_marginal=float(os.getenv("VRP_MARGINAL", "1.5")),
+            vrp_threshold_mode=vrp_mode,
+            vrp_excellent=float(os.getenv("VRP_EXCELLENT", str(profile["excellent"]))),
+            vrp_good=float(os.getenv("VRP_GOOD", str(profile["good"]))),
+            vrp_marginal=float(os.getenv("VRP_MARGINAL", str(profile["marginal"]))),
             # 3-tier liquidity system (calibrated for 50-200 contract trades)
             liquidity_reject_min_oi=int(os.getenv("LIQUIDITY_REJECT_MIN_OI", "20")),
             liquidity_reject_max_spread_pct=float(os.getenv("LIQUIDITY_REJECT_MAX_SPREAD_PCT", "100.0")),
@@ -427,6 +469,11 @@ class Config:
             min_reward_risk=float(os.getenv("MIN_REWARD_RISK", "0.25")),
             risk_budget_per_trade=float(os.getenv("RISK_BUDGET_PER_TRADE", "20000.0")),
             max_contracts=int(os.getenv("MAX_CONTRACTS", "100")),
+            # Kelly Criterion position sizing
+            use_kelly_sizing=os.getenv("USE_KELLY_SIZING", "true").lower() == "true",
+            kelly_fraction=float(os.getenv("KELLY_FRACTION", "0.25")),
+            kelly_min_edge=float(os.getenv("KELLY_MIN_EDGE", "0.05")),
+            kelly_min_contracts=int(os.getenv("KELLY_MIN_CONTRACTS", "1")),
             commission_per_contract=float(os.getenv("COMMISSION_PER_CONTRACT", "0.30")),
             iron_butterfly_wing_width_pct=float(os.getenv("IB_WING_WIDTH_PCT", "0.015")),
             iron_butterfly_min_wing_width=float(os.getenv("IB_MIN_WING_WIDTH", "3.0")),

@@ -519,8 +519,15 @@ class StrategyGenerator:
             ),
         ]
 
-        # Position sizing
-        contracts = self._calculate_contracts(metrics['max_loss'])
+        # Position sizing - use Kelly Criterion if enabled, else fixed risk budget
+        if self.config.use_kelly_sizing:
+            contracts = self._calculate_contracts_kelly(
+                max_profit=metrics['max_profit'],
+                max_loss=metrics['max_loss'],
+                probability_of_profit=metrics['pop']
+            )
+        else:
+            contracts = self._calculate_contracts(metrics['max_loss'])
 
         # Calculate position Greeks
         position_greeks = self._calculate_position_greeks(
@@ -640,8 +647,15 @@ class StrategyGenerator:
         # Reward/risk
         reward_risk = float(max_profit.amount / max_loss.amount)
 
-        # Position sizing
-        contracts = self._calculate_contracts(max_loss)
+        # Position sizing - use Kelly Criterion if enabled, else fixed risk budget
+        if self.config.use_kelly_sizing:
+            contracts = self._calculate_contracts_kelly(
+                max_profit=max_profit,
+                max_loss=max_loss,
+                probability_of_profit=pop
+            )
+        else:
+            contracts = self._calculate_contracts(max_loss)
 
         # Combine position Greeks from both spreads
         position_greeks = self._combine_greeks(put_spread, call_spread)
@@ -782,8 +796,15 @@ class StrategyGenerator:
             return None
         reward_risk = float(max_profit.amount / max_loss.amount)
 
-        # Position sizing
-        contracts = self._calculate_contracts(max_loss)
+        # Position sizing - use Kelly Criterion if enabled, else fixed risk budget
+        if self.config.use_kelly_sizing:
+            contracts = self._calculate_contracts_kelly(
+                max_profit=max_profit,
+                max_loss=max_loss,
+                probability_of_profit=pop
+            )
+        else:
+            contracts = self._calculate_contracts(max_loss)
 
         # Calculate position Greeks
         position_greeks = self._calculate_position_greeks(
@@ -1111,7 +1132,8 @@ class StrategyGenerator:
 
     def _calculate_contracts(self, max_loss_per_spread: Money) -> int:
         """
-        Calculate number of contracts based on configured risk budget.
+        DEPRECATED: Use _calculate_contracts_kelly instead.
+        Kept for backward compatibility only.
 
         Args:
             max_loss_per_spread: Max loss per single spread
@@ -1126,6 +1148,88 @@ class StrategyGenerator:
 
         # Minimum 1 contract, maximum from config for safety
         return max(1, min(contracts, self.config.max_contracts))
+
+    def _calculate_contracts_kelly(
+        self,
+        max_profit: Money,
+        max_loss: Money,
+        probability_of_profit: float
+    ) -> int:
+        """
+        Calculate position size using Kelly Criterion.
+
+        Kelly formula: f* = (p * b - q) / b
+        where:
+        - p = probability of winning (POP)
+        - q = probability of losing (1 - p)
+        - b = win/loss ratio (max_profit / max_loss)
+        - f* = fraction of capital to risk
+
+        We use fractional Kelly (default 25%) for safety:
+        - Full Kelly can be aggressive and lead to large drawdowns
+        - 25% Kelly is a common conservative choice
+        - Ensures we don't oversize even on high-probability trades
+
+        Args:
+            max_profit: Maximum profit per spread
+            max_loss: Maximum loss per spread
+            probability_of_profit: Probability of profit (0.0-1.0)
+
+        Returns:
+            Number of contracts to trade
+        """
+        if max_loss.amount <= 0:
+            logger.warning("Invalid max_loss <= 0, returning minimum contracts")
+            return self.config.kelly_min_contracts
+
+        if max_profit.amount <= 0:
+            logger.warning("Invalid max_profit <= 0, returning minimum contracts")
+            return self.config.kelly_min_contracts
+
+        # Calculate win/loss ratio (b in Kelly formula)
+        # This is the odds received: how much we win relative to how much we risk
+        win_loss_ratio = float(max_profit.amount / max_loss.amount)
+
+        # Calculate edge (expected value as fraction of risk)
+        # Edge = (p * win) - (q * loss) / loss
+        # Simplified: edge = p * b - q
+        p = probability_of_profit
+        q = 1.0 - p
+        edge = p * win_loss_ratio - q
+
+        # Check minimum edge requirement
+        if edge < self.config.kelly_min_edge:
+            logger.debug(
+                f"Edge {edge:.3f} below minimum {self.config.kelly_min_edge:.3f}, "
+                f"using minimum contracts"
+            )
+            return self.config.kelly_min_contracts
+
+        # Calculate Kelly fraction: f* = edge / b
+        kelly_full = edge / win_loss_ratio
+
+        # Apply fractional Kelly for safety (default 25% of full Kelly)
+        kelly_fraction = kelly_full * self.config.kelly_fraction
+
+        # Kelly fraction is a percentage of capital to risk
+        # Convert to number of contracts
+        capital = self.config.risk_budget_per_trade
+        position_size = kelly_fraction * capital
+
+        # Each contract risks max_loss
+        contracts = int(position_size / float(max_loss.amount))
+
+        # Apply bounds
+        contracts = max(self.config.kelly_min_contracts, contracts)
+        contracts = min(contracts, self.config.max_contracts)
+
+        logger.debug(
+            f"Kelly sizing: POP={p:.2%}, win/loss={win_loss_ratio:.2f}, "
+            f"edge={edge:.3f}, full_kelly={kelly_full:.3f}, "
+            f"fractional_kelly={kelly_fraction:.3f}, contracts={contracts}"
+        )
+
+        return contracts
 
     def _calculate_position_greeks(
         self,
