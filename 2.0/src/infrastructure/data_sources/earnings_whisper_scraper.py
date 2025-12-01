@@ -527,51 +527,6 @@ class EarningsWhisperScraper:
             logger.debug(f"Failed to parse date from tweet: {e}")
             return False
 
-    def _matches_week(self, title: str, week_monday: datetime) -> bool:
-        """Check if Reddit post title matches the requested week (legacy).
-
-        Args:
-            title: Reddit post title (e.g., "Weekly Earnings Thread 11/10 - 11/14")
-            week_monday: Target Monday datetime to match
-
-        Returns:
-            True if title matches the week, False otherwise
-        """
-        # Extract date pattern from title: "11/10 - 11/14" or "11/10"
-        matches = self._DATE_PATTERN.findall(title)
-
-        if not matches:
-            return False
-
-        # Get the first date from title (should be Monday)
-        month_str, day_str = matches[0]
-
-        try:
-            title_month = int(month_str)
-            title_day = int(day_str)
-
-            # Validate reasonable date ranges
-            if not (1 <= title_month <= 12):
-                logger.debug(f"Invalid month {title_month} in title: {title}")
-                return False
-            if not (1 <= title_day <= 31):
-                logger.debug(f"Invalid day {title_day} in title: {title}")
-                return False
-
-            # Match if same month and day
-            # Note: Year check not possible from title alone, but acceptable
-            # for recent posts (within current year or last 12 months)
-            matches_date = title_month == week_monday.month and title_day == week_monday.day
-
-            if matches_date:
-                logger.debug(f"Matched: {title} -> {week_monday.strftime('%Y-%m-%d')}")
-
-            return matches_date
-
-        except (ValueError, OverflowError) as e:
-            logger.debug(f"Failed to parse date from title '{title}': {e}")
-            return False
-
     def _parse_twitter_text(self, tweet_text: str) -> List[str]:
         """Extract ticker symbols from @eWhispers tweet text.
 
@@ -606,29 +561,6 @@ class EarningsWhisperScraper:
                 if ticker not in self.EXCLUDED_WORDS and len(ticker) >= self.MIN_TICKER_LENGTH and ticker not in tickers:
                     tickers.append(ticker)
                     logger.debug(f"Extracted ticker: {ticker}")
-
-        return list(dict.fromkeys(tickers))  # Remove duplicates, preserve order
-
-    def _parse_reddit_post(self, text: str) -> List[str]:
-        """Extract tickers from Reddit post text (legacy)."""
-        tickers = []
-        in_section = False
-
-        for line in text.split('\n'):
-            if 'most anticipated' in line.lower() and 'earnings' in line.lower():
-                in_section = True
-                continue
-
-            if in_section:
-                if line.strip().startswith('#') or 'upcoming earnings' in line.lower():
-                    break
-
-                # Extract ticker patterns using pre-compiled patterns
-                for pattern in self.TICKER_PATTERNS:
-                    match = pattern.search(line)
-                    if match:
-                        tickers.append(match.group(1))
-                        break
 
         return list(dict.fromkeys(tickers))  # Remove duplicates, preserve order
 
