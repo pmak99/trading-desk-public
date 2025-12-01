@@ -224,13 +224,19 @@ CREATE TABLE historical_moves (
 
 ## Recent Enhancements
 
-### December 2025 - Kelly Criterion & VRP Profiles
+### December 2025 - Kelly Criterion & Strategy Scoring
 
 **Kelly Criterion Position Sizing:**
 - Formula: `f* = (p × b - q) / b` where p=POP, b=win/loss ratio
 - 25% fractional Kelly for conservative capital growth
-- Minimum 5% edge requirement
+- Minimum 2% edge requirement (adjusted for credit spreads)
 - Automatic contract calculation based on probability and edge
+
+**Kelly Edge Scoring Fix:**
+- Replaced R/R-only scoring with Kelly edge scoring in strategy selection
+- Prevents negative EV trades from outscoring positive EV trades
+- Edge = (POP × R/R) - (1 - POP) combines probability and reward
+- Negative edge strategies score 0 points for edge component
 
 **VRP Profile System:**
 - 4 profiles: CONSERVATIVE, BALANCED, AGGRESSIVE, LEGACY
