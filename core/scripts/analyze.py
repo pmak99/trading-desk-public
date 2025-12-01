@@ -208,6 +208,11 @@ Notes:
         logger.info(f"   VRP Ratio: {analysis.vrp.vrp_ratio:.2f}x")
         logger.info(f"   Edge Score: {analysis.vrp.edge_score:.2f}")
         logger.info(f"   Recommendation: {analysis.vrp.recommendation.value.upper()}")
+        # Display directional bias from skew analysis if available
+        if analysis.skew:
+            logger.info(f"   Directional Bias: {analysis.skew.directional_bias.value.upper()}")
+        elif analysis.strategies:
+            logger.info(f"   Directional Bias: {analysis.strategies.directional_bias.value.upper()}")
 
         if analysis.vrp.is_tradeable:
             logger.info("\n" + "=" * 80)
