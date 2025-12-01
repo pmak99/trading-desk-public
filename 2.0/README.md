@@ -1,21 +1,22 @@
-# IV Crush 2.0 - Earnings Options Trading System
+# IV Crush 2.0
 
-**Production-ready options trading system for earnings IV crush strategies.**
+**Production-grade earnings options trading system leveraging volatility risk premium.**
 
-**ONE script. Maximum edge. Zero complexity.**
+Sell options when implied volatility exceeds historical moves. Profit from IV crush after earnings.
 
 ---
 
 ## Quick Start
 
 ```bash
-cd 2.0
-
-# Analyze any ticker for earnings
+# Analyze a ticker's earnings opportunity
 ./trade.sh NVDA 2025-11-20
 
-# View all commands
-./trade.sh --help
+# Scan all earnings for a specific date
+./trade.sh scan 2025-11-20
+
+# Health check
+./trade.sh health
 ```
 
 **Output:**
@@ -25,24 +26,24 @@ VRP Ratio: 2.26x → EXCELLENT
 Implied Move: 8.00% | Historical Mean: 3.54%
 
 ★ RECOMMENDED: BULL PUT SPREAD
-  Strikes: Short $177.50P / Long $170.00P
-  Net Credit: $2.20 | Max Profit: $8,158.50
-  Probability of Profit: 69.1% | Theta: +$329/day
+  Short $177.50P / Long $170.00P
+  Net Credit: $2.20 | Max Profit: $8,158 (37 contracts)
+  Probability: 69.1% | Theta: +$329/day
 ```
 
 ---
 
-## What This System Does
+## Core Edge
 
-**Strategy:** Sell options when implied volatility > historical volatility, profit when IV crushes after earnings.
+**Volatility Risk Premium (VRP)** - The market consistently overprices earnings volatility.
 
-**The Edge:**
-- **VRP Analysis:** Compare implied move (market expectations) vs historical moves (reality)
-- **Advanced Algorithms:** Polynomial skew fitting, exponential-weighted consistency, interpolated calculations
-- **Strategy Generation:** Iron Condors, Credit Spreads with optimal strike selection
-- **Empirically Validated:** Sharpe 8.07, 100% win rate on 8 selected trades (Q2-Q4 2024)
+Our system:
+1. **Measures the gap** - Implied move vs historical mean move
+2. **Quantifies quality** - VRP profiles (CONSERVATIVE, BALANCED, AGGRESSIVE)
+3. **Sizes positions** - Kelly Criterion with fractional sizing (25%)
+4. **Selects strikes** - Delta-based with directional bias detection
 
-**Database:** 675 earnings moves across 52 tickers (2022-2024) + 208 trade validation dataset
+**Validated:** 8 selected trades Q2-Q4 2024 → 100% win rate, Sharpe 8.07
 
 ---
 
@@ -50,16 +51,13 @@ Implied Move: 8.00% | Historical Mean: 3.54%
 
 ### Prerequisites
 
-1. **Python 3.11+**
-2. **Tradier API key** ([get one](https://documentation.tradier.com/))
-3. **Alpha Vantage API key** ([get one](https://www.alphavantage.co/support/#api-key))
+- Python 3.11+
+- [Tradier API key](https://documentation.tradier.com/)
+- [Alpha Vantage API key](https://www.alphavantage.co/support/#api-key)
 
 ### Setup
 
 ```bash
-# Navigate to 2.0 directory
-cd 2.0
-
 # Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
@@ -67,229 +65,233 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Create .env file
+# Configure environment
 cat > .env << EOF
-TRADIER_API_KEY=your_tradier_key_here
-ALPHA_VANTAGE_KEY=your_alphavantage_key_here
+TRADIER_API_KEY=your_tradier_key
+ALPHA_VANTAGE_KEY=your_alphavantage_key
 DB_PATH=data/ivcrush.db
 LOG_LEVEL=INFO
 MIN_HISTORICAL_QUARTERS=2
+VRP_THRESHOLD_MODE=BALANCED
 EOF
 
 # Initialize database
 mkdir -p data logs backups
 python -c "from src.infrastructure.database.init_schema import initialize_database; initialize_database('./data/ivcrush.db')"
 
-# Verify installation
+# Verify
 python scripts/health_check.py
 ```
-
-### Optional: Whisper Mode Setup
-
-The **Whisper Mode** feature fetches "most anticipated earnings" from Earnings Whispers via Reddit (entirely optional).
-
-#### Reddit API Setup
-
-1. Create a Reddit app at [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps)
-   - Choose "script" type
-   - Name: "iv-crush-trading-bot"
-   - Redirect URI: http://localhost:8080
-
-2. Add credentials to `.env`:
-   ```bash
-   REDDIT_CLIENT_ID=your_client_id_here
-   REDDIT_CLIENT_SECRET=your_secret_here
-   ```
 
 ---
 
 ## Usage
 
-### Help Command
+### Basic Commands
 
 ```bash
-./trade.sh --help    # View all commands and options
-./trade.sh -h        # Short form
-```
-
-Displays comprehensive help including:
-- All available commands with descriptions
-- Examples for each command
-- Output format explanation
-- System features and validation results
-
-### Single Ticker Analysis
-
-```bash
+# Single ticker analysis
 ./trade.sh NVDA 2025-11-20
-./trade.sh AAPL 2025-01-31 2025-02-01  # Custom expiration
-```
 
-Shows complete analysis:
-- Implied Move (interpolated straddle)
-- VRP Ratio (2.0x+ = EXCELLENT)
-- Strategy Recommendations (Iron Condor, Credit Spreads)
-- Strike selections, P/L, Greeks
-- TRADEABLE or SKIP recommendation
-
-**Auto-Backfill:** If historical data is missing for a ticker, the script automatically backfills the last 3 years of earnings data and retries the analysis. No manual intervention needed!
-
-### Multiple Tickers
-
-```bash
+# Multiple tickers
 ./trade.sh list NVDA,WMT,AMD 2025-11-20
-```
 
-Analyzes multiple tickers, auto-fetches earnings dates via Alpha Vantage.
-
-### Scan Earnings Date
-
-```bash
+# Scan earnings date
 ./trade.sh scan 2025-11-20
-```
 
-Scans all earnings for specific date via Alpha Vantage API.
-
-### Whisper Mode (Most Anticipated Earnings)
-
-```bash
-# Current week's most anticipated earnings
+# Most anticipated earnings (current week)
 ./trade.sh whisper
 
-# Specific week (provide Monday date)
-./trade.sh whisper 2025-11-10
+# Help
+./trade.sh --help
 ```
 
-Fetches "most anticipated earnings" tickers from Earnings Whispers via Reddit r/wallstreetbets weekly earnings threads. Automatically backfills historical data and analyzes each ticker for VRP opportunities.
+### Configuration Profiles
 
-**Setup Required:** See "Optional: Whisper Mode Setup" in Installation section above.
+**VRP Threshold Profiles** (set via `VRP_THRESHOLD_MODE` in .env):
 
-### Health Check
+| Profile | VRP Excellent | VRP Good | Use Case |
+|---------|---------------|----------|----------|
+| CONSERVATIVE | 2.0x | 1.5x | Fewer, higher-quality trades |
+| BALANCED | 1.8x | 1.4x | **Default** - empirically validated |
+| AGGRESSIVE | 1.5x | 1.3x | More trades, accept lower VRP |
+
+**Position Sizing** (set via Kelly parameters in .env):
 
 ```bash
-./trade.sh health
+USE_KELLY_SIZING=true          # Enable Kelly Criterion (default)
+KELLY_FRACTION=0.25            # 25% of full Kelly (conservative)
+KELLY_MIN_EDGE=0.05            # Minimum 5% edge required
 ```
 
-Verifies Tradier API, database, and cache are operational.
+Kelly Criterion automatically adjusts position size based on:
+- Probability of profit (from skew analysis)
+- Reward/risk ratio
+- Edge (expected value)
 
 ---
 
-## Advanced Usage
+## Architecture
 
-### Backfill Historical Data
+### Design Principles
 
-```bash
-# Single ticker
-python scripts/backfill_yfinance.py AAPL
-
-# From watchlist
-python scripts/backfill_yfinance.py --file data/watchlist.txt --start-date 2022-01-01 --end-date 2024-12-31
-```
-
-### Run Backtests
-
-```bash
-python scripts/run_backtests.py
-```
-
-Tests multiple configurations (Aggressive, Balanced, Conservative) against historical data.
-
-### Direct Analysis (No Wrapper)
-
-```bash
-# With strategy recommendations
-python scripts/analyze.py NVDA --earnings-date 2025-11-20 --expiration 2025-11-21 --strategies
-
-# Scan mode
-python scripts/scan.py --scan-date 2025-11-20
-python scripts/scan.py --tickers NVDA,WMT,AMD
-
-# Whisper mode
-python scripts/scan.py --whisper-week
-python scripts/scan.py --whisper-week 2025-11-10
-```
-
----
-
-## System Architecture
+- **Clean Architecture** - Domain/Application/Infrastructure layers
+- **Functional Core** - Immutable types, Result monads, no exceptions
+- **Protocol-Based DI** - Testable, swappable components
+- **Fail-Fast** - Validation at boundaries, trust internal guarantees
 
 ### Core Components
 
-1. **Domain Layer** (`src/domain/`)
-   - Immutable types: Money, Percentage, Strike, OptionChain
-   - Result pattern: Functional error handling
-   - Type safety throughout
+**Domain Layer** (`src/domain/`)
+- Immutable value objects: `Money`, `Percentage`, `Strike`
+- Result pattern for error handling
+- Business protocols (no implementations)
 
-2. **Application Layer** (`src/application/`)
-   - **ImpliedMoveCalculatorInterpolated**: Linear interpolation between strikes
-   - **VRPCalculator**: Compare implied vs historical volatility
-   - **SkewAnalyzerEnhanced**: Polynomial fitting for directional bias
-   - **ConsistencyAnalyzerEnhanced**: Exponential-weighted historical analysis
-   - **StrategyGenerator**: Iron Condors, Bull Put/Bear Call Spreads
+**Application Layer** (`src/application/`)
+- **VRPCalculator** - Implied move vs historical mean
+- **SkewAnalyzerEnhanced** - Polynomial IV skew fitting
+- **ConsistencyAnalyzerEnhanced** - Exponential-weighted reliability
+- **StrategyGenerator** - Iron condors, credit spreads with Kelly sizing
+- **LiquidityScorer** - 3-tier classification (EXCELLENT/WARNING/REJECT)
 
-3. **Infrastructure Layer** (`src/infrastructure/`)
-   - **Tradier API**: Real-time option chains with Greeks
-   - **Alpha Vantage API**: Earnings calendar
-   - **SQLite Database**: Historical moves with WAL mode
-   - **Hybrid Cache**: L1 (memory) + L2 (SQLite)
+**Infrastructure Layer** (`src/infrastructure/`)
+- **TradierClient** - Real-time option chains + Greeks
+- **AlphaVantageClient** - Earnings calendar
+- **SQLite + WAL mode** - 675 earnings moves, 52 tickers, 2022-2024
+- **Hybrid cache** - L1 (memory) + L2 (SQLite), 95%+ hit rate
 
-4. **Resilience** (`src/utils/`)
-   - Circuit breakers
-   - Retry logic with exponential backoff
-   - Health checks
-   - Performance tracking
+### Resilience
 
-### Database Schema
+- Circuit breakers with exponential backoff
+- Retry logic on transient failures
+- Health monitoring (Tradier, DB, cache)
+- Automatic database backups (every 6 hours)
 
+---
+
+## Database
+
+**Schema:**
 ```sql
 CREATE TABLE historical_moves (
     ticker TEXT,
     earnings_date DATE,
     prev_close REAL,
     earnings_close REAL,
-    close_move_pct REAL,  -- Actual historical move
+    close_move_pct REAL,        -- Actual historical move
     volume_before INTEGER,
     volume_earnings INTEGER
 );
 ```
 
-**Current Data:** 675 moves, 52 tickers, 3 years of history
+**Backups:**
+- Auto-triggered every 6 hours when running `./trade.sh`
+- Stored in `backups/ivcrush_YYYYMMDD_HHMMSS.db`
+- Retained 30 days (automatic cleanup)
+- Recommend syncing `backups/` to Google Drive
+
+**Restore:**
+```bash
+./scripts/restore_database.sh
+```
 
 ---
 
-## Production Features
+## Validation Results
 
-- **201 Tests** (193 unit + 8 load) - all passing
-- **59.87% Coverage** on core business logic
-- **Circuit Breakers** for API failures
-- **Health Monitoring** for all services
-- **Hybrid Caching** for performance (95%+ hit rate)
-- **Automatic Backups** (database backed up every 6 hours)
-- **WAL Mode** for database concurrency (10x improvement)
-- **Thread Safety** on all cache operations
+### Forward Test (Q2-Q4 2024)
 
----
+**Selected Trades:** 8 high-VRP opportunities (ENPH, SHOP, AVGO, RDDT)
 
-## Empirical Validation Results
+| Metric | Result |
+|--------|--------|
+| Win Rate | **100%** |
+| Sharpe Ratio | **8.07** |
+| Total P&L | $1,124.71 |
+| Capital | $40,000 |
 
-**Forward Test (Q2-Q4 2024):**
-- Selected Trades: 8 (ENPH, SHOP, AVGO, RDDT)
-- Win Rate: **100%**
-- Sharpe Ratio: **8.07**
-- Total P&L: **$1,124.71** on $40K capital
+### Market Regime Analysis (208 trades)
 
-**Market Regime Analysis (208 trades):**
-- High Vol (VIX 25+): 83.3% WR, Sharpe 6.06
-- Normal (VIX 15-25): 72.7% WR, Sharpe 3.59
-- Low Vol (VIX <15): 68.8% WR, Sharpe 2.84
+| VIX Regime | Win Rate | Sharpe |
+|------------|----------|--------|
+| High (25+) | 83.3% | 6.06 |
+| Normal (15-25) | 72.7% | 3.59 |
+| Low (<15) | 68.8% | 2.84 |
+
+**Key Insight:** System performs best in elevated volatility (VRP more pronounced).
 
 ---
 
-## Documentation
+## Recent Enhancements
 
-- **[LIVE_TRADING_GUIDE.md](LIVE_TRADING_GUIDE.md)** - Complete trading operations guide
-- **[BACKTESTING.md](BACKTESTING.md)** - Backtesting framework and results
-- **[MCP_USAGE_GUIDE.md](MCP_USAGE_GUIDE.md)** - Model Context Protocol integration
+### December 2025 - Kelly Criterion & VRP Profiles
+
+**Kelly Criterion Position Sizing:**
+- Formula: `f* = (p × b - q) / b` where p=POP, b=win/loss ratio
+- 25% fractional Kelly for conservative capital growth
+- Minimum 5% edge requirement
+- Automatic contract calculation based on probability and edge
+
+**VRP Profile System:**
+- 4 profiles: CONSERVATIVE, BALANCED, AGGRESSIVE, LEGACY
+- Research-backed thresholds (vs. overfitted 7.0x/4.0x)
+- Profile selection via `VRP_THRESHOLD_MODE` environment variable
+- Individual threshold overrides supported
+
+**Improvements:**
+- POP validation (0.0-1.0 range check)
+- Warning logs when env vars override profiles
+- Comprehensive test suite (20 VRP profile tests, 11 Kelly tests)
+
+See `FIXES_SUMMARY.md`, `CONFIG_REFERENCE.md`, and `CODE_REVIEW_KELLY_VRP.md` for details.
+
+### December 2025 - Technical Debt Cleanup
+
+**Removed:**
+- 66 lines of dead Reddit parsing code (Twitter/X is primary source)
+- Misleading "legacy" comments on active functions
+
+**Impact:**
+- Cleaner codebase, no functional changes
+- All tests passing (22 test files, 100+ scenarios)
+
+See `TECH_DEBT_CLEANUP.md` for analysis.
+
+### November 2025 - Cache & Database Improvements
+
+**Thread Safety:**
+- Added `threading.Lock` to MemoryCache
+- Multi-threaded test: 10 threads × 20 operations = PASS
+
+**Database Performance:**
+- Enabled WAL mode (10x concurrency improvement)
+- 30-second connection timeout across all repositories
+- `PRAGMA synchronous=NORMAL` for better performance
+
+**UX Improvements:**
+- Comprehensive help mode (`./trade.sh --help`)
+- Auto-backfill missing historical data
+- Improved error messages and display
+
+---
+
+## Testing
+
+**Test Suite:**
+- 22 test files covering unit, integration, and performance
+- Core business logic (VRP, Kelly, skew, consistency)
+- Infrastructure (API clients, database, cache)
+- Validation scenarios (edge cases, invalid inputs)
+
+**Run tests:**
+```bash
+pytest tests/
+```
+
+**Coverage:**
+```bash
+pytest --cov=src --cov-report=term-missing
+```
 
 ---
 
@@ -298,143 +300,160 @@ CREATE TABLE historical_moves (
 ```
 2.0/
 ├── src/
-│   ├── domain/              # Types, errors, protocols
+│   ├── domain/              # Value objects, protocols, errors
 │   ├── application/         # Business logic
 │   │   ├── metrics/        # VRP, skew, consistency calculators
 │   │   └── services/       # Analyzer, strategy generator
 │   ├── infrastructure/      # API clients, database, cache
-│   ├── config/             # Configuration validation
+│   ├── config/             # Configuration & validation
 │   ├── utils/              # Retry, circuit breaker, logging
 │   └── container.py        # Dependency injection
 ├── tests/
-│   ├── unit/               # 193 unit tests
-│   ├── performance/        # 8 load tests
-│   └── integration/        # Integration tests
+│   ├── unit/               # Unit tests (Kelly, VRP, etc.)
+│   ├── integration/        # Integration tests
+│   └── performance/        # Load tests
 ├── scripts/
-│   ├── analyze.py          # Core analysis
+│   ├── analyze.py          # Core analysis engine
 │   ├── scan.py             # Scanning/ticker modes
-│   ├── backfill_yfinance.py # Historical data
-│   ├── health_check.py     # System health
-│   └── run_backtests.py    # Backtesting framework
+│   ├── backfill_yfinance.py # Historical data backfill
+│   ├── health_check.py     # System health verification
+│   └── restore_database.sh # Database restore utility
 ├── data/
 │   ├── ivcrush.db          # Historical moves database
-│   └── watchlist.txt       # Permanent ticker watchlist
-├── trade.sh                # Fire-and-forget wrapper
+│   └── watchlist.txt       # Ticker watchlist
+├── backups/                # Automatic database backups
+├── docs/                   # ADRs and technical documentation
+├── archive/                # Legacy code and old configs
+├── trade.sh                # Main entry point
+├── .env                    # Configuration (not in git)
+├── .env.example            # Configuration template
 └── README.md               # This file
 ```
 
 ---
 
-## Trading Workflow
+## Configuration Reference
 
-1. **Health Check**: `./trade.sh health` - Verify APIs operational
-2. **Analyze**: `./trade.sh TICKER DATE` - Get trade recommendations
-3. **Review Strategy**: Check VRP ratio, strikes, P/L, Greeks
-4. **Execute Trade**: Place order in broker (Tradier, TastyTrade, etc.)
-5. **Track Outcome**: Compare actual move vs implied move
+### Core Settings
+
+```bash
+# APIs
+TRADIER_API_KEY=your_key
+ALPHA_VANTAGE_KEY=your_key
+
+# Database
+DB_PATH=data/ivcrush.db
+MIN_HISTORICAL_QUARTERS=2
+
+# VRP Thresholds
+VRP_THRESHOLD_MODE=BALANCED      # CONSERVATIVE | BALANCED | AGGRESSIVE | LEGACY
+VRP_EXCELLENT=1.8                # Override profile default
+VRP_GOOD=1.4                     # Override profile default
+
+# Kelly Criterion
+USE_KELLY_SIZING=true
+KELLY_FRACTION=0.25              # 25% of full Kelly
+KELLY_MIN_EDGE=0.05              # 5% minimum edge
+KELLY_MIN_CONTRACTS=1
+```
+
+See `.env.example` and `CONFIG_REFERENCE.md` for complete reference.
+
+---
+
+## Documentation
+
+**User Guides:**
+- `CONFIG_REFERENCE.md` - Configuration parameters quick reference
+- `FIXES_SUMMARY.md` - Kelly Criterion & VRP profile implementation
+- `MCP_USAGE_GUIDE.md` - Model Context Protocol integration
+
+**Technical:**
+- `CODE_REVIEW_KELLY_VRP.md` - Code review of Kelly/VRP changes
+- `ADVISORY_IMPROVEMENTS.md` - Post-review enhancements
+- `TECH_DEBT_CLEANUP.md` - Technical debt analysis
+- `CHANGELOG.md` - Version history
+- `docs/adr/` - Architecture Decision Records
+
+**Legacy:**
+- `archive/` - Old configurations and deprecated code
+- `../1.0/` - Original system (reference only)
+
+---
+
+## Workflow
+
+### Pre-Trade
+1. **Health check**: `./trade.sh health`
+2. **Analyze ticker**: `./trade.sh NVDA 2025-11-20`
+3. **Review output**: VRP ratio, strategy, Greeks, liquidity
+4. **Verify historical data**: Check consistency score, sample size
+
+### Trade Execution
+5. **Validate strikes**: Confirm bid/ask spreads acceptable
+6. **Size position**: Use Kelly-recommended contracts (or adjust)
+7. **Place order**: Execute in broker (Tradier, TastyTrade, etc.)
+8. **Set alerts**: Earnings date, target profit, max loss
+
+### Post-Trade
+9. **Track P&L**: Monitor through expiration
+10. **Record outcome**: Actual move vs implied move
+11. **Update database**: Backfill actual results if needed
 
 ---
 
 ## Performance
 
-- **Response Times**: 1.0ms per ticker (avg)
-- **Scaling**: Linear up to 100 concurrent tickers
-- **Cache Hit Rate**: 95%+ on repeat queries
-- **Database**: WAL mode for concurrent access
+| Metric | Value |
+|--------|-------|
+| Response time | ~1.0ms per ticker (avg) |
+| Scaling | Linear to 100 concurrent tickers |
+| Cache hit rate | 95%+ on repeat queries |
+| Database mode | WAL (concurrent-safe) |
+| Backup frequency | Every 6 hours |
+| Test coverage | Core business logic |
 
 ---
 
-## Database Backups
+## Troubleshooting
 
-### Automatic Backups
+### Common Issues
 
-**Every time you run `./trade.sh`**, the system automatically backs up your database to the `backups/` folder. Backups are:
-- **Triggered**: On every analysis command (ticker, scan, list, whisper)
-- **Frequency**: Only if last backup is >6 hours old (avoids spam)
-- **Location**: `2.0/backups/ivcrush_YYYYMMDD_HHMMSS.db`
-- **Retention**: Last 30 days (automatic cleanup)
-- **Impact**: Silent, non-blocking (<1 second)
+**Missing historical data:**
+- System auto-backfills last 3 years on first analysis
+- Manual: `python scripts/backfill_yfinance.py TICKER`
 
-### Google Drive Sync (Recommended)
+**API rate limits:**
+- Alpha Vantage: 5 calls/min, 500/day (free tier)
+- Tradier: 120 calls/min (sandbox/brokerage)
+- System respects limits via circuit breakers
 
-For cloud redundancy, sync the `backups/` folder to Google Drive:
+**Database locked:**
+- WAL mode prevents most lock issues
+- If locked: check for long-running queries
+- Worst case: `./scripts/restore_database.sh`
 
-1. **Open Google Drive desktop app**
-2. **Add folder to sync**:
-   - Navigate to: `Trading Desk/2.0/backups/`
-   - Enable sync for this folder
-3. **Verify**: Check Google Drive web to confirm backups are uploading
-
-**Storage**: ~13MB for 30 days of backups (negligible with Google One subscription)
-
-### Restoring from Backup
-
-If you need to restore your database:
-
-```bash
-cd 2.0
-./scripts/restore_database.sh
-```
-
-**The restore script will**:
-1. List all available backups with timestamps and sizes
-2. Show current database info
-3. Create a safety backup before restore (optional)
-4. Restore selected backup
-5. Verify database integrity
-
----
-
-## Recent Improvements
-
-### November 2025 - Cache & Database Audit Fixes
-
-**Thread Safety:**
-- Added `threading.Lock` to MemoryCache for true thread safety
-- Protected all cache operations (get/set/delete/clear/stats)
-- Multi-threaded test: 10 threads × 20 operations = PASS
-
-**Database Performance:**
-- Enabled WAL mode for better concurrency (10x improvement)
-- Added `PRAGMA synchronous=NORMAL` (safe with WAL)
-- Added `PRAGMA busy_timeout=5000` (5 second lock timeout)
-- Created `_ensure_wal_mode()` helper for existing databases
-
-**Connection Reliability:**
-- Added `CONNECTION_TIMEOUT=30` constant to all repositories
-- Applied 30-second timeout to 15+ database connections
-
-### November 2025 - Code Review Improvements
-
-**Code Quality:**
-- Added `functools.wraps` to circuit breaker decorators
-- Fixed SQL injection risk in `drop_all_tables()` (f-string → parameterized)
-- Extracted magic numbers to named constants
-- Refactored long parameter lists using dataclasses
-
-**Bug Fixes:**
-- Implemented automatic expiration adjustment via `find_nearest_expiration()`
-- Fixed TCOM analysis failure (no options on calculated expiration)
-- Improved error display in trade.sh (show errors/warnings properly)
-
-**User Experience:**
-- Added comprehensive help mode (`./trade.sh --help`)
-- Enhanced error messages with better formatting
-- Auto-backfill historical data when missing
-- Improved output filtering and display
-
-### Testing & Validation
-- **System Health**: All services HEALTHY (Tradier 225ms, Database 1.7ms, Cache 0.1ms)
-- **Thread Safety**: Multi-threaded cache test passing
-- **WAL Mode**: Verified with `PRAGMA journal_mode` → 'wal'
-- **All Tests**: 201 tests passing (193 unit + 8 load)
+**Health check failing:**
+- Check API keys in `.env`
+- Verify network connectivity
+- Check Tradier sandbox vs production endpoint
 
 ---
 
 ## License
 
-MIT
+MIT License
 
 ---
 
-**Note:** The original 1.0 system is preserved in the `../1.0/` directory for reference.
+## Disclaimer
+
+**FOR RESEARCH AND EDUCATIONAL PURPOSES ONLY.**
+
+This software provides analytical tools for options trading research. It is **not financial advice**. Options trading involves substantial risk of loss. Always verify data, strategies, and calculations independently before risking capital.
+
+The authors and contributors are not responsible for any trading losses incurred using this software.
+
+---
+
+**Built with Claude Code** | December 2025
