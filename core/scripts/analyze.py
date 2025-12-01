@@ -210,9 +210,12 @@ Notes:
         logger.info(f"   Recommendation: {analysis.vrp.recommendation.value.upper()}")
         # Display directional bias from skew analysis if available
         if analysis.skew:
-            logger.info(f"   Directional Bias: {analysis.skew.directional_bias.value.upper()}")
+            # Format: "Strong Bearish" instead of "STRONG_BEARISH"
+            bias_formatted = analysis.skew.directional_bias.value.replace('_', ' ').title()
+            logger.info(f"   Directional Bias: {bias_formatted}")
         elif analysis.strategies:
-            logger.info(f"   Directional Bias: {analysis.strategies.directional_bias.value.upper()}")
+            bias_formatted = analysis.strategies.directional_bias.value.replace('_', ' ').title()
+            logger.info(f"   Directional Bias: {bias_formatted}")
 
         if analysis.vrp.is_tradeable:
             logger.info("\n" + "=" * 80)
