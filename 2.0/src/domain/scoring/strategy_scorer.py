@@ -433,8 +433,8 @@ class StrategyScorer:
         # Calculate profit zone as percentage of stock price
         profit_zone_pct = (profit_zone_width / stock_price_estimate) * 100
 
-        # Get implied move percentage
-        implied_move_pct = vrp.implied_move_pct
+        # Get implied move percentage (extract float value from Percentage type)
+        implied_move_pct = vrp.implied_move_pct.value
 
         # Calculate ratio: profit zone / implied move
         # If ratio > 1.0, profit zone is wider than implied move (good)
