@@ -238,6 +238,12 @@ CREATE TABLE historical_moves (
 - Edge = (POP × R/R) - (1 - POP) combines probability and reward
 - Negative edge strategies score 0 points for edge component
 
+**Profit Zone vs Implied Move Fix:**
+- Penalizes narrow profit zones when implied move is large
+- Prevents Iron Butterflies from being recommended with huge expected moves
+- Example: 2.96% profit zone with 12.98% implied move → 53% penalty
+- Credit spreads exempted (one-sided risk, handle large moves better)
+
 **VRP Profile System:**
 - 4 profiles: CONSERVATIVE, BALANCED, AGGRESSIVE, LEGACY
 - Research-backed thresholds (vs. overfitted 7.0x/4.0x)
