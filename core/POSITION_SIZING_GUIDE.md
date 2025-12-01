@@ -14,7 +14,7 @@ Your `.env` file is configured for $20-25K max loss per trade:
 # Kelly Criterion Settings
 USE_KELLY_SIZING=true
 KELLY_FRACTION=0.25              # 25% of full Kelly (conservative)
-KELLY_MIN_EDGE=0.05              # 5% minimum edge required
+KELLY_MIN_EDGE=0.02              # 2% minimum edge required
 KELLY_MIN_CONTRACTS=1
 
 # Risk Management
@@ -180,20 +180,27 @@ With $500 max loss per spread:
 - **0.30 (30%):** More aggressive, larger positions
 - **Never exceed 0.50 (50%)** - variance becomes too high
 
-### KELLY_MIN_EDGE (0.05)
+### KELLY_MIN_EDGE (0.02)
 
 **Purpose:** Minimum expected value required to trade
 
-**5% minimum edge** means Kelly won't allocate capital unless EV > 5%.
+**2% minimum edge** means Kelly won't allocate capital unless EV > 2%.
+
+**Why 2% instead of 5%:**
+- Most credit spreads have edges in the 2-4% range
+- 5% edge is extremely rare in options selling
+- 2% still filters out negative or marginal trades
+- Allows Kelly to properly size positions with typical edges
 
 **Example:**
-- If edge = 3% → trade rejected (1 contract minimum)
-- If edge = 7% → Kelly allocates capital
+- If edge = 1% → trade rejected (1 contract minimum)
+- If edge = 3% → Kelly allocates capital properly
+- If edge = 5% → Kelly allocates more aggressively
 
 **Adjustment:**
-- **Increase (0.08):** More selective, fewer trades
-- **Decrease (0.03):** Less selective, more trades
-- Trade-off: quality vs quantity
+- **Increase (0.03-0.04):** More selective, fewer trades
+- **Decrease (0.01):** Less selective, more trades
+- **Do not use 0.05+:** Filters out most viable credit spreads
 
 ---
 
@@ -415,6 +422,10 @@ A: Monitor actual POP vs predicted POP. If consistently lower, increase KELLY_MI
 
 A: No. Kelly automatically accounts for win rate via POP. Don't increase size after wins or decrease after losses (gambler's fallacy).
 
+**Q: Why was I seeing only 1 contract per trade?**
+
+A: If KELLY_MIN_EDGE is set too high (e.g., 0.05 or 5%), Kelly filters out most credit spreads which typically have 2-4% edges. Lower to 0.02 (2%) to allow proper position sizing for typical options selling strategies.
+
 ---
 
 ## Summary
@@ -425,7 +436,7 @@ A: No. Kelly automatically accounts for win rate via POP. Don't increase size af
 - RISK_BUDGET_PER_TRADE: $250,000
 - MAX_CONTRACTS: 50
 - KELLY_FRACTION: 0.25 (25% fractional Kelly)
-- KELLY_MIN_EDGE: 0.05 (5% minimum)
+- KELLY_MIN_EDGE: 0.02 (2% minimum)
 
 **Expected Behavior:**
 - Most trades: 20-45 contracts
