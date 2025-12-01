@@ -137,23 +137,27 @@ class ScoringWeights:
     - R/R (15%): Reduced - was overshadowed by directional risk
     - Greeks (10%): Unchanged - secondary edge indicators
 
-    OLD weights: POP 45%, R/R 20%, VRP 20%, Greeks 10%, Size 5%
-    NEW weights: POP 30%, LIQUIDITY 25%, VRP 20%, R/R 15%, Greeks 10%
+    USER PREFERENCE UPDATE (Dec 2025):
+    POP increased from 30% to 40% to prioritize high-probability trades.
+    Other factors rebalanced proportionally to maintain 100 total.
+
+    CURRENT weights: POP 40%, LIQUIDITY 22%, VRP 17%, EDGE 13%, Greeks 8%
     """
 
     # Scoring weights with Greeks available (sum = 100)
-    pop_weight: float = 30.0          # Probability of profit (reduced from 45%)
-    liquidity_weight: float = 25.0    # NEW: Liquidity quality (critical addition)
-    vrp_weight: float = 20.0          # VRP edge strength (unchanged)
-    reward_risk_weight: float = 15.0  # Reward/risk ratio (reduced from 20%)
-    greeks_weight: float = 10.0       # Theta/vega quality (unchanged)
+    # USER PREFERENCE (Dec 2025): POP weighted higher for high-probability trades
+    pop_weight: float = 40.0          # Probability of profit (increased from 30%)
+    liquidity_weight: float = 22.0    # Liquidity quality (reduced from 25%)
+    vrp_weight: float = 17.0          # VRP edge strength (reduced from 20%)
+    reward_risk_weight: float = 13.0  # Kelly edge (reduced from 15%)
+    greeks_weight: float = 8.0        # Theta/vega quality (reduced from 10%)
     size_weight: float = 0.0          # Removed (position sizing is handled separately)
 
     # Scoring weights without Greeks (sum = 100)
-    pop_weight_no_greeks: float = 35.0        # Reduced from 50%
-    liquidity_weight_no_greeks: float = 30.0  # NEW: Even more critical without Greeks
-    vrp_weight_no_greeks: float = 20.0        # Unchanged
-    reward_risk_weight_no_greeks: float = 15.0  # Reduced from 25%
+    pop_weight_no_greeks: float = 45.0        # Increased from 35%
+    liquidity_weight_no_greeks: float = 26.0  # Reduced from 30%
+    vrp_weight_no_greeks: float = 17.0        # Reduced from 20%
+    reward_risk_weight_no_greeks: float = 12.0  # Reduced from 15%
     size_weight_no_greeks: float = 0.0        # Removed
 
     # Target values for normalization
