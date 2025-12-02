@@ -346,7 +346,7 @@ class BacktestEngine:
             use_hybrid: If True, use Kelly + VRP hybrid; if False, use equal weight
 
         Returns:
-            Tuple of (kelly_fraction, total P&L in dollars, max drawdown in dollars)
+            Tuple of (kelly_fraction, total P&L in dollars, max drawdown in %)
         """
         if not trades:
             return 0.0, 0.0, 0.0
@@ -381,17 +381,21 @@ class BacktestEngine:
         # Calculate total P&L and max drawdown in dollars
         total_pnl = sum(t.simulated_pnl for t in trades)
 
-        cumulative = 0.0
-        peak = 0.0
-        max_dd = 0.0
+        # Max drawdown as percentage of peak capital
+        capital = total_capital
+        peak_capital = total_capital
+        max_dd_pct = 0.0
 
         for trade in trades:
-            cumulative += trade.simulated_pnl
-            peak = max(peak, cumulative)
-            drawdown = peak - cumulative
-            max_dd = max(max_dd, drawdown)
+            capital += trade.simulated_pnl
+            peak_capital = max(peak_capital, capital)
 
-        return kelly_frac, total_pnl, max_dd
+            # Drawdown as % from peak
+            if peak_capital > 0:
+                dd_pct = (peak_capital - capital) / peak_capital * 100.0
+                max_dd_pct = max(max_dd_pct, dd_pct)
+
+        return kelly_frac, total_pnl, max_dd_pct
 
     def run_backtest(
         self,
@@ -535,16 +539,16 @@ class BacktestEngine:
         # Apply position sizing if enabled
         kelly_frac = 0.0
         if position_sizing:
-            kelly_frac, total_pnl_dollars, max_dd_dollars = self.apply_position_sizing(
+            kelly_frac, total_pnl_dollars, max_dd_pct = self.apply_position_sizing(
                 selected_trades,
                 total_capital=total_capital,
                 use_hybrid=True,
             )
 
-            # After position sizing, P&L is in dollars
+            # After position sizing, P&L is in dollars, drawdown is in %
             total_pnl = total_pnl_dollars
             avg_pnl = total_pnl / len(selected_trades)
-            max_drawdown = max_dd_dollars
+            max_drawdown = max_dd_pct
 
             # Sharpe ratio with dollar P&L
             pnls = [t.simulated_pnl for t in selected_trades]
@@ -567,16 +571,23 @@ class BacktestEngine:
                 else 0.0
             )
 
-            # Max drawdown (simplified: cumulative worst losing streak)
-            cumulative_pnl = 0
-            peak_pnl = 0
-            max_drawdown = 0
+            # Max drawdown (as percentage of running equity)
+            # Start with 100% equity, compound returns
+            equity = 100.0
+            peak_equity = 100.0
+            max_drawdown_pct = 0.0
 
             for trade in selected_trades:
-                cumulative_pnl += trade.simulated_pnl
-                peak_pnl = max(peak_pnl, cumulative_pnl)
-                drawdown = peak_pnl - cumulative_pnl
-                max_drawdown = max(max_drawdown, drawdown)
+                # Apply trade return to equity
+                equity = equity * (1 + trade.simulated_pnl / 100.0)
+                peak_equity = max(peak_equity, equity)
+
+                # Calculate drawdown as % from peak
+                if peak_equity > 0:
+                    drawdown_pct = (peak_equity - equity) / peak_equity * 100.0
+                    max_drawdown_pct = max(max_drawdown_pct, drawdown_pct)
+
+            max_drawdown = max_drawdown_pct
 
         # Performance metrics
         winners = [t for t in selected_trades if t.simulated_pnl > 0]

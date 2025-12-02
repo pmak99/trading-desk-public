@@ -54,10 +54,11 @@ class ScoringThresholds:
     These define the breakpoints for excellent/good/marginal ratings.
     """
 
-    # VRP ratio thresholds (data-driven from 289-ticker grid scan)
-    vrp_excellent: float = 7.0  # Top 33% - exceptional edge
-    vrp_good: float = 4.0  # Top 67% - strong edge
-    vrp_marginal: float = 1.5  # Baseline edge
+    # VRP ratio thresholds (updated based on comprehensive backtesting)
+    # Original values (7.0/4.0) were overfitted - updated to research-backed thresholds
+    vrp_excellent: float = 2.0  # Excellent edge (conservative baseline)
+    vrp_good: float = 1.5  # Strong edge
+    vrp_marginal: float = 1.2  # Baseline edge (VRP exists)
 
     # Consistency thresholds (higher is better, 0-1 scale)
     consistency_excellent: float = 0.8  # Very predictable moves
@@ -130,9 +131,14 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
                 skew_weight=0.05,
                 liquidity_weight=0.05,
             ),
-            thresholds=default_thresholds,
+            thresholds=ScoringThresholds(
+                vrp_excellent=2.2,  # Focus on high VRP
+                vrp_good=1.6,
+                vrp_marginal=1.3,
+                min_composite_score=62.0,  # Moderate bar
+            ),
             max_positions=10,
-            min_score=65.0,
+            min_score=62.0,
         ),
 
         # Config 2: Balanced (Recommended for User)
@@ -211,9 +217,9 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
                 liquidity_weight=0.15,
             ),
             thresholds=ScoringThresholds(
-                vrp_excellent=6.3,  # Slightly lower than baseline (aggressive)
-                vrp_good=2.8,
-                vrp_marginal=0.8,
+                vrp_excellent=1.5,  # Lower than baseline (aggressive)
+                vrp_good=1.3,
+                vrp_marginal=1.1,
                 min_composite_score=50.0,  # Lower bar
             ),
             max_positions=15,
@@ -232,13 +238,13 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
                 liquidity_weight=0.10,
             ),
             thresholds=ScoringThresholds(
-                vrp_excellent=7.7,  # Slightly higher than baseline (conservative)
-                vrp_good=4.5,
-                vrp_marginal=1.8,
-                min_composite_score=70.0,  # Higher bar
+                vrp_excellent=2.5,  # Higher than baseline (conservative)
+                vrp_good=1.8,
+                vrp_marginal=1.4,
+                min_composite_score=65.0,  # Higher bar
             ),
             max_positions=6,
-            min_score=70.0,
+            min_score=65.0,
         ),
 
         # Config 8: Hybrid (Adaptive)
