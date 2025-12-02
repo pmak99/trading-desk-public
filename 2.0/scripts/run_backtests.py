@@ -51,15 +51,32 @@ def format_result_summary(result: BacktestResult) -> str:
         f"",
         f"Performance:",
         f"  Win Rate: {result.win_rate:.1f}%",
-        f"  Total P&L: {result.total_pnl:.2f}%",
-        f"  Avg P&L/Trade: {result.avg_pnl_per_trade:.2f}%",
-        f"  Sharpe Ratio: {result.sharpe_ratio:.2f}",
-        f"  Max Drawdown: {result.max_drawdown:.2f}%",
+    ]
+
+    # Format P&L and drawdown based on position sizing mode
+    if result.position_sizing_enabled:
+        # Kelly sizing: P&L in dollars, drawdown in %
+        lines.extend([
+            f"  Total P&L: ${result.total_pnl:,.2f}",
+            f"  Avg P&L/Trade: ${result.avg_pnl_per_trade:,.2f}",
+            f"  Sharpe Ratio: {result.sharpe_ratio:.2f}",
+            f"  Max Drawdown: {result.max_drawdown:.2f}%",
+        ])
+    else:
+        # No Kelly: P&L and drawdown both in percentages
+        lines.extend([
+            f"  Total P&L: {result.total_pnl:.2f}%",
+            f"  Avg P&L/Trade: {result.avg_pnl_per_trade:.2f}%",
+            f"  Sharpe Ratio: {result.sharpe_ratio:.2f}",
+            f"  Max Drawdown: {result.max_drawdown:.2f}%",
+        ])
+
+    lines.extend([
         f"",
         f"Trade Quality:",
         f"  Avg Score (Winners): {result.avg_score_winners:.1f}",
         f"  Avg Score (Losers): {result.avg_score_losers:.1f}",
-    ]
+    ])
 
     if result.position_sizing_enabled:
         lines.extend([
@@ -67,7 +84,6 @@ def format_result_summary(result: BacktestResult) -> str:
             f"Position Sizing:",
             f"  Kelly Fraction: {result.kelly_fraction:.2%}",
             f"  Total Capital: ${result.total_capital:,.2f}",
-            f"  Total P&L: ${result.total_pnl:,.2f}",
         ])
 
     lines.append("="*80)

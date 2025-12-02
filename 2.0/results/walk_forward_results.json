@@ -1,0 +1,86 @@
+{
+  "summary": {
+    "total_windows": 8,
+    "total_test_trades": 51,
+    "avg_test_sharpe": 0.4331236488755445,
+    "avg_test_win_rate": 73.89455782312925,
+    "total_test_pnl": 26.395170189508725,
+    "config_selection_counts": {
+      "Consistency-Heavy": 5,
+      "Balanced": 1,
+      "Hybrid": 2
+    },
+    "most_selected_config": [
+      "Consistency-Heavy",
+      5
+    ]
+  },
+  "best_configs": [
+    "Consistency-Heavy",
+    "Balanced",
+    "Consistency-Heavy",
+    "Hybrid",
+    "Hybrid",
+    "Consistency-Heavy",
+    "Consistency-Heavy",
+    "Consistency-Heavy"
+  ],
+  "test_results": [
+    {
+      "config_name": "Consistency-Heavy",
+      "sharpe_ratio": 0.3073364403708389,
+      "win_rate": 75.0,
+      "total_pnl": 4.695749695254109,
+      "selected_trades": 8
+    },
+    {
+      "config_name": "Balanced",
+      "sharpe_ratio": 0.10909867254395163,
+      "win_rate": 83.33333333333334,
+      "total_pnl": 6.996722535692436,
+      "selected_trades": 12
+    },
+    {
+      "config_name": "Consistency-Heavy",
+      "sharpe_ratio": -0.25647144059034066,
+      "win_rate": 71.42857142857143,
+      "total_pnl": -25.0348599713991,
+      "selected_trades": 7
+    },
+    {
+      "config_name": "Hybrid",
+      "sharpe_ratio": 0.0,
+      "win_rate": 0.0,
+      "total_pnl": 0.0,
+      "selected_trades": 0
+    },
+    {
+      "config_name": "Hybrid",
+      "sharpe_ratio": 0.0,
+      "win_rate": 0.0,
+      "total_pnl": -0.3048428208535221,
+      "selected_trades": 1
+    },
+    {
+      "config_name": "Consistency-Heavy",
+      "sharpe_ratio": 0.9184452088992168,
+      "win_rate": 100.0,
+      "total_pnl": 11.64815872942584,
+      "selected_trades": 7
+    },
+    {
+      "config_name": "Consistency-Heavy",
+      "sharpe_ratio": 1.0245448433961004,
+      "win_rate": 87.5,
+      "total_pnl": 10.626294145842627,
+      "selected_trades": 8
+    },
+    {
+      "config_name": "Consistency-Heavy",
+      "sharpe_ratio": 0.9289118175090445,
+      "win_rate": 100.0,
+      "total_pnl": 17.767947875546337,
+      "selected_trades": 8
+    }
+  ]
+}
