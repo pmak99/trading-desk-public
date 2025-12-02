@@ -144,22 +144,40 @@ Notes:
             logger.info("=" * 80)
 
             strats = analysis.strategies
-            logger.info(f"\nDirectional Bias: {strats.directional_bias.value.upper()}")
-            logger.info(f"Generated {len(strats.strategies)} strategies\n")
+            logger.info(f"\nDirectional Bias: {strats.directional_bias.value.replace('_', ' ').upper()}")
+            logger.info(f"Generated {len(strats.strategies)} strategies")
 
             for i, strategy in enumerate(strats.strategies, 1):
                 is_recommended = (i - 1 == strats.recommended_index)
-                marker = "★ RECOMMENDED" if is_recommended else f"  Strategy {i}"
 
-                logger.info(f"\n{marker}: {strategy.strategy_type.value.replace('_', ' ').upper()}")
-                logger.info(f"  Strikes: {strategy.strike_description}")
-                logger.info(f"  Net Credit: {strategy.net_credit}")
-                logger.info(f"  Max Profit: {strategy.max_profit} ({strategy.contracts} contracts)")
-                logger.info(f"  Max Loss: {strategy.max_loss}")
-                logger.info(f"  Breakeven: {', '.join(str(be) for be in strategy.breakeven)}")
-                logger.info(f"  Probability of Profit: {strategy.probability_of_profit:.1%}")
-                logger.info(f"  Reward/Risk: {strategy.reward_risk_ratio:.2f}")
-                logger.info(f"  Score: {strategy.overall_score:.1f}/100")
+                # Add visual separator between strategies
+                logger.info("\n" + "─" * 80)
+
+                # Strategy header with prominent number
+                if is_recommended:
+                    logger.info(f"★ STRATEGY #{i} (RECOMMENDED): {strategy.strategy_type.value.replace('_', ' ').upper()}")
+                else:
+                    logger.info(f"  STRATEGY #{i}: {strategy.strategy_type.value.replace('_', ' ').upper()}")
+
+                logger.info("─" * 80)
+
+                # Trade Details section
+                logger.info(f"\n  📋 TRADE DETAILS:")
+                logger.info(f"     Strikes: {strategy.strike_description}")
+                logger.info(f"     Net Credit: {strategy.net_credit}")
+                logger.info(f"     Contracts: {strategy.contracts}")
+
+                # Profit/Loss section
+                logger.info(f"\n  💰 PROFIT/LOSS:")
+                logger.info(f"     Max Profit: {strategy.max_profit}")
+                logger.info(f"     Max Loss: {strategy.max_loss}")
+                logger.info(f"     Reward/Risk: {strategy.reward_risk_ratio:.2f}")
+                logger.info(f"     Breakeven: {', '.join(str(be) for be in strategy.breakeven)}")
+
+                # Probability & Scoring section
+                logger.info(f"\n  📊 PROBABILITY & SCORE:")
+                logger.info(f"     Win Probability: {strategy.probability_of_profit:.1%}")
+                logger.info(f"     Overall Score: {strategy.overall_score:.1f}/100")
 
                 # Display liquidity tier if available
                 if strategy.liquidity_tier:
@@ -168,22 +186,24 @@ Notes:
                         "WARNING": "⚠️ ",
                         "REJECT": "❌"
                     }.get(strategy.liquidity_tier, "ℹ️ ")
-                    logger.info(f"  Liquidity: {tier_icon} {strategy.liquidity_tier}")
+                    logger.info(f"     Liquidity: {tier_icon} {strategy.liquidity_tier}")
 
                 # Display Greeks if available
                 if strategy.position_delta is not None:
-                    logger.info(f"  Greeks:")
-                    logger.info(f"    Delta: {strategy.position_delta:+.2f} (directional exposure)")
+                    logger.info(f"\n  📈 GREEKS:")
+                    logger.info(f"     Delta: {strategy.position_delta:+.2f} (directional exposure)")
                     if strategy.position_gamma is not None:
-                        logger.info(f"    Gamma: {strategy.position_gamma:+.4f} (delta sensitivity)")
+                        logger.info(f"     Gamma: {strategy.position_gamma:+.4f} (delta sensitivity)")
                     if strategy.position_theta is not None:
-                        logger.info(f"    Theta: {strategy.position_theta:+.2f} (daily time decay)")
+                        logger.info(f"     Theta: {strategy.position_theta:+.2f} (daily time decay)")
                     if strategy.position_vega is not None:
-                        logger.info(f"    Vega: {strategy.position_vega:+.2f} (IV sensitivity)")
+                        logger.info(f"     Vega: {strategy.position_vega:+.2f} (IV sensitivity)")
 
-                logger.info(f"  Rationale: {strategy.rationale}")
+                logger.info(f"\n  💡 Rationale: {strategy.rationale}")
 
-            logger.info(f"\n💡 Recommendation: {strats.recommendation_rationale}")
+            # Final recommendation summary
+            logger.info("\n" + "=" * 80)
+            logger.info(f"💡 RECOMMENDATION: {strats.recommendation_rationale}")
 
         elif args.strategies and not analysis.strategies:
             logger.info("\n⚠️  Strategy generation was requested but not available")
