@@ -118,8 +118,8 @@ class StrategyGenerator:
         if not strategies:
             raise ValueError(f"Could not generate any valid strategies for {ticker}")
 
-        # Score and rank strategies
-        self.scorer.score_strategies(strategies, vrp)
+        # Score and rank strategies with directional alignment
+        self.scorer.score_strategies(strategies, vrp, bias)
         strategies.sort(key=lambda s: s.overall_score, reverse=True)
 
         # Select best strategy
