@@ -101,8 +101,17 @@ class TickerScorer:
             ratio_above = vrp_ratio - self.thresholds.vrp_marginal
             return 50.0 + (25.0 * ratio_above / ratio_range)
 
-        # Below marginal: No meaningful edge, return 0
-        # We don't want to reward sub-threshold setups
+        # Below marginal: Gradual decline from 1.0 to marginal threshold
+        # FIX: Was hard cutoff at 0, now gradual decline (still filters low edge)
+        if vrp_ratio >= 1.0:
+            # Linear interpolation from 0 points at 1.0x to 50 points at marginal
+            ratio_range = self.thresholds.vrp_marginal - 1.0
+            if ratio_range <= 0:
+                return 0.0
+            ratio_above = vrp_ratio - 1.0
+            return 50.0 * (ratio_above / ratio_range)
+
+        # VRP < 1.0: Implied vol less than historical (negative edge)
         return 0.0
 
     def calculate_consistency_score(

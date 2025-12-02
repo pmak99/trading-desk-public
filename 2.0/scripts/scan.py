@@ -1041,8 +1041,8 @@ def scanning_mode(
         logger.info(f"\n🎯 Sorted by VRP Ratio, Liquidity:")
 
         # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column)
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Liquidity':<12}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Liquidity':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
 
         # Sort by: 1) VRP (descending), 2) Liquidity (EXCELLENT, WARNING, REJECT)
         def sort_key_scan(x):
@@ -1053,7 +1053,14 @@ def scanning_mode(
         # Table rows
         for i, r in enumerate(sorted(tradeable, key=sort_key_scan), 1):
             ticker = r['ticker']
-            name = r.get('ticker_name', '')[:28] if r.get('ticker_name') else ''
+            # Truncate ticker name to 20 chars at word boundary (don't split words)
+            full_name = r.get('ticker_name', '') if r.get('ticker_name') else ''
+            if len(full_name) <= 20:
+                name = full_name
+            else:
+                truncated = full_name[:20]
+                last_space = truncated.rfind(' ')
+                name = truncated[:last_space] if last_space > 0 else truncated
             vrp = f"{r['vrp_ratio']:.2f}x"
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
@@ -1069,7 +1076,7 @@ def scanning_mode(
                 liq_display = "❌ REJECT"
 
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {liq_display:<12}"
+                f"   {i:<3} {ticker:<8} {name:<20} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {liq_display:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
@@ -1228,8 +1235,8 @@ def ticker_mode(
         logger.info(f"\n🎯 Sorted by Earnings Date, VRP, Liquidity:")
 
         # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column; Added Bias column Dec 2025)
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<18} {'Earnings':<12} {'Liquidity':<12}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<18} {'Earnings':<12} {'Liquidity':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
 
         # Sort by: 1) Earnings date (ascending), 2) VRP (descending), 3) Liquidity (EXCELLENT, WARNING, REJECT)
         def sort_key_ticker(x):
@@ -1240,7 +1247,14 @@ def ticker_mode(
         # Table rows
         for i, r in enumerate(sorted(tradeable, key=sort_key_ticker), 1):
             ticker = r['ticker']
-            name = r.get('ticker_name', '')[:28] if r.get('ticker_name') else ''
+            # Truncate ticker name to 20 chars at word boundary (don't split words)
+            full_name = r.get('ticker_name', '') if r.get('ticker_name') else ''
+            if len(full_name) <= 20:
+                name = full_name
+            else:
+                truncated = full_name[:20]
+                last_space = truncated.rfind(' ')
+                name = truncated[:last_space] if last_space > 0 else truncated
             vrp = f"{r['vrp_ratio']:.2f}x"
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
@@ -1258,7 +1272,7 @@ def ticker_mode(
                 liq_display = "❌ REJECT"
 
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<18} {earnings:<12} {liq_display:<12}"
+                f"   {i:<3} {ticker:<8} {name:<20} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<18} {earnings:<12} {liq_display:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
@@ -1479,8 +1493,8 @@ def whisper_mode(
         logger.info(f"\n🎯 Most Anticipated + High VRP (Sorted by Earnings Date, VRP, Liquidity):")
 
         # Table header (UPDATED POST-LOSS ANALYSIS - Added Liquidity column; Added Bias column Dec 2025)
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<28} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<18} {'Earnings':<12} {'Liquidity':<12}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<18} {'Earnings':<12} {'Liquidity':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
 
         # Sort by: 1) Earnings date (ascending), 2) VRP (descending), 3) Liquidity (EXCELLENT, WARNING, REJECT)
         def sort_key(x):
@@ -1502,7 +1516,20 @@ def whisper_mode(
         prev_earnings_date = None
         for i, r in enumerate(sorted(tradeable, key=sort_key), 1):
             ticker = r['ticker']
-            name = r.get('ticker_name', '')[:28] if r.get('ticker_name') else ''
+            # Truncate ticker name to 20 chars at word boundary (don't split words)
+            full_name = r.get('ticker_name', '') if r.get('ticker_name') else ''
+            if len(full_name) <= 20:
+                name = full_name
+            else:
+                # Find last space before position 20
+                truncated = full_name[:20]
+                last_space = truncated.rfind(' ')
+                if last_space > 0:
+                    # Truncate at last whole word
+                    name = truncated[:last_space]
+                else:
+                    # No space found, just truncate (single long word)
+                    name = truncated
             vrp = f"{r['vrp_ratio']:.2f}x"
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
@@ -1512,7 +1539,7 @@ def whisper_mode(
 
             # Add separator between different earnings dates
             if prev_earnings_date is not None and earnings != prev_earnings_date:
-                logger.info(f"   {'-'*3} {'-'*8} {'-'*28} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
+                logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
             prev_earnings_date = earnings
 
             # CRITICAL: Display liquidity tier with color coding
@@ -1525,7 +1552,7 @@ def whisper_mode(
                 liq_display = "❌ REJECT"
 
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<28} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<18} {earnings:<12} {liq_display:<12}"
+                f"   {i:<3} {ticker:<8} {name:<20} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<18} {earnings:<12} {liq_display:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")

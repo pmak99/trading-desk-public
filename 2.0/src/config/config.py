@@ -141,7 +141,7 @@ class ScoringWeights:
     POP increased from 30% to 40% to prioritize high-probability trades.
     Other factors rebalanced proportionally to maintain 100 total.
 
-    CURRENT weights: POP 40%, LIQUIDITY 22%, VRP 17%, EDGE 13%, Greeks 8%
+    CURRENT weights: POP 40%, Liquidity 22%, VRP 17%, Edge 13%, Greeks 8%
     """
 
     # Scoring weights with Greeks available (sum = 100)

@@ -461,6 +461,7 @@ class Strategy:
     strategy_type: StrategyType
     expiration: date
     legs: List[StrategyLeg]
+    stock_price: Money  # Current stock price (for profit zone calculations)
 
     # Calculated metrics
     net_credit: Money  # Positive for credit spreads

@@ -32,11 +32,11 @@ class StrategyScorer:
     fine but poor liquidity caused expensive exits and amplified losses.
 
     Scoring factors (when Greeks available):
-    - Probability of profit (POP) - default 30% weight (reduced from 45%)
-    - Liquidity quality - default 25% weight (NEW - critical addition)
-    - VRP edge - default 20% weight (unchanged)
-    - Reward/risk ratio (R/R) - default 15% weight (reduced from 20%)
-    - Greeks quality (theta/vega) - default 10% weight (unchanged)
+    - Probability of profit (POP) - default 40% weight (increased Dec 2025)
+    - Liquidity quality - default 22% weight (added Nov 2025 after loss analysis)
+    - VRP edge - default 17% weight (reduced to make room for POP increase)
+    - Kelly edge (R/R × POP) - default 13% weight (reduced from 15%)
+    - Greeks quality (theta/vega) - default 8% weight (reduced from 10%)
     - Position sizing - default 0% weight (removed - handled separately)
 
     When Greeks are not available, the greeks weight is redistributed
@@ -236,15 +236,12 @@ class StrategyScorer:
         ) * self.weights.vrp_weight_no_greeks
 
         # Factor 4: Kelly Edge (KELLY EDGE FIX Dec 2025)
-        # Calculate Kelly edge: (p × b) - q
-        q = 1.0 - strategy.probability_of_profit
-        edge = strategy.probability_of_profit * strategy.reward_risk_ratio - q
-        if edge <= 0:
-            edge_score = 0.0
-        else:
-            target_edge = 0.10
-            normalized_edge = min(edge / target_edge, 1.0)
-            edge_score = normalized_edge * self.weights.reward_risk_weight_no_greeks
+        # Use refactored method to eliminate code duplication
+        edge_score = self._calculate_kelly_edge_score(
+            strategy.probability_of_profit,
+            strategy.reward_risk_ratio,
+            weight=self.weights.reward_risk_weight_no_greeks
+        )
 
         # Factor 5: Position Sizing
         size_score = min(strategy.contracts / 10.0, 1.0) * self.weights.size_weight_no_greeks
@@ -347,7 +344,9 @@ class StrategyScorer:
             # Unknown tier, assume EXCELLENT
             return self.weights.liquidity_weight
 
-    def _calculate_kelly_edge_score(self, pop: float, rr: float) -> float:
+    def _calculate_kelly_edge_score(
+        self, pop: float, rr: float, weight: Optional[float] = None
+    ) -> float:
         """
         Calculate Kelly edge score (KELLY EDGE FIX - Added Dec 2025).
 
@@ -366,19 +365,24 @@ class StrategyScorer:
         - Negative edge (EV < 0): 0 points (reject)
         - Zero edge (break-even): 0 points
         - Positive edge: Score proportional to edge
-        - Target edge: 0.10 (10%) for full reward_risk_weight points
+        - Target edge: 0.10 (10%) for full weight points
 
         Example:
         - IC: 59.5% POP, 0.38 R/R → edge = -17.89% → 0 points
-        - BPS: 84.6% POP, 0.21 R/R → edge = +2.37% → 3.6 points
+        - BPS: 84.6% POP, 0.21 R/R → edge = +2.37% → 3.08 points (fixed)
 
         Args:
             pop: Probability of profit (0.0 to 1.0)
             rr: Reward/risk ratio
+            weight: Optional weight to use (defaults to reward_risk_weight)
 
         Returns:
-            Kelly edge score (0 to reward_risk_weight, typically 15 points max)
+            Kelly edge score (0 to weight points)
         """
+        # Use provided weight or default to standard reward_risk_weight
+        if weight is None:
+            weight = self.weights.reward_risk_weight
+
         # Calculate Kelly edge
         q = 1.0 - pop
         edge = pop * rr - q
@@ -392,7 +396,7 @@ class StrategyScorer:
         target_edge = 0.10
         normalized_edge = min(edge / target_edge, 1.0)
 
-        return normalized_edge * self.weights.reward_risk_weight
+        return normalized_edge * weight
 
     def _calculate_profit_zone_multiplier(self, strategy: Strategy, vrp: VRPResult) -> float:
         """
@@ -433,9 +437,8 @@ class StrategyScorer:
             upper_be = breakevens_sorted[-1]
             profit_zone_width = upper_be - lower_be
 
-            # Get stock price from VRP ticker (we need to estimate it)
-            # Use middle of breakevens as proxy for stock price
-            stock_price_estimate = (lower_be + upper_be) / 2.0
+            # Use actual stock price from strategy (FIX: was using breakeven midpoint)
+            stock_price_estimate = float(strategy.stock_price.amount)
 
         else:
             # Single breakeven (credit spread)
@@ -451,13 +454,17 @@ class StrategyScorer:
         # Calculate profit zone as percentage of stock price
         profit_zone_pct = (profit_zone_width / stock_price_estimate) * 100
 
-        # Get implied move percentage (extract float value from Percentage type)
+        # Get implied move percentage (one-sided: up OR down)
         implied_move_pct = vrp.implied_move_pct.value
 
-        # Calculate ratio: profit zone / implied move
-        # If ratio > 1.0, profit zone is wider than implied move (good)
-        # If ratio < 1.0, profit zone is narrower than implied move (bad)
-        zone_to_move_ratio = profit_zone_pct / implied_move_pct
+        # CRITICAL FIX: Implied move is one-sided, but stock can move ±X%
+        # Total expected range = 2 × implied_move_pct (e.g., ±15% = 30% total range)
+        total_expected_range_pct = 2 * implied_move_pct
+
+        # Calculate ratio: profit zone / total expected range
+        # If ratio > 1.0, profit zone is wider than expected range (good)
+        # If ratio < 1.0, profit zone is narrower than expected range (bad)
+        zone_to_move_ratio = profit_zone_pct / total_expected_range_pct
 
         # Apply penalty based on ratio
         if zone_to_move_ratio >= 1.0:
