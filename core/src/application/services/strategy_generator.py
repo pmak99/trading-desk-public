@@ -460,6 +460,13 @@ class StrategyGenerator:
             option_chain, option_type, target_delta_short, target_delta_long
         )
 
+        # Log which method was used
+        if strikes:
+            logger.debug(
+                f"{ticker}: Delta-based selection: {option_type.value} "
+                f"short=${float(strikes[0].price):.2f}, long=${float(strikes[1].price):.2f}"
+            )
+
         # Verify delta-based strikes are outside implied move zone
         if strikes:
             strikes = self._verify_strikes_outside_implied_move(
@@ -472,6 +479,13 @@ class StrategyGenerator:
             strikes = self._select_strikes_distance_based(
                 option_chain, vrp, option_type, below=below
             )
+            if strikes:
+                logger.debug(
+                    f"{ticker}: Distance-based selection: {option_type.value} "
+                    f"short=${float(strikes[0].price):.2f}, long=${float(strikes[1].price):.2f}"
+                )
+            else:
+                logger.warning(f"{ticker}: Distance-based selection failed for {option_type.value}")
 
         if not strikes:
             return None
@@ -481,16 +495,23 @@ class StrategyGenerator:
         # Get option quotes
         option_chain_side = option_chain.puts if option_type == OptionType.PUT else option_chain.calls
         if short_strike not in option_chain_side or long_strike not in option_chain_side:
-            logger.warning(f"{ticker}: Strikes not found in {option_type.value}s chain")
+            # Debug: Show what strikes were selected and what's available
+            available_strikes = sorted([float(s.price) for s in option_chain_side.keys()])
+            logger.warning(
+                f"{ticker}: Strikes not found in {option_type.value}s chain. "
+                f"Selected: short=${float(short_strike.price):.2f}, long=${float(long_strike.price):.2f}. "
+                f"Available: ${available_strikes[0]:.2f}-${available_strikes[-1]:.2f} "
+                f"({len(available_strikes)} strikes)"
+            )
             return None
 
         short_quote = option_chain_side[short_strike]
         long_quote = option_chain_side[long_strike]
 
-        # Validate liquidity
-        if not short_quote.is_liquid or not long_quote.is_liquid:
-            logger.warning(f"{ticker}: Insufficient liquidity for {strategy_type.value}")
-            return None
+        # Note: Liquidity validation is now done by LiquidityScorer after strategy construction
+        # This allows for more sophisticated tier-based classification (EXCELLENT/WARNING/REJECT)
+        # rather than binary accept/reject. The tier is attached to the strategy and can be
+        # used for filtering or displaying warnings.
 
         # Calculate metrics
         metrics = self._calculate_spread_metrics(
@@ -547,6 +568,7 @@ class StrategyGenerator:
             strategy_type=strategy_type,
             expiration=option_chain.expiration,
             legs=legs,
+            stock_price=option_chain.stock_price,
             net_credit=metrics['net_credit'],
             max_profit=metrics['max_profit'] * contracts,
             max_loss=metrics['max_loss'] * contracts,
@@ -672,6 +694,7 @@ class StrategyGenerator:
             strategy_type=StrategyType.IRON_CONDOR,
             expiration=option_chain.expiration,
             legs=legs,
+            stock_price=option_chain.stock_price,
             net_credit=net_credit,
             max_profit=max_profit * contracts,
             max_loss=max_loss * contracts,
@@ -720,14 +743,17 @@ class StrategyGenerator:
         # Tighter than condor since we expect minimal movement
         wing_width = max(stock_price * self.config.iron_butterfly_wing_width_pct, 3.0)
 
-        # Find protection strikes (equal distance from ATM)
-        available_strikes = sorted(option_chain.strikes, key=lambda s: float(s.price))
+        # FIX: Find protection strikes from specific chains to ensure they exist
+        # Previously used option_chain.strikes (union), which could select strikes
+        # that don't exist in the target chain
+        put_strikes = sorted(option_chain.puts.keys(), key=lambda s: float(s.price))
+        call_strikes = sorted(option_chain.calls.keys(), key=lambda s: float(s.price))
 
         long_put_strike = self._find_nearest_strike(
-            available_strikes, float(atm_strike.price) - wing_width
+            put_strikes, float(atm_strike.price) - wing_width
         )
         long_call_strike = self._find_nearest_strike(
-            available_strikes, float(atm_strike.price) + wing_width
+            call_strikes, float(atm_strike.price) + wing_width
         )
 
         if not long_put_strike or not long_call_strike:
@@ -748,11 +774,9 @@ class StrategyGenerator:
         wing_call = option_chain.calls[long_call_strike]
         wing_put = option_chain.puts[long_put_strike]
 
-        # Validate liquidity
-        if not all([atm_call.is_liquid, atm_put.is_liquid,
-                   wing_call.is_liquid, wing_put.is_liquid]):
-            logger.warning(f"{ticker}: Insufficient liquidity for iron butterfly")
-            return None
+        # Note: Liquidity validation is now done by LiquidityScorer after strategy construction
+        # This allows for more sophisticated tier-based classification (EXCELLENT/WARNING/REJECT)
+        # rather than binary accept/reject.
 
         # Calculate net credit
         credit_collected = atm_call.mid.amount + atm_put.mid.amount
@@ -775,20 +799,42 @@ class StrategyGenerator:
         breakeven_upper = Money(float(atm_strike.price) + float(net_credit.amount))
 
         # POP (probability stock stays within breakevens)
-        # Calculate based on profit range relative to stock price
+        # FIX: Calculate based on profit zone vs IMPLIED MOVE RANGE (both directions)
         profit_range = 2 * float(net_credit.amount)  # Total width of profit zone
         profit_range_pct = profit_range / stock_price * 100
 
-        # Configurable POP estimation formula
-        # Linear interpolation: POP = base + (range - reference) * sensitivity
-        # Clamped between min and max
-        pop = min(
-            self.config.ib_pop_max,
-            max(
-                self.config.ib_pop_min,
-                self.config.ib_pop_base + (profit_range_pct - self.config.ib_pop_reference_range) * self.config.ib_pop_sensitivity
-            )
-        )
+        # Get implied move percentage (one-sided: up OR down)
+        implied_move_pct = vrp.implied_move_pct.value
+
+        # CRITICAL FIX: Implied move is one-sided, but stock can move ±X%
+        # Total expected range = 2 × implied_move_pct (e.g., ±15% = 30% total range)
+        total_expected_range_pct = 2 * implied_move_pct
+
+        # Calculate ratio: profit zone / total expected range
+        # If ratio >= 1.0, profit zone covers full expected range (high POP ~65-70%)
+        # If ratio < 1.0, profit zone is narrower than expected range (lower POP)
+        zone_to_move_ratio = profit_range_pct / total_expected_range_pct
+
+        # POP estimation based on zone/move ratio
+        # More accurate than linear approximation - accounts for market expectations
+        if zone_to_move_ratio >= 1.0:
+            # Profit zone >= implied move: 65-70% POP
+            pop = min(0.70, 0.65 + (zone_to_move_ratio - 1.0) * 0.05)
+        elif zone_to_move_ratio >= 0.75:
+            # 75-100% coverage: 55-65% POP (linear interpolation)
+            pop = 0.55 + (zone_to_move_ratio - 0.75) * (0.10 / 0.25)
+        elif zone_to_move_ratio >= 0.50:
+            # 50-75% coverage: 40-55% POP
+            pop = 0.40 + (zone_to_move_ratio - 0.50) * (0.15 / 0.25)
+        elif zone_to_move_ratio >= 0.30:
+            # 30-50% coverage: 30-40% POP
+            pop = 0.30 + (zone_to_move_ratio - 0.30) * (0.10 / 0.20)
+        else:
+            # < 30% coverage: 25-30% POP (very tight butterfly)
+            pop = max(0.25, 0.30 - (0.30 - zone_to_move_ratio) * 0.25)
+
+        # Clamp to configured bounds
+        pop = min(self.config.ib_pop_max, max(self.config.ib_pop_min, pop))
 
         # Reward/risk
         if max_loss.amount <= 0:
@@ -863,6 +909,7 @@ class StrategyGenerator:
             strategy_type=StrategyType.IRON_BUTTERFLY,
             expiration=option_chain.expiration,
             legs=legs,
+            stock_price=option_chain.stock_price,
             net_credit=net_credit,
             max_profit=max_profit * contracts,
             max_loss=max_loss * contracts,
@@ -999,8 +1046,10 @@ class StrategyGenerator:
             short_strike_price = stock_price + implied_move_dollars + buffer
             long_strike_price = short_strike_price + spread_width
 
-        # Find nearest available strikes
-        available_strikes = sorted(option_chain.strikes, key=lambda s: float(s.price))
+        # FIX: Use strikes from the specific chain (puts or calls), not all strikes!
+        # This was causing strikes to be selected that don't exist in the target chain.
+        chain = option_chain.puts if option_type == OptionType.PUT else option_chain.calls
+        available_strikes = sorted(chain.keys(), key=lambda s: float(s.price))
 
         short_strike = self._find_nearest_strike(available_strikes, short_strike_price)
         long_strike = self._find_nearest_strike(available_strikes, long_strike_price)
@@ -1116,7 +1165,8 @@ class StrategyGenerator:
             pop = 1.0 - abs(short_quote.delta)
         else:
             # Fallback: Use distance from price as proxy
-            pop = 0.70  # Default 70% for ~30-delta
+            # FIX: Aligned with target_delta_short = 0.25 (25-delta ≈ 75% POP)
+            pop = 0.75  # Default 75% for ~25-delta (was 70% for 30-delta)
 
         # Reward/risk ratio
         reward_risk = float(max_profit.amount / max_loss.amount) if max_loss.amount > 0 else 0.0
