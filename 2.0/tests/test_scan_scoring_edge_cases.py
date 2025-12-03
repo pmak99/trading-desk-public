@@ -3,10 +3,11 @@
 Test edge cases and error handling in composite quality scoring.
 
 Tests defensive programming features added in Dec 2025:
-- Input validation (non-dict input)
-- Error handling for malformed data
-- Conservative defaults for missing data
+- Input validation (non-dict input raises TypeError)
+- Type error handling (dict/list values fall back to defaults)
+- Conservative defaults for missing/invalid data
 - Graceful degradation for parsing errors
+- Negative value clamping (negative values clamped to 0)
 """
 
 import sys

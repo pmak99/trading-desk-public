@@ -4,6 +4,9 @@ Test the composite quality scoring function with real data from 12/1/2025 scan.
 
 This test verifies that MRVL (NEUTRAL bias, lower VRP) ranks higher than
 OKTA (STRONG BEARISH, higher VRP) due to risk-adjusted scoring.
+
+Updated Dec 2025: Tests now use scoring constants to ensure consistency
+with production code and verify all 10 code review fixes.
 """
 
 import sys
@@ -12,7 +15,26 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.scan import calculate_scan_quality_score
+from scripts.scan import (
+    calculate_scan_quality_score,
+    _precalculate_quality_scores,
+    SCORE_VRP_MAX_POINTS,
+    SCORE_VRP_TARGET,
+    SCORE_EDGE_MAX_POINTS,
+    SCORE_EDGE_TARGET,
+    SCORE_LIQUIDITY_MAX_POINTS,
+    SCORE_LIQUIDITY_EXCELLENT_POINTS,
+    SCORE_LIQUIDITY_WARNING_POINTS,
+    SCORE_LIQUIDITY_REJECT_POINTS,
+    SCORE_MOVE_MAX_POINTS,
+    SCORE_MOVE_EASY_THRESHOLD,
+    SCORE_MOVE_MODERATE_THRESHOLD,
+    SCORE_MOVE_MODERATE_POINTS,
+    SCORE_MOVE_CHALLENGING_THRESHOLD,
+    SCORE_MOVE_CHALLENGING_POINTS,
+    SCORE_MOVE_EXTREME_POINTS,
+    LIQUIDITY_PRIORITY_ORDER
+)
 
 
 def test_mrvl_vs_okta():
@@ -143,26 +165,31 @@ def test_mrvl_vs_okta():
     print("=" * 80)
 
     def breakdown_score(data):
-        """Show detailed breakdown of score components."""
-        vrp_score = min(data['vrp_ratio'] / 3.0, 1.0) * 35  # Updated: 35 max
-        edge_score = min(data['edge_score'] / 4.0, 1.0) * 30  # Updated: 30 max
+        """
+        Show detailed breakdown of score components.
+
+        Uses production constants to ensure test matches implementation.
+        """
+        # Use production constants
+        vrp_score = max(0.0, min(data['vrp_ratio'] / SCORE_VRP_TARGET, 1.0)) * SCORE_VRP_MAX_POINTS
+        edge_score = max(0.0, min(data['edge_score'] / SCORE_EDGE_TARGET, 1.0)) * SCORE_EDGE_MAX_POINTS
 
         if data['liquidity_tier'] == 'EXCELLENT':
-            liq_score = 20.0
+            liq_score = SCORE_LIQUIDITY_EXCELLENT_POINTS
         elif data['liquidity_tier'] == 'WARNING':
-            liq_score = 10.0
+            liq_score = SCORE_LIQUIDITY_WARNING_POINTS
         else:
-            liq_score = 0.0
+            liq_score = SCORE_LIQUIDITY_REJECT_POINTS
 
         implied_pct = float(data['implied_move_pct'].rstrip('%'))
-        if implied_pct <= 8.0:
-            move_score = 15.0  # Updated: 15 max
-        elif implied_pct <= 12.0:
-            move_score = 10.0
-        elif implied_pct <= 15.0:
-            move_score = 6.0
+        if implied_pct <= SCORE_MOVE_EASY_THRESHOLD:
+            move_score = SCORE_MOVE_MAX_POINTS
+        elif implied_pct <= SCORE_MOVE_MODERATE_THRESHOLD:
+            move_score = SCORE_MOVE_MODERATE_POINTS
+        elif implied_pct <= SCORE_MOVE_CHALLENGING_THRESHOLD:
+            move_score = SCORE_MOVE_CHALLENGING_POINTS
         else:
-            move_score = 3.0
+            move_score = SCORE_MOVE_EXTREME_POINTS
 
         return vrp_score, edge_score, liq_score, move_score
 
@@ -173,10 +200,10 @@ def test_mrvl_vs_okta():
     okta_vrp, okta_edge, okta_liq, okta_move = breakdown_score(okta)
     crwd_vrp, crwd_edge, crwd_liq, crwd_move = breakdown_score(crwd)
 
-    print(f"{'VRP (35 max)':<20} {mrvl_vrp:<8.1f} {okta_vrp:<8.1f} {crwd_vrp:<8.1f}")
-    print(f"{'Edge (30 max)':<20} {mrvl_edge:<8.1f} {okta_edge:<8.1f} {crwd_edge:<8.1f}")
-    print(f"{'Liquidity (20 max)':<20} {mrvl_liq:<8.1f} {okta_liq:<8.1f} {crwd_liq:<8.1f}")
-    print(f"{'Implied Move (15 max)':<20} {mrvl_move:<8.1f} {okta_move:<8.1f} {crwd_move:<8.1f}")
+    print(f"{'VRP (' + str(SCORE_VRP_MAX_POINTS) + ' max)':<20} {mrvl_vrp:<8.1f} {okta_vrp:<8.1f} {crwd_vrp:<8.1f}")
+    print(f"{'Edge (' + str(SCORE_EDGE_MAX_POINTS) + ' max)':<20} {mrvl_edge:<8.1f} {okta_edge:<8.1f} {crwd_edge:<8.1f}")
+    print(f"{'Liquidity (' + str(SCORE_LIQUIDITY_EXCELLENT_POINTS) + ' max)':<20} {mrvl_liq:<8.1f} {okta_liq:<8.1f} {crwd_liq:<8.1f}")
+    print(f"{'Implied Move (' + str(SCORE_MOVE_MAX_POINTS) + ' max)':<20} {mrvl_move:<8.1f} {okta_move:<8.1f} {crwd_move:<8.1f}")
     print(f"{'-'*20} {'-'*8} {'-'*8} {'-'*8}")
     print(f"{'TOTAL':<20} {mrvl_score:<8.1f} {okta_score:<8.1f} {crwd_score:<8.1f}")
 
@@ -192,5 +219,133 @@ def test_mrvl_vs_okta():
     print("=" * 80 + "\n")
 
 
+def test_helper_function():
+    """Test _precalculate_quality_scores helper function."""
+    print("\n" + "=" * 80)
+    print("TEST: Helper Function _precalculate_quality_scores()")
+    print("=" * 80)
+
+    # Create test data
+    results = [
+        {'vrp_ratio': 4.0, 'edge_score': 3.0, 'liquidity_tier': 'WARNING', 'implied_move_pct': '10%'},
+        {'vrp_ratio': 8.0, 'edge_score': 4.5, 'liquidity_tier': 'EXCELLENT', 'implied_move_pct': '7%'},
+        {'vrp_ratio': 2.0, 'edge_score': 1.5, 'liquidity_tier': 'REJECT', 'implied_move_pct': '15%'},
+    ]
+
+    # Call helper function
+    _precalculate_quality_scores(results)
+
+    # Verify _quality_score field was added
+    print(f"\n✓ Checking helper function added '_quality_score' field:")
+    for i, r in enumerate(results, 1):
+        assert '_quality_score' in r, f"Result {i} missing '_quality_score' field"
+        score = r['_quality_score']
+        print(f"  Result {i}: score = {score:.1f}")
+
+        # Verify score matches direct calculation
+        direct_score = calculate_scan_quality_score(r)
+        assert score == direct_score, f"Cached score {score} != direct score {direct_score}"
+        print(f"    ✓ Matches direct calculation: {direct_score:.1f}")
+
+    print(f"\n✅ PASS: Helper function works correctly")
+    print(f"  - Adds '_quality_score' field to all results")
+    print(f"  - Cached scores match direct calculation")
+    print(f"  - Performance optimization: O(n) pre-calc vs O(n log n) in sort")
+
+
+def test_liquidity_priority_order():
+    """Test LIQUIDITY_PRIORITY_ORDER constant."""
+    print("\n" + "=" * 80)
+    print("TEST: LIQUIDITY_PRIORITY_ORDER Constant")
+    print("=" * 80)
+
+    # Verify constant structure
+    print(f"\nLIQUIDITY_PRIORITY_ORDER = {LIQUIDITY_PRIORITY_ORDER}")
+
+    # Check expected keys
+    expected_keys = {'EXCELLENT', 'WARNING', 'REJECT', 'UNKNOWN'}
+    actual_keys = set(LIQUIDITY_PRIORITY_ORDER.keys())
+    assert actual_keys == expected_keys, f"Expected keys {expected_keys}, got {actual_keys}"
+    print(f"✓ All expected keys present: {expected_keys}")
+
+    # Check ordering (lower number = higher priority)
+    assert LIQUIDITY_PRIORITY_ORDER['EXCELLENT'] == 0, "EXCELLENT should be priority 0"
+    assert LIQUIDITY_PRIORITY_ORDER['WARNING'] == 1, "WARNING should be priority 1"
+    assert LIQUIDITY_PRIORITY_ORDER['REJECT'] == 2, "REJECT should be priority 2"
+    assert LIQUIDITY_PRIORITY_ORDER['UNKNOWN'] == 3, "UNKNOWN should be priority 3"
+    print(f"✓ Priorities correctly ordered: EXCELLENT(0) > WARNING(1) > REJECT(2) > UNKNOWN(3)")
+
+    # Test sorting with priority
+    test_data = [
+        {'ticker': 'A', '_quality_score': 80.0, 'liquidity_tier': 'REJECT'},
+        {'ticker': 'B', '_quality_score': 80.0, 'liquidity_tier': 'EXCELLENT'},
+        {'ticker': 'C', '_quality_score': 80.0, 'liquidity_tier': 'WARNING'},
+        {'ticker': 'D', '_quality_score': 80.0, 'liquidity_tier': 'UNKNOWN'},
+    ]
+
+    sorted_data = sorted(test_data, key=lambda x: (
+        -x['_quality_score'],
+        LIQUIDITY_PRIORITY_ORDER.get(x['liquidity_tier'], 3)
+    ))
+
+    sorted_tickers = [d['ticker'] for d in sorted_data]
+    expected_order = ['B', 'C', 'A', 'D']  # EXCELLENT, WARNING, REJECT, UNKNOWN
+    assert sorted_tickers == expected_order, f"Expected {expected_order}, got {sorted_tickers}"
+    print(f"✓ Sorting works correctly: {' > '.join(sorted_tickers)}")
+
+    print(f"\n✅ PASS: LIQUIDITY_PRIORITY_ORDER constant working correctly")
+
+
+def test_constants_consistency():
+    """Test that all scoring constants are consistent."""
+    print("\n" + "=" * 80)
+    print("TEST: Scoring Constants Consistency")
+    print("=" * 80)
+
+    # Verify constants sum to 100
+    total_max = (SCORE_VRP_MAX_POINTS + SCORE_EDGE_MAX_POINTS +
+                 SCORE_LIQUIDITY_EXCELLENT_POINTS + SCORE_MOVE_MAX_POINTS)
+    print(f"\nTotal max points: {total_max}")
+    assert total_max == 100, f"Max points should sum to 100, got {total_max}"
+    print(f"✓ Max points sum to 100: {SCORE_VRP_MAX_POINTS} + {SCORE_EDGE_MAX_POINTS} + {SCORE_LIQUIDITY_EXCELLENT_POINTS} + {SCORE_MOVE_MAX_POINTS} = 100")
+
+    # Verify targets are positive (prevent division by zero)
+    assert SCORE_VRP_TARGET > 0, "VRP target must be > 0"
+    assert SCORE_EDGE_TARGET > 0, "Edge target must be > 0"
+    print(f"✓ Targets are positive: VRP={SCORE_VRP_TARGET}, Edge={SCORE_EDGE_TARGET}")
+
+    # Verify liquidity tier consistency
+    assert SCORE_LIQUIDITY_EXCELLENT_POINTS == SCORE_LIQUIDITY_MAX_POINTS, "EXCELLENT should equal MAX"
+    assert SCORE_LIQUIDITY_WARNING_POINTS == SCORE_LIQUIDITY_EXCELLENT_POINTS / 2, "WARNING should be 50% of EXCELLENT"
+    assert SCORE_LIQUIDITY_REJECT_POINTS == 0, "REJECT should be 0"
+    print(f"✓ Liquidity tiers consistent: EXCELLENT={SCORE_LIQUIDITY_EXCELLENT_POINTS}, WARNING={SCORE_LIQUIDITY_WARNING_POINTS}, REJECT={SCORE_LIQUIDITY_REJECT_POINTS}")
+
+    # Verify move thresholds are ordered
+    assert SCORE_MOVE_EASY_THRESHOLD < SCORE_MOVE_MODERATE_THRESHOLD, "Easy < Moderate"
+    assert SCORE_MOVE_MODERATE_THRESHOLD < SCORE_MOVE_CHALLENGING_THRESHOLD, "Moderate < Challenging"
+    print(f"✓ Move thresholds ordered: {SCORE_MOVE_EASY_THRESHOLD}% < {SCORE_MOVE_MODERATE_THRESHOLD}% < {SCORE_MOVE_CHALLENGING_THRESHOLD}%")
+
+    # Verify move scores decrease with difficulty
+    assert SCORE_MOVE_MAX_POINTS > SCORE_MOVE_MODERATE_POINTS, "Easy > Moderate"
+    assert SCORE_MOVE_MODERATE_POINTS > SCORE_MOVE_CHALLENGING_POINTS, "Moderate > Challenging"
+    assert SCORE_MOVE_CHALLENGING_POINTS > SCORE_MOVE_EXTREME_POINTS, "Challenging > Extreme"
+    print(f"✓ Move scores decrease: {SCORE_MOVE_MAX_POINTS} > {SCORE_MOVE_MODERATE_POINTS} > {SCORE_MOVE_CHALLENGING_POINTS} > {SCORE_MOVE_EXTREME_POINTS}")
+
+    print(f"\n✅ PASS: All constants are consistent and valid")
+
+
 if __name__ == "__main__":
     test_mrvl_vs_okta()
+    test_helper_function()
+    test_liquidity_priority_order()
+    test_constants_consistency()
+
+    print("\n" + "=" * 80)
+    print("ALL TESTS COMPLETED SUCCESSFULLY")
+    print("=" * 80)
+    print("\nSummary:")
+    print("✅ Quality score calculation (CRWD > OKTA > MRVL)")
+    print("✅ Helper function _precalculate_quality_scores()")
+    print("✅ LIQUIDITY_PRIORITY_ORDER constant")
+    print("✅ All scoring constants valid and consistent")
+    print("=" * 80 + "\n")
