@@ -111,6 +111,7 @@ class TestSkewAnalyzerEnhanced:
         chain = self.create_chain_with_skew(skew_type="normal")
 
         from src.domain.errors import Ok
+        from src.domain.enums import DirectionalBias
         provider.get_option_chain.return_value = Ok(chain)
 
         result = analyzer.analyze_skew_curve("TEST", chain.expiration)
@@ -122,7 +123,8 @@ class TestSkewAnalyzerEnhanced:
         assert analysis.ticker == "TEST"
         assert analysis.num_points >= analyzer.MIN_POINTS
         assert analysis.strength in ["smile", "smirk", "inverse_smile"]
-        assert analysis.directional_bias in ["put_bias", "call_bias", "neutral"]
+        # Check that directional_bias is a valid DirectionalBias enum value
+        assert isinstance(analysis.directional_bias, DirectionalBias)
         assert 0.0 <= analysis.confidence <= 1.0
 
     def test_smile_detection(self, analyzer, provider):
