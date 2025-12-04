@@ -21,11 +21,14 @@
 
 ## Phase 1: Data Collection & Feature Engineering (In Progress)
 
-### Task 1.1: Historical Move Features
-- [ ] Extract historical moves from ivcrush.db
-- [ ] Calculate rolling statistics (mean, std, percentiles)
-- [ ] Quarter-over-quarter trends
-- [ ] **Deliverable:** `data/features/historical_features.parquet`
+### Task 1.1: Historical Move Features ✅
+- [x] Extract historical moves from ivcrush.db
+- [x] Calculate rolling statistics (mean, std, percentiles)
+- [x] Quarter-over-quarter trends
+- [x] **Deliverable:** `data/features/historical_features.parquet`
+  - Generated 4,926 feature rows with 35 columns
+  - 92.2% coverage for 1Q+ data, 37.8% for 8Q+ data
+  - Average data quality score: 0.618
 
 ### Task 1.2: Volatility Features
 - [ ] ATR (Average True Range) calculations
