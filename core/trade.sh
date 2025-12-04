@@ -312,11 +312,13 @@ ${BOLD}COMMANDS${NC}
     ${GREEN}whisper${NC}
         Fetch and analyze "most anticipated earnings" from Earnings Whispers.
         Uses Reddit API (r/wallstreetbets) or OCR fallback.
+        Auto-validates earnings dates (Yahoo Finance + Alpha Vantage).
         Auto-backfills historical data for discovered tickers.
 
         Examples:
             $0 whisper                            # Current week
             $0 whisper 2025-11-24                 # Specific week (Monday)
+            $0 whisper --skip-validation          # Skip date validation
 
     ${GREEN}health${NC}
         System health check - verify APIs, database, cache operational.
@@ -537,6 +539,22 @@ scan_earnings() {
     echo ""
 }
 
+validate_earnings_dates() {
+    # Cross-reference earnings dates from Yahoo Finance and Alpha Vantage
+    # to ensure accuracy before analysis
+    echo -e "${BLUE}🔍 Validating earnings dates...${NC}"
+
+    # Run validation for whisper tickers (non-blocking, informational)
+    if python scripts/validate_earnings_dates.py --whisper-week 2>&1 | \
+        grep -E "CONFLICT|Consensus|✓|✗|⚠️" | head -20; then
+        echo ""
+    else
+        # If validation fails, just warn and continue
+        echo -e "${YELLOW}⚠️  Earnings date validation failed (continuing anyway)${NC}"
+        echo ""
+    fi
+}
+
 whisper_mode() {
     local week_monday=${1:-}
 
@@ -610,7 +628,27 @@ case "${1:-}" in
     whisper)
         health_check
         backup_database
-        whisper_mode "${2:-}"
+
+        # Check if --skip-validation flag is present
+        SKIP_VALIDATION=false
+        WEEK_ARG=""
+        for arg in "$@"; do
+            if [[ "$arg" == "--skip-validation" ]]; then
+                SKIP_VALIDATION=true
+            elif [[ "$arg" != "whisper" ]]; then
+                WEEK_ARG="$arg"
+            fi
+        done
+
+        # Run validation unless skipped
+        if [[ "$SKIP_VALIDATION" == false ]]; then
+            validate_earnings_dates
+        else
+            echo -e "${YELLOW}⚠️  Skipping earnings date validation${NC}"
+            echo ""
+        fi
+
+        whisper_mode "$WEEK_ARG"
         show_summary
         ;;
 

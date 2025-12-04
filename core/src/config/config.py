@@ -289,12 +289,12 @@ class AlgorithmConfig:
     interpolation_tolerance: float = 0.01   # Strike match tolerance (dollars)
 
     # VRP calculation metric selection
-    vrp_move_metric: str = "close"  # "close", "intraday", or "gap"
+    vrp_move_metric: str = "intraday"  # "close", "intraday", or "gap"
     # Rationale:
     # - "close": Earnings close vs prev close (matches ATM straddle expectation)
     # - "intraday": High-low range on earnings day (captures intraday volatility)
     # - "gap": Open vs prev close (gap move only)
-    # Recommended: "close" for apples-to-apples with implied move
+    # Changed to "intraday" to capture full volatility range for IV crush strategy
 
 
 @dataclass(frozen=True)
@@ -511,7 +511,7 @@ class Config:
             skew_min_points=int(os.getenv("SKEW_MIN_POINTS", "5")),
             consistency_decay_factor=float(os.getenv("CONSISTENCY_DECAY_FACTOR", "0.85")),
             interpolation_tolerance=float(os.getenv("INTERPOLATION_TOLERANCE", "0.01")),
-            vrp_move_metric=os.getenv("VRP_MOVE_METRIC", "close"),
+            vrp_move_metric=os.getenv("VRP_MOVE_METRIC", "intraday"),
         )
 
         # Logging
