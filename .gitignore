@@ -81,3 +81,6 @@ src/data/cache/
 .dmypy.json
 dmypy.json
 3.0/.env
+
+# Exclude sensitive 2025 trade statements and analysis
+docs/2025 Trades/
