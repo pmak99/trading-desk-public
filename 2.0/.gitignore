@@ -46,3 +46,6 @@ backups/*.tmp.*
 
 # Pre-restore safety backups
 data/*.db.pre-restore-*
+
+# Exclude sensitive 2025 trade statements
+../docs/2025 Trades/
