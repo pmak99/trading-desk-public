@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -297,48 +298,58 @@ def main():
                 for ticker in tickers
             }
 
-            # Process results as they complete
-            for future in as_completed(future_to_ticker):
-                ticker, success, has_conflict = future.result()
-                if success:
-                    success_count += 1
-                else:
-                    error_count += 1
-                if has_conflict:
-                    conflict_count += 1
-    else:
-        # Sequential execution (original behavior)
-        for ticker in tickers:
-            try:
-                result = validator.validate_earnings_date(ticker)
-
-                if result.is_ok:
-                    validation = result.value
-                    if validation.has_conflict:
-                        conflict_count += 1
-
-                    if not args.dry_run:
-                        save_result = earnings_repo.save_earnings_event(
-                            ticker=ticker,
-                            earnings_date=validation.consensus_date,
-                            timing=validation.consensus_timing
-                        )
-                        if save_result.is_ok:
-                            success_count += 1
-                            logger.info(f"✓ {ticker}: Updated to {validation.consensus_date}")
-                        else:
-                            error_count += 1
-                            logger.error(f"✗ {ticker}: Failed to update - {save_result.error}")
-                    else:
+            # Process results as they complete with progress bar
+            with tqdm(total=len(tickers), desc="Validating", unit="ticker") as pbar:
+                for future in as_completed(future_to_ticker):
+                    ticker, success, has_conflict = future.result()
+                    if success:
                         success_count += 1
-                        logger.info(f"✓ {ticker}: Would update to {validation.consensus_date}")
-                else:
-                    error_count += 1
-                    logger.error(f"✗ {ticker}: {result.error}")
+                        pbar.set_postfix({"✓": success_count, "✗": error_count, "⚠": conflict_count})
+                    else:
+                        error_count += 1
+                        pbar.set_postfix({"✓": success_count, "✗": error_count, "⚠": conflict_count})
+                    if has_conflict:
+                        conflict_count += 1
+                        pbar.set_postfix({"✓": success_count, "✗": error_count, "⚠": conflict_count})
+                    pbar.update(1)
+    else:
+        # Sequential execution with progress bar
+        with tqdm(tickers, desc="Validating", unit="ticker") as pbar:
+            for ticker in pbar:
+                try:
+                    result = validator.validate_earnings_date(ticker)
 
-            except Exception as e:
-                error_count += 1
-                logger.error(f"✗ {ticker}: Unexpected error - {e}")
+                    if result.is_ok:
+                        validation = result.value
+                        if validation.has_conflict:
+                            conflict_count += 1
+
+                        if not args.dry_run:
+                            save_result = earnings_repo.save_earnings_event(
+                                ticker=ticker,
+                                earnings_date=validation.consensus_date,
+                                timing=validation.consensus_timing
+                            )
+                            if save_result.is_ok:
+                                success_count += 1
+                                logger.info(f"✓ {ticker}: Updated to {validation.consensus_date}")
+                            else:
+                                error_count += 1
+                                logger.error(f"✗ {ticker}: Failed to update - {save_result.error}")
+                        else:
+                            success_count += 1
+                            logger.info(f"✓ {ticker}: Would update to {validation.consensus_date}")
+                    else:
+                        error_count += 1
+                        logger.error(f"✗ {ticker}: {result.error}")
+
+                    # Update progress bar postfix with stats
+                    pbar.set_postfix({"✓": success_count, "✗": error_count, "⚠": conflict_count})
+
+                except Exception as e:
+                    error_count += 1
+                    logger.error(f"✗ {ticker}: Unexpected error - {e}")
+                    pbar.set_postfix({"✓": success_count, "✗": error_count, "⚠": conflict_count})
 
     # Summary
     logger.info(f"\n{'='*70}")
