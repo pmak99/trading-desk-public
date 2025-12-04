@@ -81,13 +81,15 @@ class SkewAnalyzerEnhanced:
 
     # Directional bias thresholds (7-level scale, in IV%/moneyness units)
     # Based on typical single-stock skew slopes of 5-15% IV across 10% moneyness
-    THRESHOLD_NEUTRAL = 0.3   # |slope| <= 0.3 → NEUTRAL
-    THRESHOLD_WEAK = 0.8      # 0.3 < |slope| <= 0.8 → WEAK bias
-    THRESHOLD_STRONG = 1.5    # |slope| > 1.5 → STRONG bias
+    # NOTE: Slope units are "percentage points per decimal moneyness"
+    # Example: slope=100 means 1% OTM strike has 1% higher IV (100 * 0.01 = 1%)
+    THRESHOLD_NEUTRAL = 30.0   # |slope| <= 30 → NEUTRAL (< 0.3% IV change per 1% moneyness)
+    THRESHOLD_WEAK = 80.0      # 30 < |slope| <= 80 → WEAK bias (0.3-0.8% IV change per 1% moneyness)
+    THRESHOLD_STRONG = 150.0   # |slope| > 150 → STRONG bias (> 1.5% IV change per 1% moneyness)
 
     # Bias confidence thresholds
-    MIN_CONFIDENCE = 0.3      # Minimum confidence to trust bias signal
-    MAX_TYPICAL_SLOPE = 2.0   # Maximum typical slope for normalization
+    MIN_CONFIDENCE = 0.15     # Minimum confidence to trust bias signal (R² × slope_strength)
+    MAX_TYPICAL_SLOPE = 150.0 # Maximum typical slope for normalization (matches THRESHOLD_STRONG)
 
     def __init__(self, provider: OptionsDataProvider):
         self.provider = provider
