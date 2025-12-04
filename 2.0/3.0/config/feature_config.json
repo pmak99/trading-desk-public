@@ -1,0 +1,43 @@
+{
+  "historical_features": {
+    "enabled": true,
+    "lookback_quarters": [1, 2, 4, 8],
+    "statistics": ["mean", "std", "min", "max", "median"],
+    "trend_analysis": true
+  },
+  "volatility_features": {
+    "enabled": true,
+    "indicators": ["atr", "bbands_width", "hv_iv_ratio"],
+    "windows": [10, 20, 50],
+    "term_structure": true
+  },
+  "market_features": {
+    "enabled": true,
+    "indices": ["SPY", "QQQ", "VIX"],
+    "sector_performance": true,
+    "correlation_window": 60
+  },
+  "time_features": {
+    "enabled": true,
+    "include": [
+      "days_since_earnings",
+      "day_of_week",
+      "month",
+      "quarter",
+      "market_phase"
+    ]
+  },
+  "fundamental_features": {
+    "enabled": false,
+    "note": "Optional - requires additional data sources"
+  },
+  "preprocessing": {
+    "scaling": "standard",
+    "handle_missing": "median",
+    "outlier_threshold": 3.0,
+    "feature_selection": {
+      "method": "mutual_info",
+      "top_k": 50
+    }
+  }
+}

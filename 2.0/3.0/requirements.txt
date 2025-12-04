@@ -1,0 +1,35 @@
+# Core ML/Data Science
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+scipy>=1.11.0
+
+# Deep Learning (optional, for Phase 2)
+# tensorflow>=2.13.0
+# torch>=2.0.0
+
+# Feature Engineering
+ta>=0.11.0  # Technical analysis indicators
+statsmodels>=0.14.0  # Statistical models
+
+# Data Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.14.0
+
+# Utilities
+python-dotenv>=1.0.0
+pyyaml>=6.0
+tqdm>=4.65.0
+joblib>=1.3.0
+
+# Database
+# (reuse existing ../data/ivcrush.db, no need for new DB dependencies)
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Jupyter (for notebooks)
+jupyter>=1.0.0
+ipykernel>=6.25.0

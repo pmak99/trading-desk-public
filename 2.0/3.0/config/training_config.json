@@ -1,0 +1,54 @@
+{
+  "data_split": {
+    "method": "walk_forward",
+    "train_ratio": 0.7,
+    "validation_ratio": 0.15,
+    "test_ratio": 0.15,
+    "min_train_samples": 100
+  },
+  "cross_validation": {
+    "enabled": true,
+    "method": "time_series_split",
+    "n_splits": 5,
+    "gap": 1
+  },
+  "hyperparameter_tuning": {
+    "enabled": true,
+    "method": "random_search",
+    "n_iter": 50,
+    "cv": 3,
+    "scoring": "neg_mean_squared_error"
+  },
+  "training": {
+    "random_seed": 42,
+    "early_stopping": {
+      "enabled": true,
+      "patience": 10,
+      "min_delta": 0.001
+    },
+    "logging": {
+      "level": "INFO",
+      "log_file": "reports/experiments/training.log"
+    }
+  },
+  "evaluation": {
+    "metrics": [
+      "mse",
+      "mae",
+      "r2",
+      "sharpe_ratio",
+      "win_rate",
+      "profit_factor"
+    ],
+    "backtest": {
+      "initial_capital": 100000,
+      "position_size": 0.1,
+      "commission": 0.0
+    }
+  },
+  "model_saving": {
+    "save_best_only": true,
+    "save_frequency": "epoch",
+    "checkpoint_dir": "models/checkpoints/"
+  }
+}
