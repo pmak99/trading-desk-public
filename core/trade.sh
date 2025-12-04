@@ -545,14 +545,10 @@ validate_earnings_dates() {
     echo -e "${BLUE}🔍 Validating earnings dates...${NC}"
 
     # Run validation for whisper tickers (non-blocking, informational)
-    if python scripts/validate_earnings_dates.py --whisper-week 2>&1 | \
-        grep -E "CONFLICT|Consensus|✓|✗|⚠️" | head -20; then
-        echo ""
-    else
-        # If validation fails, just warn and continue
-        echo -e "${YELLOW}⚠️  Earnings date validation failed (continuing anyway)${NC}"
-        echo ""
-    fi
+    # Note: head -20 may cause SIGPIPE which is expected behavior, so we ignore it
+    (python scripts/validate_earnings_dates.py --whisper-week 2>&1 | \
+        grep -E "CONFLICT|Consensus|✓|✗|⚠️" | head -20) || true
+    echo ""
 }
 
 whisper_mode() {
