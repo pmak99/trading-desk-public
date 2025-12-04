@@ -318,7 +318,6 @@ ${BOLD}COMMANDS${NC}
         Examples:
             $0 whisper                            # Current week
             $0 whisper 2025-11-24                 # Specific week (Monday)
-            $0 whisper --skip-validation          # Skip date validation
 
     ${GREEN}health${NC}
         System health check - verify APIs, database, cache operational.
@@ -539,16 +538,8 @@ scan_earnings() {
     echo ""
 }
 
-validate_earnings_dates() {
-    # Cross-reference earnings dates from Yahoo Finance and Alpha Vantage
-    # to ensure accuracy before analysis
-    echo -e "${BLUE}🔍 Validating earnings dates...${NC}"
-
-    # Run validation for whisper tickers (non-blocking, informational)
-    # Let the script display its own progress bar - grep would buffer/filter it
-    python scripts/validate_earnings_dates.py --whisper-week 2>&1 || true
-    echo ""
-}
+# Earnings date validation moved to scan.py (validates only tradeable tickers after filtering)
+# This optimizes performance by skipping tickers that won't be displayed
 
 whisper_mode() {
     local week_monday=${1:-}
@@ -624,25 +615,16 @@ case "${1:-}" in
         health_check
         backup_database
 
-        # Check if --skip-validation flag is present
-        SKIP_VALIDATION=false
+        # Extract week argument if provided
         WEEK_ARG=""
         for arg in "$@"; do
-            if [[ "$arg" == "--skip-validation" ]]; then
-                SKIP_VALIDATION=true
-            elif [[ "$arg" != "whisper" ]]; then
+            if [[ "$arg" != "whisper" ]]; then
                 WEEK_ARG="$arg"
             fi
         done
 
-        # Run validation unless skipped
-        if [[ "$SKIP_VALIDATION" == false ]]; then
-            validate_earnings_dates
-        else
-            echo -e "${YELLOW}⚠️  Skipping earnings date validation${NC}"
-            echo ""
-        fi
-
+        # Note: Earnings date validation now happens automatically inside scan.py
+        # for tradeable tickers only (after filtering), optimizing performance
         whisper_mode "$WEEK_ARG"
         show_summary
         ;;
