@@ -70,6 +70,9 @@ from src.infrastructure.data_sources.earnings_whisper_scraper import (
     get_week_monday
 )
 from src.infrastructure.cache.hybrid_cache import HybridCache
+from src.application.services.earnings_date_validator import EarningsDateValidator
+from src.infrastructure.data_sources.yahoo_finance_earnings import YahooFinanceEarnings
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -1508,6 +1511,58 @@ def ticker_mode(
     return 0
 
 
+def validate_tradeable_earnings_dates(tradeable_results: List[dict], container: Container) -> None:
+    """
+    Validate earnings dates for tradeable opportunities only.
+
+    Cross-references earnings dates from Yahoo Finance and Alpha Vantage
+    for tickers that passed all filters and have tradeable strategies.
+    This optimizes validation by skipping tickers that won't be displayed.
+
+    Args:
+        tradeable_results: List of tradeable result dictionaries
+        container: DI container with Alpha Vantage API
+    """
+    if not tradeable_results:
+        return
+
+    # Extract unique tickers from tradeable results
+    tickers_to_validate = list({r['ticker'] for r in tradeable_results})
+
+    if not tickers_to_validate:
+        return
+
+    logger.info(f"\n🔍 Validating earnings dates for {len(tickers_to_validate)} tradeable tickers...")
+
+    # Initialize validator
+    yahoo_finance = YahooFinanceEarnings()
+    validator = EarningsDateValidator(
+        alpha_vantage=container.alphavantage,
+        yahoo_finance=yahoo_finance
+    )
+
+    # Validate each ticker with progress bar
+    success_count = 0
+    conflict_count = 0
+
+    for ticker in tqdm(tickers_to_validate, desc="Validating", unit="ticker"):
+        result = validator.validate_earnings_date(ticker)
+
+        if result.is_ok:
+            validation = result.value
+            success_count += 1
+
+            if validation.has_conflict:
+                conflict_count += 1
+                logger.debug(f"⚠️  {ticker}: Conflict detected - {validation.conflict_details}")
+        else:
+            logger.debug(f"✗ {ticker}: Validation failed - {result.error}")
+
+    logger.info(f"✓ Validated {success_count}/{len(tickers_to_validate)} tickers" +
+                (f" (⚠️  {conflict_count} conflicts)" if conflict_count > 0 else ""))
+    logger.info("")
+
+
 def whisper_mode(
     container: Container,
     week_monday: Optional[str] = None,
@@ -1704,6 +1759,9 @@ def whisper_mode(
     # Tradeable opportunities
     tradeable = [r for r in results if r.get('is_tradeable', False)]
     if tradeable:
+        # Validate earnings dates for tradeable tickers only (optimization)
+        validate_tradeable_earnings_dates(tradeable, container)
+
         # Pre-calculate quality scores once (avoids ~82% duplicate calculations)
         _precalculate_quality_scores(tradeable)
 
