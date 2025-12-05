@@ -24,6 +24,9 @@ tqdm>=4.65.0
 joblib>=1.3.0
 pyarrow>=22.0.0  # For parquet file format
 
+# Data Sources
+yfinance>=0.2.0  # Price data for volatility features
+
 # Database
 # (reuse existing ../data/ivcrush.db, no need for new DB dependencies)
 
