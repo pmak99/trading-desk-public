@@ -57,8 +57,8 @@ class AlphaVantageAPI:
         Returns:
             Result with list of (ticker, date, timing) tuples
         """
-        # Rate limit check
-        if self.rate_limiter and not self.rate_limiter.acquire():
+        # Rate limit check (blocking mode - wait for token)
+        if self.rate_limiter and not self.rate_limiter.acquire(blocking=True):
             return Err(
                 AppError(
                     ErrorCode.RATELIMIT,
@@ -183,8 +183,8 @@ class AlphaVantageAPI:
         Returns:
             Result with list of (date, open, high, low, close, volume) tuples
         """
-        # Rate limit check
-        if self.rate_limiter and not self.rate_limiter.acquire():
+        # Rate limit check (blocking mode - wait for token)
+        if self.rate_limiter and not self.rate_limiter.acquire(blocking=True):
             return Err(
                 AppError(
                     ErrorCode.RATELIMIT,

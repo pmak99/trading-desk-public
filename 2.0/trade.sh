@@ -7,6 +7,7 @@
 #   ./trade.sh list TSLA,NVDA,META 2025-11-27       # Multiple tickers
 #   ./trade.sh scan 2025-11-25                     # Scan all earnings for date
 #   ./trade.sh whisper [YYYY-MM-DD]                # Most anticipated earnings (current or specific week)
+#   ./trade.sh sync [--dry-run]                    # Sync earnings calendar (discover new dates)
 #   ./trade.sh health                              # Health check
 
 set -euo pipefail  # Exit on error, unset vars, pipeline failures
@@ -263,6 +264,56 @@ backup_database() {
     trap - RETURN
 }
 
+sync_earnings_calendar() {
+    # Sync earnings calendar with latest data from Alpha Vantage + Yahoo Finance
+    #
+    # This discovers new earnings announcements and validates dates using
+    # cross-reference validation (Yahoo Finance priority).
+    #
+    # Args:
+    #   $1: Optional flags (--dry-run, --check-staleness)
+
+    local dry_run_flag=""
+    local extra_args=""
+
+    # Parse arguments
+    for arg in "$@"; do
+        case "$arg" in
+            --dry-run|-n)
+                dry_run_flag="--dry-run"
+                ;;
+            --check-staleness|-s)
+                extra_args="--check-staleness"
+                ;;
+            --threshold*)
+                extra_args="$extra_args $arg"
+                ;;
+        esac
+    done
+
+    echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
+    echo -e "${BLUE}${BOLD}  Earnings Calendar Sync${NC}"
+    echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
+
+    if [ -n "$dry_run_flag" ]; then
+        echo -e "${YELLOW}Mode: DRY RUN (preview only)${NC}"
+    fi
+
+    python scripts/sync_earnings_calendar.py $dry_run_flag $extra_args
+    local exit_code=$?
+
+    if [ $exit_code -eq 0 ]; then
+        echo -e "${GREEN}✓ Earnings calendar synced${NC}\n"
+    else
+        echo -e "${RED}✗ Sync failed or stale data detected${NC}\n"
+        if [ "$extra_args" != *"--check-staleness"* ]; then
+            return $exit_code
+        fi
+    fi
+
+    return $exit_code
+}
+
 show_usage() {
     cat << EOF
 ${BLUE}${BOLD}═══════════════════════════════════════════════════════════════════════${NC}
@@ -318,6 +369,19 @@ ${BOLD}COMMANDS${NC}
         Examples:
             $0 whisper                            # Current week
             $0 whisper 2025-11-24                 # Specific week (Monday)
+
+    ${GREEN}sync${NC}
+        Sync earnings calendar - discover new earnings announcements.
+        Fetches full 3-month calendar from Alpha Vantage.
+        Cross-validates with Yahoo Finance (highest priority).
+        Detects date changes and conflicts.
+
+        ${YELLOW}⚠️  Use this to ensure your earnings calendar is up-to-date!${NC}
+
+        Examples:
+            $0 sync                               # Live sync (updates database)
+            $0 sync --dry-run                     # Preview changes only
+            $0 sync --check-staleness             # Check for stale data
 
     ${GREEN}health${NC}
         System health check - verify APIs, database, cache operational.
@@ -597,6 +661,12 @@ case "${1:-}" in
 
     health)
         health_check
+        ;;
+
+    sync)
+        # Parse sync arguments
+        shift  # Remove 'sync' from args
+        sync_earnings_calendar "$@"
         ;;
 
     scan)

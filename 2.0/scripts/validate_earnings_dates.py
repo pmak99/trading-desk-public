@@ -236,9 +236,11 @@ def main():
             tickers.extend(file_tickers)
 
     # Initialize data sources
+    from src.utils.rate_limiter import create_alpha_vantage_limiter
+
     alpha_vantage = AlphaVantageAPI(
         api_key=os.getenv("ALPHA_VANTAGE_KEY", ""),
-        rate_limiter=None
+        rate_limiter=create_alpha_vantage_limiter()
     )
     yahoo_finance = YahooFinanceEarnings()
     whisper_scraper = EarningsWhisperScraper()
