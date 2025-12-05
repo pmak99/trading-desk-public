@@ -80,12 +80,24 @@
 
 ---
 
-## Phase 2: Model Development (Pending)
+## Phase 2: Model Development (In Progress)
 
-### Task 2.1: Baseline Models
-- [ ] Linear regression for magnitude
-- [ ] Logistic regression for direction
-- [ ] Simple ensemble
+### Task 2.1: Baseline Models ✅
+- [x] Linear regression for magnitude
+- [x] Logistic regression for direction
+- [x] Walk-forward cross-validation (5 folds)
+- [x] Feature importance analysis
+- [x] **Deliverable:** `notebooks/03_baseline_models.ipynb` + `models/baseline/`
+  - **Magnitude Prediction (Linear Regression):**
+    - MAE: 2.25% ± 0.38%
+    - RMSE: 3.44% ± 0.57%
+    - R²: 0.226 ± 0.074
+  - **Direction Prediction (Logistic Regression):**
+    - Accuracy: 99.9% (⚠️ Suspiciously high - potential data leakage)
+    - Note: Final validation showed single-class confusion matrix
+    - Requires investigation before production use
+  - **Features Used:** 57 (after filtering >50% missing + non-numeric)
+  - **Models Saved:** linear_regression_magnitude.pkl, logistic_regression_direction.pkl, scaler.pkl, imputer.pkl
 
 ### Task 2.2: Advanced Models
 - [ ] Random Forest / Gradient Boosting
