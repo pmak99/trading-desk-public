@@ -716,7 +716,15 @@ def fetch_earnings_for_ticker(
     Returns:
         (earnings_date, timing) tuple or None if not found
     """
-    # If we have a cached full calendar, filter it locally (much faster)
+    # PRIORITY 1: Check database first (source of truth, validated data)
+    earnings_repo = container.earnings_repo
+    db_result = earnings_repo.get_next_earnings(ticker)
+    if db_result.is_ok and db_result.value is not None:
+        earnings_date, timing = db_result.value
+        logger.info(f"{ticker}: Earnings on {earnings_date} ({timing.value}) [from DB]")
+        return (earnings_date, timing)
+
+    # PRIORITY 2: If we have a cached full calendar, filter it locally (much faster)
     if cached_calendar is not None:
         ticker_earnings = [
             (sym, dt, timing) for sym, dt, timing in cached_calendar
