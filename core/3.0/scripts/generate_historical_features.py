@@ -49,8 +49,12 @@ def extract_historical_moves(db_path: str) -> pd.DataFrame:
     # Convert date to datetime
     df['earnings_date'] = pd.to_datetime(df['earnings_date'])
 
-    # Calculate absolute move (for volatility features)
-    df['abs_close_move_pct'] = df['close_move_pct'].abs()
+    # FIX: The close_move_pct column in DB stores absolute values (bug in 2.0)
+    # Recalculate the SIGNED close move percentage from raw prices
+    df['close_move_pct_signed'] = ((df['earnings_close'] - df['prev_close']) / df['prev_close']) * 100
+
+    # Calculate absolute move (for magnitude features)
+    df['abs_close_move_pct'] = df['close_move_pct_signed'].abs()
 
     return df
 
@@ -78,7 +82,7 @@ def calculate_rolling_stats(df: pd.DataFrame, lookback_quarters: list, statistic
             feature_dict = {
                 'ticker': ticker,
                 'earnings_date': row['earnings_date'],
-                'current_close_move_pct': row['close_move_pct'],
+                'current_close_move_pct': row['close_move_pct_signed'],  # FIXED: Use signed value
                 'current_abs_move_pct': row['abs_close_move_pct']
             }
 
