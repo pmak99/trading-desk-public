@@ -87,15 +87,21 @@
 - [x] Logistic regression for direction
 - [x] Walk-forward cross-validation (5 folds)
 - [x] Feature importance analysis
+- [x] **CRITICAL BUG FIX:** Corrected direction prediction data issue
+  - **Issue:** Database stored absolute values instead of signed moves (99.8% up, 0.2% down)
+  - **Fix:** Recalculated signed close_move_pct from raw prices
+  - **Result:** Balanced 51.7% up / 48.3% down distribution
 - [x] **Deliverable:** `notebooks/03_baseline_models.ipynb` + `models/baseline/`
   - **Magnitude Prediction (Linear Regression):**
     - MAE: 2.25% ± 0.38%
     - RMSE: 3.44% ± 0.57%
     - R²: 0.226 ± 0.074
   - **Direction Prediction (Logistic Regression):**
-    - Accuracy: 99.9% (⚠️ Suspiciously high - potential data leakage)
-    - Note: Final validation showed single-class confusion matrix
-    - Requires investigation before production use
+    - Accuracy: 52.8% ± 3.6% (vs 57.4% 2.0 baseline)
+    - Precision: 54.7%
+    - Recall: 60.1%
+    - F1: 57.2%
+    - ⚠️ **Underperforms 2.0 by ~4.6%** - need advanced models
   - **Features Used:** 57 (after filtering >50% missing + non-numeric)
   - **Models Saved:** linear_regression_magnitude.pkl, logistic_regression_direction.pkl, scaler.pkl, imputer.pkl
 
