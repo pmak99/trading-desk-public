@@ -49,11 +49,15 @@
   - 42% data coverage (VIX limited for older periods)
   - Regime distribution: 64% bull, 23% bear, 5% strong_bull, 5% strong_bear
 
-### Task 1.4: Time-Based Features
-- [ ] Days since last earnings
-- [ ] Seasonality patterns
-- [ ] Market phase (bull/bear/sideways)
-- [ ] **Deliverable:** `data/features/time_features.parquet`
+### Task 1.4: Time-Based Features ✅
+- [x] Days since last earnings and until next
+- [x] Seasonality patterns (month, quarter, day of week)
+- [x] Earnings frequency and regularity
+- [x] Earnings timing (BMO/AMC)
+- [x] **Deliverable:** `data/features/time_features.parquet`
+  - Generated 4,926 feature rows with 22 columns
+  - 92.2% coverage for earnings gap features
+  - 99.4% quarterly earnings, 51.2% BMO vs 48.4% AMC
 
 ### Task 1.5: Company Fundamentals (Optional)
 - [ ] Market cap, revenue growth
