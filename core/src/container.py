@@ -25,6 +25,7 @@ from src.application.metrics.implied_move import ImpliedMoveCalculator
 from src.application.metrics.vrp import VRPCalculator
 from src.application.metrics.liquidity_scorer import LiquidityScorer
 from src.application.metrics.market_conditions import MarketConditionsAnalyzer
+from src.application.metrics.adaptive_thresholds import AdaptiveThresholdCalculator
 from src.application.services.analyzer import TickerAnalyzer
 from src.application.services.strategy_generator import StrategyGenerator
 from src.application.services.health import HealthCheckService
@@ -35,6 +36,7 @@ from src.utils.rate_limiter import (
     create_tradier_limiter,
 )
 from src.utils.circuit_breaker import CircuitBreaker
+from src.utils.concurrent_scanner import ConcurrentScanner
 from src.infrastructure.database.connection_pool import ConnectionPool
 from src.infrastructure.database.migrations import MigrationManager
 
@@ -83,6 +85,7 @@ class Container:
         self._consistency_analyzer = "uninitialized"  # ConsistencyAnalyzerEnhanced or None (Phase 4)
         self._liquidity_scorer: Optional[LiquidityScorer] = None
         self._market_conditions: Optional[MarketConditionsAnalyzer] = None
+        self._adaptive_thresholds: Optional[AdaptiveThresholdCalculator] = None
         self._strategy_generator: Optional[StrategyGenerator] = None
         self._analyzer: Optional[TickerAnalyzer] = None
         self._async_analyzer: Optional[AsyncTickerAnalyzer] = None
@@ -91,6 +94,7 @@ class Container:
         self._tradier_breaker: Optional[CircuitBreaker] = None
         self._alpha_vantage_breaker: Optional[CircuitBreaker] = None
         self._db_pool: Optional[ConnectionPool] = None
+        self._concurrent_scanner: Optional[ConcurrentScanner] = None
 
     # ========================================================================
     # Infrastructure Layer
@@ -254,8 +258,13 @@ class Container:
         if self._consistency_analyzer == "uninitialized":
             if self.config.algorithms.use_enhanced_consistency:
                 from src.application.metrics.consistency_enhanced import ConsistencyAnalyzerEnhanced
-                self._consistency_analyzer = ConsistencyAnalyzerEnhanced()
-                logger.info("Created ConsistencyAnalyzerEnhanced (Phase 4)")
+                # FIX: Pass the same move_metric as VRP to ensure apples-to-apples comparison
+                self._consistency_analyzer = ConsistencyAnalyzerEnhanced(
+                    move_metric=self.config.algorithms.vrp_move_metric
+                )
+                logger.info(
+                    f"Created ConsistencyAnalyzerEnhanced (Phase 4, metric={self.config.algorithms.vrp_move_metric})"
+                )
             else:
                 # Set to None permanently if disabled
                 self._consistency_analyzer = None
@@ -309,6 +318,16 @@ class Container:
             logger.debug("Created MarketConditionsAnalyzer")
         return self._market_conditions
 
+    @property
+    def adaptive_threshold_calculator(self) -> AdaptiveThresholdCalculator:
+        """Get adaptive threshold calculator for VIX-adjusted VRP thresholds."""
+        if self._adaptive_thresholds is None:
+            self._adaptive_thresholds = AdaptiveThresholdCalculator(
+                base_thresholds=self.config.thresholds
+            )
+            logger.debug("Created AdaptiveThresholdCalculator")
+        return self._adaptive_thresholds
+
     # ========================================================================
     # Application Layer - Services
     # ========================================================================
@@ -358,6 +377,23 @@ class Container:
             )
             logger.debug("Created AnalysisRepository with connection pool")
         return self._analysis_repo
+
+    @property
+    def concurrent_scanner(self) -> ConcurrentScanner:
+        """
+        Get concurrent scanner for parallel ticker analysis.
+
+        Uses ThreadPoolExecutor for 5x+ speedup on multi-ticker scans.
+        Default: 5 workers, 2 req/s rate limit (respects Tradier API limits).
+        """
+        if self._concurrent_scanner is None:
+            self._concurrent_scanner = ConcurrentScanner(
+                container=self,
+                max_workers=5,
+                rate_limit_per_second=2.0,
+            )
+            logger.debug("Created ConcurrentScanner (5 workers, 2 req/s)")
+        return self._concurrent_scanner
 
     # ========================================================================
     # Utility Methods
