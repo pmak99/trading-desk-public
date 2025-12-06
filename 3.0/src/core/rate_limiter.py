@@ -70,16 +70,17 @@ class TokenBucketRateLimiter:
         self._tokens = min(self.capacity, self._tokens + elapsed * self.rate)
         self._last_update = now
 
-    def acquire(self, tokens: int = 1, blocking: bool = True) -> bool:
+    def acquire(self, tokens: int = 1, blocking: bool = True, timeout: float = 60.0) -> bool:
         """
         Acquire tokens from the bucket.
 
         Args:
             tokens: Number of tokens to acquire (default: 1)
             blocking: If True, block until tokens available
+            timeout: Maximum time to wait in seconds (default: 60s)
 
         Returns:
-            True if tokens acquired, False if non-blocking and unavailable
+            True if tokens acquired, False if non-blocking/timeout and unavailable
         """
         with self._lock:
             self._refill()
@@ -91,9 +92,19 @@ class TokenBucketRateLimiter:
             if not blocking:
                 return False
 
-        # Wait for tokens (outside lock)
+            # Calculate wait time inside lock to avoid race condition
+            needed = tokens - self._tokens
+            estimated_wait = needed / self.rate
+
+        # Wait for tokens (outside lock) with timeout
+        start_time = time.time()
         while True:
-            time.sleep(0.1)
+            elapsed = time.time() - start_time
+            if elapsed >= timeout:
+                logger.warning(f"Rate limiter '{self.name}' timed out after {timeout}s")
+                return False
+
+            time.sleep(min(0.1, timeout - elapsed))
             with self._lock:
                 self._refill()
                 if self._tokens >= tokens:
@@ -164,23 +175,36 @@ class AsyncTokenBucketRateLimiter:
         self._tokens = min(self.capacity, self._tokens + elapsed * self.rate)
         self._last_update = now
 
-    async def acquire(self, tokens: int = 1) -> None:
+    async def acquire(self, tokens: int = 1, timeout: float = 60.0) -> bool:
         """
         Acquire tokens from the bucket (async).
 
         Args:
             tokens: Number of tokens to acquire
+            timeout: Maximum time to wait in seconds (default: 60s)
+
+        Returns:
+            True if tokens acquired, False if timeout
         """
+        start_time = time.time()
         while True:
             async with self._lock:
                 self._refill()
                 if self._tokens >= tokens:
                     self._tokens -= tokens
-                    return
+                    return True
 
-            # Calculate wait time and sleep
-            wait_time = (tokens - self._tokens) / self.rate
-            await asyncio.sleep(min(wait_time, 0.1))
+                # Calculate wait time inside lock to avoid race condition
+                needed = tokens - self._tokens
+                wait_time = needed / self.rate
+
+            # Check timeout
+            elapsed = time.time() - start_time
+            if elapsed >= timeout:
+                logger.warning(f"Async rate limiter '{self.name}' timed out after {timeout}s")
+                return False
+
+            await asyncio.sleep(min(wait_time, 0.1, timeout - elapsed))
 
     async def try_acquire(self, tokens: int = 1) -> bool:
         """

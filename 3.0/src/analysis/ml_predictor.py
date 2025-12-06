@@ -17,9 +17,9 @@ from typing import Optional, Dict, Tuple
 from dataclasses import dataclass
 import logging
 
-# Suppress sklearn feature name warnings from DecisionTree estimators inside RF
-warnings.filterwarnings('ignore', message='X has feature names, but DecisionTreeRegressor was fitted without feature names')
-warnings.filterwarnings('ignore', message='X does not have valid feature names')
+# Note: sklearn warnings about feature names have been addressed by using
+# DataFrame inputs throughout the prediction pipeline (see _prepare_features_df).
+# No warning suppression needed.
 
 from src.data.price_fetcher import PriceFetcher, VolatilityFeatures
 from src.utils.db import get_db_connection
@@ -365,8 +365,17 @@ class MLMagnitudePredictor:
                 prediction_upper=prediction_upper,
             )
 
+        except (ValueError, KeyError) as e:
+            # Expected errors: missing data, invalid feature values
+            logger.warning(f"{ticker}: Prediction failed due to data issue - {e}")
+            return None
+        except (FileNotFoundError, IOError) as e:
+            # File/database access issues
+            logger.error(f"{ticker}: Prediction failed due to I/O error - {e}")
+            return None
         except Exception as e:
-            logger.error(f"Error predicting magnitude for {ticker}: {e}")
+            # Unexpected errors - log with full traceback for debugging
+            logger.exception(f"{ticker}: Unexpected error during prediction - {e}")
             return None
 
     def _calculate_calibrated_confidence(
