@@ -9,9 +9,10 @@ import logging
 from datetime import date
 from pathlib import Path
 from typing import List, Optional
-from contextlib import contextmanager
+
 from src.domain.types import Money, Percentage, HistoricalMove
 from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
+from src.infrastructure.database.repositories.base_repository import BaseRepository
 
 # TYPE_CHECKING import to avoid circular dependency
 from typing import TYPE_CHECKING
@@ -20,16 +21,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Connection timeout for all database operations (30 seconds)
-CONNECTION_TIMEOUT = 30
 
-
-class PricesRepository:
+class PricesRepository(BaseRepository):
     """
     Repository for historical price movements.
 
+    Inherits connection management from BaseRepository.
     Supports connection pooling for better concurrent performance.
-    Falls back to direct connections if pool not provided (backward compatible).
     """
 
     def __init__(self, db_path: str | Path, pool: Optional['ConnectionPool'] = None):
@@ -40,28 +38,7 @@ class PricesRepository:
             db_path: Path to SQLite database
             pool: Optional connection pool (uses direct connections if None)
         """
-        self.db_path = str(db_path)
-        self.pool = pool
-
-    @contextmanager
-    def _get_connection(self):
-        """
-        Get database connection from pool or create direct connection.
-
-        Yields:
-            Database connection
-        """
-        if self.pool:
-            # Use connection pool
-            with self.pool.get_connection() as conn:
-                yield conn
-        else:
-            # Fallback to direct connection (testing/legacy)
-            conn = sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT)
-            try:
-                yield conn
-            finally:
-                conn.close()
+        super().__init__(db_path, pool)
 
     def save_historical_move(
         self, move: HistoricalMove

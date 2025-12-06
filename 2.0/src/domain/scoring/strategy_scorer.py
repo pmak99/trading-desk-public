@@ -5,12 +5,15 @@ This module provides clean separation of scoring concerns from strategy generati
 making the scoring algorithm testable and maintainable independently.
 """
 
+import logging
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from src.config.config import ScoringWeights
 from src.domain.types import Strategy, VRPResult
 from src.domain.enums import StrategyType, DirectionalBias
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -586,17 +589,40 @@ class StrategyScorer:
         elif zone_to_move_ratio >= 0.70:
             # Profit zone is 70-100% of implied move - slight penalty
             # Linear interpolation: 0.70 → 0.9, 1.0 → 1.0
-            return 0.9 + (zone_to_move_ratio - 0.70) * (0.1 / 0.30)
+            multiplier = 0.9 + (zone_to_move_ratio - 0.70) * (0.1 / 0.30)
+            logger.debug(
+                f"{strategy.strategy_type.value}: Slight profit zone penalty "
+                f"(zone {profit_zone_pct:.1f}% vs move ±{implied_move_pct:.1f}%, "
+                f"multiplier={multiplier:.2f})"
+            )
+            return multiplier
         elif zone_to_move_ratio >= 0.40:
             # Profit zone is 40-70% of implied move - moderate penalty
             # Linear interpolation: 0.40 → 0.7, 0.70 → 0.9
-            return 0.7 + (zone_to_move_ratio - 0.40) * (0.2 / 0.30)
+            multiplier = 0.7 + (zone_to_move_ratio - 0.40) * (0.2 / 0.30)
+            logger.info(
+                f"{strategy.strategy_type.value}: Moderate profit zone penalty "
+                f"(zone {profit_zone_pct:.1f}% vs move ±{implied_move_pct:.1f}%, "
+                f"multiplier={multiplier:.2f})"
+            )
+            return multiplier
         elif zone_to_move_ratio >= 0.20:
             # Profit zone is 20-40% of implied move - heavy penalty
             # Linear interpolation: 0.20 → 0.5, 0.40 → 0.7
-            return 0.5 + (zone_to_move_ratio - 0.20) * (0.2 / 0.20)
+            multiplier = 0.5 + (zone_to_move_ratio - 0.20) * (0.2 / 0.20)
+            logger.warning(
+                f"{strategy.strategy_type.value}: Heavy profit zone penalty - "
+                f"profit zone ({profit_zone_pct:.1f}%) much smaller than implied move "
+                f"(±{implied_move_pct:.1f}%), multiplier={multiplier:.2f}"
+            )
+            return multiplier
         else:
             # Profit zone < 20% of implied move - severe penalty
+            logger.warning(
+                f"{strategy.strategy_type.value}: SEVERE profit zone penalty - "
+                f"profit zone ({profit_zone_pct:.1f}%) is <20% of implied move "
+                f"(±{implied_move_pct:.1f}%), multiplier=0.30. Consider rejecting."
+            )
             return 0.3
 
     def _generate_strategy_rationale(self, strategy: Strategy, vrp: VRPResult) -> str:

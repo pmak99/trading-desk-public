@@ -1,18 +1,30 @@
 [project]
-name = "iv-crush-2"
-version = "2.0.0"
-description = "IV Crush System 2.0 - Quantitative Options Trading"
+name = "ivcrush"
+version = "2.5.0"
+description = "IV Crush Trading System - Quantitative Earnings Options Strategy Scanner"
 requires-python = ">=3.11"
 authors = [
     {name = "Trading Desk"}
 ]
 readme = "README.md"
+keywords = ["options", "trading", "iv-crush", "volatility", "earnings"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
 
 dependencies = [
     "requests>=2.32.0",
     "python-dotenv>=1.2.0",
     "numpy>=2.0.0",
     "praw>=7.7.0",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "tqdm>=4.66.0",
 ]
 
 [project.optional-dependencies]
@@ -29,9 +41,16 @@ dev = [
     "ruff>=0.1.0",
 ]
 
+[project.scripts]
+ivcrush = "src.cli.main:main"
+
 [build-system]
 requires = ["setuptools>=68.0.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"

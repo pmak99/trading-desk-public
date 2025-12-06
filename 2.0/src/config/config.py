@@ -47,48 +47,31 @@ class CacheConfig:
 class ThresholdsConfig:
     """Trading thresholds and parameters."""
 
-    # VRP ratio thresholds - REVISED (Nov 2025)
-    # Previous values (7.0x/4.0x) were overfitted to small sample (8 trades)
-    # Academic literature: VRP of 1.2-1.5x is typically tradeable
-    # Market research: Consistent edge appears at 1.5x+, excellent at 2.0x+
-    #
+    # VRP ratio thresholds
     # THRESHOLD PROFILES (select via vrp_threshold_mode):
-    # - CONSERVATIVE: 2.0x/1.5x/1.2x - Higher selectivity, fewer trades, stronger edge
-    # - BALANCED:     1.8x/1.4x/1.2x - Moderate selectivity, good edge/frequency balance (DEFAULT)
-    # - AGGRESSIVE:   1.5x/1.3x/1.1x - More opportunities, acceptable edge
-    # - LEGACY:       7.0x/4.0x/1.5x - Original overfitted values (NOT RECOMMENDED)
+    # - CONSERVATIVE: 2.0x/1.5x/1.2x - Higher selectivity, fewer trades
+    # - BALANCED:     1.8x/1.4x/1.2x - Good edge/frequency balance (DEFAULT)
+    # - AGGRESSIVE:   1.5x/1.3x/1.1x - More opportunities
+    vrp_threshold_mode: str = "BALANCED"
+    vrp_excellent: float = 1.8
+    vrp_good: float = 1.4
+    vrp_marginal: float = 1.2
 
-    vrp_threshold_mode: str = "BALANCED"  # CONSERVATIVE, BALANCED, AGGRESSIVE, or LEGACY
+    # Liquidity filters - 3-TIER SYSTEM
+    # REJECT tier: Hard minimums
+    liquidity_reject_min_oi: int = 20
+    liquidity_reject_max_spread_pct: float = 100.0
+    liquidity_reject_min_volume: int = 0
 
-    # Active thresholds (set based on mode, can be overridden)
-    vrp_excellent: float = 1.8  # BALANCED default
-    vrp_good: float = 1.4       # BALANCED default
-    vrp_marginal: float = 1.2   # BALANCED default
+    # WARNING tier: Scoring targets
+    liquidity_warning_min_oi: int = 200
+    liquidity_warning_max_spread_pct: float = 15.0
+    liquidity_warning_min_volume: int = 0
 
-    # Liquidity filters - 3-TIER SYSTEM (USER CALIBRATED FOR 50-200 CONTRACT TRADES)
-    # Classification logic: EXCELLENT if all excellent thresholds met,
-    #                       REJECT if any reject threshold fails,
-    #                       WARNING for everything in between (catch-all tier)
-
-    # REJECT tier: Hard minimums - any metric below these = REJECT
-    liquidity_reject_min_oi: int = 20         # Absolute minimum OI
-    liquidity_reject_max_spread_pct: float = 100.0  # Maximum acceptable spread %
-    liquidity_reject_min_volume: int = 0      # Allow zero volume (future options may not have traded today)
-
-    # WARNING tier: Used for scoring only (not classification boundaries)
-    # These thresholds help score options 0-100 but don't filter
-    liquidity_warning_min_oi: int = 200       # "Good" OI for scoring
-    liquidity_warning_max_spread_pct: float = 15.0  # "Good" spread for scoring
-    liquidity_warning_min_volume: int = 0     # Allow zero volume
-
-    # EXCELLENT tier: All metrics must meet these thresholds
-    liquidity_excellent_min_oi: int = 1000    # High OI threshold
-    liquidity_excellent_max_spread_pct: float = 8.0  # Tight spread threshold
-    liquidity_excellent_min_volume: int = 100  # High volume threshold
-
-    # Legacy thresholds (DEPRECATED - use tier system instead)
-    min_open_interest: int = 100  # Now matches REJECT tier
-    max_spread_pct: float = 50.0  # Now matches REJECT tier
+    # EXCELLENT tier: All metrics must meet these
+    liquidity_excellent_min_oi: int = 1000
+    liquidity_excellent_max_spread_pct: float = 8.0
+    liquidity_excellent_min_volume: int = 100
 
     # Data quality
     min_historical_quarters: int = 4
@@ -98,19 +81,19 @@ class ThresholdsConfig:
     min_market_cap_millions: float = 1000.0
 
     # Strike selection
-    implied_move_buffer: float = 0.10  # 10% beyond implied move for safety
+    implied_move_buffer: float = 0.10
 
     # Skew analysis
-    skew_strong_threshold: float = 5.0  # 5% IV difference = strong skew
-    skew_moderate_threshold: float = 2.0  # 2% = moderate skew
+    skew_strong_threshold: float = 5.0
+    skew_moderate_threshold: float = 2.0
 
     # Consistency
-    high_consistency_threshold: float = 0.7  # CV < 0.7 = consistent
+    high_consistency_threshold: float = 0.7
     acceptable_consistency_threshold: float = 1.0
 
     # Greeks thresholds
-    min_theta_good: float = 30.0  # $30/day = good theta
-    min_vega_good: float = -50.0  # -$50 = good vega exposure
+    min_theta_good: float = 30.0
+    min_vega_good: float = -50.0
 
 
 @dataclass(frozen=True)
@@ -180,64 +163,77 @@ class ScoringWeights:
     theta_positive_threshold: float = 30.0  # Theta > $30/day mentioned in rationale
     vega_beneficial_threshold: float = -50.0  # Vega < -$50 benefits from IV crush
 
-    # NEW: Liquidity thresholds for rationale
-    liquidity_excellent_threshold: str = "EXCELLENT"  # Liquidity tier = EXCELLENT
-    liquidity_acceptable_threshold: str = "WARNING"   # Minimum acceptable = WARNING
+    # Liquidity thresholds for rationale
+    liquidity_excellent_threshold: str = "EXCELLENT"
+    liquidity_acceptable_threshold: str = "WARNING"
+
+
+@dataclass(frozen=True)
+class ScanConfig:
+    """Scan mode scoring configuration."""
+
+    # Quality score factors (sum = 100)
+    score_vrp_max_points: float = 35.0
+    score_vrp_target: float = 3.0
+    score_edge_max_points: float = 30.0
+    score_edge_target: float = 4.0
+    score_liquidity_max_points: float = 20.0
+    score_liquidity_excellent_points: float = 20.0
+    score_liquidity_warning_points: float = 10.0
+    score_liquidity_reject_points: float = 0.0
+    score_move_max_points: float = 15.0
+
+    # Implied move difficulty thresholds
+    score_move_easy_threshold: float = 8.0
+    score_move_moderate_threshold: float = 12.0
+    score_move_moderate_points: float = 10.0
+    score_move_challenging_threshold: float = 15.0
+    score_move_challenging_points: float = 6.0
+    score_move_extreme_points: float = 3.0
+    score_move_default_points: float = 7.5
+
+    # Cache settings
+    cache_max_l1_size: int = 100
 
 
 @dataclass(frozen=True)
 class StrategyConfig:
-    """
-    Strategy generation configuration.
+    """Strategy generation configuration."""
 
-    Controls how strategies are selected and constructed.
-    """
+    # Strike selection
+    target_delta_short: float = 0.25  # Sell 25-delta (75% POP)
+    target_delta_long: float = 0.20   # Buy 20-delta for protection
 
-    # Strike selection - Delta-based (probability-based)
-    target_delta_short: float = 0.25  # Sell 25-delta (75% POP, balanced approach)
-
-    # DEPRECATED: Long strike selection now uses fixed dollar width
-    # TODO(v3.0): Remove this parameter - kept for backward compatibility only
-    target_delta_long: float = 0.25
-
-    # DEPRECATED: Spread width now uses fixed dollar amounts
-    # TODO(v3.0): Remove this parameter - kept for backward compatibility only
-    spread_width_percent: float = 0.03
-
-    # Spread width - Fixed dollar amounts (user strategy)
+    # Spread width - Fixed dollar amounts
     spread_width_high_price: float = 5.0  # $5 for stocks >= $20
     spread_width_low_price: float = 3.0   # $3 for stocks < $20
-    spread_width_threshold: float = 20.0  # Price threshold
+    spread_width_threshold: float = 20.0
 
     # Quality filters
-    min_credit_per_spread: float = 0.20  # $0.20 minimum credit (balanced for 25-delta)
-    min_reward_risk: float = 0.25  # Minimum 1:4 ratio (25% reward/risk)
+    min_credit_per_spread: float = 0.20
+    min_reward_risk: float = 0.25
 
     # Position sizing - Kelly Criterion based
-    risk_budget_per_trade: float = 20000.0  # $20K max loss per position (used as account equity proxy)
-    max_contracts: int = 100  # Safety cap on contract size
+    risk_budget_per_trade: float = 20000.0
+    max_contracts: int = 100
 
     # Kelly Criterion parameters
-    use_kelly_sizing: bool = True           # Use Kelly Criterion (True) or fixed risk budget (False)
-    kelly_fraction: float = 0.25            # Fractional Kelly (0.25 = use 25% of full Kelly, conservative)
-    kelly_min_edge: float = 0.05            # Minimum edge required for Kelly (5%)
-    kelly_min_contracts: int = 1            # Minimum contracts even if Kelly suggests 0
+    use_kelly_sizing: bool = True
+    kelly_fraction: float = 0.25
+    kelly_min_edge: float = 0.05
+    kelly_min_contracts: int = 1
 
-    # Commission and fees
-    commission_per_contract: float = 0.30  # $0.30 per contract
+    # Commission
+    commission_per_contract: float = 0.30
 
-    # Iron butterfly specific
-    iron_butterfly_wing_width_pct: float = 0.015  # 1.5% for tighter profit zone
-    iron_butterfly_min_wing_width: float = 3.0    # Minimum $3 wing width
-
-    # Iron butterfly POP estimation parameters
-    # Formula: POP = base_pop + (range_pct - reference_range) * sensitivity
-    # Example: 2% range → 40% POP, 4% range → 60% POP
-    ib_pop_base: float = 0.40          # Base POP at reference range
-    ib_pop_reference_range: float = 2.0  # Reference profit range (%)
-    ib_pop_sensitivity: float = 0.10   # POP change per 1% range
-    ib_pop_min: float = 0.35           # Minimum POP cap
-    ib_pop_max: float = 0.70           # Maximum POP cap
+    # Iron butterfly
+    iron_butterfly_wing_width_pct: float = 0.015
+    iron_butterfly_min_wing_width: float = 3.0
+    ib_pop_base: float = 0.40
+    ib_pop_reference_range: float = 2.0
+    ib_pop_sensitivity: float = 0.10
+    ib_pop_min: float = 0.35
+    ib_pop_max: float = 0.70
 
     # Scoring configuration
     scoring_weights: ScoringWeights = field(default_factory=ScoringWeights)
@@ -316,6 +312,7 @@ class Config:
     cache: CacheConfig
     thresholds: ThresholdsConfig
     strategy: StrategyConfig
+    scan: ScanConfig
     rate_limits: RateLimitConfig
     resilience: ResilienceConfig
     algorithms: AlgorithmConfig
@@ -415,7 +412,6 @@ class Config:
             vrp_excellent=float(os.getenv("VRP_EXCELLENT", str(profile["excellent"]))),
             vrp_good=float(os.getenv("VRP_GOOD", str(profile["good"]))),
             vrp_marginal=float(os.getenv("VRP_MARGINAL", str(profile["marginal"]))),
-            # 3-tier liquidity system (calibrated for 50-200 contract trades)
             liquidity_reject_min_oi=int(os.getenv("LIQUIDITY_REJECT_MIN_OI", "20")),
             liquidity_reject_max_spread_pct=float(os.getenv("LIQUIDITY_REJECT_MAX_SPREAD_PCT", "100.0")),
             liquidity_reject_min_volume=int(os.getenv("LIQUIDITY_REJECT_MIN_VOLUME", "0")),
@@ -425,14 +421,9 @@ class Config:
             liquidity_excellent_min_oi=int(os.getenv("LIQUIDITY_EXCELLENT_MIN_OI", "1000")),
             liquidity_excellent_max_spread_pct=float(os.getenv("LIQUIDITY_EXCELLENT_MAX_SPREAD_PCT", "8.0")),
             liquidity_excellent_min_volume=int(os.getenv("LIQUIDITY_EXCELLENT_MIN_VOLUME", "100")),
-            # Legacy (deprecated)
-            min_open_interest=int(os.getenv("MIN_OPEN_INTEREST", "100")),
-            max_spread_pct=float(os.getenv("MAX_SPREAD_PCT", "50.0")),
             min_historical_quarters=int(os.getenv("MIN_HISTORICAL_QUARTERS", "4")),
             max_historical_quarters=int(os.getenv("MAX_HISTORICAL_QUARTERS", "12")),
-            min_market_cap_millions=float(
-                os.getenv("MIN_MARKET_CAP_MILLIONS", "1000.0")
-            ),
+            min_market_cap_millions=float(os.getenv("MIN_MARKET_CAP_MILLIONS", "1000.0")),
         )
 
         # Rate limits
@@ -462,25 +453,10 @@ class Config:
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", "30")),
         )
 
-        # Check for deprecated env vars and warn users
-        if os.getenv("TARGET_DELTA_LONG") and os.getenv("TARGET_DELTA_LONG") != "0.25":
-            logger.warning(
-                "TARGET_DELTA_LONG is deprecated and ignored. "
-                "Long strike selection now uses fixed dollar spread widths. "
-                "Use SPREAD_WIDTH_HIGH_PRICE and SPREAD_WIDTH_LOW_PRICE instead."
-            )
-
-        if os.getenv("SPREAD_WIDTH_PERCENT") and os.getenv("SPREAD_WIDTH_PERCENT") != "0.03":
-            logger.warning(
-                "SPREAD_WIDTH_PERCENT is deprecated and ignored. "
-                "Use SPREAD_WIDTH_HIGH_PRICE (default $5) and SPREAD_WIDTH_LOW_PRICE (default $3) instead."
-            )
-
         # Strategy configuration
         strategy = StrategyConfig(
             target_delta_short=float(os.getenv("TARGET_DELTA_SHORT", "0.25")),
-            target_delta_long=float(os.getenv("TARGET_DELTA_LONG", "0.25")),
-            spread_width_percent=float(os.getenv("SPREAD_WIDTH_PERCENT", "0.03")),
+            target_delta_long=float(os.getenv("TARGET_DELTA_LONG", "0.20")),
             spread_width_high_price=float(os.getenv("SPREAD_WIDTH_HIGH_PRICE", "5.0")),
             spread_width_low_price=float(os.getenv("SPREAD_WIDTH_LOW_PRICE", "3.0")),
             spread_width_threshold=float(os.getenv("SPREAD_WIDTH_THRESHOLD", "20.0")),
@@ -488,7 +464,6 @@ class Config:
             min_reward_risk=float(os.getenv("MIN_REWARD_RISK", "0.25")),
             risk_budget_per_trade=float(os.getenv("RISK_BUDGET_PER_TRADE", "20000.0")),
             max_contracts=int(os.getenv("MAX_CONTRACTS", "100")),
-            # Kelly Criterion position sizing
             use_kelly_sizing=os.getenv("USE_KELLY_SIZING", "true").lower() == "true",
             kelly_fraction=float(os.getenv("KELLY_FRACTION", "0.25")),
             kelly_min_edge=float(os.getenv("KELLY_MIN_EDGE", "0.05")),
@@ -503,7 +478,10 @@ class Config:
             ib_pop_max=float(os.getenv("IB_POP_MAX", "0.70")),
         )
 
-        # Algorithms (Phase 4)
+        # Scan scoring configuration
+        scan = ScanConfig()
+
+        # Algorithms
         algorithms = AlgorithmConfig(
             use_interpolated_move=os.getenv("USE_INTERPOLATED_MOVE", "true").lower() == "true",
             use_enhanced_skew=os.getenv("USE_ENHANCED_SKEW", "true").lower() == "true",
@@ -532,6 +510,7 @@ class Config:
             cache=cache,
             thresholds=thresholds,
             strategy=strategy,
+            scan=scan,
             rate_limits=rate_limits,
             resilience=resilience,
             algorithms=algorithms,

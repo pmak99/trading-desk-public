@@ -59,6 +59,10 @@ class ConsistencyAnalyzerEnhanced:
     - Trend detection (increasing volatility = bad signal)
     - Confidence score for strategy decisions
     - Better adaptation to changing market conditions
+
+    IMPORTANT: The move_metric parameter should match the VRP calculator's
+    metric to ensure apples-to-apples comparison. Default is "close" to match
+    ATM straddle expectation (close-to-close movement).
     """
 
     # Configuration
@@ -68,8 +72,22 @@ class ConsistencyAnalyzerEnhanced:
     HIGH_TRUSTWORTHINESS = 0.7  # Threshold for high trust
     RECENT_QUARTERS = 4  # Number of quarters for "recent" bias
 
-    def __init__(self):
-        pass
+    def __init__(self, move_metric: str = "close"):
+        """
+        Initialize consistency analyzer.
+
+        Args:
+            move_metric: Which move metric to use for consistency analysis.
+                - "close": Close-to-close move (RECOMMENDED - matches VRP/straddle)
+                - "intraday": High-low range on earnings day
+                - "gap": Gap open vs previous close
+        """
+        if move_metric not in ["close", "intraday", "gap"]:
+            raise ValueError(
+                f"Invalid move_metric: {move_metric}. "
+                f"Must be 'close', 'intraday', or 'gap'"
+            )
+        self.move_metric = move_metric
 
     def analyze_consistency(
         self,
@@ -100,8 +118,18 @@ class ConsistencyAnalyzerEnhanced:
                 )
             )
 
-        # Extract intraday moves (most relevant for IV crush strategy)
-        moves = [float(hm.intraday_move_pct.value) for hm in historical_moves]
+        # Extract moves based on configured metric (should match VRP calculator)
+        # FIX: Previously hardcoded to intraday_move_pct, but VRP uses close_move_pct
+        # This caused apples-to-oranges comparison in consistency analysis
+        if self.move_metric == "close":
+            moves = [float(hm.close_move_pct.value) for hm in historical_moves]
+        elif self.move_metric == "intraday":
+            moves = [float(hm.intraday_move_pct.value) for hm in historical_moves]
+        elif self.move_metric == "gap":
+            moves = [float(hm.gap_move_pct.value) for hm in historical_moves]
+        else:
+            # Should never happen due to __init__ validation, but be defensive
+            moves = [float(hm.close_move_pct.value) for hm in historical_moves]
 
         # Calculate exponentially-weighted statistics
         weighted_mean = self._exponential_weighted_mean(moves)

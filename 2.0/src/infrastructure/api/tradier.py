@@ -7,6 +7,7 @@ Implements OptionsDataProvider protocol with retry logic and circuit breaker
 
 import requests
 import logging
+import time
 from datetime import date
 from typing import Dict, Optional
 from src.domain.types import (
@@ -120,12 +121,91 @@ class TradierAPI:
             logger.warning(f"Timeout fetching price for {ticker}")
             return Err(AppError(ErrorCode.TIMEOUT, f"Timeout: {ticker}"))
 
+    def get_stock_prices_batch(
+        self, tickers: list[str]
+    ) -> Result[Dict[str, Money], AppError]:
+        """
+        Get stock prices for multiple tickers in a single API call.
+
+        Tradier supports up to 100 symbols per request.
+        This reduces API calls from N to ceil(N/100) for batch operations.
+
+        Args:
+            tickers: List of stock symbols (max 100)
+
+        Returns:
+            Result with dict mapping ticker -> Money price
+        """
+        if not tickers:
+            return Ok({})
+
+        # Rate limit check
+        if self.rate_limiter and not self.rate_limiter.acquire():
+            return Err(
+                AppError(
+                    ErrorCode.RATELIMIT,
+                    "Tradier rate limit exceeded",
+                )
+            )
+
+        try:
+            # Tradier accepts comma-separated symbols (max 100)
+            if len(tickers) > 100:
+                logger.warning(
+                    f"Batch price request for {len(tickers)} tickers "
+                    f"exceeds limit of 100. Truncating to first 100."
+                )
+            symbols_str = ','.join(tickers[:100])
+
+            response = requests.get(
+                f"{self.base_url}/markets/quotes",
+                params={'symbols': symbols_str},
+                headers=self.headers,
+                timeout=self.timeout * 2,  # Double timeout for batch
+            )
+            response.raise_for_status()
+
+            # Check response size to prevent OOM
+            if len(response.content) > MAX_API_RESPONSE_SIZE:
+                return Err(
+                    AppError(
+                        ErrorCode.EXTERNAL,
+                        f"Response too large: {len(response.content)} bytes",
+                    )
+                )
+
+            data = response.json()
+
+            # Handle case where 'quotes' key exists but value is None
+            quotes_data = data.get('quotes') or {}
+            quotes = quotes_data.get('quote', [])
+
+            # Handle single quote or list
+            if not isinstance(quotes, list):
+                quotes = [quotes]
+
+            # Build result dict
+            prices: Dict[str, Money] = {}
+            for quote in quotes:
+                if quote and quote.get('symbol') and quote.get('last'):
+                    ticker = quote['symbol'].upper()
+                    prices[ticker] = Money(float(quote['last']))
+
+            logger.info(
+                f"Batch fetched {len(prices)}/{len(tickers)} stock prices"
+            )
+            return Ok(prices)
+
+        except requests.exceptions.Timeout:
+            logger.warning(f"Timeout fetching batch prices")
+            return Err(AppError(ErrorCode.TIMEOUT, "Batch quote timeout"))
+
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request error fetching price: {e}")
+            logger.error(f"Request error fetching batch prices: {e}")
             return Err(AppError(ErrorCode.EXTERNAL, str(e)))
 
         except Exception as e:
-            logger.error(f"Unexpected error fetching price: {e}")
+            logger.error(f"Unexpected error fetching batch prices: {e}")
             return Err(AppError(ErrorCode.EXTERNAL, str(e)))
 
     def get_option_chain(

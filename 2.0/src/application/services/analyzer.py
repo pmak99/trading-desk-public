@@ -6,7 +6,7 @@ from typing import Optional
 
 from src.domain.types import TickerAnalysis, ImpliedMove, VRPResult
 from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
-from src.domain.enums import EarningsTiming
+from src.domain.enums import EarningsTiming, Recommendation
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +105,9 @@ class TickerAnalyzer:
 
             vrp = vrp_result.value
 
+            # Step 3.5: Apply adaptive thresholds based on VIX regime
+            vrp = self._apply_adaptive_thresholds(ticker, vrp)
+
             # Step 4: Optionally calculate enhanced skew (Phase 4)
             skew = None
             if self.container.skew_analyzer:
@@ -173,3 +176,92 @@ class TickerAnalyzer:
             return Err(
                 AppError(ErrorCode.CALCULATION, f"Analysis failed: {str(e)}")
             )
+
+    def _apply_adaptive_thresholds(self, ticker: str, vrp: VRPResult) -> VRPResult:
+        """Apply adaptive thresholds based on current VIX regime.
+
+        In elevated volatility environments, we require higher VRP ratios
+        to maintain edge. This may downgrade recommendations from the base
+        VRP calculation.
+
+        Args:
+            ticker: Stock ticker (for logging)
+            vrp: Original VRP result with base recommendation
+
+        Returns:
+            VRPResult with potentially adjusted recommendation
+        """
+        try:
+            # Get current market conditions
+            market_conditions_result = self.container.market_conditions_analyzer.get_current_conditions()
+
+            if market_conditions_result.is_err:
+                logger.debug(
+                    f"{ticker}: Could not fetch market conditions for adaptive thresholds, "
+                    f"using base recommendation: {vrp.recommendation.value}"
+                )
+                return vrp
+
+            market_conditions = market_conditions_result.value
+
+            # Get adaptive thresholds based on VIX regime
+            adapted = self.container.adaptive_threshold_calculator.calculate(market_conditions)
+
+            # Check if trading is not recommended in current regime
+            if not adapted.trade_recommended:
+                logger.warning(
+                    f"{ticker}: Trading not recommended in {adapted.regime} regime "
+                    f"(VIX={adapted.vix_level:.1f}). Overriding to SKIP."
+                )
+                return VRPResult(
+                    ticker=vrp.ticker,
+                    expiration=vrp.expiration,
+                    implied_move_pct=vrp.implied_move_pct,
+                    historical_mean_move_pct=vrp.historical_mean_move_pct,
+                    vrp_ratio=vrp.vrp_ratio,
+                    edge_score=vrp.edge_score,
+                    recommendation=Recommendation.SKIP,
+                )
+
+            # Re-evaluate recommendation using adapted thresholds
+            if vrp.vrp_ratio >= adapted.vrp_excellent:
+                new_recommendation = Recommendation.EXCELLENT
+            elif vrp.vrp_ratio >= adapted.vrp_good:
+                new_recommendation = Recommendation.GOOD
+            elif vrp.vrp_ratio >= adapted.vrp_marginal:
+                new_recommendation = Recommendation.MARGINAL
+            else:
+                new_recommendation = Recommendation.SKIP
+
+            # Log if recommendation changed
+            if new_recommendation != vrp.recommendation:
+                logger.info(
+                    f"{ticker}: Adaptive thresholds adjusted recommendation from "
+                    f"{vrp.recommendation.value} → {new_recommendation.value} "
+                    f"(VIX regime: {adapted.regime}, factor: {adapted.adjustment_factor:.1f}x)"
+                )
+                return VRPResult(
+                    ticker=vrp.ticker,
+                    expiration=vrp.expiration,
+                    implied_move_pct=vrp.implied_move_pct,
+                    historical_mean_move_pct=vrp.historical_mean_move_pct,
+                    vrp_ratio=vrp.vrp_ratio,
+                    edge_score=vrp.edge_score,
+                    recommendation=new_recommendation,
+                )
+
+            # Log that adaptive thresholds were applied but no change needed
+            if adapted.is_adjusted:
+                logger.debug(
+                    f"{ticker}: Adaptive thresholds applied (factor: {adapted.adjustment_factor:.1f}x) "
+                    f"but recommendation unchanged: {vrp.recommendation.value}"
+                )
+
+            return vrp
+
+        except Exception as e:
+            logger.warning(
+                f"{ticker}: Error applying adaptive thresholds: {e}. "
+                f"Using base recommendation: {vrp.recommendation.value}"
+            )
+            return vrp
