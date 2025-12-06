@@ -140,10 +140,20 @@
     5. hv_20d (volatility)
   - **Models Saved:** rf_magnitude.pkl, rf_direction.pkl, xgb_magnitude.pkl, xgb_direction.pkl, imputer.pkl, feature importance CSVs
 
-### Task 2.3: Model Validation
-- [ ] Walk-forward cross-validation
-- [ ] Out-of-sample testing
-- [ ] Production readiness checks
+### Task 2.3: Model Validation ✅
+- [x] Walk-forward cross-validation (5-fold time-series split)
+- [x] Out-of-sample testing on 2025 data
+- [x] Feature selection analysis (RF importance, Mutual Info, RFE)
+- [x] **Deliverable:** `models/validated/` + `scripts/walk_forward_cv.py`
+  - **CRITICAL FINDING: Direction prediction is ~51% (random)**
+  - Walk-forward CV results (5 folds, 821 samples each):
+    - RF Direction: 50.9% ± 1.5% (was 54% on single split - overfitting!)
+    - XGB Direction: 50.6% ± 1.5%
+    - RF Magnitude: MAE 2.20%, R² 0.258
+    - XGB Magnitude: MAE 2.30%, R² 0.185
+  - Feature selection showed no improvement (best: 51.7% with correlation filtering)
+  - **Root Cause:** Current features (historical moves, volatility, time) lack predictive
+    power for direction. The 2.0 system's edge comes from **real-time IV/VRP data**.
 
 ---
 
@@ -187,38 +197,37 @@
 - All ML features stored in parquet format for efficiency
 - Models versioned and tracked in `models/` directory
 
-### Key Insights from Phase 2
+### Key Insights from Phase 2 (Updated after Validation)
 
 **What Works:**
-- ML models successfully learn patterns from features (>50% accuracy = better than random)
-- Random Forest performs best among ML models (54.0% direction, R² 0.242 magnitude)
+- Magnitude prediction shows real signal (R² 0.26 in cross-validation)
 - Volatility features most predictive: Bollinger Band width, Historical Volatility, ATR
-- Time-based features important: Q1 earnings, BMO/AMC timing, seasonality
 - Feature engineering pipeline working well (86.6% average coverage)
+- Models generalize to unseen time periods for magnitude
 
-**What Doesn't Work Yet:**
-- ML models underperform 2.0 rule-based system by 3.4 percentage points (54.0% vs 57.4%)
-- Gap to minimum target: 6.3 percentage points (need 60.3%)
-- Gap to goal target: 9.2 percentage points (need 63.2%)
+**What Doesn't Work:**
+- **Direction prediction is essentially random (~51% accuracy)**
+- Historical features alone cannot predict earnings move direction
+- Feature selection does not improve direction accuracy
+- The 54% accuracy on single train/test split was overfitting
 
-**Potential Next Steps:**
-1. **Hybrid Approach:** Combine ML predictions with 2.0 rule-based logic
-   - Use ML as confidence score to filter/rank 2.0 predictions
-   - Ensemble: weighted average of ML and rule-based signals
-2. **Better Features:** Add option-specific data
-   - Implied volatility (IV) levels and IV rank
-   - Option Greeks (delta, gamma, theta, vega)
-   - Put/Call ratio, Open Interest
-   - IV crush magnitude (actual IV before vs after earnings)
-3. **Different ML Approach:**
-   - Model the 2.0 rules directly (decision tree that replicates logic)
-   - Multi-output model (predict move + strategy selection together)
-   - Calibrated probabilities for position sizing
-4. **Hyperparameter Tuning:**
-   - RandomizedSearchCV for RF/XGBoost parameters
-   - Try deeper trees, more estimators
-   - Feature selection (drop low-importance features)
+**Why 2.0 System Works (57.4% Win Rate):**
+- Uses **real-time IV data** (implied move from ATM straddle)
+- Calculates **VRP ratio** (Implied Move / Historical Mean Move)
+- Makes trade decisions based on VRP thresholds (excellent >7x, good >4x)
+- This IV/VRP signal is not available historically in the database
 
-**Recommendation:** Consider option (1) - Hybrid approach for Phase 3, as 2.0 logic is proven to work and ML can enhance it rather than replace it.
+**Path Forward:**
+1. **Keep ML for Magnitude Prediction** - R² 0.26 is useful for position sizing
+2. **Rely on 2.0 for Direction/Trade Selection** - VRP-based logic works
+3. **Hybrid Integration** - Use ML magnitude to enhance 2.0 strategies:
+   - Adjust spread width based on predicted move size
+   - Position sizing based on ML confidence
+   - Filter trades where predicted magnitude is extreme
 
-**Last Updated:** 2025-12-04
+**Alternative: Start Logging IV Data**
+- Capture implied_move and VRP at analysis time
+- Build historical IV dataset over 6-12 months
+- Then retrain direction model with IV features
+
+**Last Updated:** 2025-12-06
