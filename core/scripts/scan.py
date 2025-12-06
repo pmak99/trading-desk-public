@@ -1444,8 +1444,8 @@ def ticker_mode(
         logger.info(f"\n🎯 Sorted by Earnings Date, Quality Score (Risk-Adjusted):")
 
         # Table header (UPDATED Dec 2025 - Added Quality Score for risk-adjusted ranking)
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'Score':<7} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<18} {'Earnings':<12} {'Liquidity':<12}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*7} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'Score':<7} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<15} {'Earnings':<12} {'Liquidity':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*7} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*15} {'-'*12} {'-'*12}")
 
         # Sort by: 1) Earnings date (ascending), 2) Quality Score (descending), 3) Liquidity (EXCELLENT, WARNING, REJECT)
         def sort_key_ticker(x):
@@ -1484,7 +1484,7 @@ def ticker_mode(
                 liq_display = "❌ REJECT"
 
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<20} {score_display:<7} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<18} {earnings:<12} {liq_display:<12}"
+                f"   {i:<3} {ticker:<8} {name:<20} {score_display:<7} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<15} {earnings:<12} {liq_display:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
@@ -1555,6 +1555,94 @@ def validate_tradeable_earnings_dates(tradeable_results: List[dict], container: 
     logger.info("")
 
 
+def ensure_tickers_in_db(tickers: list[str], container: Container) -> None:
+    """
+    Ensure all tickers are in the database. Auto-add and sync missing tickers.
+
+    This eliminates the manual workflow:
+    - OLD: fetch tickers → manually add to DB → manually sync → re-run whisper
+    - NEW: fetch tickers → auto-add → auto-sync → continue analysis
+
+    Args:
+        tickers: List of ticker symbols to ensure in database
+        container: DI container
+    """
+    import sqlite3
+
+    db_path = container.config.database.path
+    placeholder_date = (date.today() + timedelta(days=7)).isoformat()
+
+    # Check which tickers are missing from DB
+    missing_tickers = []
+    with sqlite3.connect(db_path, timeout=30) as conn:
+        cursor = conn.cursor()
+        for ticker in tickers:
+            cursor.execute(
+                "SELECT COUNT(*) FROM earnings_calendar WHERE ticker = ? AND earnings_date >= date('now')",
+                (ticker,)
+            )
+            if cursor.fetchone()[0] == 0:
+                missing_tickers.append(ticker)
+
+    if not missing_tickers:
+        logger.info(f"✓ All {len(tickers)} tickers already in database")
+        return
+
+    # Add missing tickers
+    logger.info(f"📝 Adding {len(missing_tickers)} new tickers to database...")
+    with sqlite3.connect(db_path, timeout=30) as conn:
+        cursor = conn.cursor()
+        for ticker in missing_tickers:
+            cursor.execute(
+                """INSERT OR IGNORE INTO earnings_calendar
+                   (ticker, earnings_date, timing, confirmed)
+                   VALUES (?, ?, 'UNKNOWN', 0)""",
+                (ticker, placeholder_date)
+            )
+        conn.commit()
+    logger.info(f"✓ Added {len(missing_tickers)} tickers: {', '.join(missing_tickers[:10])}" +
+                ("..." if len(missing_tickers) > 10 else ""))
+
+    # Sync to fetch correct earnings dates
+    logger.info("🔄 Syncing earnings dates from Alpha Vantage + Yahoo Finance...")
+    logger.info(f"   Note: This may take ~{len(missing_tickers) * 12 // 60} minutes due to rate limiting (5 calls/min)")
+
+    # Call the existing sync script
+    script_path = Path(__file__).parent / "sync_earnings_calendar.py"
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            capture_output=True,
+            text=True,
+            timeout=len(missing_tickers) * 15  # 15 seconds per ticker timeout
+        )
+
+        if result.returncode == 0:
+            logger.info("✓ Earnings calendar synced successfully")
+
+            # Clean up orphaned placeholders (confirmed=0) after successful sync
+            logger.info("🧹 Cleaning up placeholder entries...")
+            with sqlite3.connect(db_path, timeout=30) as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' * len(missing_tickers))
+                cursor.execute(
+                    f"""DELETE FROM earnings_calendar
+                        WHERE ticker IN ({placeholders}) AND confirmed = 0""",
+                    missing_tickers
+                )
+                deleted = cursor.rowcount
+                conn.commit()
+            if deleted > 0:
+                logger.info(f"✓ Removed {deleted} orphaned placeholder entries")
+        else:
+            logger.warning(f"⚠️  Sync completed with warnings:\n{result.stderr}")
+    except subprocess.TimeoutExpired:
+        logger.warning("⚠️  Sync timed out, but may have partially completed")
+    except Exception as e:
+        logger.error(f"✗ Sync failed: {e}")
+        logger.info("   Continuing with API fallback...")
+
+
 def whisper_mode(
     container: Container,
     week_monday: Optional[str] = None,
@@ -1623,6 +1711,9 @@ def whisper_mode(
 
     logger.info(f"✓ Retrieved {len(tickers)} most anticipated tickers")
     logger.info(f"Tickers: {', '.join(tickers)}")
+
+    # Ensure all tickers are in database (auto-add + sync if needed)
+    ensure_tickers_in_db(tickers, container)
 
     # Analyze each ticker
     results = []
@@ -1741,8 +1832,8 @@ def whisper_mode(
         logger.info(f"\n🎯 Most Anticipated + High VRP (Sorted by Earnings Date, Quality Score):")
 
         # Table header (UPDATED Dec 2025 - Added Quality Score for risk-adjusted ranking)
-        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'Score':<7} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<18} {'Earnings':<12} {'Liquidity':<12}")
-        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*7} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'Score':<7} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<15} {'Earnings':<12} {'Liquidity':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*7} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*15} {'-'*12} {'-'*12}")
 
         # Sort by: 1) Earnings date (ascending), 2) Quality Score (descending), 3) Liquidity (EXCELLENT, WARNING, REJECT)
         def sort_key(x):
@@ -1784,7 +1875,7 @@ def whisper_mode(
 
             # Add separator between different earnings dates
             if prev_earnings_date is not None and earnings != prev_earnings_date:
-                logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*7} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*18} {'-'*12} {'-'*12}")
+                logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*7} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*15} {'-'*12} {'-'*12}")
             prev_earnings_date = earnings
 
             # CRITICAL: Display liquidity tier with color coding
@@ -1797,7 +1888,7 @@ def whisper_mode(
                 liq_display = "❌ REJECT"
 
             logger.info(
-                f"   {i:<3} {ticker:<8} {name:<20} {score_display:<7} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<18} {earnings:<12} {liq_display:<12}"
+                f"   {i:<3} {ticker:<8} {name:<20} {score_display:<7} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<15} {earnings:<12} {liq_display:<12}"
             )
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
