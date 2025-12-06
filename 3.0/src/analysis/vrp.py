@@ -72,7 +72,7 @@ class VRPCalculator:
         threshold_good: float = 4.0,
         threshold_marginal: float = 1.5,
         min_quarters: int = 4,
-        move_metric: str = "close",  # "close", "intraday", or "gap"
+        move_metric: str = "intraday",  # "intraday" (default), "close", or "gap"
     ):
         default_db = Path(__file__).parent.parent.parent.parent / "2.0" / "data" / "ivcrush.db"
         self.db_path = db_path or Path(os.getenv('DB_PATH', str(default_db)))

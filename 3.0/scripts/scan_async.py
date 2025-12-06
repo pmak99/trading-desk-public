@@ -32,12 +32,14 @@ from src.analysis.vrp import VRPCalculator
 from src.analysis.ml_predictor import MLMagnitudePredictor
 from src.analysis.scanner_core import (
     ScanResult,
+    TradeRecommendation,
     get_earnings_calendar,
     find_next_expiration,
     log_iv_data,
     calculate_position_multiplier,
     assess_edge,
     get_default_db_path,
+    generate_trade_recommendation,
 )
 
 logging.basicConfig(
@@ -97,6 +99,13 @@ async def scan_ticker_async(
         # Assess edge
         edge_assessment = assess_edge(vrp_result, ml_prediction)
 
+        # Generate trade recommendation with risk metrics
+        trade_rec = generate_trade_recommendation(
+            implied_move=implied_move,
+            vrp_result=vrp_result,
+            position_multiplier=position_mult,
+        )
+
         return ScanResult(
             ticker=ticker,
             earnings_date=earnings_date,
@@ -106,9 +115,15 @@ async def scan_ticker_async(
             vrp_ratio=vrp_result.vrp_ratio,
             vrp_recommendation=vrp_result.recommendation.value,
             ml_predicted_move_pct=ml_prediction.predicted_move_pct if ml_prediction else None,
-            ml_confidence=ml_prediction.prediction_confidence if ml_prediction else None,
+            ml_confidence=ml_prediction.calibrated_confidence if ml_prediction else None,
             edge_assessment=edge_assessment,
             position_size_multiplier=position_mult,
+            stock_price=implied_move.stock_price,
+            atm_strike=implied_move.atm_strike,
+            straddle_credit=implied_move.straddle_cost,
+            trade_recommendation=trade_rec,
+            ml_prediction_lower=ml_prediction.prediction_lower if ml_prediction else None,
+            ml_prediction_upper=ml_prediction.prediction_upper if ml_prediction else None,
         )
 
     except AsyncRetryError as e:
@@ -156,10 +171,16 @@ async def scan_all_tickers(
         elif result is not None and result.vrp_ratio >= min_vrp:
             valid_results.append(result)
 
-    return valid_results
+    # Dedupe by ticker - keep only the best expiration (highest VRP) for each ticker
+    ticker_best = {}
+    for result in valid_results:
+        if result.ticker not in ticker_best or result.vrp_ratio > ticker_best[result.ticker].vrp_ratio:
+            ticker_best[result.ticker] = result
+
+    return list(ticker_best.values())
 
 
-def print_results(results: List[ScanResult], log_iv: bool) -> None:
+def print_results(results: List[ScanResult], log_iv: bool, show_trades: bool = True) -> None:
     """Print scan results in human-readable format."""
     print("\n" + "=" * 80)
     print("3.0 ASYNC EARNINGS SCAN RESULTS")
@@ -169,14 +190,28 @@ def print_results(results: List[ScanResult], log_iv: bool) -> None:
         print("\nNo opportunities found above minimum VRP threshold.")
     else:
         for r in results:
-            print(f"\n{r.ticker} | Earnings: {r.earnings_date} | Exp: {r.expiration}")
-            print(f"  Implied Move: {r.implied_move_pct:.1f}%")
-            print(f"  Historical Mean: {r.historical_mean_pct:.1f}%")
+            print(f"\n{'─' * 78}")
+            print(f"  {r.ticker} | Earnings: {r.earnings_date} | Exp: {r.expiration}")
+            print(f"{'─' * 78}")
+            print(f"  Stock: ${r.stock_price:.2f}" if r.stock_price else "")
+            print(f"  Implied Move: {r.implied_move_pct:.1f}%  |  Historical Mean: {r.historical_mean_pct:.1f}%")
             print(f"  VRP: {r.vrp_ratio:.1f}x ({r.vrp_recommendation.upper()})")
+
             if r.ml_predicted_move_pct:
-                print(f"  ML Prediction: {r.ml_predicted_move_pct:.1f}% (conf: {r.ml_confidence:.0%})")
-            print(f"  Edge: {r.edge_assessment}")
-            print(f"  Position Multiplier: {r.position_size_multiplier:.2f}x")
+                conf_pct = r.ml_confidence * 100 if r.ml_confidence else 0
+                ml_range = ""
+                if r.ml_prediction_lower and r.ml_prediction_upper:
+                    ml_range = f" [{r.ml_prediction_lower:.1f}%-{r.ml_prediction_upper:.1f}%]"
+                print(f"  ML Prediction: {r.ml_predicted_move_pct:.1f}%{ml_range} (conf: {conf_pct:.0f}%)")
+
+            # Actionable trade info
+            if show_trades and r.trade_recommendation:
+                tr = r.trade_recommendation
+                print(f"\n  📊 TRADE: SELL {r.ticker} {r.expiration.strftime('%b%d')} ${tr.atm_strike:.0f} Straddle")
+                print(f"     Credit: ${tr.straddle_credit:.2f} ({r.implied_move_pct:.1f}% implied)")
+                print(f"     Breakevens: ${tr.breakeven_lower:.2f} - ${tr.breakeven_upper:.2f}")
+                print(f"     Max Profit: ${tr.max_profit:.0f}  |  Est. Max Loss: ${tr.max_loss:.0f}")
+                print(f"     Suggested Size: {tr.suggested_size} contract(s)")
 
     print("\n" + "=" * 80)
     print(f"Total: {len(results)} opportunities")
@@ -250,7 +285,7 @@ def main():
     parser.add_argument("--days", type=int, default=7, help="Days ahead to scan")
     parser.add_argument("--log-iv", action="store_true", help="Log IV data for ML training")
     parser.add_argument("--min-vrp", type=float, default=1.5, help="Minimum VRP to show")
-    parser.add_argument("--workers", type=int, default=5, help="Number of concurrent workers")
+    parser.add_argument("--workers", type=int, default=10, help="Number of concurrent workers")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     args = parser.parse_args()
 
