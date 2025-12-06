@@ -4,6 +4,7 @@ Price data fetcher using yfinance (free).
 Fetches historical OHLCV data for volatility feature calculation.
 """
 
+import time
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -13,6 +14,66 @@ from dataclasses import dataclass
 import logging
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    'VolatilityFeatures',
+    'PriceFetcher',
+]
+
+# US market holidays (approximate - major ones)
+US_MARKET_HOLIDAYS = {
+    # 2024
+    date(2024, 1, 1),   # New Year's Day
+    date(2024, 1, 15),  # MLK Day
+    date(2024, 2, 19),  # Presidents Day
+    date(2024, 3, 29),  # Good Friday
+    date(2024, 5, 27),  # Memorial Day
+    date(2024, 6, 19),  # Juneteenth
+    date(2024, 7, 4),   # Independence Day
+    date(2024, 9, 2),   # Labor Day
+    date(2024, 11, 28), # Thanksgiving
+    date(2024, 12, 25), # Christmas
+    # 2025
+    date(2025, 1, 1),   # New Year's Day
+    date(2025, 1, 20),  # MLK Day
+    date(2025, 2, 17),  # Presidents Day
+    date(2025, 4, 18),  # Good Friday
+    date(2025, 5, 26),  # Memorial Day
+    date(2025, 6, 19),  # Juneteenth
+    date(2025, 7, 4),   # Independence Day
+    date(2025, 9, 1),   # Labor Day
+    date(2025, 11, 27), # Thanksgiving
+    date(2025, 12, 25), # Christmas
+}
+
+
+def is_trading_day(d: date) -> bool:
+    """Check if a date is a trading day (not weekend or holiday)."""
+    # Weekend check
+    if d.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        return False
+    # Holiday check
+    if d in US_MARKET_HOLIDAYS:
+        return False
+    return True
+
+
+def get_previous_trading_day(d: date) -> date:
+    """Get the most recent trading day on or before the given date."""
+    while not is_trading_day(d):
+        d = d - timedelta(days=1)
+    return d
+
+
+def trading_days_between(start: date, end: date) -> int:
+    """Count trading days between two dates (exclusive of start, inclusive of end)."""
+    count = 0
+    current = start + timedelta(days=1)
+    while current <= end:
+        if is_trading_day(current):
+            count += 1
+        current += timedelta(days=1)
+    return count
 
 
 @dataclass
@@ -46,12 +107,48 @@ class VolatilityFeatures:
 class PriceFetcher:
     """
     Fetch price data from Yahoo Finance (free).
+
+    Includes rate limiting and trading-day-aware caching.
     """
 
-    def __init__(self, cache_days: int = 1):
+    def __init__(
+        self,
+        cache_days: int = 1,  # Backward compatible name
+        min_request_interval: float = 0.2,
+    ):
+        """
+        Initialize price fetcher.
+
+        Args:
+            cache_days: Number of trading days before cache expires
+            min_request_interval: Minimum seconds between API requests (rate limiting)
+        """
         self._cache: Dict[str, pd.DataFrame] = {}
         self._cache_dates: Dict[str, date] = {}
-        self.cache_days = cache_days
+        self.cache_days = cache_days  # Keep backward compatible name
+        self.min_request_interval = min_request_interval
+        self._last_request_time: float = 0.0
+
+    def _rate_limit(self) -> None:
+        """Enforce rate limiting between requests."""
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.min_request_interval:
+            sleep_time = self.min_request_interval - elapsed
+            time.sleep(sleep_time)
+        self._last_request_time = time.time()
+
+    def _is_cache_valid(self, cache_key: str, as_of_date: date) -> bool:
+        """Check if cached data is still valid using trading days."""
+        if cache_key not in self._cache:
+            return False
+
+        cached_date = self._cache_dates.get(cache_key)
+        if not cached_date:
+            return False
+
+        # Count trading days between cached date and current date
+        trading_days = trading_days_between(cached_date, as_of_date)
+        return trading_days <= self.cache_days
 
     def get_price_history(
         self,
@@ -73,13 +170,14 @@ class PriceFetcher:
         as_of_date = as_of_date or date.today()
         cache_key = f"{ticker}_{days}"
 
-        # Check cache
-        if cache_key in self._cache:
-            cached_date = self._cache_dates.get(cache_key)
-            if cached_date and (as_of_date - cached_date).days <= self.cache_days:
-                return self._cache[cache_key]
+        # Check cache with trading day logic
+        if self._is_cache_valid(cache_key, as_of_date):
+            return self._cache[cache_key]
 
         try:
+            # Rate limit before making request
+            self._rate_limit()
+
             # Fetch from yfinance
             # Add buffer days for weekends/holidays
             start_date = as_of_date - timedelta(days=int(days * 1.5) + 10)
@@ -150,9 +248,9 @@ class PriceFetcher:
 
             # Bollinger Band Width (width / middle band)
             for window in [10, 20, 50]:
-                df[f'sma_{window}'] = df['close'].rolling(window).mean()
-                df[f'std_{window}'] = df['close'].rolling(window).std()
-                df[f'bb_width_{window}'] = (2 * df[f'std_{window}']) / df[f'sma_{window}']
+                df[f'sma_{window}d'] = df['close'].rolling(window).mean()
+                df[f'std_{window}d'] = df['close'].rolling(window).std()
+                df[f'bb_width_{window}d'] = (2 * df[f'std_{window}d']) / df[f'sma_{window}d']
 
             # Historical Volatility (annualized)
             df['log_return'] = np.log(df['close'] / df['close'].shift(1))
@@ -177,9 +275,9 @@ class PriceFetcher:
                 atr_20d_pct=(atr_20d / current_price) * 100,
                 atr_50d=atr_50d,
                 atr_50d_pct=(atr_50d / current_price) * 100,
-                bb_width_10d=df['bb_width_10'].iloc[-1],
-                bb_width_20d=df['bb_width_20'].iloc[-1],
-                bb_width_50d=df['bb_width_50'].iloc[-1],
+                bb_width_10d=df['bb_width_10d'].iloc[-1],
+                bb_width_20d=df['bb_width_20d'].iloc[-1],
+                bb_width_50d=df['bb_width_50d'].iloc[-1],
                 hv_10d=hv_10d,
                 hv_20d=hv_20d,
                 hv_50d=hv_50d,

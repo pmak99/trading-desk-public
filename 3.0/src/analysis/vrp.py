@@ -7,13 +7,22 @@ VRP = Implied Move / Historical Mean Move
 High VRP = market expects more movement than history suggests = edge for sellers
 """
 
+import os
 import numpy as np
-import sqlite3
 from datetime import date
 from pathlib import Path
-from typing import List, Optional, NamedTuple
+from typing import List, Optional
 from dataclasses import dataclass
 from enum import Enum
+
+from src.utils.db import get_db_connection
+
+__all__ = [
+    'Recommendation',
+    'HistoricalMove',
+    'VRPResult',
+    'VRPCalculator',
+]
 
 
 class Recommendation(Enum):
@@ -65,7 +74,8 @@ class VRPCalculator:
         min_quarters: int = 4,
         move_metric: str = "close",  # "close", "intraday", or "gap"
     ):
-        self.db_path = db_path or Path(__file__).parent.parent.parent.parent / "2.0" / "data" / "ivcrush.db"
+        default_db = Path(__file__).parent.parent.parent.parent / "2.0" / "data" / "ivcrush.db"
+        self.db_path = db_path or Path(os.getenv('DB_PATH', str(default_db)))
         self.thresholds = {
             'excellent': threshold_excellent,
             'good': threshold_good,
@@ -76,30 +86,28 @@ class VRPCalculator:
 
     def get_historical_moves(self, ticker: str, limit: int = 12) -> List[HistoricalMove]:
         """Fetch historical earnings moves from database."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT earnings_date, prev_close, earnings_close,
+                       close_move_pct, gap_move_pct, intraday_move_pct
+                FROM historical_moves
+                WHERE ticker = ?
+                ORDER BY earnings_date DESC
+                LIMIT ?
+            """, (ticker, limit))
 
-        cursor.execute("""
-            SELECT earnings_date, prev_close, earnings_close,
-                   close_move_pct, gap_move_pct, intraday_move_pct
-            FROM historical_moves
-            WHERE ticker = ?
-            ORDER BY earnings_date DESC
-            LIMIT ?
-        """, (ticker, limit))
+            moves = []
+            for row in cursor.fetchall():
+                moves.append(HistoricalMove(
+                    earnings_date=date.fromisoformat(row[0]) if isinstance(row[0], str) else row[0],
+                    prev_close=row[1],
+                    earnings_close=row[2],
+                    close_move_pct=abs(row[3]),  # Ensure absolute
+                    gap_move_pct=abs(row[4]) if row[4] else 0,
+                    intraday_move_pct=abs(row[5]) if row[5] else 0,
+                ))
 
-        moves = []
-        for row in cursor.fetchall():
-            moves.append(HistoricalMove(
-                earnings_date=date.fromisoformat(row[0]) if isinstance(row[0], str) else row[0],
-                prev_close=row[1],
-                earnings_close=row[2],
-                close_move_pct=abs(row[3]),  # Ensure absolute
-                gap_move_pct=abs(row[4]) if row[4] else 0,
-                intraday_move_pct=abs(row[5]) if row[5] else 0,
-            ))
-
-        conn.close()
         return moves
 
     def calculate(
