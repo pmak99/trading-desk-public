@@ -135,7 +135,7 @@ class AsyncTradierAPI:
 
                         # Success - notify circuit breaker
                         if self._circuit_breaker:
-                            await self._circuit_breaker._on_success()
+                            await self._circuit_breaker.record_success()
 
                         return result
 
@@ -144,7 +144,7 @@ class AsyncTradierAPI:
 
                 # Notify circuit breaker of failure
                 if self._circuit_breaker:
-                    await self._circuit_breaker._on_failure()
+                    await self._circuit_breaker.record_failure()
 
                 if attempt < self.max_retries:
                     delay = self.base_delay * (2 ** attempt)

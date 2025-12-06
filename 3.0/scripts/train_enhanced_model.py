@@ -87,6 +87,23 @@ BACKUP_DIR = MODELS_DIR / "backup"
 DATA_DIR = Path(__file__).parent.parent / "data" / "features"
 
 
+def get_n_jobs() -> int:
+    """
+    Get appropriate n_jobs setting based on platform.
+
+    macOS has issues with multiprocessing in scikit-learn/joblib
+    due to the 'spawn' start method causing loky resource tracker warnings.
+    Linux and Windows can safely use multiple cores.
+    """
+    import platform
+    if platform.system() == 'Darwin':
+        # macOS: use single core to avoid multiprocessing issues
+        return 1
+    else:
+        # Linux/Windows: use all available cores
+        return -1
+
+
 class EnhancedModelTrainer:
     """Enhanced ML training with hyperparameter optimization and ensembling."""
 
@@ -254,7 +271,7 @@ class EnhancedModelTrainer:
 
         best_params = study.best_params
         best_params['random_state'] = 42
-        best_params['n_jobs'] = 1  # Avoid multiprocessing issues on Mac
+        best_params['n_jobs'] = get_n_jobs()
 
         logger.info(f"Best RF params: {best_params}")
         logger.info(f"Best CV score: {study.best_value:.4f}")
@@ -309,7 +326,7 @@ class EnhancedModelTrainer:
 
         best_params = study.best_params
         best_params['random_state'] = 42
-        best_params['n_jobs'] = 1  # Avoid multiprocessing issues on Mac
+        best_params['n_jobs'] = get_n_jobs()
         best_params['verbosity'] = 0
 
         logger.info(f"Best XGB params: {best_params}")
@@ -326,7 +343,7 @@ class EnhancedModelTrainer:
             'min_samples_leaf': 5,
             'max_features': 'sqrt',
             'random_state': 42,
-            'n_jobs': 1,  # Avoid multiprocessing issues on Mac
+            'n_jobs': get_n_jobs(),
         }
         if task == 'classification':
             params['class_weight'] = 'balanced'
@@ -343,7 +360,7 @@ class EnhancedModelTrainer:
             'reg_alpha': 0.1,
             'reg_lambda': 1.0,
             'random_state': 42,
-            'n_jobs': 1,  # Avoid multiprocessing issues on Mac
+            'n_jobs': get_n_jobs(),
             'verbosity': 0,
         }
 
@@ -500,64 +517,88 @@ class EnhancedModelTrainer:
         quantile_models: Optional[Dict[float, Any]] = None,
         hyperparams: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Save all model artifacts."""
-        # Backup existing models
+        """
+        Save all model artifacts atomically.
+
+        Uses a two-phase approach:
+        1. Save new models to a temporary directory
+        2. Backup existing models (if save succeeded)
+        3. Move new models into place
+
+        This ensures we never lose existing models if save fails.
+        """
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        # Phase 1: Save to temporary directory first
+        temp_dir = MODELS_DIR / f"temp_{timestamp}"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # Save main models to temp
+            joblib.dump(magnitude_model, temp_dir / "rf_magnitude_validated.pkl")
+            joblib.dump(direction_model, temp_dir / "rf_direction_validated.pkl")
+            joblib.dump(imputer, temp_dir / "imputer_validated.pkl")
+
+            # Save quantile models if available
+            if quantile_models:
+                for q, model in quantile_models.items():
+                    joblib.dump(model, temp_dir / f"quantile_{int(q*100)}_validated.pkl")
+
+            # Save feature columns
+            with open(temp_dir / "feature_columns.txt", 'w') as f:
+                for col in feature_cols:
+                    f.write(f"{col}\n")
+
+            # Save metadata
+            metadata = {
+                'trained_at': datetime.now().isoformat(),
+                'n_features': len(feature_cols),
+                'feature_columns': feature_cols,
+                'magnitude_metrics': magnitude_metrics,
+                'direction_metrics': direction_metrics,
+                'hyperparams': hyperparams,
+                'has_quantile_models': quantile_models is not None,
+            }
+
+            with open(temp_dir / "model_metadata.json", 'w') as f:
+                json.dump(metadata, f, indent=2, default=str)
+
+            # Save CV results
+            cv_results = {
+                'timestamp': datetime.now().isoformat(),
+                'n_features': len(feature_cols),
+                'summary': {
+                    'rf_magnitude': magnitude_metrics.get('summary', {}),
+                    'rf_direction': direction_metrics.get('summary', {}),
+                },
+                'cv_results': {
+                    'magnitude': magnitude_metrics,
+                    'direction': direction_metrics,
+                },
+            }
+
+            with open(temp_dir / "cv_results.json", 'w') as f:
+                json.dump(cv_results, f, indent=2, default=str)
+
+            logger.info(f"New models saved to temp directory: {temp_dir}")
+
+        except Exception as e:
+            # Clean up temp directory on failure
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise RuntimeError(f"Failed to save models: {e}") from e
+
+        # Phase 2: Backup existing models AFTER successful save
         if VALIDATED_DIR.exists():
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             backup_path = BACKUP_DIR / timestamp
             backup_path.mkdir(parents=True, exist_ok=True)
             shutil.copytree(VALIDATED_DIR, backup_path / "validated")
             logger.info(f"Backed up existing models to {backup_path}")
+            # Remove old validated directory
+            shutil.rmtree(VALIDATED_DIR)
 
-        VALIDATED_DIR.mkdir(parents=True, exist_ok=True)
-
-        # Save main models
-        joblib.dump(magnitude_model, VALIDATED_DIR / "rf_magnitude_validated.pkl")
-        joblib.dump(direction_model, VALIDATED_DIR / "rf_direction_validated.pkl")
-        joblib.dump(imputer, VALIDATED_DIR / "imputer_validated.pkl")
-
-        # Save quantile models if available
-        if quantile_models:
-            for q, model in quantile_models.items():
-                joblib.dump(model, VALIDATED_DIR / f"quantile_{int(q*100)}_validated.pkl")
-
-        # Save feature columns
-        with open(VALIDATED_DIR / "feature_columns.txt", 'w') as f:
-            for col in feature_cols:
-                f.write(f"{col}\n")
-
-        # Save metadata
-        metadata = {
-            'trained_at': datetime.now().isoformat(),
-            'n_features': len(feature_cols),
-            'feature_columns': feature_cols,
-            'magnitude_metrics': magnitude_metrics,
-            'direction_metrics': direction_metrics,
-            'hyperparams': hyperparams,
-            'has_quantile_models': quantile_models is not None,
-        }
-
-        with open(VALIDATED_DIR / "model_metadata.json", 'w') as f:
-            json.dump(metadata, f, indent=2, default=str)
-
-        # Save CV results
-        cv_results = {
-            'timestamp': datetime.now().isoformat(),
-            'n_features': len(feature_cols),
-            'summary': {
-                'rf_magnitude': magnitude_metrics.get('summary', {}),
-                'rf_direction': direction_metrics.get('summary', {}),
-            },
-            'cv_results': {
-                'magnitude': magnitude_metrics,
-                'direction': direction_metrics,
-            },
-        }
-
-        with open(VALIDATED_DIR / "cv_results.json", 'w') as f:
-            json.dump(cv_results, f, indent=2, default=str)
-
-        logger.info(f"Models saved to {VALIDATED_DIR}")
+        # Phase 3: Move temp to validated (atomic on same filesystem)
+        shutil.move(str(temp_dir), str(VALIDATED_DIR))
+        logger.info(f"Models saved atomically to {VALIDATED_DIR}")
 
     def run(self, force: bool = False) -> bool:
         """Run the enhanced training pipeline."""
