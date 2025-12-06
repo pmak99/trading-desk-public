@@ -161,15 +161,42 @@ def get_market_regime(as_of_date: date) -> MarketRegime:
 
 
 # Cache market regime for 1 hour (it doesn't change that often)
+# Uses bounded cache to prevent unbounded memory growth
 _market_regime_cache: Dict[str, tuple] = {}
 _CACHE_TTL = 3600  # 1 hour
+_CACHE_MAX_SIZE = 100  # Maximum cache entries
+
+
+def _evict_old_cache_entries(current_time: float) -> None:
+    """Evict expired and excess cache entries."""
+    global _market_regime_cache
+
+    # First, remove expired entries
+    expired_keys = [
+        key for key, (_, cached_time) in _market_regime_cache.items()
+        if current_time - cached_time >= _CACHE_TTL
+    ]
+    for key in expired_keys:
+        del _market_regime_cache[key]
+
+    # Then, if still over limit, remove oldest entries (LRU eviction)
+    if len(_market_regime_cache) >= _CACHE_MAX_SIZE:
+        sorted_keys = sorted(
+            _market_regime_cache.keys(),
+            key=lambda k: _market_regime_cache[k][1]  # Sort by timestamp
+        )
+        # Remove oldest 20% of entries
+        keys_to_remove = sorted_keys[:len(sorted_keys) // 5 + 1]
+        for key in keys_to_remove:
+            del _market_regime_cache[key]
 
 
 def get_market_features(as_of_date: date) -> Dict[str, float]:
     """
     Get market regime features for ML model.
 
-    Uses caching to avoid repeated API calls.
+    Uses bounded caching to avoid repeated API calls while preventing
+    unbounded memory growth.
 
     Args:
         as_of_date: Reference date
@@ -187,6 +214,9 @@ def get_market_features(as_of_date: date) -> Dict[str, float]:
         cached_features, cached_time = _market_regime_cache[cache_key]
         if current_time - cached_time < _CACHE_TTL:
             return cached_features
+
+    # Evict old entries before adding new one
+    _evict_old_cache_entries(current_time)
 
     # Fetch fresh data
     regime = get_market_regime(as_of_date)

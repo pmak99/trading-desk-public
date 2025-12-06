@@ -74,15 +74,27 @@ class AsyncCircuitBreaker:
             f"threshold={failure_threshold}, timeout={recovery_timeout}s"
         )
 
-    @property
-    def state(self) -> CircuitState:
-        """Get current circuit state (not thread-safe for reads)."""
+    def get_state(self) -> CircuitState:
+        """
+        Get current circuit state (sync, non-locking snapshot).
+
+        For thread-safe state checks, use is_open() or call() which acquire locks.
+        """
         return self._state
 
-    @property
-    def failure_count(self) -> int:
-        """Get current failure count."""
+    def get_failure_count(self) -> int:
+        """Get current failure count (sync, non-locking snapshot)."""
         return self._failure_count
+
+    async def get_state_async(self) -> CircuitState:
+        """Get current circuit state with lock (thread-safe)."""
+        async with self._lock:
+            return self._state
+
+    async def get_failure_count_async(self) -> int:
+        """Get current failure count with lock (thread-safe)."""
+        async with self._lock:
+            return self._failure_count
 
     async def is_open(self) -> bool:
         """Check if circuit is currently open."""
@@ -141,8 +153,16 @@ class AsyncCircuitBreaker:
             await self._on_failure()
             raise
 
+    async def record_success(self) -> None:
+        """Record a successful call (public API)."""
+        await self._on_success()
+
+    async def record_failure(self) -> None:
+        """Record a failed call (public API)."""
+        await self._on_failure()
+
     async def _on_success(self) -> None:
-        """Handle successful call."""
+        """Handle successful call (internal)."""
         async with self._lock:
             if self._state == CircuitState.HALF_OPEN:
                 self._success_count += 1
@@ -196,7 +216,8 @@ class AsyncCircuitBreaker:
         return wrapper
 
     def __repr__(self) -> str:
+        # Uses non-locking snapshot for repr - safe for debugging
         return (
-            f"AsyncCircuitBreaker(name='{self.name}', state={self._state.value}, "
-            f"failures={self._failure_count}/{self.failure_threshold})"
+            f"AsyncCircuitBreaker(name='{self.name}', state={self.get_state().value}, "
+            f"failures={self.get_failure_count()}/{self.failure_threshold})"
         )
