@@ -39,54 +39,31 @@ except Exception as e:
 
 def test_generators():
     """Test generator functions for memory efficiency."""
-    print("\n=== Testing Generators ===")
-
     # Test chunked generator
     items = list(range(100))
     chunks = list(chunked(items, 25))
-
-    if len(chunks) == 4 and all(len(chunk) == 25 for chunk in chunks):
-        print(f"✅ Chunked generator: 100 items → {len(chunks)} chunks of 25")
-    else:
-        print(f"❌ Chunked generator failed: got {len(chunks)} chunks")
-        return False
+    assert len(chunks) == 4, f"Expected 4 chunks, got {len(chunks)}"
+    assert all(len(chunk) == 25 for chunk in chunks), "All chunks should be size 25"
 
     # Test filtered generator
     numbers = list(range(20))
     evens = list(filtered_generator(numbers, lambda x: x % 2 == 0))
-
-    if len(evens) == 10 and all(n % 2 == 0 for n in evens):
-        print(f"✅ Filtered generator: {len(evens)}/20 items passed filter")
-    else:
-        print("❌ Filtered generator failed")
-        return False
+    assert len(evens) == 10, f"Expected 10 even numbers, got {len(evens)}"
+    assert all(n % 2 == 0 for n in evens), "All numbers should be even"
 
     # Test lazy_map
     squares = list(lazy_map(lambda x: x * x, [1, 2, 3, 4, 5]))
-
-    if squares == [1, 4, 9, 16, 25]:
-        print(f"✅ Lazy map: transformed {len(squares)} items")
-    else:
-        print(f"❌ Lazy map failed: {squares}")
-        return False
+    assert squares == [1, 4, 9, 16, 25], f"Expected [1,4,9,16,25], got {squares}"
 
     # Test sliding window
     prices = [10, 12, 11, 13, 15, 14, 16]
     windows = list(sliding_window(prices, 3))
-
-    if len(windows) == 5 and windows[0] == [10, 12, 11]:
-        print(f"✅ Sliding window: created {len(windows)} windows of size 3")
-    else:
-        print(f"❌ Sliding window failed")
-        return False
-
-    return True
+    assert len(windows) == 5, f"Expected 5 windows, got {len(windows)}"
+    assert windows[0] == [10, 12, 11], f"First window should be [10,12,11]"
 
 
 def test_batch_processing():
     """Test batch processing generators."""
-    print("\n=== Testing Batch Processing ===")
-
     items = list(range(100))
     results = []
 
@@ -97,19 +74,13 @@ def test_batch_processing():
     for result in batch_process_generator(items, processor, chunk_size=25, log_progress=False):
         results.append(result)
 
-    if len(results) == 100 and results[0] == 0 and results[99] == 198:
-        print(f"✅ Batch processing: processed {len(results)} items in chunks")
-    else:
-        print(f"❌ Batch processing failed: {len(results)} results")
-        return False
-
-    return True
+    assert len(results) == 100, f"Expected 100 results, got {len(results)}"
+    assert results[0] == 0, f"First result should be 0, got {results[0]}"
+    assert results[99] == 198, f"Last result should be 198, got {results[99]}"
 
 
 def test_ticker_stream():
     """Test ticker stream generator."""
-    print("\n=== Testing Ticker Stream Generator ===")
-
     tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA']
 
     def mock_fetcher(ticker):
@@ -126,75 +97,37 @@ def test_ticker_stream():
     ))
 
     # M=77, T=84 pass filter (>75), A=65, G=71 don't
-    if len(results) == 2:  # MSFT, TSLA
-        print(f"✅ Ticker stream: {len(results)}/5 tickers passed filter")
-    else:
-        print(f"❌ Ticker stream failed: {len(results)} results (expected 2)")
-        return False
-
-    return True
+    assert len(results) == 2, f"Expected 2 results (MSFT, TSLA), got {len(results)}"
 
 
 def test_config_file():
     """Test performance.yaml configuration file."""
-    print("\n=== Testing Configuration File ===")
+    with open('config/performance.yaml', 'r') as f:
+        config = yaml.safe_load(f)
 
-    try:
-        with open('config/performance.yaml', 'r') as f:
-            config = yaml.safe_load(f)
+    # Verify key sections exist
+    required_sections = [
+        'rate_limiting',
+        'batch_processing',
+        'caching',
+        'circuit_breaker',
+        'memory',
+        'timeouts',
+        'filtering',
+        'logging'
+    ]
 
-        # Verify key sections exist
-        required_sections = [
-            'rate_limiting',
-            'batch_processing',
-            'caching',
-            'circuit_breaker',
-            'memory',
-            'timeouts',
-            'filtering',
-            'logging'
-        ]
+    missing = [s for s in required_sections if s not in config]
+    assert not missing, f"Config missing sections: {missing}"
 
-        missing = [s for s in required_sections if s not in config]
-        if missing:
-            print(f"❌ Config missing sections: {missing}")
-            return False
-
-        print(f"✅ Config file has all {len(required_sections)} required sections")
-
-        # Verify some key values
-        if config['rate_limiting']['tradier']['rate'] == 120:
-            print("✅ Config values loaded correctly (tradier rate: 120)")
-        else:
-            print("❌ Config values incorrect")
-            return False
-
-        if config['batch_processing']['yfinance_chunk_size'] == 50:
-            print("✅ Config batch size: 50")
-        else:
-            print("❌ Config batch size incorrect")
-            return False
-
-        if config['circuit_breaker']['failure_threshold'] == 5:
-            print("✅ Config circuit breaker threshold: 5")
-        else:
-            print("❌ Config circuit breaker threshold incorrect")
-            return False
-
-    except FileNotFoundError:
-        print("❌ config/performance.yaml not found")
-        return False
-    except yaml.YAMLError as e:
-        print(f"❌ YAML parsing error: {e}")
-        return False
-
-    return True
+    # Verify some key values
+    assert config['rate_limiting']['tradier']['rate'] == 120, "Tradier rate should be 120"
+    assert config['batch_processing']['yfinance_chunk_size'] == 50, "yfinance chunk size should be 50"
+    assert config['circuit_breaker']['failure_threshold'] == 5, "Circuit breaker threshold should be 5"
 
 
 def test_error_messages():
     """Test enhanced error messages."""
-    print("\n=== Testing Enhanced Error Messages ===")
-
     # Test API rate limit error
     error = api_rate_limit_error(
         api_name="Tradier",
@@ -204,11 +137,9 @@ def test_error_messages():
     )
 
     formatted = error.format()
-    if "Tradier" in formatted and "120/120" in formatted and "Suggestion" in formatted:
-        print("✅ API rate limit error formatted correctly")
-    else:
-        print("❌ API rate limit error formatting failed")
-        return False
+    assert "Tradier" in formatted, "Error should contain 'Tradier'"
+    assert "120/120" in formatted, "Error should contain '120/120'"
+    assert "Suggestion" in formatted, "Error should contain 'Suggestion'"
 
     # Test ticker not found error
     error2 = ticker_not_found_error(
@@ -217,11 +148,8 @@ def test_error_messages():
     )
 
     formatted2 = error2.format()
-    if "INVALID" in formatted2 and "yfinance" in formatted2:
-        print("✅ Ticker not found error formatted correctly")
-    else:
-        print("❌ Ticker not found error formatting failed")
-        return False
+    assert "INVALID" in formatted2, "Error should contain 'INVALID'"
+    assert "yfinance" in formatted2, "Error should contain 'yfinance'"
 
     # Test insufficient data error
     error3 = insufficient_data_error(
@@ -231,11 +159,8 @@ def test_error_messages():
     )
 
     formatted3 = error3.format()
-    if "AAPL" in formatted3 and "iv_rank" in formatted3:
-        print("✅ Insufficient data error formatted correctly")
-    else:
-        print("❌ Insufficient data error formatting failed")
-        return False
+    assert "AAPL" in formatted3, "Error should contain 'AAPL'"
+    assert "iv_rank" in formatted3, "Error should contain 'iv_rank'"
 
     # Test validation error
     error4 = validation_error(
@@ -245,11 +170,8 @@ def test_error_messages():
         ticker="AAPL"
     )
 
-    if "price" in error4.format() and "float" in error4.format():
-        print("✅ Validation error formatted correctly")
-    else:
-        print("❌ Validation error formatting failed")
-        return False
+    assert "price" in error4.format(), "Error should contain 'price'"
+    assert "float" in error4.format(), "Error should contain 'float'"
 
     # Test generic error formatting
     try:
@@ -260,19 +182,12 @@ def test_error_messages():
             context={"ticker": "AAPL", "operation": "fetch_data"},
             suggestion="Check API credentials"
         )
-        if "ValueError" in formatted_exc and "AAPL" in formatted_exc:
-            print("✅ Generic error formatting works")
-        else:
-            print("❌ Generic error formatting failed")
-            return False
-
-    return True
+        assert "ValueError" in formatted_exc, "Error should contain 'ValueError'"
+        assert "AAPL" in formatted_exc, "Error should contain 'AAPL'"
 
 
 def test_command_pattern():
     """Test command pattern with undo/redo."""
-    print("\n=== Testing Command Pattern ===")
-
     # Test basic command execution
     history = CommandHistory(max_history=10)
 
@@ -296,30 +211,18 @@ def test_command_pattern():
 
     # Execute command
     result = history.execute(cmd)
-
-    if result == "executed" and execute_count == 1:
-        print("✅ Command execution works")
-    else:
-        print("❌ Command execution failed")
-        return False
+    assert result == "executed", f"Expected 'executed', got {result}"
+    assert execute_count == 1, f"Execute count should be 1, got {execute_count}"
 
     # Undo command
     success = history.undo()
-
-    if success and undo_count == 1:
-        print("✅ Command undo works")
-    else:
-        print("❌ Command undo failed")
-        return False
+    assert success, "Undo should succeed"
+    assert undo_count == 1, f"Undo count should be 1, got {undo_count}"
 
     # Redo command
     success = history.redo()
-
-    if success and execute_count == 2:
-        print("✅ Command redo works")
-    else:
-        print("❌ Command redo failed")
-        return False
+    assert success, "Redo should succeed"
+    assert execute_count == 2, f"Execute count should be 2 after redo, got {execute_count}"
 
     # Test DataModificationCommand
     class TestObject:
@@ -336,21 +239,11 @@ def test_command_pattern():
 
     history2 = CommandHistory()
     history2.execute(mod_cmd)
-
-    if obj.value == 20:
-        print("✅ Data modification command execution works")
-    else:
-        print("❌ Data modification command failed")
-        return False
+    assert obj.value == 20, f"Object value should be 20, got {obj.value}"
 
     # Undo modification
     history2.undo()
-
-    if obj.value == 10:
-        print("✅ Data modification command undo works")
-    else:
-        print("❌ Data modification undo failed")
-        return False
+    assert obj.value == 10, f"Object value should be 10 after undo, got {obj.value}"
 
     # Test history limits
     history3 = CommandHistory(max_history=3)
@@ -363,13 +256,7 @@ def test_command_pattern():
         history3.execute(cmd)
 
     history_list = history3.get_history()
-    if len(history_list) == 3:  # Should only keep last 3
-        print(f"✅ Command history respects max_history limit ({len(history_list)}/3)")
-    else:
-        print(f"❌ Command history limit failed: {len(history_list)}")
-        return False
-
-    return True
+    assert len(history_list) == 3, f"History should have 3 items, got {len(history_list)}"
 
 
 if __name__ == '__main__':
