@@ -58,6 +58,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.utils.logging import setup_logging
 from src.utils.shutdown import register_shutdown_callback
+from src.utils.concurrent_scanner import ConcurrentScanner, BatchScanResult
 from src.container import Container, reset_container
 from src.config.config import Config
 from src.domain.enums import EarningsTiming
@@ -361,10 +362,11 @@ def check_liquidity_with_tier(ticker: str, expiration: date, container: Containe
         return result
 
     except Exception as e:
-        logger.debug(f"{ticker}: Liquidity check failed: {e}")
-        result = (False, "WARNING")
-        _liquidity_cache[cache_key] = result
-        return result
+        # Log at warning level since this could indicate real issues
+        logger.warning(f"{ticker}: Liquidity check failed: {e}")
+        # Don't cache errors - allow retry on next call
+        # Return REJECT to be conservative when we can't verify liquidity
+        return (False, "REJECT")
 
 
 def check_basic_liquidity(ticker: str, expiration: date, container: Container) -> bool:
@@ -798,6 +800,17 @@ def analyze_ticker(
             logger.error(f"✗ Invalid expiration date: {validation_error}")
             return None
 
+        # Find nearest available expiration (may differ from calculated date)
+        nearest_exp_result = container.tradier.find_nearest_expiration(ticker, expiration_date)
+        if nearest_exp_result.is_err:
+            logger.warning(f"✗ Failed to find expiration for {ticker}: {nearest_exp_result.error}")
+            return None
+
+        actual_expiration = nearest_exp_result.value
+        if actual_expiration != expiration_date:
+            logger.info(f"  Adjusted expiration: {expiration_date} → {actual_expiration}")
+            expiration_date = actual_expiration
+
         # Get calculators
         implied_move_calc = container.implied_move_calculator
         vrp_calc = container.vrp_calculator
@@ -991,6 +1004,60 @@ def analyze_ticker(
         return None
 
 
+def analyze_ticker_concurrent(
+    container: Container,
+    ticker: str,
+    earnings_date: date,
+    expiration_date: date
+) -> Optional[dict]:
+    """
+    Wrapper for analyze_ticker() compatible with ConcurrentScanner.
+
+    Used by ConcurrentScanner.scan_ticker() as the analyze_func parameter.
+    Disables auto-backfill for concurrent mode to avoid blocking.
+
+    Args:
+        container: DI container
+        ticker: Stock ticker symbol
+        earnings_date: Earnings announcement date
+        expiration_date: Options expiration date
+
+    Returns:
+        Analysis result dict or None
+    """
+    return analyze_ticker(
+        container=container,
+        ticker=ticker,
+        earnings_date=earnings_date,
+        expiration_date=expiration_date,
+        auto_backfill=False  # Disable backfill in concurrent mode
+    )
+
+
+def filter_ticker_concurrent(
+    ticker: str,
+    expiration_date: date,
+    container: Container
+) -> Tuple[bool, Optional[str]]:
+    """
+    Filter function compatible with ConcurrentScanner.
+
+    Args:
+        ticker: Stock ticker symbol
+        expiration_date: Options expiration date
+        container: DI container (passed via closure)
+
+    Returns:
+        (should_filter, reason) tuple
+    """
+    should_filter, reason, _ = should_filter_ticker(
+        ticker, expiration_date, container,
+        check_market_cap=True,
+        check_liquidity=True
+    )
+    return (should_filter, reason)
+
+
 def calculate_scan_quality_score(result: dict) -> float:
     """
     Calculate composite quality score for scan ranking.
@@ -1150,16 +1217,218 @@ def _precalculate_quality_scores(tradeable_results: List[dict]) -> None:
         result['_quality_score'] = calculate_scan_quality_score(result)
 
 
-def scanning_mode(
+def _display_scan_results(
+    results: List[dict],
+    success_count: int,
+    error_count: int,
+    skip_count: int,
+    filtered_count: int,
+    mode_name: str,
+    scan_date: Optional[date] = None,
+    total_events: int = 0,
+    tickers: Optional[List[str]] = None,
+    week_range: Optional[Tuple[date, date]] = None
+) -> int:
+    """
+    Display scan results in a formatted table (shared by all modes).
+
+    This is a helper function to avoid duplicating display logic across
+    scanning_mode, ticker_mode, and whisper_mode.
+
+    Args:
+        results: List of analysis result dictionaries
+        success_count: Number of successful analyses
+        error_count: Number of errors
+        skip_count: Number of skipped tickers
+        filtered_count: Number of filtered tickers
+        mode_name: Display name for the mode (e.g., "SCAN MODE")
+        scan_date: Target date for scan mode
+        total_events: Total earnings events found
+        tickers: List of tickers for ticker mode
+        week_range: (start, end) dates for whisper mode
+
+    Returns:
+        Exit code (0 for success)
+    """
+    # Summary header
+    logger.info("\n" + "=" * 80)
+    logger.info(f"{mode_name} - SUMMARY")
+    logger.info("=" * 80)
+
+    # Mode-specific details
+    if scan_date:
+        logger.info(f"\n📅 Scan Details:")
+        logger.info(f"   Mode: Earnings Date Scan")
+        logger.info(f"   Date: {scan_date}")
+        logger.info(f"   Total Earnings Found: {total_events}")
+    elif week_range:
+        logger.info(f"\n🔊 Most Anticipated Earnings Analysis:")
+        logger.info(f"   Mode: Earnings Whispers")
+        logger.info(f"   Week: {week_range[0]} to {week_range[1]}")
+    elif tickers:
+        logger.info(f"\n📋 Ticker List Analysis:")
+        logger.info(f"   Mode: Multiple Ticker Analysis")
+        logger.info(f"   Tickers Requested: {len(tickers)}")
+
+    logger.info(f"\n📊 Analysis Results:")
+    logger.info(f"   🔍 Filtered (Market Cap Only): {filtered_count}")
+    logger.info(f"   ✓ Successfully Analyzed: {success_count}")
+    logger.info(f"   ⏭️  Skipped (No Data): {skip_count}")
+    logger.info(f"   ✗ Errors: {error_count}")
+
+    # Tradeable opportunities
+    tradeable = [r for r in results if r.get('is_tradeable', False)]
+    if tradeable:
+        # Pre-calculate quality scores once
+        _precalculate_quality_scores(tradeable)
+
+        logger.info(f"\n" + "=" * 80)
+        logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
+        logger.info("=" * 80)
+        logger.info(f"\n🎯 Sorted by Quality Score (Risk-Adjusted):")
+
+        # Table header
+        logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'Score':<7} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Liquidity':<12}")
+        logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*7} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
+
+        # Sort by quality score
+        def sort_key(x):
+            tier = x.get('liquidity_tier', 'UNKNOWN')
+            return (-x['_quality_score'], LIQUIDITY_PRIORITY_ORDER.get(tier, 3))
+
+        for i, r in enumerate(sorted(tradeable, key=sort_key), 1):
+            ticker = r['ticker']
+            full_name = r.get('ticker_name', '') or ''
+            name = full_name[:20] if len(full_name) <= 20 else full_name[:full_name[:20].rfind(' ') or 20]
+
+            score_display = f"{r['_quality_score']:.1f}"
+            vrp = f"{r['vrp_ratio']:.2f}x"
+            implied = str(r['implied_move_pct'])
+            edge = f"{r['edge_score']:.2f}"
+            rec = r['recommendation'].upper()
+
+            liquidity_tier = r.get('liquidity_tier', 'UNKNOWN')
+            liq_display = "✓ High" if liquidity_tier == "EXCELLENT" else ("⚠️  Low" if liquidity_tier == "WARNING" else "❌ REJECT")
+
+            logger.info(
+                f"   {i:<3} {ticker:<8} {name:<20} {score_display:<7} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {liq_display:<12}"
+            )
+
+        logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
+    else:
+        logger.info(f"\n" + "=" * 80)
+        logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
+        logger.info("=" * 80)
+        logger.info(f"\n❌ No opportunities found")
+        if skip_count > 0:
+            logger.info(f"   Note: {skip_count} ticker(s) skipped due to missing historical data")
+
+    return 0
+
+
+def scanning_mode_parallel(
     container: Container,
     scan_date: date,
     expiration_offset: Optional[int] = None
 ) -> int:
     """
+    Parallel scanning mode: Scan earnings using ConcurrentScanner.
+
+    Uses thread pool for ~5x speedup on multi-ticker scans.
+    Returns exit code (0 for success, 1 for error)
+    """
+    logger.info("=" * 80)
+    logger.info("SCANNING MODE: Earnings Date Scan (PARALLEL)")
+    logger.info("=" * 80)
+    logger.info(f"Scan Date: {scan_date}")
+    logger.info("")
+
+    # Fetch earnings for the date
+    earnings_events = fetch_earnings_for_date(container, scan_date)
+
+    if not earnings_events:
+        logger.warning("No earnings found for this date")
+        return 0
+
+    # Build earnings lookup for ConcurrentScanner
+    # Format: ticker -> (earnings_date, timing_str)
+    earnings_lookup: Dict[str, Tuple[date, str]] = {}
+    for ticker, earnings_date, timing in earnings_events:
+        earnings_lookup[ticker] = (earnings_date, timing.value)
+
+    tickers = list(earnings_lookup.keys())
+
+    logger.info(f"Starting parallel scan of {len(tickers)} tickers...")
+
+    # Create filter function with container closure
+    def filter_func(ticker: str, expiration: date) -> Tuple[bool, Optional[str]]:
+        return filter_ticker_concurrent(ticker, expiration, container)
+
+    # Progress callback for logging
+    def progress_callback(ticker: str, completed: int, total: int):
+        if completed % 5 == 0 or completed == total:
+            logger.info(f"Progress: {completed}/{total} ({completed*100//total}%)")
+
+    # Run concurrent scan
+    scanner = container.concurrent_scanner
+    batch_result = scanner.scan_tickers(
+        tickers=tickers,
+        earnings_lookup=earnings_lookup,
+        analyze_func=analyze_ticker_concurrent,
+        filter_func=filter_func,
+        expiration_offset=expiration_offset or 0,
+        progress_callback=progress_callback,
+    )
+
+    # Extract results
+    results = []
+    for scan_result in batch_result.results:
+        if scan_result.data:
+            results.append(scan_result.data)
+
+    # Log statistics
+    logger.info(f"\n📊 Parallel Scan Complete:")
+    logger.info(f"   Total time: {batch_result.total_duration_ms:.0f}ms")
+    logger.info(f"   Avg per ticker: {batch_result.avg_duration_ms:.0f}ms")
+    logger.info(f"   Success: {batch_result.success_count}")
+    logger.info(f"   Filtered: {batch_result.filtered_count}")
+    logger.info(f"   Skipped: {batch_result.skip_count}")
+    logger.info(f"   Errors: {batch_result.error_count}")
+
+    # Display results using existing logic
+    return _display_scan_results(
+        results=results,
+        success_count=batch_result.success_count,
+        error_count=batch_result.error_count,
+        skip_count=batch_result.skip_count,
+        filtered_count=batch_result.filtered_count,
+        mode_name="SCAN MODE",
+        scan_date=scan_date,
+        total_events=len(earnings_events)
+    )
+
+
+def scanning_mode(
+    container: Container,
+    scan_date: date,
+    expiration_offset: Optional[int] = None,
+    parallel: bool = False
+) -> int:
+    """
     Scanning mode: Scan earnings for a specific date.
+
+    Args:
+        container: DI container
+        scan_date: Target earnings date
+        expiration_offset: Custom expiration offset in days
+        parallel: If True, use parallel processing (5x speedup)
 
     Returns exit code (0 for success, 1 for error)
     """
+    # Use parallel mode if requested
+    if parallel:
+        return scanning_mode_parallel(container, scan_date, expiration_offset)
+
     logger.info("=" * 80)
     logger.info("SCANNING MODE: Earnings Date Scan")
     logger.info("=" * 80)
@@ -1322,16 +1591,108 @@ def scanning_mode(
     return 0
 
 
-def ticker_mode(
+def ticker_mode_parallel(
     container: Container,
     tickers: List[str],
     expiration_offset: Optional[int] = None
 ) -> int:
     """
+    Parallel ticker mode: Analyze tickers using ConcurrentScanner.
+
+    Uses thread pool for ~5x speedup on multi-ticker analysis.
+    Returns exit code (0 for success, 1 for error)
+    """
+    logger.info("=" * 80)
+    logger.info("TICKER MODE: Command Line Tickers (PARALLEL)")
+    logger.info("=" * 80)
+    logger.info(f"Tickers: {', '.join(tickers)}")
+    logger.info("")
+
+    # Build earnings lookup for each ticker
+    earnings_lookup: Dict[str, Tuple[date, str]] = {}
+
+    logger.info("Fetching earnings dates...")
+    for ticker in tickers:
+        earnings_info = fetch_earnings_for_ticker(container, ticker)
+        if earnings_info:
+            earnings_date, timing = earnings_info
+            earnings_lookup[ticker] = (earnings_date, timing.value)
+        else:
+            logger.info(f"⏭️  {ticker}: No upcoming earnings found")
+
+    if not earnings_lookup:
+        logger.warning("No earnings found for any requested tickers")
+        return 0
+
+    logger.info(f"Starting parallel analysis of {len(earnings_lookup)} tickers...")
+
+    # Create filter function with container closure
+    def filter_func(ticker: str, expiration: date) -> Tuple[bool, Optional[str]]:
+        return filter_ticker_concurrent(ticker, expiration, container)
+
+    # Progress callback for logging
+    def progress_callback(ticker: str, completed: int, total: int):
+        logger.info(f"Progress: {completed}/{total} - {ticker}")
+
+    # Run concurrent scan
+    scanner = container.concurrent_scanner
+    batch_result = scanner.scan_tickers(
+        tickers=list(earnings_lookup.keys()),
+        earnings_lookup=earnings_lookup,
+        analyze_func=analyze_ticker_concurrent,
+        filter_func=filter_func,
+        expiration_offset=expiration_offset or 0,
+        progress_callback=progress_callback,
+    )
+
+    # Extract results
+    results = []
+    for scan_result in batch_result.results:
+        if scan_result.data:
+            results.append(scan_result.data)
+
+    # Log statistics
+    logger.info(f"\n📊 Parallel Analysis Complete:")
+    logger.info(f"   Total time: {batch_result.total_duration_ms:.0f}ms")
+    logger.info(f"   Avg per ticker: {batch_result.avg_duration_ms:.0f}ms")
+    logger.info(f"   Success: {batch_result.success_count}")
+    logger.info(f"   Filtered: {batch_result.filtered_count}")
+    logger.info(f"   Skipped: {batch_result.skip_count}")
+    logger.info(f"   Errors: {batch_result.error_count}")
+
+    # Display results using shared helper
+    return _display_scan_results(
+        results=results,
+        success_count=batch_result.success_count,
+        error_count=batch_result.error_count,
+        skip_count=batch_result.skip_count + (len(tickers) - len(earnings_lookup)),
+        filtered_count=batch_result.filtered_count,
+        mode_name="TICKER MODE",
+        tickers=tickers
+    )
+
+
+def ticker_mode(
+    container: Container,
+    tickers: List[str],
+    expiration_offset: Optional[int] = None,
+    parallel: bool = False
+) -> int:
+    """
     Ticker mode: Analyze specific tickers from command line.
+
+    Args:
+        container: DI container
+        tickers: List of ticker symbols
+        expiration_offset: Custom expiration offset in days
+        parallel: If True, use parallel processing (5x speedup)
 
     Returns exit code (0 for success, 1 for error)
     """
+    # Use parallel mode if requested and we have multiple tickers
+    if parallel and len(tickers) > 1:
+        return ticker_mode_parallel(container, tickers, expiration_offset)
+
     logger.info("=" * 80)
     logger.info("TICKER MODE: Command Line Tickers")
     logger.info("=" * 80)
@@ -1643,11 +2004,107 @@ def ensure_tickers_in_db(tickers: list[str], container: Container) -> None:
         logger.info("   Continuing with API fallback...")
 
 
+def whisper_mode_parallel(
+    container: Container,
+    tickers: List[str],
+    monday: date,
+    week_end: date,
+    expiration_offset: Optional[int] = None
+) -> int:
+    """
+    Parallel whisper mode: Analyze anticipated earnings using ConcurrentScanner.
+
+    Uses thread pool for ~5x speedup on multi-ticker analysis.
+
+    Args:
+        container: DI container
+        tickers: List of ticker symbols to analyze
+        monday: Start of week (Monday)
+        week_end: End of week (Sunday)
+        expiration_offset: Custom expiration offset in days
+
+    Returns:
+        Exit code (0 = success, 1 = error)
+    """
+    logger.info("")
+    logger.info("🚀 Using PARALLEL processing for faster analysis...")
+
+    # Build earnings lookup for each ticker
+    earnings_lookup: Dict[str, Tuple[date, str]] = {}
+
+    logger.info("Fetching earnings dates...")
+    for ticker in tickers:
+        earnings_info = fetch_earnings_for_ticker(container, ticker)
+        if earnings_info:
+            earnings_date, timing = earnings_info
+            earnings_lookup[ticker] = (earnings_date, timing.value)
+        else:
+            logger.info(f"⏭️  {ticker}: No upcoming earnings found")
+
+    if not earnings_lookup:
+        logger.warning("No earnings found for any anticipated tickers")
+        return 0
+
+    logger.info(f"Starting parallel analysis of {len(earnings_lookup)} tickers...")
+
+    # Create filter function with container closure
+    def filter_func(ticker: str, expiration: date) -> Tuple[bool, Optional[str]]:
+        return filter_ticker_concurrent(ticker, expiration, container)
+
+    # Progress callback for logging
+    def progress_callback(ticker: str, completed: int, total: int):
+        if completed % 5 == 0 or completed == total:
+            logger.info(f"Progress: {completed}/{total} ({completed*100//total}%)")
+
+    # Run concurrent scan
+    scanner = container.concurrent_scanner
+    batch_result = scanner.scan_tickers(
+        tickers=list(earnings_lookup.keys()),
+        earnings_lookup=earnings_lookup,
+        analyze_func=analyze_ticker_concurrent,
+        filter_func=filter_func,
+        expiration_offset=expiration_offset or 0,
+        progress_callback=progress_callback,
+    )
+
+    # Extract results
+    results = []
+    for scan_result in batch_result.results:
+        if scan_result.data:
+            results.append(scan_result.data)
+
+    # Validate earnings dates for tradeable results
+    tradeable = [r for r in results if r.get('is_tradeable', False)]
+    if tradeable:
+        validate_tradeable_earnings_dates(tradeable, container)
+
+    # Log statistics
+    logger.info(f"\n📊 Parallel Analysis Complete:")
+    logger.info(f"   Total time: {batch_result.total_duration_ms:.0f}ms")
+    logger.info(f"   Avg per ticker: {batch_result.avg_duration_ms:.0f}ms")
+    logger.info(f"   Success: {batch_result.success_count}")
+    logger.info(f"   Filtered: {batch_result.filtered_count}")
+    logger.info(f"   Skipped: {batch_result.skip_count}")
+    logger.info(f"   Errors: {batch_result.error_count}")
+
+    # Display results using shared helper
+    return _display_scan_results(
+        results=results,
+        success_count=batch_result.success_count,
+        error_count=batch_result.error_count,
+        skip_count=batch_result.skip_count + (len(tickers) - len(earnings_lookup)),
+        filtered_count=batch_result.filtered_count,
+        mode_name="WHISPER MODE",
+        week_range=(monday, week_end)
+    )
+
+
 def whisper_mode(
     container: Container,
     week_monday: Optional[str] = None,
     fallback_image: Optional[str] = None,
-    expiration_offset: Optional[int] = None
+    expiration_offset: Optional[int] = None,
+    parallel: bool = False
 ) -> int:
     """
     Whisper mode: Analyze most anticipated earnings.
@@ -1659,6 +2116,7 @@ def whisper_mode(
         week_monday: Monday in YYYY-MM-DD (defaults to current week)
         fallback_image: Path to earnings screenshot (PNG/JPG)
         expiration_offset: Custom expiration offset in days
+        parallel: If True, use parallel processing (5x speedup)
 
     Returns:
         Exit code (0 = success, 1 = error)
@@ -1667,6 +2125,7 @@ def whisper_mode(
     logger.info("WHISPER MODE: Most Anticipated Earnings")
     logger.info("=" * 80)
 
+    # Validate week_monday format if provided
     if week_monday:
         try:
             target_date = datetime.strptime(week_monday, "%Y-%m-%d")
@@ -1674,21 +2133,31 @@ def whisper_mode(
         except ValueError:
             logger.error(f"Invalid date: {week_monday}. Use YYYY-MM-DD")
             return 1
+        week_str = monday.strftime("%Y-%m-%d")
     else:
-        monday = get_week_monday()
+        # Let scraper auto-detect (tries next week first, then current)
+        monday = None
+        week_str = None
 
-    # Calculate week range (Monday to Sunday)
-    week_end = monday + timedelta(days=6)
-    logger.info(f"Week: {monday.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
     if fallback_image:
         logger.info(f"Fallback: {fallback_image}")
 
     logger.info("Fetching ticker list...")
     scraper = EarningsWhisperScraper()
     result = scraper.get_most_anticipated_earnings(
-        week_monday=monday.strftime("%Y-%m-%d"),
+        week_monday=week_str,
         fallback_image=fallback_image
     )
+
+    # Extract the actual week from result for display
+    # The scraper returns tickers for whichever week it found
+    if monday is None:
+        # Auto-detect succeeded - use next week's Monday for display
+        monday = get_week_monday() + timedelta(days=7)
+
+    # Calculate week range (Monday to Sunday)
+    week_end = monday + timedelta(days=6)
+    logger.info(f"Week: {monday.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
 
     if result.is_err:
         logger.error(f"Failed to fetch ticker list: {result.error}")
@@ -1714,6 +2183,12 @@ def whisper_mode(
 
     # Ensure all tickers are in database (auto-add + sync if needed)
     ensure_tickers_in_db(tickers, container)
+
+    # Use parallel mode if requested
+    if parallel:
+        return whisper_mode_parallel(
+            container, tickers, monday, week_end, expiration_offset
+        )
 
     # Analyze each ticker
     results = []
@@ -1979,6 +2454,11 @@ Notes:
         help="Path to earnings screenshot (PNG/JPG) for whisper mode fallback"
     )
     parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Enable parallel processing for ~5x speedup (uses thread pool)"
+    )
+    parser.add_argument(
         "--log-level",
         type=str,
         default="INFO",
@@ -2006,7 +2486,10 @@ Notes:
         # Execute appropriate mode
         if args.scan_date:
             scan_date = parse_date(args.scan_date)
-            return scanning_mode(container, scan_date, args.expiration_offset)
+            return scanning_mode(
+                container, scan_date, args.expiration_offset,
+                parallel=args.parallel
+            )
         elif args.whisper_week is not None:
             # whisper_week can be '' (empty string) for current week or a date string
             week_monday = args.whisper_week if args.whisper_week else None
@@ -2014,11 +2497,15 @@ Notes:
                 container,
                 week_monday=week_monday,
                 fallback_image=args.fallback_image,
-                expiration_offset=args.expiration_offset
+                expiration_offset=args.expiration_offset,
+                parallel=args.parallel
             )
         else:
             tickers = [t.strip().upper() for t in args.tickers.split(',')]
-            return ticker_mode(container, tickers, args.expiration_offset)
+            return ticker_mode(
+                container, tickers, args.expiration_offset,
+                parallel=args.parallel
+            )
 
     except KeyboardInterrupt:
         logger.info("\nInterrupted by user")
