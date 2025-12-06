@@ -99,12 +99,18 @@ class AIClient:
             BudgetExceededError: If all models are exhausted
             Exception: If API call fails after all retries
         """
-        # Get best available model
-        try:
-            model, provider = self.usage_tracker.get_available_model(preferred_model, use_case, override_daily_limit)
-        except BudgetExceededError as e:
-            logger.error(f"❌ All models exhausted: {e}")
-            raise
+        # If Perplexity key not set, go directly to Gemini
+        if not self.perplexity_key and self.google_key:
+            logger.info("📡 No Perplexity key - using Gemini directly")
+            model = "gemini-2.0-flash"
+            provider = "google"
+        else:
+            # Get best available model via cascade
+            try:
+                model, provider = self.usage_tracker.get_available_model(preferred_model, use_case, override_daily_limit)
+            except BudgetExceededError as e:
+                logger.error(f"❌ All models exhausted: {e}")
+                raise
 
         logger.info(f"📡 Using {model} ({provider}) for {use_case}")
 
@@ -246,8 +252,8 @@ class AIClient:
         if not self.google_key:
             raise ValueError("GOOGLE_API_KEY not set in environment")
 
-        # Gemini 2.0 Flash model name
-        gemini_model = 'gemini-2.0-flash-exp'
+        # Gemini 2.5 Flash model (newest, best quotas)
+        gemini_model = 'gemini-2.5-flash'
 
         url = self.endpoints['google'].format(model=gemini_model)
 
@@ -258,7 +264,9 @@ class AIClient:
                 'parts': [{'text': prompt}]
             }],
             'generationConfig': {
-                'maxOutputTokens': max_tokens
+                'maxOutputTokens': max_tokens,
+                # Disable thinking mode for faster, direct responses
+                'thinkingConfig': {'thinkingBudget': 0}
             }
         }
 
@@ -284,8 +292,20 @@ class AIClient:
 
                 result = response.json()
 
-                # Extract content
-                content = result['candidates'][0]['content']['parts'][0]['text']
+                # Extract content (handle different response formats)
+                candidates = result.get('candidates', [])
+                if not candidates:
+                    raise ValueError(f"No candidates in response: {result}")
+
+                candidate = candidates[0]
+                content_obj = candidate.get('content', {})
+                parts = content_obj.get('parts', [])
+
+                if parts:
+                    content = parts[0].get('text', '')
+                else:
+                    # Fallback: try to get text directly from candidate
+                    content = candidate.get('text', str(candidate))
 
                 # Gemini free tier doesn't charge, estimate tokens for logging
                 prompt_tokens_est = int(len(prompt.split()) * 1.3)
