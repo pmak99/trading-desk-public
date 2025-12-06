@@ -1206,19 +1206,17 @@ class StrategyGenerator:
         probability_of_profit: float
     ) -> int:
         """
-        Calculate position size using Kelly Criterion.
+        Calculate position size for credit spreads using expected value sizing.
 
-        Kelly formula: f* = (p * b - q) / b
-        where:
-        - p = probability of winning (POP)
-        - q = probability of losing (1 - p)
-        - b = win/loss ratio (max_profit / max_loss)
-        - f* = fraction of capital to risk
+        Credit spreads have asymmetric payoffs (small win, larger loss), so
+        traditional Kelly Criterion (designed for binary bets) doesn't work well.
+        Instead, we use EV-based sizing:
 
-        We use fractional Kelly (default 25%) for safety:
-        - Full Kelly can be aggressive and lead to large drawdowns
-        - 25% Kelly is a common conservative choice
-        - Ensures we don't oversize even on high-probability trades
+        1. Calculate Expected Value: EV = POP × max_profit - (1-POP) × max_loss
+        2. Determine position size as fraction of risk budget based on:
+           - Base allocation = risk_budget / max_loss_per_spread
+           - Scaling factor based on trade quality (EV, POP)
+        3. Apply fractional Kelly for safety
 
         Args:
             max_profit: Maximum profit per spread
@@ -1244,47 +1242,84 @@ class StrategyGenerator:
             )
             return self.config.kelly_min_contracts
 
-        # Calculate win/loss ratio (b in Kelly formula)
-        # This is the odds received: how much we win relative to how much we risk
-        win_loss_ratio = float(max_profit.amount / max_loss.amount)
-
-        # Calculate edge (expected value as fraction of risk)
-        # Edge = (p * win) - (q * loss) / loss
-        # Simplified: edge = p * b - q
         p = probability_of_profit
         q = 1.0 - p
-        edge = p * win_loss_ratio - q
 
-        # Check minimum edge requirement
-        if edge < self.config.kelly_min_edge:
+        # Calculate Expected Value per spread
+        # EV = (probability of win × profit) - (probability of loss × loss)
+        ev = p * float(max_profit.amount) - q * float(max_loss.amount)
+
+        # Calculate EV as percentage of risk (more intuitive metric)
+        ev_pct = ev / float(max_loss.amount) if max_loss.amount > 0 else 0
+
+        # Minimum EV requirement
+        # For credit spreads, allow slightly negative EV because:
+        # 1. VRP analysis already confirmed the trade is good (IV overpriced)
+        # 2. POP from delta assumes fair pricing, but IV crush creates additional edge
+        # 3. Typical credit spreads have EV from -2% to +5%
+        # Use -2% threshold to allow borderline trades that VRP recommends
+        min_ev_pct = -0.02  # Allow up to -2% EV (VRP provides additional edge)
+
+        if ev_pct < min_ev_pct:
             logger.debug(
-                f"Edge {edge:.3f} below minimum {self.config.kelly_min_edge:.3f}, "
-                f"using minimum contracts"
+                f"Position sizing: EV {ev_pct:.2%} below minimum {min_ev_pct:.2%}, "
+                f"POP={p:.1%}, max_profit=${max_profit.amount:.2f}, max_loss=${max_loss.amount:.2f}, "
+                f"using min_contracts={self.config.kelly_min_contracts}"
             )
             return self.config.kelly_min_contracts
 
-        # Calculate Kelly fraction: f* = edge / b
-        kelly_full = edge / win_loss_ratio
-
-        # Apply fractional Kelly for safety (default 25% of full Kelly)
-        kelly_fraction = kelly_full * self.config.kelly_fraction
-
-        # Kelly fraction is a percentage of capital to risk
-        # Convert to number of contracts
+        # Base position: How many contracts fit in risk budget
+        # This gives maximum possible position based on capital
         capital = self.config.risk_budget_per_trade
-        position_size = kelly_fraction * capital
+        base_contracts = capital / float(max_loss.amount)
 
-        # Each contract risks max_loss
-        contracts = int(position_size / float(max_loss.amount))
+        # Calculate quality scaling factor based on POP
+        # Higher POP = can take larger position (more confident)
+        # Scale from 0.5 (at 70% POP) to 1.0 (at 90%+ POP)
+        # Below 70% POP, use minimum sizing
+        if p >= 0.90:
+            pop_scale = 1.0
+        elif p >= 0.70:
+            # Linear scale from 0.5 to 1.0 as POP goes from 70% to 90%
+            pop_scale = 0.5 + (p - 0.70) * 2.5
+        else:
+            # Below 70% POP, use reduced sizing
+            pop_scale = 0.3
+
+        # Calculate EV scaling factor
+        # Higher EV% = larger position
+        # Scale from 0.5 (at 0% EV) to 1.0 (at 5%+ EV)
+        # For negative EV trades (allowed due to VRP edge), use reduced scale 0.3-0.5
+        if ev_pct >= 0.05:
+            ev_scale = 1.0
+        elif ev_pct >= 0.0:
+            # Positive but low EV: scale 0.5 to 1.0
+            ev_scale = 0.5 + ev_pct / 0.05 * 0.5
+        elif ev_pct >= min_ev_pct:
+            # Negative EV (but above min): reduced scale 0.3 to 0.5
+            # At -2% EV, scale = 0.3; at 0% EV, scale = 0.5
+            ev_scale = 0.3 + (ev_pct - min_ev_pct) / (0.0 - min_ev_pct) * 0.2
+        else:
+            ev_scale = 0.3
+
+        # Combined scaling factor
+        quality_scale = pop_scale * ev_scale
+
+        # Apply fractional Kelly for safety (default 25%)
+        # This further reduces position size for conservative sizing
+        position_fraction = self.config.kelly_fraction * quality_scale
+
+        # Calculate contracts
+        contracts = int(base_contracts * position_fraction)
 
         # Apply bounds
         contracts = max(self.config.kelly_min_contracts, contracts)
         contracts = min(contracts, self.config.max_contracts)
 
         logger.debug(
-            f"Kelly sizing: POP={p:.2%}, win/loss={win_loss_ratio:.2f}, "
-            f"edge={edge:.3f}, full_kelly={kelly_full:.3f}, "
-            f"fractional_kelly={kelly_fraction:.3f}, contracts={contracts}"
+            f"Position sizing: POP={p:.1%}, EV=${ev:.2f} ({ev_pct:.1%} of risk), "
+            f"pop_scale={pop_scale:.2f}, ev_scale={ev_scale:.2f}, "
+            f"quality={quality_scale:.2f}, fraction={position_fraction:.3f}, contracts={contracts}"
         )
 
         return contracts
