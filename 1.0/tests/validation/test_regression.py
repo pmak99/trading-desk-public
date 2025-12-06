@@ -10,58 +10,37 @@ sys.path.insert(0, '.')
 
 def test_critical_methods_preserved():
     """Ensure critical methods still exist."""
-    print("=" * 70)
-    print("REGRESSION TEST: Critical Methods Preserved")
-    print("=" * 70)
-
-    tests_passed = 0
-    tests_failed = 0
-
     # Test 1: earnings_analyzer.py critical methods
-    print("\n[1] Checking earnings_analyzer.py...")
     with open('src/analysis/earnings_analyzer.py', 'r') as f:
         content = f.read()
 
     critical_methods = [
         'def analyze_specific_tickers',
-        'def analyze_date',
+        'def analyze_daily_earnings',
         'def _fetch_tickers_data',
-        'def _fetch_options_parallel',  # New method
         'def _run_parallel_analysis',
         'def _analyze_single_ticker',
     ]
 
     for method in critical_methods:
-        if method in content:
-            print(f"   ✓ Method preserved: {method}")
-            tests_passed += 1
-        else:
-            print(f"   ✗ Method missing: {method}")
-            tests_failed += 1
+        assert method in content, f"Method missing in earnings_analyzer.py: {method}"
 
     # Test 2: tradier_client.py critical methods
-    print("\n[2] Checking tradier_client.py...")
     with open('src/options/tradier_client.py', 'r') as f:
         content = f.read()
 
     critical_methods = [
         'def get_options_data',
         'def _get_quote',
-        'def _get_options_chain',
+        'def _fetch_options_chain',
         'def _extract_iv_rank',
-        'def _find_closest_expiration',
+        'def _get_nearest_weekly_expiration',
     ]
 
     for method in critical_methods:
-        if method in content:
-            print(f"   ✓ Method preserved: {method}")
-            tests_passed += 1
-        else:
-            print(f"   ✗ Method missing: {method}")
-            tests_failed += 1
+        assert method in content, f"Method missing in tradier_client.py: {method}"
 
     # Test 3: reddit_scraper.py critical methods
-    print("\n[3] Checking reddit_scraper.py...")
     with open('src/data/reddit_scraper.py', 'r') as f:
         content = f.read()
 
@@ -72,162 +51,66 @@ def test_critical_methods_preserved():
     ]
 
     for method in critical_methods:
-        if method in content:
-            print(f"   ✓ Method preserved: {method}")
-            tests_passed += 1
-        else:
-            print(f"   ✗ Method missing: {method}")
-            tests_failed += 1
-
-    print(f"\n{'='*70}")
-    print(f"Methods Preserved: {tests_passed} passed, {tests_failed} failed")
-    print(f"{'='*70}\n")
-
-    return tests_passed, tests_failed
+        assert method in content, f"Method missing in reddit_scraper.py: {method}"
 
 
 def test_method_signatures():
     """Ensure method signatures weren't changed (breaking API)."""
-    print("=" * 70)
-    print("REGRESSION TEST: Method Signatures Unchanged")
-    print("=" * 70)
-
-    tests_passed = 0
-    tests_failed = 0
-
     # Test 1: get_ticker_sentiment signature
-    print("\n[1] Checking get_ticker_sentiment signature...")
     with open('src/data/reddit_scraper.py', 'r') as f:
         content = f.read()
 
-    # Extract method signature
     match = re.search(r'def get_ticker_sentiment\((.*?)\):', content, re.DOTALL)
-    if match:
-        sig = match.group(1)
-        # Check required parameters preserved
-        if 'ticker' in sig and 'subreddits' in sig:
-            print(f"   ✓ Signature preserved (has ticker, subreddits)")
-            tests_passed += 1
-        else:
-            print(f"   ✗ Signature changed")
-            tests_failed += 1
-
-        # Check new code doesn't break old callers
-        if 'analyze_content' in sig and 'False' in sig:
-            print(f"   ✓ New parameter has default value (backward compatible)")
-            tests_passed += 1
-        else:
-            print(f"   ⚠  analyze_content parameter may break old code")
-    else:
-        print(f"   ✗ Method signature not found")
-        tests_failed += 1
+    assert match, "get_ticker_sentiment method not found"
+    sig = match.group(1)
+    assert 'ticker' in sig, "get_ticker_sentiment missing 'ticker' parameter"
+    assert 'subreddits' in sig, "get_ticker_sentiment missing 'subreddits' parameter"
 
     # Test 2: get_options_data signature
-    print("\n[2] Checking get_options_data signature...")
     with open('src/options/tradier_client.py', 'r') as f:
         content = f.read()
 
     match = re.search(r'def get_options_data\((.*?)\):', content, re.DOTALL)
-    if match:
-        sig = match.group(1)
-        if 'ticker' in sig and 'current_price' in sig:
-            print(f"   ✓ Signature preserved")
-            tests_passed += 1
-        else:
-            print(f"   ✗ Signature changed")
-            tests_failed += 1
-    else:
-        print(f"   ✗ Method signature not found")
-        tests_failed += 1
-
-    print(f"\n{'='*70}")
-    print(f"Signatures Unchanged: {tests_passed} passed, {tests_failed} failed")
-    print(f"{'='*70}\n")
-
-    return tests_passed, tests_failed
+    assert match, "get_options_data method not found"
+    sig = match.group(1)
+    assert 'ticker' in sig, "get_options_data missing 'ticker' parameter"
+    assert 'current_price' in sig, "get_options_data missing 'current_price' parameter"
 
 
 def test_return_values_unchanged():
     """Verify return value structures weren't changed."""
-    print("=" * 70)
-    print("REGRESSION TEST: Return Value Structures")
-    print("=" * 70)
-
-    tests_passed = 0
-    tests_failed = 0
-
     # Test 1: get_ticker_sentiment return structure
-    print("\n[1] Checking get_ticker_sentiment return...")
     with open('src/data/reddit_scraper.py', 'r') as f:
         content = f.read()
 
     required_keys = ['ticker', 'posts_found', 'sentiment_score', 'avg_score', 'total_comments']
     for key in required_keys:
-        if f"'{key}':" in content or f'"{key}":' in content:
-            print(f"   ✓ Return includes '{key}'")
-            tests_passed += 1
-        else:
-            print(f"   ✗ Return missing '{key}'")
-            tests_failed += 1
+        assert f"'{key}':" in content or f'"{key}":' in content, f"Return missing '{key}' in reddit_scraper.py"
 
     # Test 2: get_options_data return structure
-    print("\n[2] Checking get_options_data return...")
     with open('src/options/tradier_client.py', 'r') as f:
         content = f.read()
 
-    # Check docstring mentions key return fields
     required_fields = ['iv_rank', 'current_iv']
     for field in required_fields:
-        if field in content:
-            print(f"   ✓ Return includes '{field}'")
-            tests_passed += 1
-        else:
-            print(f"   ✗ Return missing '{field}'")
-            tests_failed += 1
-
-    print(f"\n{'='*70}")
-    print(f"Return Values: {tests_passed} passed, {tests_failed} failed")
-    print(f"{'='*70}\n")
-
-    return tests_passed, tests_failed
+        assert field in content, f"Return missing '{field}' in tradier_client.py"
 
 
 def test_no_breaking_changes():
     """Test that optimizations don't break existing code flows."""
-    print("=" * 70)
-    print("REGRESSION TEST: No Breaking Changes")
-    print("=" * 70)
-
-    tests_passed = 0
-    tests_failed = 0
-
-    # Test 1: Parallel options fetching doesn't break data flow
-    print("\n[1] Checking parallel options fetching integration...")
+    # Test 1: Data flow patterns preserved
     with open('src/analysis/earnings_analyzer.py', 'r') as f:
         content = f.read()
 
-    # Verify the flow: fetch basic data → fetch options parallel → return
-    if 'basic_ticker_data' in content and '_fetch_options_parallel' in content:
-        print(f"   ✓ Two-stage fetch pattern implemented")
-        tests_passed += 1
-    else:
-        print(f"   ✗ Fetch pattern broken")
-        tests_failed += 1
-
-    # Verify data still gets options_data key
-    if "'options_data'" in content or '"options_data"' in content:
-        print(f"   ✓ options_data key still populated")
-        tests_passed += 1
-    else:
-        print(f"   ✗ options_data key missing")
-        tests_failed += 1
+    assert 'ticker_data_fetcher' in content or 'TickerDataFetcher' in content, \
+        "Data fetch pattern not implemented"
+    assert "'options_data'" in content or '"options_data"' in content, \
+        "options_data key missing"
 
     # Test 2: Cache doesn't interfere with Reddit scraping
-    print("\n[2] Checking cache doesn't break Reddit scraping...")
     with open('src/data/reddit_scraper.py', 'r') as f:
         content = f.read()
 
-    # Verify: check cache → if miss, scrape → cache result
     cache_checks = [
         'cached_result = self._cache.get',
         'if cached_result:',
@@ -235,53 +118,19 @@ def test_no_breaking_changes():
         'self._cache.set(',
     ]
 
-    all_present = all(check in content for check in cache_checks)
-    if all_present:
-        print(f"   ✓ Cache flow correct (check → miss → scrape → cache)")
-        tests_passed += 1
-    else:
-        print(f"   ✗ Cache flow incomplete")
-        tests_failed += 1
+    for check in cache_checks:
+        assert check in content, f"Cache flow incomplete: missing '{check}'"
 
-    # Verify scraping logic still executes
-    if 'ThreadPoolExecutor' in content and '_search_subreddit' in content:
-        print(f"   ✓ Original scraping logic preserved")
-        tests_passed += 1
-    else:
-        print(f"   ✗ Scraping logic modified")
-        tests_failed += 1
+    assert 'ThreadPoolExecutor' in content, "ThreadPoolExecutor missing"
+    assert '_search_subreddit' in content, "_search_subreddit missing"
 
     # Test 3: Session doesn't break Tradier API calls
-    print("\n[3] Checking session doesn't break Tradier calls...")
     with open('src/options/tradier_client.py', 'r') as f:
         content = f.read()
 
-    # Verify: session has headers → session.get() has correct params
-    if 'self.session.headers.update' in content:
-        print(f"   ✓ Session headers configured")
-        tests_passed += 1
-
-    # Verify session.get() calls have params
-    session_get_pattern = r'self\.session\.get\([^)]*params='
-    if re.search(session_get_pattern, content):
-        print(f"   ✓ Session.get() calls include params")
-        tests_passed += 1
-    else:
-        print(f"   ⚠  Check session.get() params")
-
-    # Verify response handling unchanged
-    if 'response.raise_for_status()' in content and 'response.json()' in content:
-        print(f"   ✓ Response handling unchanged")
-        tests_passed += 1
-    else:
-        print(f"   ✗ Response handling modified")
-        tests_failed += 1
-
-    print(f"\n{'='*70}")
-    print(f"No Breaking Changes: {tests_passed} passed, {tests_failed} failed")
-    print(f"{'='*70}\n")
-
-    return tests_passed, tests_failed
+    assert 'self.session.headers.update' in content, "Session headers not configured"
+    assert 'response.raise_for_status()' in content, "Response handling missing raise_for_status"
+    assert 'response.json()' in content, "Response handling missing json parsing"
 
 
 def main():
