@@ -1,39 +1,25 @@
-# Core ML/Data Science
-numpy>=1.24.0
-pandas>=2.0.0
-scikit-learn>=1.3.0
-scipy>=1.11.0
+# 3.0 ML Earnings Scanner - Core Dependencies
+# Tested with Python 3.11+
 
-# Deep Learning (optional, for Phase 2)
-# tensorflow>=2.13.0
-# torch>=2.0.0
+# Core ML
+numpy>=2.0.0,<3.0.0
+pandas>=2.0.0,<3.0.0
+scikit-learn>=1.5.0,<2.0.0
+joblib>=1.3.0,<2.0.0
 
-# Feature Engineering
-ta>=0.11.0  # Technical analysis indicators
-statsmodels>=0.14.0  # Statistical models
-
-# Data Visualization
-matplotlib>=3.7.0
-seaborn>=0.12.0
-plotly>=5.14.0
-
-# Utilities
-python-dotenv>=1.0.0
-pyyaml>=6.0
-tqdm>=4.65.0
-joblib>=1.3.0
-pyarrow>=22.0.0  # For parquet file format
-
-# Data Sources
-yfinance>=0.2.0  # Price data for volatility features
-
-# Database
-# (reuse existing ../data/ivcrush.db, no need for new DB dependencies)
+# Data Fetching
+yfinance>=0.2.40,<1.0.0      # Free price data for volatility features
+requests>=2.28.0,<3.0.0       # HTTP client for Tradier API (sync)
+aiohttp>=3.9.0,<4.0.0         # HTTP client for Tradier API (async)
 
 # Testing
 pytest>=7.4.0
 pytest-cov>=4.1.0
+pytest-asyncio>=1.0.0          # Async test support
 
-# Jupyter (for notebooks)
-jupyter>=1.0.0
-ipykernel>=6.25.0
+# Optional: Development dependencies
+# jupyter>=1.0.0              # For notebooks
+# matplotlib>=3.7.0           # For visualization
+# seaborn>=0.12.0             # For visualization
+# ta>=0.11.0                  # Technical analysis (not currently used)
+# statsmodels>=0.14.0         # Statistical models (not currently used)

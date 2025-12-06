@@ -4,13 +4,65 @@ Simplified version borrowed from 2.0.
 """
 
 import os
+import time
 import requests
 import logging
 from datetime import date
-from typing import Dict, List, Optional, NamedTuple
+from typing import Dict, List, Optional, Callable, TypeVar
 from dataclasses import dataclass
+from functools import wraps
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    'retry_with_backoff',
+    'OptionQuote',
+    'OptionChain',
+    'ImpliedMove',
+    'TradierAPI',
+]
+
+T = TypeVar('T')
+
+
+def retry_with_backoff(
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 30.0,
+    exponential_base: float = 2.0,
+    retryable_exceptions: tuple = (requests.exceptions.RequestException,)
+) -> Callable:
+    """
+    Decorator for retrying functions with exponential backoff.
+
+    Args:
+        max_retries: Maximum number of retry attempts
+        base_delay: Initial delay in seconds
+        max_delay: Maximum delay cap in seconds
+        exponential_base: Base for exponential backoff
+        retryable_exceptions: Tuple of exceptions to retry on
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            last_exception = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except retryable_exceptions as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        delay = min(base_delay * (exponential_base ** attempt), max_delay)
+                        logger.warning(
+                            f"{func.__name__} failed (attempt {attempt + 1}/{max_retries + 1}): {e}. "
+                            f"Retrying in {delay:.1f}s..."
+                        )
+                        time.sleep(delay)
+                    else:
+                        logger.error(f"{func.__name__} failed after {max_retries + 1} attempts: {e}")
+            raise last_exception
+        return wrapper
+    return decorator
 
 
 @dataclass
@@ -63,7 +115,10 @@ class TradierAPI:
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv('TRADIER_API_KEY')
         if not self.api_key:
-            raise ValueError("TRADIER_API_KEY not set")
+            raise ValueError(
+                "TRADIER_API_KEY not set. "
+                "Set it via environment variable or pass api_key parameter."
+            )
 
         self.base_url = "https://api.tradier.com/v1"
         self.headers = {
@@ -72,6 +127,7 @@ class TradierAPI:
         }
         self.timeout = 10
 
+    @retry_with_backoff(max_retries=3, base_delay=1.0)
     def get_stock_price(self, ticker: str) -> float:
         """Get current stock price."""
         response = requests.get(
@@ -93,6 +149,7 @@ class TradierAPI:
 
         return float(quotes[0]['last'])
 
+    @retry_with_backoff(max_retries=3, base_delay=1.0)
     def get_expirations(self, ticker: str) -> List[date]:
         """Get available option expirations."""
         response = requests.get(
@@ -111,6 +168,7 @@ class TradierAPI:
 
         return [date.fromisoformat(d) for d in dates if d]
 
+    @retry_with_backoff(max_retries=3, base_delay=1.0)
     def get_option_chain(self, ticker: str, expiration: date, greeks: bool = True) -> OptionChain:
         """Get option chain for ticker and expiration."""
         stock_price = self.get_stock_price(ticker)

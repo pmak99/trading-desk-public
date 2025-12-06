@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-3.0 Earnings Trade Scanner (Sync Version)
+3.0 Async Earnings Trade Scanner
+
+Parallel scanning of multiple tickers for improved performance.
 
 Combines:
 - VRP analysis (2.0 logic) for trade selection
@@ -8,22 +10,24 @@ Combines:
 - IV data logging for future model training
 
 Usage:
-    python scripts/scan.py [--tickers AAPL,MSFT] [--days 7] [--log-iv]
+    python scripts/scan_async.py [--tickers AAPL,MSFT] [--days 7] [--log-iv] [--workers 10]
 """
 
 import argparse
+import asyncio
 import json
 import logging
 import sys
+import time
 from dataclasses import asdict
 from datetime import date, timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.api.tradier import TradierAPI
+from src.api.tradier_async import AsyncTradierAPI, AsyncRetryError
 from src.analysis.vrp import VRPCalculator
 from src.analysis.ml_predictor import MLMagnitudePredictor
 from src.analysis.scanner_core import (
@@ -43,19 +47,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def scan_ticker(
+async def scan_ticker_async(
     ticker: str,
     earnings_date: date,
-    api: TradierAPI,
+    api: AsyncTradierAPI,
     vrp_calc: VRPCalculator,
     ml_predictor: MLMagnitudePredictor,
     db_path: Path,
     log_iv: bool = False,
 ) -> Optional[ScanResult]:
-    """Scan a single ticker for earnings trade opportunity."""
+    """Scan a single ticker for earnings trade opportunity (async)."""
     try:
         # Get expirations
-        expirations = api.get_expirations(ticker)
+        expirations = await api.get_expirations(ticker)
         expiration = find_next_expiration(expirations, earnings_date)
 
         if not expiration:
@@ -63,9 +67,9 @@ def scan_ticker(
             return None
 
         # Calculate implied move
-        implied_move = api.calculate_implied_move(ticker, expiration)
+        implied_move = await api.calculate_implied_move(ticker, expiration)
 
-        # Calculate VRP
+        # Calculate VRP (sync - database operation)
         vrp_result = vrp_calc.calculate(
             ticker=ticker,
             expiration=expiration,
@@ -76,14 +80,14 @@ def scan_ticker(
             logger.warning(f"{ticker}: Insufficient historical data for VRP")
             return None
 
-        # ML prediction
+        # ML prediction (sync - model inference)
         ml_prediction = ml_predictor.predict(ticker, earnings_date)
 
-        # Log IV data if requested
+        # Log IV data if requested (sync - database operation)
         if log_iv:
             log_iv_data(db_path, ticker, earnings_date, expiration,
                        implied_move, vrp_result, ml_prediction)
-            logger.info(f"Logged IV data for {ticker}")
+            logger.debug(f"Logged IV data for {ticker}")
 
         # Calculate position multiplier
         position_mult = calculate_position_multiplier(
@@ -107,15 +111,58 @@ def scan_ticker(
             position_size_multiplier=position_mult,
         )
 
+    except AsyncRetryError as e:
+        logger.error(f"{ticker}: API request failed after retries - {e}")
+        return None
     except Exception as e:
         logger.error(f"{ticker}: Scan failed - {e}")
         return None
 
 
+async def scan_all_tickers(
+    tickers_to_scan: List[Tuple[str, date, str]],
+    api: AsyncTradierAPI,
+    vrp_calc: VRPCalculator,
+    ml_predictor: MLMagnitudePredictor,
+    db_path: Path,
+    log_iv: bool,
+    min_vrp: float,
+) -> List[ScanResult]:
+    """Scan all tickers in parallel."""
+    tasks = []
+    for ticker, earnings_date, timing in tickers_to_scan:
+        if earnings_date is None:
+            continue
+        tasks.append(
+            scan_ticker_async(
+                ticker=ticker,
+                earnings_date=earnings_date,
+                api=api,
+                vrp_calc=vrp_calc,
+                ml_predictor=ml_predictor,
+                db_path=db_path,
+                log_iv=log_iv,
+            )
+        )
+
+    # Execute all scans concurrently
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Filter successful results above min VRP
+    valid_results = []
+    for result in results:
+        if isinstance(result, Exception):
+            logger.error(f"Task failed with exception: {result}")
+        elif result is not None and result.vrp_ratio >= min_vrp:
+            valid_results.append(result)
+
+    return valid_results
+
+
 def print_results(results: List[ScanResult], log_iv: bool) -> None:
     """Print scan results in human-readable format."""
     print("\n" + "=" * 80)
-    print("3.0 EARNINGS SCAN RESULTS")
+    print("3.0 ASYNC EARNINGS SCAN RESULTS")
     print("=" * 80)
 
     if not results:
@@ -138,21 +185,13 @@ def print_results(results: List[ScanResult], log_iv: bool) -> None:
     print("=" * 80)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="3.0 Earnings Trade Scanner")
-    parser.add_argument("--tickers", type=str, help="Comma-separated tickers to scan")
-    parser.add_argument("--days", type=int, default=7, help="Days ahead to scan")
-    parser.add_argument("--log-iv", action="store_true", help="Log IV data for ML training")
-    parser.add_argument("--min-vrp", type=float, default=1.5, help="Minimum VRP to show")
-    parser.add_argument("--json", action="store_true", help="Output as JSON")
-    args = parser.parse_args()
-
+async def main_async(args):
+    """Main async entry point."""
     # Get database path
     db_path = get_default_db_path()
 
-    # Initialize components
+    # Initialize sync components
     try:
-        api = TradierAPI()
         vrp_calc = VRPCalculator(db_path=db_path)
         ml_predictor = MLMagnitudePredictor()
     except Exception as e:
@@ -161,7 +200,16 @@ def main():
 
     # Get tickers to scan
     if args.tickers:
-        tickers_to_scan = [(t.strip(), None, None) for t in args.tickers.split(",")]
+        tickers_to_scan = []
+        for t in args.tickers.split(","):
+            ticker = t.strip()
+            # Try to get earnings date from calendar
+            earnings_list = get_earnings_calendar(db_path, date.today(), date.today() + timedelta(days=30))
+            matching = [e for e in earnings_list if e[0] == ticker]
+            if matching:
+                tickers_to_scan.append(matching[0])
+            else:
+                logger.warning(f"{ticker}: No earnings date found, skipping")
     else:
         # Get from earnings calendar
         start_date = date.today()
@@ -170,38 +218,44 @@ def main():
 
     if not tickers_to_scan:
         logger.info("No earnings found in date range")
-        return
+        return []
 
-    logger.info(f"Scanning {len(tickers_to_scan)} tickers...")
+    logger.info(f"Scanning {len(tickers_to_scan)} tickers with {args.workers} concurrent workers...")
+    start_time = time.time()
 
-    # Scan each ticker
-    results = []
-    for ticker, earnings_date, timing in tickers_to_scan:
-        if earnings_date is None:
-            # If no earnings date provided, try to get from calendar
-            earnings_list = get_earnings_calendar(db_path, date.today(), date.today() + timedelta(days=30))
-            matching = [e for e in earnings_list if e[0] == ticker]
-            if matching:
-                earnings_date = matching[0][1]
-            else:
-                logger.warning(f"{ticker}: No earnings date found")
-                continue
-
-        result = scan_ticker(
-            ticker=ticker,
-            earnings_date=earnings_date,
+    # Scan with async API
+    async with AsyncTradierAPI(max_concurrent=args.workers) as api:
+        results = await scan_all_tickers(
+            tickers_to_scan=tickers_to_scan,
             api=api,
             vrp_calc=vrp_calc,
             ml_predictor=ml_predictor,
             db_path=db_path,
             log_iv=args.log_iv,
+            min_vrp=args.min_vrp,
         )
 
-        if result and result.vrp_ratio >= args.min_vrp:
-            results.append(result)
+    elapsed = time.time() - start_time
+    logger.info(f"Scan completed in {elapsed:.1f}s ({len(tickers_to_scan)/elapsed:.1f} tickers/sec)")
 
     # Sort by VRP ratio
     results.sort(key=lambda x: x.vrp_ratio, reverse=True)
+
+    return results
+
+
+def main():
+    parser = argparse.ArgumentParser(description="3.0 Async Earnings Trade Scanner")
+    parser.add_argument("--tickers", type=str, help="Comma-separated tickers to scan")
+    parser.add_argument("--days", type=int, default=7, help="Days ahead to scan")
+    parser.add_argument("--log-iv", action="store_true", help="Log IV data for ML training")
+    parser.add_argument("--min-vrp", type=float, default=1.5, help="Minimum VRP to show")
+    parser.add_argument("--workers", type=int, default=5, help="Number of concurrent workers")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    args = parser.parse_args()
+
+    # Run async main
+    results = asyncio.run(main_async(args))
 
     # Output
     if args.json:
