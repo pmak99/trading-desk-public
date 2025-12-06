@@ -717,12 +717,30 @@ def fetch_earnings_for_ticker(
         (earnings_date, timing) tuple or None if not found
     """
     # PRIORITY 1: Check database first (source of truth, validated data)
-    earnings_repo = container.earnings_repo
-    db_result = earnings_repo.get_next_earnings(ticker)
-    if db_result.is_ok and db_result.value is not None:
-        earnings_date, timing = db_result.value
-        logger.info(f"{ticker}: Earnings on {earnings_date} ({timing.value}) [from DB]")
-        return (earnings_date, timing)
+    import sqlite3
+    db_path = container.config.database.path
+    try:
+        with sqlite3.connect(db_path, timeout=30) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT earnings_date, timing
+                FROM earnings_calendar
+                WHERE ticker = ? AND earnings_date >= date('now')
+                ORDER BY earnings_date ASC
+                LIMIT 1
+                ''',
+                (ticker,)
+            )
+            row = cursor.fetchone()
+            if row:
+                from src.domain.enums import EarningsTiming
+                earnings_date = date.fromisoformat(row[0])
+                timing = EarningsTiming(row[1])
+                logger.info(f"{ticker}: Earnings on {earnings_date} ({timing.value}) [from DB]")
+                return (earnings_date, timing)
+    except Exception as e:
+        logger.debug(f"DB lookup failed for {ticker}: {e}")
 
     # PRIORITY 2: If we have a cached full calendar, filter it locally (much faster)
     if cached_calendar is not None:
