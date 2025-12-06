@@ -12,8 +12,10 @@ import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import logging
+
+from src.data.price_fetcher import PriceFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,9 @@ class MLMagnitudePredictor:
         # Load feature columns
         with open(self.models_dir / "feature_columns.txt") as f:
             self.feature_cols = [line.strip() for line in f if line.strip()]
+
+        # Initialize price fetcher for volatility features
+        self.price_fetcher = PriceFetcher()
 
         logger.info(f"Loaded ML magnitude predictor with {len(self.feature_cols)} features")
 
@@ -98,17 +103,34 @@ class MLMagnitudePredictor:
 
     def _get_volatility_features(self, ticker: str, as_of_date: date) -> Dict[str, float]:
         """
-        Calculate volatility features.
+        Calculate volatility features using Yahoo Finance data.
 
-        In a real implementation, this would fetch price data and calculate
-        ATR, Bollinger Bands, Historical Volatility, etc.
-
-        For now, return empty dict - these would need to be calculated
-        from a price data source.
+        Returns ATR, Bollinger Band width, and Historical Volatility
+        for 10, 20, and 50 day windows.
         """
-        # TODO: Implement volatility feature calculation
-        # This requires daily price data which we don't have in a standalone context
-        return {}
+        vol_features = self.price_fetcher.calculate_volatility_features(ticker, as_of_date)
+
+        if vol_features is None:
+            return {}
+
+        # Convert dataclass to dict with matching feature names
+        features = {
+            'atr_10d': vol_features.atr_10d,
+            'atr_10d_pct': vol_features.atr_10d_pct,
+            'atr_20d': vol_features.atr_20d,
+            'atr_20d_pct': vol_features.atr_20d_pct,
+            'atr_50d': vol_features.atr_50d,
+            'atr_50d_pct': vol_features.atr_50d_pct,
+            'bb_width_10d': vol_features.bb_width_10d,
+            'bb_width_20d': vol_features.bb_width_20d,
+            'bb_width_50d': vol_features.bb_width_50d,
+            'hv_10d': vol_features.hv_10d,
+            'hv_20d': vol_features.hv_20d,
+            'hv_50d': vol_features.hv_50d,
+            'hv_percentile_1y': vol_features.hv_percentile,
+        }
+
+        return features
 
     def _get_time_features(self, earnings_date: date) -> Dict[str, float]:
         """Calculate time-based features."""
