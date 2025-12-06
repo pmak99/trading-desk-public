@@ -37,6 +37,15 @@ bb_width_50d
 hv_50d
 hv_10d_percentile
 hv_20d_percentile
+vix_current
+vix_20d_avg
+vix_percentile_60d
+spy_trend_20d
+spy_rsi_14d
+spy_vs_20ma
+qqq_trend_20d
+qqq_rsi_14d
+qqq_vs_20ma
 days_since_last_earnings
 days_until_next_earnings
 avg_earnings_gap
