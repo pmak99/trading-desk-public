@@ -1,6 +1,11 @@
 """
 Async Tradier API client for 3.0 ML System.
 Enables parallel scanning of multiple tickers.
+
+Includes:
+- Circuit breaker for fault tolerance
+- Rate limiter for API compliance
+- Exponential backoff retry logic
 """
 
 import os
@@ -11,6 +16,9 @@ from datetime import date
 from typing import Dict, List, Optional, TypeVar
 
 from src.api.tradier import OptionQuote, OptionChain, ImpliedMove
+from src.core.async_circuit_breaker import AsyncCircuitBreaker
+from src.core.circuit_breaker import CircuitBreakerOpenError
+from src.core.rate_limiter import AsyncTokenBucketRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +47,8 @@ class AsyncTradierAPI:
         max_retries: int = 3,
         base_delay: float = 1.0,
         max_concurrent: int = 10,  # Optimized from 5 based on benchmarks
+        enable_circuit_breaker: bool = True,
+        enable_rate_limiter: bool = True,
     ):
         self.api_key = api_key or os.getenv('TRADIER_API_KEY')
         if not self.api_key:
@@ -57,6 +67,26 @@ class AsyncTradierAPI:
         self.base_delay = base_delay
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self._session: Optional[aiohttp.ClientSession] = None
+
+        # Circuit breaker - trips after 5 consecutive failures, resets after 60s
+        self._circuit_breaker: Optional[AsyncCircuitBreaker] = None
+        if enable_circuit_breaker:
+            self._circuit_breaker = AsyncCircuitBreaker(
+                failure_threshold=5,
+                recovery_timeout=60,
+                success_threshold=2,
+                expected_exception=(aiohttp.ClientError, asyncio.TimeoutError),
+                name="tradier_api"
+            )
+
+        # Rate limiter - Tradier allows ~120 requests/min, use 2/s with burst of 10
+        self._rate_limiter: Optional[AsyncTokenBucketRateLimiter] = None
+        if enable_rate_limiter:
+            self._rate_limiter = AsyncTokenBucketRateLimiter(
+                rate=2.0,      # 2 requests per second
+                capacity=10,   # Allow burst of 10
+                name="tradier"
+            )
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -81,19 +111,41 @@ class AsyncTradierAPI:
             self._session = None
 
     async def _request_with_retry(self, url: str, params: Dict) -> Dict:
-        """Make request with retry logic."""
+        """Make request with retry logic, circuit breaker, and rate limiting."""
         if not self._session:
             raise RuntimeError("API must be used as async context manager")
+
+        # Check circuit breaker first
+        if self._circuit_breaker and await self._circuit_breaker.is_open():
+            raise CircuitBreakerOpenError(
+                f"Circuit breaker '{self._circuit_breaker.name}' is OPEN"
+            )
 
         last_exception = None
         for attempt in range(self.max_retries + 1):
             try:
+                # Rate limiting - wait for token before making request
+                if self._rate_limiter:
+                    await self._rate_limiter.acquire()
+
                 async with self.semaphore:
                     async with self._session.get(url, params=params) as response:
                         response.raise_for_status()
-                        return await response.json()
+                        result = await response.json()
+
+                        # Success - notify circuit breaker
+                        if self._circuit_breaker:
+                            await self._circuit_breaker._on_success()
+
+                        return result
+
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 last_exception = e
+
+                # Notify circuit breaker of failure
+                if self._circuit_breaker:
+                    await self._circuit_breaker._on_failure()
+
                 if attempt < self.max_retries:
                     delay = self.base_delay * (2 ** attempt)
                     logger.warning(

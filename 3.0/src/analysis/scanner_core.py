@@ -17,6 +17,7 @@ from src.analysis.vrp import VRPResult, Recommendation
 from src.analysis.ml_predictor import MagnitudePrediction
 
 __all__ = [
+    'TradeRecommendation',
     'ScanResult',
     'get_earnings_calendar',
     'find_next_expiration',
@@ -24,7 +25,24 @@ __all__ = [
     'calculate_position_multiplier',
     'assess_edge',
     'get_default_db_path',
+    'generate_trade_recommendation',
 ]
+
+
+@dataclass
+class TradeRecommendation:
+    """Actionable trade recommendation with specific strikes."""
+    strategy: str  # 'short_straddle', 'short_strangle', 'iron_condor'
+    stock_price: float
+    atm_strike: float
+    call_strike: Optional[float]  # For strangle/condor
+    put_strike: Optional[float]   # For strangle/condor
+    straddle_credit: float
+    max_profit: float
+    max_loss: float  # For defined risk trades
+    breakeven_upper: float
+    breakeven_lower: float
+    suggested_size: int  # Number of contracts based on position sizing
 
 
 @dataclass
@@ -47,6 +65,16 @@ class ScanResult:
     # Combined Analysis
     edge_assessment: str
     position_size_multiplier: float
+
+    # Actionable Trade Info (optional - populated by enhanced scanner)
+    stock_price: Optional[float] = None
+    atm_strike: Optional[float] = None
+    straddle_credit: Optional[float] = None
+    trade_recommendation: Optional[TradeRecommendation] = None
+
+    # ML Prediction Intervals (optional)
+    ml_prediction_lower: Optional[float] = None  # 10th percentile
+    ml_prediction_upper: Optional[float] = None  # 90th percentile
 
 
 def get_default_db_path() -> Path:
@@ -270,3 +298,61 @@ def assess_edge(
             assessment += f" | ML confirms historical ({ml_prediction.predicted_move_pct:.1f}%)"
 
     return assessment
+
+
+def generate_trade_recommendation(
+    implied_move: ImpliedMove,
+    vrp_result: VRPResult,
+    position_multiplier: float,
+    base_contracts: int = 1,
+    max_risk_per_trade: float = 5000.0,
+) -> TradeRecommendation:
+    """
+    Generate actionable trade recommendation with specific strikes.
+
+    Args:
+        implied_move: Implied move calculation with prices
+        vrp_result: VRP analysis result
+        position_multiplier: Position size multiplier from VRP/ML
+        base_contracts: Base number of contracts
+        max_risk_per_trade: Maximum risk per trade in dollars
+
+    Returns:
+        TradeRecommendation with specific trade parameters
+    """
+    stock_price = implied_move.stock_price
+    atm_strike = implied_move.atm_strike
+    straddle_credit = implied_move.straddle_cost
+
+    # Calculate breakevens
+    breakeven_upper = atm_strike + straddle_credit
+    breakeven_lower = atm_strike - straddle_credit
+
+    # For short straddle, max profit is the credit received
+    max_profit = straddle_credit * 100  # Per contract
+
+    # Max loss is theoretically unlimited for straddle, but we estimate based on 2x expected move
+    expected_move_dollars = stock_price * (vrp_result.historical_mean_pct / 100)
+    estimated_max_loss = (2 * expected_move_dollars - straddle_credit) * 100
+
+    # Calculate suggested size based on risk and position multiplier
+    adjusted_contracts = max(1, int(base_contracts * position_multiplier))
+
+    # Cap based on max risk per trade
+    if estimated_max_loss > 0:
+        max_contracts_by_risk = int(max_risk_per_trade / estimated_max_loss)
+        adjusted_contracts = min(adjusted_contracts, max(1, max_contracts_by_risk))
+
+    return TradeRecommendation(
+        strategy='short_straddle',
+        stock_price=stock_price,
+        atm_strike=atm_strike,
+        call_strike=atm_strike,  # Same for straddle
+        put_strike=atm_strike,   # Same for straddle
+        straddle_credit=straddle_credit,
+        max_profit=max_profit * adjusted_contracts,
+        max_loss=estimated_max_loss * adjusted_contracts,
+        breakeven_upper=breakeven_upper,
+        breakeven_lower=breakeven_lower,
+        suggested_size=adjusted_contracts,
+    )
