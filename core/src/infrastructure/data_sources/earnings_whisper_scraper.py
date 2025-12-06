@@ -272,11 +272,15 @@ class EarningsWhisperScraper:
         Get most anticipated earnings tickers.
 
         Args:
-            week_monday: Monday in YYYY-MM-DD format (defaults to current week)
+            week_monday: Monday in YYYY-MM-DD format (defaults to upcoming week)
             fallback_image: Path to screenshot image (PNG/JPG)
 
         Returns:
             Result with ticker list or error
+
+        Note:
+            @eWhispers typically posts about the UPCOMING week's earnings,
+            so when no date is specified, we try next week first, then current week.
         """
         if week_monday:
             try:
@@ -286,10 +290,36 @@ class EarningsWhisperScraper:
                     ErrorCode.INVALID,
                     f"Invalid date format: {week_monday}. Use YYYY-MM-DD"
                 ))
+            monday = get_week_monday(target_date)
+            weeks_to_try = [monday]
         else:
-            target_date = datetime.now()
+            # No date specified - try next week first, then current week
+            # @eWhispers posts about upcoming weeks, not past ones
+            current_monday = get_week_monday(datetime.now())
+            next_monday = current_monday + timedelta(days=7)
+            weeks_to_try = [next_monday, current_monday]
+            logger.info(f"No date specified, trying next week ({next_monday.strftime('%Y-%m-%d')}) then current week")
 
-        monday = get_week_monday(target_date)
+        # Try each week in order
+        last_error = None
+        for monday in weeks_to_try:
+            result = self._try_fetch_week(monday, fallback_image)
+            if result.is_ok:
+                return result
+            last_error = result.error
+            logger.debug(f"Week {monday.strftime('%Y-%m-%d')} not found, trying next...")
+
+        return Result.Err(last_error or AppError(
+            ErrorCode.EXTERNAL,
+            "All weeks and methods failed"
+        ))
+
+    def _try_fetch_week(
+        self,
+        monday: datetime,
+        fallback_image: Optional[str] = None
+    ) -> Result[List[str], AppError]:
+        """Try to fetch earnings for a specific week."""
         monday_str = monday.strftime('%Y-%m-%d')
 
         # Check cache first (week-specific key)
