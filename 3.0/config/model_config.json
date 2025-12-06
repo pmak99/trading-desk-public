@@ -1,0 +1,47 @@
+{
+  "magnitude_model": {
+    "model_type": "random_forest",
+    "params": {
+      "n_estimators": 100,
+      "max_depth": 10,
+      "min_samples_split": 5,
+      "min_samples_leaf": 2,
+      "random_state": 42
+    },
+    "target": "move_magnitude",
+    "output": "models/magnitude/rf_magnitude.pkl"
+  },
+  "direction_model": {
+    "model_type": "logistic_regression",
+    "params": {
+      "C": 1.0,
+      "penalty": "l2",
+      "solver": "lbfgs",
+      "max_iter": 1000,
+      "random_state": 42
+    },
+    "target": "move_direction",
+    "output": "models/direction/lr_direction.pkl"
+  },
+  "volatility_model": {
+    "model_type": "gradient_boosting",
+    "params": {
+      "n_estimators": 100,
+      "learning_rate": 0.1,
+      "max_depth": 5,
+      "random_state": 42
+    },
+    "target": "iv_change",
+    "output": "models/volatility/gb_volatility.pkl"
+  },
+  "ensemble": {
+    "strategy": "weighted_average",
+    "weights": {
+      "magnitude": 0.5,
+      "direction": 0.3,
+      "volatility": 0.2
+    },
+    "min_confidence": 0.6,
+    "fallback_to_baseline": true
+  }
+}
