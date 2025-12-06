@@ -5,19 +5,24 @@ Uses Random Forest model trained on historical features to predict
 expected earnings move magnitude.
 """
 
+import os
 import joblib
-import pandas as pd
 import numpy as np
-import sqlite3
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
-from typing import Optional, Dict, Any
-from dataclasses import dataclass, asdict
+from typing import Optional, Dict
+from dataclasses import dataclass
 import logging
 
 from src.data.price_fetcher import PriceFetcher
+from src.utils.db import get_db_connection
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    'MagnitudePrediction',
+    'MLMagnitudePredictor',
+]
 
 
 @dataclass
@@ -41,15 +46,27 @@ class MLMagnitudePredictor:
 
     def __init__(self, models_dir: Optional[Path] = None, db_path: Optional[Path] = None):
         self.models_dir = models_dir or Path(__file__).parent.parent.parent / "models" / "validated"
-        self.db_path = db_path or Path(__file__).parent.parent.parent.parent / "2.0" / "data" / "ivcrush.db"
+        default_db = Path(__file__).parent.parent.parent.parent / "2.0" / "data" / "ivcrush.db"
+        self.db_path = db_path or Path(os.getenv('DB_PATH', str(default_db)))
 
-        # Load model and preprocessing
-        self.model = joblib.load(self.models_dir / "rf_magnitude_validated.pkl")
-        self.imputer = joblib.load(self.models_dir / "imputer_validated.pkl")
+        # Load model and preprocessing with error handling
+        try:
+            self.model = joblib.load(self.models_dir / "rf_magnitude_validated.pkl")
+            self.imputer = joblib.load(self.models_dir / "imputer_validated.pkl")
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"Model files not found at {self.models_dir}. "
+                "Run model training first or check models_dir path."
+            ) from e
 
         # Load feature columns
-        with open(self.models_dir / "feature_columns.txt") as f:
-            self.feature_cols = [line.strip() for line in f if line.strip()]
+        try:
+            with open(self.models_dir / "feature_columns.txt") as f:
+                self.feature_cols = [line.strip() for line in f if line.strip()]
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"Feature columns file not found at {self.models_dir}/feature_columns.txt"
+            ) from e
 
         # Initialize price fetcher for volatility features
         self.price_fetcher = PriceFetcher()
@@ -58,20 +75,17 @@ class MLMagnitudePredictor:
 
     def _get_historical_stats(self, ticker: str, as_of_date: date) -> Dict[str, float]:
         """Calculate historical move statistics for a ticker."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        # Get historical moves before the earnings date
-        cursor.execute("""
-            SELECT close_move_pct, gap_move_pct, intraday_move_pct, earnings_date
-            FROM historical_moves
-            WHERE ticker = ? AND earnings_date < ?
-            ORDER BY earnings_date DESC
-            LIMIT 12
-        """, (ticker, as_of_date.isoformat()))
-
-        rows = cursor.fetchall()
-        conn.close()
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            # Get historical moves before the earnings date
+            cursor.execute("""
+                SELECT close_move_pct, gap_move_pct, intraday_move_pct, earnings_date
+                FROM historical_moves
+                WHERE ticker = ? AND earnings_date < ?
+                ORDER BY earnings_date DESC
+                LIMIT 12
+            """, (ticker, as_of_date.isoformat()))
+            rows = cursor.fetchall()
 
         if not rows:
             return {}
