@@ -20,10 +20,10 @@ class TestKellySizing:
         """Create test configuration with Kelly sizing enabled."""
         return StrategyConfig(
             use_kelly_sizing=True,
-            kelly_fraction=0.25,  # 25% of full Kelly
+            kelly_fraction=0.25,
             kelly_min_edge=0.05,
             kelly_min_contracts=1,
-            risk_budget_per_trade=20000.0,  # $20K account
+            risk_budget_per_trade=20000.0,
             max_contracts=100,
             target_delta_short=0.25,
             target_delta_long=0.20,

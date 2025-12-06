@@ -9,9 +9,10 @@ import logging
 from datetime import date
 from pathlib import Path
 from typing import List, Tuple, Optional
-from contextlib import contextmanager
+
 from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 from src.domain.enums import EarningsTiming
+from src.infrastructure.database.repositories.base_repository import BaseRepository
 
 # TYPE_CHECKING import to avoid circular dependency
 from typing import TYPE_CHECKING
@@ -20,16 +21,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Connection timeout for all database operations (30 seconds)
-CONNECTION_TIMEOUT = 30
 
-
-class EarningsRepository:
+class EarningsRepository(BaseRepository):
     """
     Repository for earnings calendar data.
 
+    Inherits connection management from BaseRepository.
     Supports connection pooling for better concurrent performance.
-    Falls back to direct connections if pool not provided (backward compatible).
     """
 
     def __init__(self, db_path: str | Path, pool: Optional['ConnectionPool'] = None):
@@ -40,28 +38,7 @@ class EarningsRepository:
             db_path: Path to SQLite database
             pool: Optional connection pool (uses direct connections if None)
         """
-        self.db_path = str(db_path)
-        self.pool = pool
-
-    @contextmanager
-    def _get_connection(self):
-        """
-        Get database connection from pool or create direct connection.
-
-        Yields:
-            Database connection
-        """
-        if self.pool:
-            # Use connection pool
-            with self.pool.get_connection() as conn:
-                yield conn
-        else:
-            # Fallback to direct connection
-            conn = sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT)
-            try:
-                yield conn
-            finally:
-                conn.close()
+        super().__init__(db_path, pool)
 
     def save_earnings_event(
         self, ticker: str, earnings_date: date, timing: EarningsTiming
@@ -158,7 +135,7 @@ class EarningsRepository:
             Result with list of (ticker, date) tuples
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
@@ -179,8 +156,7 @@ class EarningsRepository:
             return Ok(results)
 
         except sqlite3.Error as e:
-            logger.error(f"Failed to get upcoming earnings: {e}")
-            return Err(AppError(ErrorCode.DBERROR, str(e)))
+            return self._db_error(e, "get upcoming earnings")
 
     def delete_old_earnings(self, days_old: int = 365) -> Result[int, AppError]:
         """
@@ -192,22 +168,11 @@ class EarningsRepository:
         Returns:
             Result with count of deleted rows
         """
-        try:
-            with sqlite3.connect(self.db_path, timeout=CONNECTION_TIMEOUT) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    '''
-                    DELETE FROM earnings_calendar
-                    WHERE earnings_date < date('now', '-' || ? || ' days')
-                    ''',
-                    (days_old,),
-                )
-                deleted_count = cursor.rowcount
-                conn.commit()
-
-            logger.info(f"Deleted {deleted_count} old earnings events")
-            return Ok(deleted_count)
-
-        except sqlite3.Error as e:
-            logger.error(f"Failed to delete old earnings: {e}")
-            return Err(AppError(ErrorCode.DBERROR, str(e)))
+        return self._execute_delete(
+            '''
+            DELETE FROM earnings_calendar
+            WHERE earnings_date < date('now', '-' || ? || ' days')
+            ''',
+            (days_old,),
+            operation="delete old earnings",
+        )

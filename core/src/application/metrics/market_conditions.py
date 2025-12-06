@@ -18,6 +18,7 @@ from typing import Optional
 from src.domain.types import Percentage
 from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 from src.domain.protocols import OptionsDataProvider
+from src.domain.vix_regime import classify_vix_regime
 
 logger = logging.getLogger(__name__)
 
@@ -163,28 +164,15 @@ class MarketConditionsAnalyzer:
         """
         Classify volatility regime based on VIX level.
 
+        Delegates to shared utility for consistency across application.
+
         Args:
             vix_level: Current VIX level
 
         Returns:
-            Regime name (low/normal/elevated/high)
+            Regime name (very_low/low/normal/normal_high/elevated/elevated_high/high/extreme)
         """
-        if vix_level < 12:
-            return "very_low"
-        elif vix_level < 15:
-            return "low"
-        elif vix_level < 20:
-            return "normal"
-        elif vix_level < 25:
-            return "normal_high"
-        elif vix_level < 30:
-            return "elevated"
-        elif vix_level < 35:
-            return "elevated_high"
-        elif vix_level < 40:
-            return "high"
-        else:
-            return "extreme"
+        return classify_vix_regime(vix_level)
 
     def _calculate_regime_score(self, vix_level: float) -> float:
         """

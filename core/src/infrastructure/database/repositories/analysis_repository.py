@@ -19,31 +19,34 @@ Enables later meta-analysis:
 import logging
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, List, Dict, Any
+
 from src.domain.types import TickerAnalysis, Strategy, StrategyRecommendation
 from src.application.metrics.market_conditions import MarketConditions
+from src.infrastructure.database.repositories.base_repository import ResilientRepository
 
 logger = logging.getLogger(__name__)
 
 
-class AnalysisRepository:
+class AnalysisRepository(ResilientRepository):
     """
     Repository for persisting analysis results to database.
 
+    Inherits resilient failure handling from ResilientRepository.
     Stores complete analysis metadata for later review and optimization.
     """
 
-    def __init__(self, db_path: str, max_failures: int = 10):
+    def __init__(self, db_path: str | Path, pool=None, max_failures: int = 10):
         """
         Initialize repository with database path.
 
         Args:
             db_path: Path to SQLite database
+            pool: Optional connection pool (uses direct connections if None)
             max_failures: Maximum consecutive failures before critical alert
         """
-        self.db_path = db_path
-        self.failure_count = 0
-        self.max_failures = max_failures
+        super().__init__(db_path, pool=pool, max_failures=max_failures)
 
     def log_analysis(
         self,
@@ -60,7 +63,7 @@ class AnalysisRepository:
             selected_strategy: Strategy selected for execution (optional)
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 # Extract key metrics
@@ -152,24 +155,12 @@ class AnalysisRepository:
                 conn.commit()
                 logger.debug(f"Logged analysis for {analysis.ticker} to database")
 
-                # Reset failure count on success
-                self.failure_count = 0
+                # Reset failure count on success (inherited from ResilientRepository)
+                self._record_success()
 
         except Exception as e:
-            # Increment failure counter
-            self.failure_count += 1
-
-            # Check if we've hit the failure threshold
-            if self.failure_count >= self.max_failures:
-                logger.critical(
-                    f"Database logging has failed {self.failure_count} consecutive times! "
-                    f"Last error: {e}. Database may be unavailable or corrupted - investigate immediately!"
-                )
-            else:
-                logger.error(
-                    f"Failed to log analysis for {analysis.ticker} ({self.failure_count}/{self.max_failures}): {e}"
-                )
-
+            # Record failure using inherited method
+            self._record_failure(e, f"log analysis for {analysis.ticker}")
             # Don't raise - logging failure shouldn't break analysis
 
     def get_recent_analyses(
