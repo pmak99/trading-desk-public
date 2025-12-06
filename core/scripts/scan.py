@@ -702,16 +702,18 @@ def fetch_earnings_for_date(
 
 def fetch_earnings_for_ticker(
     container: Container,
-    ticker: str,
-    cached_calendar: Optional[List[Tuple[str, date, EarningsTiming]]] = None
+    ticker: str
 ) -> Optional[Tuple[date, EarningsTiming]]:
     """
     Fetch earnings date for a specific ticker.
 
+    Priority:
+    1. Database (validated, cross-referenced source of truth)
+    2. Alpha Vantage API (fallback for tickers not in DB)
+
     Args:
         container: DI container
         ticker: Stock ticker symbol
-        cached_calendar: Optional pre-fetched full calendar to filter from
 
     Returns:
         (earnings_date, timing) tuple or None if not found
@@ -742,23 +744,7 @@ def fetch_earnings_for_ticker(
     except Exception as e:
         logger.debug(f"DB lookup failed for {ticker}: {e}")
 
-    # PRIORITY 2: If we have a cached full calendar, filter it locally (much faster)
-    if cached_calendar is not None:
-        ticker_earnings = [
-            (sym, dt, timing) for sym, dt, timing in cached_calendar
-            if sym == ticker
-        ]
-        if ticker_earnings:
-            # Sort by date and get nearest
-            ticker_earnings.sort(key=lambda x: x[1])
-            ticker_symbol, earnings_date, timing = ticker_earnings[0]
-            logger.info(f"{ticker}: Earnings on {earnings_date} ({timing.value})")
-            return (earnings_date, timing)
-        else:
-            logger.warning(f"No upcoming earnings found for {ticker}")
-            return None
-
-    # Fallback: individual API call (slower, more API calls)
+    # PRIORITY 2: Fallback to Alpha Vantage API
     alpha_vantage = container.alphavantage
     result = alpha_vantage.get_earnings_calendar(symbol=ticker, horizon="3month")
 
@@ -773,7 +759,7 @@ def fetch_earnings_for_ticker(
 
     # Get the nearest earnings date
     ticker_symbol, earnings_date, timing = earnings[0]
-    logger.info(f"{ticker}: Earnings on {earnings_date} ({timing.value})")
+    logger.info(f"{ticker}: Earnings on {earnings_date} ({timing.value}) [from API]")
     return (earnings_date, timing)
 
 
@@ -1352,26 +1338,6 @@ def ticker_mode(
     logger.info(f"Tickers: {', '.join(tickers)}")
     logger.info("")
 
-    # Use shared cache for earnings data
-    shared_cache = get_shared_cache(container)
-
-    # Fetch full earnings calendar ONCE and cache it
-    logger.info("Fetching full earnings calendar...")
-    cache_key = f"earnings_calendar:{date.today().isoformat()}"
-    full_calendar = shared_cache.get(cache_key)
-
-    if full_calendar is None:
-        logger.info("Cache MISS - fetching from Alpha Vantage...")
-        calendar_result = container.alphavantage.get_earnings_calendar(horizon="3month")
-        if calendar_result.is_err:
-            logger.error(f"Failed to fetch earnings calendar: {calendar_result.error}")
-            return 1
-        full_calendar = calendar_result.value
-        shared_cache.set(cache_key, full_calendar)
-        logger.info(f"✓ Fetched {len(full_calendar)} total earnings events (cached)")
-    else:
-        logger.info(f"✓ Cache HIT - using cached calendar ({len(full_calendar)} events)")
-
     # Analyze each ticker
     results = []
     success_count = 0
@@ -1394,8 +1360,8 @@ def ticker_mode(
         pbar.set_postfix_str(f"Current: {ticker}")
         sys.stderr.flush()  # Force flush after each update
 
-        # Fetch earnings date for ticker (using cached full calendar - no API call!)
-        earnings_info = fetch_earnings_for_ticker(container, ticker, cached_calendar=full_calendar)
+        # Fetch earnings date for ticker (DB first, API fallback)
+        earnings_info = fetch_earnings_for_ticker(container, ticker)
 
         if not earnings_info:
             skip_count += 1
@@ -1628,13 +1594,9 @@ def whisper_mode(
     logger.info(f"Week: {monday.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
     if fallback_image:
         logger.info(f"Fallback: {fallback_image}")
-    logger.info("")
-
-    # Use shared cache for earnings data
-    shared_cache = get_shared_cache(container)
 
     logger.info("Fetching ticker list...")
-    scraper = EarningsWhisperScraper(cache=shared_cache)
+    scraper = EarningsWhisperScraper()
     result = scraper.get_most_anticipated_earnings(
         week_monday=monday.strftime("%Y-%m-%d"),
         fallback_image=fallback_image
@@ -1661,24 +1623,6 @@ def whisper_mode(
 
     logger.info(f"✓ Retrieved {len(tickers)} most anticipated tickers")
     logger.info(f"Tickers: {', '.join(tickers)}")
-    logger.info("")
-
-    # Fetch full earnings calendar ONCE and cache it
-    logger.info("Fetching full earnings calendar...")
-    cache_key = f"earnings_calendar:{date.today().isoformat()}"
-    full_calendar = shared_cache.get(cache_key)
-
-    if full_calendar is None:
-        logger.info("Cache MISS - fetching from Alpha Vantage...")
-        calendar_result = container.alphavantage.get_earnings_calendar(horizon="3month")
-        if calendar_result.is_err:
-            logger.error(f"Failed to fetch earnings calendar: {calendar_result.error}")
-            return 1
-        full_calendar = calendar_result.value
-        shared_cache.set(cache_key, full_calendar)
-        logger.info(f"✓ Fetched {len(full_calendar)} total earnings events (cached)")
-    else:
-        logger.info(f"✓ Cache HIT - using cached calendar ({len(full_calendar)} events)")
 
     # Analyze each ticker
     results = []
@@ -1702,8 +1646,8 @@ def whisper_mode(
         pbar.set_postfix_str(f"Current: {ticker}")
         sys.stderr.flush()  # Force flush after each update
 
-        # Fetch earnings date for ticker (using cached full calendar - no API call!)
-        earnings_info = fetch_earnings_for_ticker(container, ticker, cached_calendar=full_calendar)
+        # Fetch earnings date for ticker (DB first, API fallback)
+        earnings_info = fetch_earnings_for_ticker(container, ticker)
 
         if not earnings_info:
             skip_count += 1
