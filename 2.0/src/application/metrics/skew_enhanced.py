@@ -261,18 +261,21 @@ class SkewAnalyzerEnhanced:
             strength = "smirk"  # Normal asymmetric skew
 
         # Determine directional bias with 7-level strength scale
+        # NOTE: In typical equity skew, OTM puts have higher IV than OTM calls
+        # - Negative slope (skew decreases as strikes increase) = bearish protection demand
+        # - Positive slope (skew increases as strikes increase) = bullish call demand
         abs_slope = abs(slope_atm)
 
         if abs_slope <= self.THRESHOLD_NEUTRAL:
             directional_bias = DirectionalBias.NEUTRAL
-        elif slope_atm > 0:  # Positive slope = put bias (puts more expensive)
+        elif slope_atm < 0:  # Negative slope = put skew (bearish protection)
             if abs_slope > self.THRESHOLD_STRONG:
                 directional_bias = DirectionalBias.STRONG_BEARISH
             elif abs_slope > self.THRESHOLD_WEAK:
                 directional_bias = DirectionalBias.BEARISH
             else:  # THRESHOLD_NEUTRAL < abs_slope <= THRESHOLD_WEAK
                 directional_bias = DirectionalBias.WEAK_BEARISH
-        else:  # Negative slope = call bias (calls more expensive)
+        else:  # Positive slope = call skew (bullish speculation)
             if abs_slope > self.THRESHOLD_STRONG:
                 directional_bias = DirectionalBias.STRONG_BULLISH
             elif abs_slope > self.THRESHOLD_WEAK:

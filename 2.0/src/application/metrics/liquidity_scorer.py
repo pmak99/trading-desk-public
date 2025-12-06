@@ -72,13 +72,13 @@ class LiquidityScorer:
         self,
         min_oi: int = 50,
         good_oi: int = 500,
-        excellent_oi: int = 2000,
+        excellent_oi: int = 1000,  # Lowered from 2000 (less conservative)
         min_volume: int = 20,
         good_volume: int = 100,
-        excellent_volume: int = 500,
+        excellent_volume: int = 250,  # Lowered from 500 (less conservative)
         max_spread_pct: float = 10.0,
         good_spread_pct: float = 5.0,
-        excellent_spread_pct: float = 2.0,
+        excellent_spread_pct: float = 3.0,  # Raised from 2.0 (less strict)
     ):
         """
         Initialize liquidity scorer with thresholds.
@@ -207,7 +207,7 @@ class LiquidityScorer:
         Classify liquidity into 3-tier system (EXCELLENT/WARNING/REJECT).
 
         This is the single source of truth for tier classification across all modes.
-        Uses strict threshold-based rules (not score-based) for consistency.
+        Uses 2-out-of-3 rule for EXCELLENT tier to be less conservative.
 
         Args:
             oi: Open interest
@@ -217,17 +217,24 @@ class LiquidityScorer:
         Returns:
             "EXCELLENT", "WARNING", or "REJECT"
         """
-        # EXCELLENT tier: All metrics meet excellent thresholds
-        if (oi >= self.excellent_oi
-            and volume >= self.excellent_volume
-            and spread_pct <= self.excellent_spread_pct):
-            return "EXCELLENT"
-
         # REJECT tier: Any metric fails minimum thresholds
         if (oi < self.min_oi
             or volume < self.min_volume
             or spread_pct > self.max_spread_pct):
             return "REJECT"
+
+        # EXCELLENT tier: At least 2 out of 3 metrics meet excellent thresholds
+        # This is less conservative than requiring all 3
+        excellent_count = 0
+        if oi >= self.excellent_oi:
+            excellent_count += 1
+        if volume >= self.excellent_volume:
+            excellent_count += 1
+        if spread_pct <= self.excellent_spread_pct:
+            excellent_count += 1
+
+        if excellent_count >= 2:
+            return "EXCELLENT"
 
         # WARNING tier: Meets minimums but not excellent
         return "WARNING"
