@@ -41,9 +41,9 @@ This provides:
 - Liquidity tier for each
 - Quality score ranking
 
-### Step 4: Identify TOP 3 VRP > 4x Tickers
-From scan results, identify the top 3 tickers where:
-- VRP >= 4.0x (GOOD or EXCELLENT tier)
+### Step 4: Identify TOP 5 VRP >= 3x Tickers
+From scan results, identify the top 5 tickers where:
+- VRP >= 3.0x (discovery threshold)
 - Liquidity != REJECT
 
 ### Step 5: Add Sentiment for TOP 3 (Conditional)
@@ -108,7 +108,7 @@ Legend: ⭐ EXCELLENT (≥7x) | ✓ GOOD (≥4x) | ○ MARGINAL (≥1.5x) | 🚫
 
 📊 SUMMARY
    Total earnings: {N}
-   VRP > 4x: {M} tickers
+   VRP >= 3x: {M} tickers
    Liquidity REJECT: {R} tickers (avoid)
 
 🔝 TOP 3 OPPORTUNITIES
@@ -138,6 +138,6 @@ Legend: ⭐ EXCELLENT (≥7x) | ✓ GOOD (≥4x) | ○ MARGINAL (≥1.5x) | 🚫
 
 ## Cost Control
 - Maximum 3 Perplexity calls (top 3 only)
-- Only for VRP >= 4x AND Liquidity != REJECT
+- Only for VRP >= 3x AND Liquidity != REJECT (discovery threshold)
 - Cache-aware to avoid duplicate calls
 - If already primed with `/prime`, all sentiment from cache

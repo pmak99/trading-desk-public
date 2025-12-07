@@ -173,8 +173,8 @@ TOP PICK: NVDA (Dec 10 AMC)
 ```
 
 ## Cost Control
-- Maximum 3 Perplexity calls (top 3 only)
-- Only for VRP >= 4x AND Liquidity != REJECT
+- Maximum 5 Perplexity calls (top 5 only)
+- Only for VRP >= 3x AND Liquidity != REJECT (discovery threshold)
 - Cache hits are instant and free
 - After `/prime`, all sentiment comes from cache
 

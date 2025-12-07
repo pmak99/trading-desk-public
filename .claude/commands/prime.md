@@ -63,10 +63,10 @@ This provides:
 
 ### Step 5: Filter Qualified Tickers
 From scan results, filter to tickers where:
-- VRP >= 4.0x (GOOD or EXCELLENT tier)
+- VRP >= 3.0x (discovery threshold for sentiment priming)
 - Liquidity != REJECT
 
-These are worth caching sentiment for.
+Note: 3x is the discovery threshold for priming. Position sizing still uses 4x rule.
 
 ### Step 6: Check Budget Status
 ```bash
@@ -160,7 +160,7 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
 
 📊 SCAN RESULTS
    Earnings found: {N} tickers
-   VRP > 4x qualified: {M} tickers
+   VRP >= 3x qualified: {M} tickers
    Liquidity REJECT: {R} tickers (excluded)
 
 🔄 FETCHING SENTIMENT
@@ -189,11 +189,12 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
 ```
 
 ## Cost Control
-- Only primes VRP >= 4x tickers (no wasted calls on low-edge trades)
+- Only primes VRP >= 3x tickers (discovery threshold, captures more opportunities)
+- Position sizing still uses 4x rule (3x is for discovery, not full sizing)
 - Skips already-cached tickers (no duplicate calls)
 - Skips non-trading days entirely (save budget)
 - Shows budget status after completion
-- Typically 3-8 calls per day depending on earnings density
+- Typically 5-12 calls per day depending on earnings density
 
 ## Weekend/Holiday Handling
 - Detects via `mcp__alpaca__alpaca_get_clock`
