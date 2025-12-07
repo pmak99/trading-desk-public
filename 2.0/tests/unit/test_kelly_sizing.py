@@ -74,6 +74,16 @@ class TestKellySizing:
         - 75% POP
         - 0.40 reward/risk (40% return)
         - Strong edge
+
+        Using EV-based sizing (not traditional Kelly):
+        - EV = 0.75 * 200 - 0.25 * 300 = 150 - 75 = $75 per spread
+        - EV% = 75/300 = 25% (excellent edge)
+        - pop_scale = 0.5 + (0.75 - 0.70) * 2.5 = 0.625
+        - ev_scale = 1.0 (EV% >= 5%)
+        - quality_scale = 0.625 * 1.0 = 0.625
+        - position_fraction = 0.25 * 0.625 = 0.15625
+        - base_contracts = 20000 / 300 = 66.67
+        - contracts = 66.67 * 0.15625 ≈ 10
         """
         max_profit = Money(200.0)   # $2.00 credit
         max_loss = Money(300.0)     # $3.00 max loss
@@ -81,15 +91,8 @@ class TestKellySizing:
 
         contracts = generator._calculate_contracts_kelly(max_profit, max_loss, pop)
 
-        # b = 200/300 = 0.6667
-        # edge = 0.75 * 0.6667 - 0.25 = 0.50 - 0.25 = 0.25 (25% edge)
-        # kelly_full = 0.25 / 0.6667 = 0.375 (37.5% of capital)
-        # kelly_frac = 0.375 * 0.25 = 0.09375 (9.375% of capital)
-        # position_size = 0.09375 * $20,000 = $1,875
-        # contracts = $1,875 / $300 = 6.25 → 6 contracts
-
-        assert contracts >= 6, f"Expected ~6 contracts, got {contracts}"
-        assert contracts <= 7, f"Expected ~6 contracts, got {contracts}"
+        assert contracts >= 8, f"Expected ~10 contracts with excellent edge, got {contracts}"
+        assert contracts <= 12, f"Expected ~10 contracts with excellent edge, got {contracts}"
 
     def test_kelly_marginal_edge(self, generator):
         """
@@ -169,6 +172,16 @@ class TestKellySizing:
         - Collects $2.00 total credit
         - Max loss $3.00 (width - credit)
         - 65% POP
+
+        Using EV-based sizing:
+        - EV = 0.65 * 200 - 0.35 * 300 = 130 - 105 = $25 per spread
+        - EV% = 25/300 = 8.33% (positive edge)
+        - pop_scale = 0.3 (POP < 70%)
+        - ev_scale = 1.0 (EV% >= 5%)
+        - quality_scale = 0.3 * 1.0 = 0.3
+        - position_fraction = 0.25 * 0.3 = 0.075
+        - base_contracts = 20000 / 300 = 66.67
+        - contracts = 66.67 * 0.075 ≈ 5
         """
         max_profit = Money(200.0)   # $2.00 credit
         max_loss = Money(300.0)     # $3.00 max loss
@@ -176,15 +189,8 @@ class TestKellySizing:
 
         contracts = generator._calculate_contracts_kelly(max_profit, max_loss, pop)
 
-        # b = 200/300 = 0.6667
-        # edge = 0.65 * 0.6667 - 0.35 = 0.4333 - 0.35 = 0.0833 (8.33% edge)
-        # kelly_full = 0.0833 / 0.6667 = 0.125 (12.5% of capital)
-        # kelly_frac = 0.125 * 0.25 = 0.03125 (3.125% of capital)
-        # position_size = 0.03125 * $20,000 = $625
-        # contracts = $625 / $300 = 2.08 → 2 contracts
-
-        assert contracts >= 2, f"Expected ~2 contracts for iron condor, got {contracts}"
-        assert contracts <= 3, f"Expected ~2 contracts for iron condor, got {contracts}"
+        assert contracts >= 4, f"Expected ~5 contracts for iron condor, got {contracts}"
+        assert contracts <= 6, f"Expected ~5 contracts for iron condor, got {contracts}"
 
     def test_kelly_invalid_max_loss(self, generator):
         """Test handling of invalid (zero/negative) max_loss."""

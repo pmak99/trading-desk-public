@@ -97,23 +97,26 @@ class TestCalculateExpirationDate:
         # Friday + 1 = Saturday, should adjust to Monday
         assert result == date(2025, 1, 13)
 
-    def test_bmo_on_friday_same_day(self):
-        """BMO on Friday should use same day (0DTE)."""
+    def test_bmo_on_friday_next_friday(self):
+        """BMO on Friday should use Friday 1 week out (avoid 0DTE risk)."""
         earnings = date(2025, 1, 10)  # Friday
         result = calculate_expiration_date(earnings, EarningsTiming.BMO)
-        assert result == earnings
+        # Fri + 7 days = next Friday (Jan 17)
+        assert result == date(2025, 1, 17)
 
-    def test_bmo_on_thursday_next_friday(self):
-        """BMO on Thursday should use next Friday."""
+    def test_bmo_on_thursday_next_week_friday(self):
+        """BMO on Thursday should use Friday 1 week out (avoid 0DTE risk)."""
         earnings = date(2025, 1, 9)  # Thursday
         result = calculate_expiration_date(earnings, EarningsTiming.BMO)
-        assert result == date(2025, 1, 10)  # Friday
+        # Thu + 8 days = next Friday (Jan 17)
+        assert result == date(2025, 1, 17)
 
-    def test_amc_on_thursday_next_day(self):
-        """AMC on Thursday should use next day (Friday, 1DTE)."""
+    def test_amc_on_thursday_next_week_friday(self):
+        """AMC on Thursday should use Friday 1 week out (avoid 0DTE risk)."""
         earnings = date(2025, 1, 9)  # Thursday
         result = calculate_expiration_date(earnings, EarningsTiming.AMC)
-        assert result == date(2025, 1, 10)  # Friday
+        # Thu + 8 days = next Friday (Jan 17)
+        assert result == date(2025, 1, 17)
 
     def test_amc_on_monday_next_friday(self):
         """AMC on Monday should use next Friday."""
@@ -245,7 +248,7 @@ class TestIntegrationScenarios:
         assert validation is None
 
     def test_thursday_amc_auto_calculation(self):
-        """Thursday AMC should auto-calculate to Friday 1DTE."""
+        """Thursday AMC should auto-calculate to Friday 1 week out (avoid 0DTE risk)."""
         # Find next Thursday
         today = date.today()
         days_to_thursday = (3 - today.weekday()) % 7
@@ -256,8 +259,8 @@ class TestIntegrationScenarios:
         # Calculate expiration (no offset)
         expiration = calculate_expiration_date(thursday, EarningsTiming.AMC)
 
-        # Should be Friday (next day)
-        expected_friday = thursday + timedelta(days=1)
+        # Thursday + 8 days = Friday 1 week out (avoids 0DTE risk)
+        expected_friday = thursday + timedelta(days=8)
         assert expiration == expected_friday
         assert expiration.weekday() == 4  # Friday
 

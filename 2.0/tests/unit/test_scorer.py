@@ -61,12 +61,18 @@ class TestVRPScore:
         assert 50.0 < score < 75.0
 
     def test_poor_vrp(self, scorer):
-        """VRP < 1.2x should score 0-50."""
+        """VRP < 1.0x should score 0 (negative edge)."""
+        # VRP < 1.0 means implied vol is LESS than historical (negative edge)
         score = scorer.calculate_vrp_score(0.5)
-        assert 0.0 < score < 50.0
+        assert score == 0.0  # Below 1.0x = no edge
 
         score = scorer.calculate_vrp_score(0.0)
         assert score == 0.0
+
+    def test_between_1_and_marginal_vrp(self, scorer):
+        """VRP between 1.0x and marginal (1.2x) should interpolate 0-50."""
+        score = scorer.calculate_vrp_score(1.1)  # Between 1.0 and 1.2
+        assert 0.0 < score < 50.0
 
     def test_invalid_vrp(self, scorer):
         """Negative or None VRP should score 0."""
@@ -102,9 +108,13 @@ class TestConsistencyScore:
         assert 50.0 < score < 75.0
 
     def test_poor_consistency(self, scorer):
-        """Consistency < 0.4 should score 0-50."""
+        """Consistency < 0.4 (marginal threshold) should score 0."""
+        # Below marginal = no meaningful consistency
         score = scorer.calculate_consistency_score(0.2)
-        assert 0.0 < score < 50.0
+        assert score == 0.0
+
+        score = scorer.calculate_consistency_score(0.0)
+        assert score == 0.0
 
     def test_invalid_consistency(self, scorer):
         """Negative or None consistency should score 0."""

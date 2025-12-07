@@ -150,7 +150,7 @@ class TestVRPCalculator:
             lower_bound=Money(90.0),
         )
 
-        # Historical moves: 5% average
+        # Historical moves: 5% average (close_move_pct is the default metric)
         historical_moves = [
             HistoricalMove(
                 ticker=ticker,
@@ -159,10 +159,10 @@ class TestVRPCalculator:
                 earnings_open=Money(100.0),
                 earnings_high=Money(102.5),
                 earnings_low=Money(97.5),
-                earnings_close=Money(100.0),
+                earnings_close=Money(105.0),  # 5% close move
                 intraday_move_pct=Percentage(5.0),
                 gap_move_pct=Percentage(0.0),
-                close_move_pct=Percentage(0.0),
+                close_move_pct=Percentage(5.0),  # Default metric used by VRP
             )
             for i in range(1, 5)
         ]
@@ -175,13 +175,16 @@ class TestVRPCalculator:
         assert result.is_ok
         vrp = result.value
 
-        # VRP ratio = 10% / 5% = 2.0x (excellent)
+        # VRP ratio = 10% / 5% = 2.0x (marginal since excellent threshold is 7.0x)
         assert vrp.vrp_ratio == pytest.approx(2.0, abs=0.01)
-        assert vrp.recommendation == Recommendation.EXCELLENT
-        assert vrp.is_tradeable
+        # Note: Default thresholds are excellent=7.0x, good=4.0x, marginal=1.5x
+        # 2.0x falls in MARGINAL category (>= 1.5x but < 4.0x)
+        assert vrp.recommendation == Recommendation.MARGINAL
+        # MARGINAL is NOT tradeable - only EXCELLENT and GOOD are
+        assert not vrp.is_tradeable
 
     def test_calculate_good_vrp(self):
-        """Test VRP with good opportunity (1.5x-2.0x)."""
+        """Test VRP with good opportunity (4.0x-7.0x threshold)."""
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
@@ -199,7 +202,7 @@ class TestVRPCalculator:
             lower_bound=Money(92.5),
         )
 
-        # Historical moves: 5% average
+        # Historical moves: 5% average (close_move_pct is the default metric)
         historical_moves = [
             HistoricalMove(
                 ticker=ticker,
@@ -208,10 +211,10 @@ class TestVRPCalculator:
                 earnings_open=Money(100.0),
                 earnings_high=Money(102.5),
                 earnings_low=Money(97.5),
-                earnings_close=Money(100.0),
+                earnings_close=Money(105.0),  # 5% close move
                 intraday_move_pct=Percentage(5.0),
                 gap_move_pct=Percentage(0.0),
-                close_move_pct=Percentage(0.0),
+                close_move_pct=Percentage(5.0),  # Default metric used by VRP
             )
             for i in range(1, 5)
         ]
@@ -224,13 +227,16 @@ class TestVRPCalculator:
         assert result.is_ok
         vrp = result.value
 
-        # VRP ratio = 7.5% / 5% = 1.5x (good)
+        # VRP ratio = 7.5% / 5% = 1.5x (marginal - exactly at threshold)
         assert vrp.vrp_ratio == pytest.approx(1.5, abs=0.01)
-        assert vrp.recommendation == Recommendation.GOOD
-        assert vrp.is_tradeable
+        # Default thresholds: excellent=7.0x, good=4.0x, marginal=1.5x
+        # 1.5x is exactly at MARGINAL threshold
+        assert vrp.recommendation == Recommendation.MARGINAL
+        # MARGINAL is NOT tradeable - only EXCELLENT and GOOD are
+        assert not vrp.is_tradeable
 
     def test_calculate_skip_vrp(self):
-        """Test VRP with insufficient edge (<1.2x)."""
+        """Test VRP with insufficient edge (<1.5x)."""
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
@@ -248,7 +254,7 @@ class TestVRPCalculator:
             lower_bound=Money(95.0),
         )
 
-        # Historical moves: 5% average (no edge)
+        # Historical moves: 5% average (no edge) - using close_move_pct
         historical_moves = [
             HistoricalMove(
                 ticker=ticker,
@@ -257,10 +263,10 @@ class TestVRPCalculator:
                 earnings_open=Money(100.0),
                 earnings_high=Money(102.5),
                 earnings_low=Money(97.5),
-                earnings_close=Money(100.0),
+                earnings_close=Money(105.0),  # 5% close move
                 intraday_move_pct=Percentage(5.0),
                 gap_move_pct=Percentage(0.0),
-                close_move_pct=Percentage(0.0),
+                close_move_pct=Percentage(5.0),  # Default metric used by VRP
             )
             for i in range(1, 5)
         ]
@@ -273,7 +279,7 @@ class TestVRPCalculator:
         assert result.is_ok
         vrp = result.value
 
-        # VRP ratio = 5% / 5% = 1.0x (skip)
+        # VRP ratio = 5% / 5% = 1.0x (skip - below marginal threshold of 1.5x)
         assert vrp.vrp_ratio == pytest.approx(1.0, abs=0.01)
         assert vrp.recommendation == Recommendation.SKIP
         assert not vrp.is_tradeable

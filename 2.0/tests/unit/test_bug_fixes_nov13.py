@@ -96,7 +96,12 @@ class TestBugFix4SkewAnalysisDirectionalBias:
     def test_strategy_generator_determine_bias_method_exists(self):
         """Verify StrategyGenerator has _determine_bias method."""
         from src.application.services.strategy_generator import StrategyGenerator
-        generator = StrategyGenerator()
+        from src.config.config import StrategyConfig
+        from src.application.metrics.liquidity_scorer import LiquidityScorer
+        # StrategyGenerator now requires config and liquidity_scorer
+        config = StrategyConfig()
+        liquidity_scorer = LiquidityScorer()
+        generator = StrategyGenerator(config, liquidity_scorer)
         assert hasattr(generator, '_determine_bias')
         assert callable(getattr(generator, '_determine_bias'))
 
@@ -105,7 +110,7 @@ class TestBugFix4SkewAnalysisDirectionalBias:
         from src.application.metrics.skew_enhanced import SkewAnalysis
         from src.domain.types import Money, Percentage
 
-        # Create a sample SkewAnalysis
+        # Create a sample SkewAnalysis with new required fields
         skew = SkewAnalysis(
             ticker="TEST",
             expiration=date(2025, 11, 20),
@@ -113,20 +118,31 @@ class TestBugFix4SkewAnalysisDirectionalBias:
             skew_atm=Percentage(0.5),
             curvature=0.1,
             strength="smirk",
-            directional_bias="put_bias",  # This is the key attribute
+            directional_bias=DirectionalBias.BEARISH,  # Now uses enum
             confidence=0.95,
-            num_points=10
+            num_points=10,
+            slope_atm=0.05,  # New required field
+            bias_confidence=0.8,  # New required field
         )
 
         assert hasattr(skew, 'directional_bias')
-        assert skew.directional_bias == "put_bias"
+        assert skew.directional_bias == DirectionalBias.BEARISH
 
     def test_skew_analysis_directional_bias_values(self):
-        """Verify SkewAnalysis supports all directional_bias values."""
+        """Verify SkewAnalysis supports all DirectionalBias enum values."""
         from src.application.metrics.skew_enhanced import SkewAnalysis
         from src.domain.types import Money, Percentage
 
-        valid_biases = ["put_bias", "call_bias", "neutral"]
+        # DirectionalBias now has 7 levels
+        valid_biases = [
+            DirectionalBias.STRONG_BEARISH,
+            DirectionalBias.BEARISH,
+            DirectionalBias.WEAK_BEARISH,
+            DirectionalBias.NEUTRAL,
+            DirectionalBias.WEAK_BULLISH,
+            DirectionalBias.BULLISH,
+            DirectionalBias.STRONG_BULLISH,
+        ]
 
         for bias in valid_biases:
             skew = SkewAnalysis(
@@ -138,7 +154,9 @@ class TestBugFix4SkewAnalysisDirectionalBias:
                 strength="smirk",
                 directional_bias=bias,
                 confidence=0.95,
-                num_points=10
+                num_points=10,
+                slope_atm=0.05,
+                bias_confidence=0.8,
             )
             assert skew.directional_bias == bias
 

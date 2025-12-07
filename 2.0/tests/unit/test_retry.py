@@ -7,6 +7,9 @@ from unittest.mock import Mock
 
 from src.utils.retry import async_retry, sync_retry
 
+# Mark all async tests with pytest-asyncio
+pytestmark = pytest.mark.asyncio
+
 
 class TestSyncRetry:
     """Tests for sync_retry decorator."""

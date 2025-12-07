@@ -231,13 +231,20 @@ class TestLiquidityScoring:
         assert 70.0 <= score <= 80.0
 
     def test_liquidity_marginal_50_points(self, scorer):
-        """Marginal liquidity (OI >= 100, spread <= 15%, vol >= 50) gets ~50 points."""
+        """Marginal liquidity (OI >= 100, spread <= 15%, vol >= 50) gets ~38 points.
+
+        With 4-tier scoring:
+        - OI 100: 2.5 pts (just above min, below warning tier)
+        - Spread 15%: 5.0 pts (warning tier)
+        - Volume 50: 2.0 pts (at min)
+        Total: 9.5 * 4 = 38.0
+        """
         score = scorer.calculate_liquidity_score(
             open_interest=100,
             bid_ask_spread_pct=15.0,
             volume=50,
         )
-        assert 45.0 <= score <= 55.0
+        assert 35.0 <= score <= 42.0
 
     def test_liquidity_poor_low_score(self, scorer):
         """Poor liquidity gets low score."""
