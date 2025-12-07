@@ -157,7 +157,7 @@ SCORE_MOVE_BASELINE_PCT = 20.0              # 20% implied move = 0 points
 # Market hours indicator
 MARKET_CLOSED_INDICATOR = "*"  # Appended to tier when using OI-only scoring
 
-def parse_liquidity_tier(tier_display: str) -> tuple:
+def parse_liquidity_tier(tier_display: str) -> Tuple[str, bool]:
     """
     Parse liquidity tier display string into base tier and market status.
 
