@@ -1,0 +1,234 @@
+"""
+Sentiment Cache for 4.0 AI-First Trading System
+
+Caches Perplexity/WebSearch sentiment results to avoid duplicate API calls.
+Uses SQLite for persistence across sessions.
+
+Cache Key Format: sentiment:{TICKER}:{YYYY-MM-DD}:{SOURCE}
+TTL: 3 hours (10800 seconds)
+"""
+
+import sqlite3
+import json
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional
+from dataclasses import dataclass
+
+
+@dataclass
+class CachedSentiment:
+    """Cached sentiment result."""
+    ticker: str
+    date: str
+    source: str  # "perplexity" or "websearch"
+    sentiment: str  # The actual sentiment text/analysis
+    cached_at: datetime
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if cache entry has expired (3 hour TTL)."""
+        return datetime.now() - self.cached_at > timedelta(hours=3)
+
+    @property
+    def age_minutes(self) -> int:
+        """Age of cache entry in minutes."""
+        return int((datetime.now() - self.cached_at).total_seconds() / 60)
+
+
+class SentimentCache:
+    """
+    SQLite-backed sentiment cache with 3-hour TTL.
+
+    Usage:
+        cache = SentimentCache()
+
+        # Check cache
+        cached = cache.get("NVDA", "2025-12-09")
+        if cached:
+            print(f"Cache hit! ({cached.source}, {cached.age_minutes}m old)")
+            return cached.sentiment
+
+        # Fetch fresh sentiment...
+        sentiment = fetch_from_perplexity(ticker)
+
+        # Store in cache
+        cache.set("NVDA", "2025-12-09", "perplexity", sentiment)
+    """
+
+    DEFAULT_TTL_HOURS = 3
+
+    def __init__(self, db_path: Optional[Path] = None):
+        """Initialize cache with optional custom database path."""
+        if db_path is None:
+            db_path = Path(__file__).parent.parent.parent / "data" / "sentiment_cache.db"
+
+        self.db_path = db_path
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _init_db(self):
+        """Initialize database schema."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sentiment_cache (
+                    ticker TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    sentiment TEXT NOT NULL,
+                    cached_at TEXT NOT NULL,
+                    PRIMARY KEY (ticker, date, source)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_sentiment_ticker_date
+                ON sentiment_cache(ticker, date)
+            """)
+            conn.commit()
+
+    def get(self, ticker: str, date: str) -> Optional[CachedSentiment]:
+        """
+        Get cached sentiment for ticker on date.
+
+        Returns the newest non-expired entry, preferring perplexity over websearch.
+        Returns None if no valid cache entry exists.
+        """
+        ticker = ticker.upper()
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+
+            # Get all entries for ticker+date, ordered by preference
+            cursor = conn.execute("""
+                SELECT ticker, date, source, sentiment, cached_at
+                FROM sentiment_cache
+                WHERE ticker = ? AND date = ?
+                ORDER BY
+                    CASE source WHEN 'perplexity' THEN 0 ELSE 1 END,
+                    cached_at DESC
+            """, (ticker, date))
+
+            for row in cursor:
+                cached_at = datetime.fromisoformat(row['cached_at'])
+                entry = CachedSentiment(
+                    ticker=row['ticker'],
+                    date=row['date'],
+                    source=row['source'],
+                    sentiment=row['sentiment'],
+                    cached_at=cached_at
+                )
+
+                if not entry.is_expired:
+                    return entry
+
+            return None
+
+    def set(self, ticker: str, date: str, source: str, sentiment: str) -> None:
+        """
+        Store sentiment in cache.
+
+        Args:
+            ticker: Stock ticker (will be uppercased)
+            date: Date string (YYYY-MM-DD format)
+            source: "perplexity" or "websearch"
+            sentiment: The sentiment analysis text
+        """
+        ticker = ticker.upper()
+        cached_at = datetime.now().isoformat()
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO sentiment_cache
+                (ticker, date, source, sentiment, cached_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (ticker, date, source, sentiment, cached_at))
+            conn.commit()
+
+    def clear_expired(self) -> int:
+        """Remove expired cache entries. Returns count of deleted entries."""
+        cutoff = (datetime.now() - timedelta(hours=self.DEFAULT_TTL_HOURS)).isoformat()
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                DELETE FROM sentiment_cache
+                WHERE cached_at < ?
+            """, (cutoff,))
+            conn.commit()
+            return cursor.rowcount
+
+    def clear_all(self) -> int:
+        """Clear all cache entries. Returns count of deleted entries."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("DELETE FROM sentiment_cache")
+            conn.commit()
+            return cursor.rowcount
+
+    def stats(self) -> dict:
+        """Get cache statistics."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+
+            total = conn.execute("SELECT COUNT(*) as cnt FROM sentiment_cache").fetchone()['cnt']
+
+            by_source = {}
+            for row in conn.execute("""
+                SELECT source, COUNT(*) as cnt
+                FROM sentiment_cache
+                GROUP BY source
+            """):
+                by_source[row['source']] = row['cnt']
+
+            # Count expired
+            cutoff = (datetime.now() - timedelta(hours=self.DEFAULT_TTL_HOURS)).isoformat()
+            expired = conn.execute("""
+                SELECT COUNT(*) as cnt
+                FROM sentiment_cache
+                WHERE cached_at < ?
+            """, (cutoff,)).fetchone()['cnt']
+
+            return {
+                "total_entries": total,
+                "by_source": by_source,
+                "expired": expired,
+                "valid": total - expired
+            }
+
+
+# Convenience function for slash commands
+def get_cached_sentiment(ticker: str, date: str = None) -> Optional[str]:
+    """
+    Quick helper to get cached sentiment.
+
+    Args:
+        ticker: Stock ticker
+        date: Optional date (defaults to today)
+
+    Returns:
+        Cached sentiment text or None if not cached/expired
+    """
+    if date is None:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    cache = SentimentCache()
+    result = cache.get(ticker, date)
+
+    if result:
+        return result.sentiment
+    return None
+
+
+def cache_sentiment(ticker: str, sentiment: str, source: str = "perplexity", date: str = None) -> None:
+    """
+    Quick helper to cache sentiment.
+
+    Args:
+        ticker: Stock ticker
+        sentiment: Sentiment analysis text
+        source: "perplexity" or "websearch"
+        date: Optional date (defaults to today)
+    """
+    if date is None:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    cache = SentimentCache()
+    cache.set(ticker, date, source, sentiment)

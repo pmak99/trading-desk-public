@@ -1,0 +1,245 @@
+"""
+Budget Tracker for Perplexity API Usage
+
+Tracks daily API calls and cost to stay within $5/month budget.
+Resets automatically based on date comparison (no cron needed).
+
+Limits:
+- Max: 150 calls/day (~$4.50 of $5 budget)
+- Warn: At 80% (120 calls)
+- Hard stop: At 100% (graceful degradation to WebSearch)
+"""
+
+import sqlite3
+from datetime import datetime, date
+from pathlib import Path
+from typing import Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
+
+
+class BudgetStatus(Enum):
+    """Budget status levels."""
+    OK = "ok"           # Under 80%
+    WARNING = "warning"  # 80-99%
+    EXHAUSTED = "exhausted"  # 100%+
+
+
+@dataclass
+class BudgetInfo:
+    """Current budget information."""
+    date: str
+    calls_today: int
+    cost_today: float
+    calls_remaining: int
+    status: BudgetStatus
+
+    @property
+    def usage_percent(self) -> float:
+        """Percentage of daily budget used."""
+        return (self.calls_today / BudgetTracker.MAX_DAILY_CALLS) * 100
+
+
+class BudgetTracker:
+    """
+    SQLite-backed daily budget tracker for Perplexity API.
+
+    Usage:
+        tracker = BudgetTracker()
+
+        # Before making API call
+        if tracker.can_call():
+            # Make Perplexity call...
+            tracker.record_call(cost=0.01)
+        else:
+            # Fall back to WebSearch
+            pass
+
+        # Check status
+        info = tracker.get_info()
+        print(f"Calls today: {info.calls_today}/{tracker.MAX_DAILY_CALLS}")
+    """
+
+    MAX_DAILY_CALLS = 150  # ~$4.50 at $0.03 per call average
+    WARN_THRESHOLD = 0.80  # 80% = 120 calls
+    COST_PER_CALL_ESTIMATE = 0.03  # Conservative estimate
+
+    def __init__(self, db_path: Optional[Path] = None):
+        """Initialize tracker with optional custom database path."""
+        if db_path is None:
+            db_path = Path(__file__).parent.parent.parent / "data" / "sentiment_cache.db"
+
+        self.db_path = db_path
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _init_db(self):
+        """Initialize database schema."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS api_budget (
+                    date TEXT PRIMARY KEY,
+                    calls INTEGER DEFAULT 0,
+                    cost REAL DEFAULT 0.0,
+                    last_updated TEXT
+                )
+            """)
+            conn.commit()
+
+    def _get_today(self) -> str:
+        """Get today's date as string."""
+        return date.today().isoformat()
+
+    def _ensure_today_row(self, conn: sqlite3.Connection) -> None:
+        """Ensure a row exists for today (handles date rollover)."""
+        today = self._get_today()
+        conn.execute("""
+            INSERT OR IGNORE INTO api_budget (date, calls, cost, last_updated)
+            VALUES (?, 0, 0.0, ?)
+        """, (today, datetime.now().isoformat()))
+
+    def can_call(self) -> bool:
+        """Check if we can make another API call today."""
+        info = self.get_info()
+        return info.status != BudgetStatus.EXHAUSTED
+
+    def should_warn(self) -> bool:
+        """Check if we should warn user about budget."""
+        info = self.get_info()
+        return info.status == BudgetStatus.WARNING
+
+    def record_call(self, cost: float = None) -> None:
+        """
+        Record an API call.
+
+        Args:
+            cost: Actual cost if known, otherwise uses estimate
+        """
+        if cost is None:
+            cost = self.COST_PER_CALL_ESTIMATE
+
+        today = self._get_today()
+
+        with sqlite3.connect(self.db_path) as conn:
+            self._ensure_today_row(conn)
+            conn.execute("""
+                UPDATE api_budget
+                SET calls = calls + 1,
+                    cost = cost + ?,
+                    last_updated = ?
+                WHERE date = ?
+            """, (cost, datetime.now().isoformat(), today))
+            conn.commit()
+
+    def get_info(self) -> BudgetInfo:
+        """Get current budget information."""
+        today = self._get_today()
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            self._ensure_today_row(conn)
+
+            row = conn.execute("""
+                SELECT date, calls, cost
+                FROM api_budget
+                WHERE date = ?
+            """, (today,)).fetchone()
+
+            calls = row['calls']
+            cost = row['cost']
+            remaining = max(0, self.MAX_DAILY_CALLS - calls)
+
+            # Determine status
+            if calls >= self.MAX_DAILY_CALLS:
+                status = BudgetStatus.EXHAUSTED
+            elif calls >= int(self.MAX_DAILY_CALLS * self.WARN_THRESHOLD):
+                status = BudgetStatus.WARNING
+            else:
+                status = BudgetStatus.OK
+
+            return BudgetInfo(
+                date=today,
+                calls_today=calls,
+                cost_today=cost,
+                calls_remaining=remaining,
+                status=status
+            )
+
+    def get_monthly_summary(self) -> dict:
+        """Get monthly usage summary."""
+        today = date.today()
+        month_start = today.replace(day=1).isoformat()
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+
+            row = conn.execute("""
+                SELECT
+                    COUNT(*) as days_with_usage,
+                    SUM(calls) as total_calls,
+                    SUM(cost) as total_cost,
+                    AVG(calls) as avg_calls_per_day,
+                    MAX(calls) as max_calls_day
+                FROM api_budget
+                WHERE date >= ?
+            """, (month_start,)).fetchone()
+
+            return {
+                "month": today.strftime("%Y-%m"),
+                "days_with_usage": row['days_with_usage'] or 0,
+                "total_calls": row['total_calls'] or 0,
+                "total_cost": row['total_cost'] or 0.0,
+                "avg_calls_per_day": row['avg_calls_per_day'] or 0.0,
+                "max_calls_day": row['max_calls_day'] or 0,
+                "budget_remaining": 5.00 - (row['total_cost'] or 0.0)
+            }
+
+    def reset_today(self) -> None:
+        """Reset today's counts (for testing)."""
+        today = self._get_today()
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                UPDATE api_budget
+                SET calls = 0, cost = 0.0, last_updated = ?
+                WHERE date = ?
+            """, (datetime.now().isoformat(), today))
+            conn.commit()
+
+
+# Convenience functions for slash commands
+def check_budget() -> Tuple[bool, str]:
+    """
+    Quick helper to check if Perplexity call is allowed.
+
+    Returns:
+        Tuple of (can_call: bool, message: str)
+    """
+    tracker = BudgetTracker()
+    info = tracker.get_info()
+
+    if info.status == BudgetStatus.EXHAUSTED:
+        return False, f"Daily budget exhausted ({info.calls_today}/{tracker.MAX_DAILY_CALLS} calls). Using WebSearch fallback."
+
+    if info.status == BudgetStatus.WARNING:
+        return True, f"Warning: {info.usage_percent:.0f}% of daily budget used ({info.calls_today}/{tracker.MAX_DAILY_CALLS} calls)."
+
+    return True, f"Budget OK: {info.calls_remaining} calls remaining today."
+
+
+def record_perplexity_call(cost: float = 0.01) -> None:
+    """Quick helper to record a Perplexity API call."""
+    tracker = BudgetTracker()
+    tracker.record_call(cost)
+
+
+def get_budget_status() -> str:
+    """Get formatted budget status for display."""
+    tracker = BudgetTracker()
+    info = tracker.get_info()
+    monthly = tracker.get_monthly_summary()
+
+    return f"""Budget Status:
+  Today: {info.calls_today}/{tracker.MAX_DAILY_CALLS} calls (${info.cost_today:.2f})
+  Month: {monthly['total_calls']} calls (${monthly['total_cost']:.2f} of $5.00)
+  Status: {info.status.value.upper()}"""

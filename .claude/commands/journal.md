@@ -1,21 +1,86 @@
-# Parse Trade Journal
+# Parse Trade Journal from Fidelity Statements
 
 Parse Fidelity monthly statements and generate trading journal with P&L analysis.
 
-Run the trade journal parser:
+## Arguments
+None - automatically processes PDFs in the statements directory
 
+## Step-by-Step Instructions
+
+### Step 1: Run the Parser
+Execute the trade journal parser:
 ```bash
 cd /Users/prashant/PycharmProjects/Trading\ Desk && python scripts/parse_trade_statements_v3.py
 ```
 
-After running, provide a summary including:
-1. Total trades and win rate
-2. Total P&L (short-term and long-term)
-3. Top 5 winning tickers
-4. Top 5 losing tickers
-5. Monthly P&L breakdown
-6. Any patterns observed (e.g., strategy performance, ticker concentration)
+If v3 fails, try:
+```bash
+python scripts/parse_trade_statements_v2.py
+```
 
-The parser outputs:
+### Step 2: Provide Summary Analysis
+After parsing completes, analyze the output and provide a summary including:
+
+1. **Overall Performance**
+   - Total trades and win rate
+   - Total P&L (short-term and long-term)
+   - Profit factor
+
+2. **Ticker Analysis**
+   - Top 5 winning tickers
+   - Top 5 losing tickers
+   - Ticker concentration warnings
+
+3. **Temporal Analysis**
+   - Monthly P&L breakdown
+   - Any seasonal patterns
+
+4. **Strategy Insights**
+   - Performance by strategy type
+   - Any patterns observed
+
+### Output Files
+The parser generates:
 - `docs/2025 Trades/trading_journal_2025_v3.csv` - CSV journal
 - `docs/2025 Trades/trading_data_2025_v3.json` - Detailed JSON data
+
+## Output Format
+
+```
+══════════════════════════════════════════════════════
+📔 TRADE JOURNAL PARSED
+══════════════════════════════════════════════════════
+
+📊 OVERALL PERFORMANCE
+   Total Trades: {N}
+   Win Rate: {X}%
+   Total P&L: ${X,XXX}
+   Profit Factor: {X.XX}
+
+🏆 TOP WINNERS
+   1. {TICKER} - ${X,XXX}
+   2. {TICKER} - ${X,XXX}
+   3. {TICKER} - ${X,XXX}
+
+⚠️ TOP LOSERS
+   1. {TICKER} - -${X,XXX}
+   2. {TICKER} - -${X,XXX}
+   3. {TICKER} - -${X,XXX}
+
+📅 MONTHLY P&L
+   {Month}: ${X,XXX}
+   {Month}: ${X,XXX}
+   ...
+
+📋 OUTPUT FILES
+   CSV: docs/2025 Trades/trading_journal_2025_v3.csv
+   JSON: docs/2025 Trades/trading_data_2025_v3.json
+
+💡 NEXT STEPS
+   Run `/backtest` for detailed performance analysis
+══════════════════════════════════════════════════════
+```
+
+## Cost Control
+- No MCP usage (local PDF parsing only)
+- Pure utility command
