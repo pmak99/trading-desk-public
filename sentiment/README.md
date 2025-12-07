@@ -35,6 +35,18 @@ AI-enhanced layer on top of the proven 2.0 IV Crush system. Adds sentiment analy
 3. **Graceful Degradation** - Sentiment never blocks analysis
 4. **Cost-Conscious** - 40 calls/day budget, caching, free fallbacks
 
+## Sentiment-Adjusted Directional Bias
+
+3-rule system for adjusting 2.0's skew-based direction using AI sentiment:
+
+| Rule | Condition | Action |
+|------|-----------|--------|
+| 1 | Neutral skew + sentiment signal | Sentiment breaks tie |
+| 2 | Conflict (bullish skew + bearish sentiment) | Go neutral (hedge) |
+| 3 | Otherwise | Keep original skew bias |
+
+This allows AI to provide directional insight without overriding quantitative signals.
+
 ## 4.0 Scoring System
 
 ### Formula
@@ -70,13 +82,16 @@ Risks: [1-2 bullets, max 10 words each]
 | Command | Purpose | AI Cost |
 |---------|---------|---------|
 | `/health` | System health check | Free |
-| `/prime [DATE]` | Pre-cache sentiment + sync earnings | ~3-8 calls |
-| `/whisper [DATE]` | Most anticipated (sentiment-adjusted) | ~3 calls |
+| `/prime [DATE]` | Pre-cache sentiment (uses whisper list) | ~3-8 calls |
+| `/whisper [DATE]` | Most anticipated with DIR column | ~3 calls |
 | `/analyze TICKER` | Deep analysis with strategies | ~1 call |
 | `/alert` | Today's high-VRP opportunities | ~3 calls |
 | `/scan DATE` | Scan all earnings on date | ~3 calls |
 | `/collect TICKER` | Explicitly collect sentiment | ~1 call |
 | `/backfill` | Record post-earnings outcomes | Free |
+| `/maintenance` | Database backup, cleanup, health | Free |
+
+**Note:** Discovery threshold is 3x VRP (position sizing still uses 4x rule).
 
 ## Daily Workflow
 
@@ -134,12 +149,18 @@ After Earnings:
 ├── data/
 │   └── sentiment_cache.db    # SQLite: cache + budget + history
 ├── src/
-│   ├── __init__.py           # Imports from 2.0
+│   ├── __init__.py               # Imports from 2.0
+│   ├── sentiment_direction.py    # 3-rule directional bias adjustment
 │   └── cache/
 │       ├── __init__.py
 │       ├── sentiment_cache.py    # 3-hour TTL cache
 │       ├── budget_tracker.py     # API budget tracking (40/day)
 │       └── sentiment_history.py  # Permanent backtesting data
+├── tests/                        # Unit tests (184 tests)
+│   ├── test_budget_tracker.py
+│   ├── test_sentiment_cache.py
+│   ├── test_sentiment_direction.py
+│   └── test_sentiment_history.py
 └── docs/
     └── ARCHITECTURE.md       # Detailed architecture docs
 ```
@@ -154,6 +175,21 @@ After Earnings:
 | `finnhub` | News, insider trades | Free |
 | `yahoo-finance` | Price data fallback | Free |
 | `memory` | Knowledge graph | Free |
+
+## Testing
+
+```bash
+# From project root
+cd 4.0 && ../2.0/venv/bin/python -m pytest tests/ -v
+```
+
+**Test Coverage (Dec 2025):** 184 tests pass
+
+Key test files:
+- `test_sentiment_direction.py` - 3-rule directional bias
+- `test_sentiment_cache.py` - Cache TTL, invalidation
+- `test_budget_tracker.py` - API budget enforcement
+- `test_sentiment_history.py` - Backtesting data storage
 
 ## Related Documentation
 
