@@ -5,17 +5,21 @@ Integrates with scan results and Alpaca positions.
 """
 
 import sys
-import json
+import re
 import subprocess
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
 
 # Alert thresholds
 VRP_EXCELLENT_THRESHOLD = 7.0
 VRP_GOOD_THRESHOLD = 4.0
-LIQUIDITY_REQUIRED = "EXCELLENT"
-MIN_POP = 60.0
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', text)
 
 
 def get_today_scan() -> str:
@@ -28,17 +32,17 @@ def get_today_scan() -> str:
             [str(trade_script), "scan", today],
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=300  # 5 minutes for large scans
         )
-        return result.stdout + result.stderr
+        return strip_ansi(result.stdout + result.stderr)
+    except subprocess.TimeoutExpired:
+        return "Error: Scan timed out after 5 minutes"
     except Exception as e:
         return f"Error running scan: {e}"
 
 
 def parse_scan_for_alerts(scan_output: str) -> list[dict]:
     """Parse scan output for alert-worthy opportunities."""
-    import re
-
     alerts = []
     current_ticker = None
     current_data = {}
@@ -46,8 +50,8 @@ def parse_scan_for_alerts(scan_output: str) -> list[dict]:
     lines = scan_output.split('\n')
 
     for line in lines:
-        # Ticker header
-        ticker_match = re.match(r'^([A-Z]{1,5})\s+\|', line)
+        # Ticker header - matches "Analyzing TICKER" pattern
+        ticker_match = re.search(r'Analyzing\s+([A-Z]{1,5})\s*$', line)
         if ticker_match:
             if current_ticker and current_data.get('vrp_ratio', 0) >= VRP_GOOD_THRESHOLD:
                 alerts.append(current_data)
@@ -55,30 +59,34 @@ def parse_scan_for_alerts(scan_output: str) -> list[dict]:
             current_data = {'ticker': current_ticker}
             continue
 
-        # VRP
-        vrp_match = re.search(r'VRP[:\s]+(\d+\.?\d*)x?', line, re.I)
+        # VRP Ratio
+        vrp_match = re.search(r'VRP(?:\s+Ratio)?[:\s]+(\d+\.?\d*)x', line, re.I)
         if vrp_match and current_data:
             current_data['vrp_ratio'] = float(vrp_match.group(1))
 
-        # VRP Tier
-        tier_match = re.search(r'(EXCELLENT|GOOD|MARGINAL|SKIP)', line)
-        if tier_match and current_data:
-            current_data['vrp_tier'] = tier_match.group(1)
+        # VRP Recommendation/Tier
+        rec_match = re.search(r'Recommendation[:\s]+(EXCELLENT|GOOD|MARGINAL|SKIP)', line, re.I)
+        if rec_match and current_data:
+            current_data['vrp_tier'] = rec_match.group(1).upper()
 
         # Implied move
-        implied_match = re.search(r'[Ii]mplied[:\s]+(\d+\.?\d*)%', line)
+        implied_match = re.search(r'Implied Move[:\s]+(\d+\.?\d*)%', line, re.I)
         if implied_match and current_data:
             current_data['implied_move'] = float(implied_match.group(1))
 
-        # Liquidity
-        liq_match = re.search(r'[Ll]iquidity[:\s]+(EXCELLENT|WARNING|REJECT)', line, re.I)
+        # Liquidity Tier
+        liq_match = re.search(r'Liquidity Tier[:\s]+(EXCELLENT|WARNING|REJECT)', line, re.I)
         if liq_match and current_data:
-            current_data['liquidity'] = liq_match.group(1).upper()
+            current_data['liquidity'] = liq_match.group(1).upper().rstrip('*')
 
         # Recommended strategy
-        strat_match = re.search(r'(Iron Condor|Iron Butterfly|Bull Put|Bear Call)', line, re.I)
+        strat_match = re.search(r'(Iron Condor|Iron Butterfly|Bull Put Spread|Bear Call Spread)', line, re.I)
         if strat_match and current_data:
             current_data['strategy'] = strat_match.group(1)
+
+        # Mark tradeable
+        if 'TRADEABLE OPPORTUNITY' in line and current_data:
+            current_data['tradeable'] = True
 
     # Last ticker
     if current_ticker and current_data.get('vrp_ratio', 0) >= VRP_GOOD_THRESHOLD:
