@@ -31,33 +31,25 @@ def load_historical_data(ticker: str = None) -> list[dict]:
         print(f"Database not found: {db_path}")
         return []
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    base_query = """
+        SELECT ticker, earnings_date,
+               close_move_pct as actual_move_pct,
+               CASE WHEN earnings_close > prev_close THEN 'UP' ELSE 'DOWN' END as direction,
+               prev_close as close_before, earnings_close as close_after
+        FROM historical_moves
+        {where_clause}
+        ORDER BY earnings_date DESC
+    """
 
-    if ticker:
-        query = """
-            SELECT ticker, earnings_date,
-                   close_move_pct as actual_move_pct,
-                   CASE WHEN earnings_close > prev_close THEN 'UP' ELSE 'DOWN' END as direction,
-                   prev_close as close_before, earnings_close as close_after
-            FROM historical_moves
-            WHERE ticker = ?
-            ORDER BY earnings_date DESC
-        """
-        cursor = conn.execute(query, (ticker.upper(),))
-    else:
-        query = """
-            SELECT ticker, earnings_date,
-                   close_move_pct as actual_move_pct,
-                   CASE WHEN earnings_close > prev_close THEN 'UP' ELSE 'DOWN' END as direction,
-                   prev_close as close_before, earnings_close as close_after
-            FROM historical_moves
-            ORDER BY earnings_date DESC
-        """
-        cursor = conn.execute(query)
-
-    results = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        if ticker:
+            query = base_query.format(where_clause="WHERE ticker = ?")
+            cursor = conn.execute(query, (ticker.upper(),))
+        else:
+            query = base_query.format(where_clause="")
+            cursor = conn.execute(query)
+        results = [dict(row) for row in cursor.fetchall()]
 
     return results
 
@@ -69,8 +61,12 @@ def load_trading_journal() -> dict:
     if not journal_path.exists():
         return {}
 
-    with open(journal_path) as f:
-        return json.load(f)
+    try:
+        with open(journal_path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Warning: Could not load trading journal: {e}")
+        return {}
 
 
 def calculate_backtest_metrics(moves: list[dict], implied_move_target: float = 8.0) -> dict:
@@ -210,13 +206,18 @@ def print_report(metrics: dict, journal: dict = None):
         print("ACTUAL VS BACKTEST COMPARISON (2025 YTD)")
         print("="*70)
 
-        print(f"\nActual Trading Results:")
-        print(f"  Total trades: {actual['total_trades']}")
-        print(f"  Winners: {actual['winners']} ({actual['winners']/actual['total_trades']*100:.1f}%)")
-        print(f"  Losers: {actual['losers']} ({actual['losers']/actual['total_trades']*100:.1f}%)")
-        print(f"  Total P&L: ${actual['total_pl']:,.2f}")
+        total_trades = actual.get('total_trades', 0)
+        if total_trades == 0:
+            print("\n  No trades found in journal")
+            return
 
-        actual_win_rate = actual['winners'] / actual['total_trades'] * 100
+        print(f"\nActual Trading Results:")
+        print(f"  Total trades: {total_trades}")
+        print(f"  Winners: {actual['winners']} ({actual['winners']/total_trades*100:.1f}%)")
+        print(f"  Losers: {actual['losers']} ({actual['losers']/total_trades*100:.1f}%)")
+        print(f"  Total P&L: ${actual.get('total_pl', 0):,.2f}")
+
+        actual_win_rate = actual['winners'] / total_trades * 100
         expected_win_rate = metrics['win_rate_at_8']
 
         print(f"\nWin Rate Analysis:")

@@ -24,9 +24,6 @@ def get_historical_moves(ticker: str, limit: int = 20) -> list[dict]:
         print(f"Database not found: {db_path}")
         return []
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
     query = """
         SELECT ticker, earnings_date,
                close_move_pct as actual_move_pct,
@@ -38,9 +35,10 @@ def get_historical_moves(ticker: str, limit: int = 20) -> list[dict]:
         LIMIT ?
     """
 
-    cursor = conn.execute(query, (ticker.upper(), limit))
-    results = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(query, (ticker.upper(), limit))
+        results = [dict(row) for row in cursor.fetchall()]
 
     return results
 
@@ -177,7 +175,14 @@ def main():
         sys.exit(1)
 
     ticker = sys.argv[1].upper()
-    implied_move = float(sys.argv[2]) if len(sys.argv) > 2 else None
+    implied_move = None
+
+    if len(sys.argv) > 2:
+        try:
+            implied_move = float(sys.argv[2])
+        except ValueError:
+            print(f"Error: Invalid implied move '{sys.argv[2]}'. Must be a number.")
+            sys.exit(1)
 
     analyze_ticker(ticker, implied_move)
 
