@@ -44,7 +44,8 @@ VRP Ratio = Implied Move / Historical Mean Move
 
 ## Directory Structure
 
-- `2.0/` - **CURRENT PRODUCTION** system (use this)
+- `2.0/` - **CURRENT PRODUCTION** system (core VRP/strategy math)
+- `4.0/` - AI sentiment layer (Perplexity, caching, budget tracking)
 - `3.0/` - ML enhancement project (in development)
 - `1.0/` - Deprecated original system
 
@@ -111,5 +112,51 @@ DB_PATH=data/ivcrush.db  # Database location
 - **yahoo-finance** - Stock history and quotes
 - **alpaca** - Paper trading account, positions, orders
 - **memory** - Knowledge graph for context
-- **gemini** - AI assistance
-- **finnhub** - News, earnings surprises, insider trades (if configured)
+- **finnhub** - News, earnings surprises, insider trades
+- **perplexity** - AI sentiment analysis (budget: 40 calls/day, $5/month)
+
+## 4.0 Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/prime` | Pre-cache sentiment for today's earnings (run morning) |
+| `/whisper` | Find most anticipated earnings with sentiment |
+| `/analyze TICKER` | Deep dive with VRP + sentiment + strategies |
+| `/alert` | Today's high-VRP opportunities |
+| `/scan DATE` | Scan all earnings for specific date |
+| `/collect TICKER` | Manually collect sentiment for backtesting |
+| `/health` | System health check |
+
+## 4.0 Scoring System
+
+**2.0 Score:** VRP (55%) + Move Difficulty (25%) + Liquidity (20%)
+
+**4.0 Score:** 2.0 Score × (1 + Sentiment Modifier)
+
+| Sentiment | Modifier |
+|-----------|----------|
+| Strong Bullish | +12% |
+| Bullish | +7% |
+| Neutral | 0% |
+| Bearish | -7% |
+| Strong Bearish | -12% |
+
+**Minimum Cutoffs:**
+- 2.0 Score ≥ 50 (pre-sentiment)
+- 4.0 Score ≥ 55 (post-sentiment)
+
+## AI Sentiment Format
+
+All sentiment queries return structured data:
+```
+Direction: [bullish/bearish/neutral]
+Score: [-1 to +1]
+Catalysts: [2-3 bullets, max 10 words each]
+Risks: [1-2 bullets, max 10 words each]
+```
+
+## Design Principles
+
+- **AI for discovery** (what to look at)
+- **Math for trading** (how to trade it)
+- Never let sentiment override VRP/liquidity rules

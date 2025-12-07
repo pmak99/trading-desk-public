@@ -213,6 +213,42 @@ Tiers:
 
 ---
 
+## 4.0 Sentiment-Adjusted Scoring
+
+### Formula
+```
+4.0 Score = 2.0 Score × (1 + Sentiment_Modifier)
+```
+
+### Sentiment Modifiers
+| Sentiment | Score Range | Modifier |
+|-----------|-------------|----------|
+| Strong Bullish | +0.7 to +1.0 | +12% |
+| Bullish | +0.3 to +0.6 | +7% |
+| Neutral | -0.2 to +0.2 | 0% |
+| Bearish | -0.6 to -0.3 | -7% |
+| Strong Bearish | -1.0 to -0.7 | -12% |
+
+### Minimum Score Cutoffs
+- **2.0 Score ≥ 50** (pre-sentiment filter)
+- **4.0 Score ≥ 55** (post-sentiment filter)
+
+### Structured Sentiment Format
+All sentiment queries return structured data to minimize context usage:
+```
+Direction: [bullish/bearish/neutral]
+Score: [-1 to +1]
+Catalysts: [2-3 bullets, max 10 words each]
+Risks: [1-2 bullets, max 10 words each]
+```
+
+### Design Principle
+- **AI for discovery** (what to look at)
+- **Math for trading** (how to trade it)
+- Never let sentiment override VRP/liquidity rules
+
+---
+
 ## Sentiment Caching Strategy
 
 ### Problem
@@ -242,10 +278,11 @@ SOURCE:       perplexity | websearch (tracks data quality)
 
 ### Daily Budget Tracking
 
-- Max: 150 calls/day (~$4.50 of $5 budget)
-- Warn: At 80% (120 calls)
+- Max: 40 calls/day (~$0.24/day with sonar model)
+- Warn: At 80% (32 calls)
 - Hard stop: At 100% (graceful degradation to WebSearch)
 - Reset: Date comparison on each call (no cron needed)
+- Monthly budget: $5.00
 
 ---
 
