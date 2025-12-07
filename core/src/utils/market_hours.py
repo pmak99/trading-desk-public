@@ -6,7 +6,7 @@ During market closed periods, liquidity data may be stale or missing (volume=0, 
 """
 
 import logging
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Tuple
 from zoneinfo import ZoneInfo
 
@@ -19,8 +19,9 @@ ET = ZoneInfo("America/New_York")
 MARKET_OPEN = time(9, 30)   # 9:30 AM ET
 MARKET_CLOSE = time(16, 0)  # 4:00 PM ET
 
-# US market holidays for 2024-2025
+# US market holidays for 2024-2026
 # Source: NYSE holiday calendar
+# NOTE: Update annually - add next year's holidays before January
 US_MARKET_HOLIDAYS = {
     # 2024
     (2024, 1, 1),   # New Year's Day
@@ -44,6 +45,17 @@ US_MARKET_HOLIDAYS = {
     (2025, 9, 1),   # Labor Day
     (2025, 11, 27), # Thanksgiving
     (2025, 12, 25), # Christmas
+    # 2026
+    (2026, 1, 1),   # New Year's Day
+    (2026, 1, 19),  # MLK Day
+    (2026, 2, 16),  # Presidents Day
+    (2026, 4, 3),   # Good Friday
+    (2026, 5, 25),  # Memorial Day
+    (2026, 6, 19),  # Juneteenth
+    (2026, 7, 3),   # Independence Day (observed, Jul 4 is Saturday)
+    (2026, 9, 7),   # Labor Day
+    (2026, 11, 26), # Thanksgiving
+    (2026, 12, 25), # Christmas
 }
 
 
@@ -154,18 +166,18 @@ def get_last_trading_day() -> datetime:
     """
     now = datetime.now(ET)
 
-    # Start from today
+    # Start from today at market close
     check_date = now.replace(hour=16, minute=0, second=0, microsecond=0)
 
     # If it's before market close today, use yesterday as reference
     if now.time() < MARKET_CLOSE:
-        check_date = check_date.replace(day=check_date.day - 1)
+        check_date = check_date - timedelta(days=1)
 
     # Go back until we find a trading day
     for _ in range(10):  # Max 10 days back (handles holiday clusters)
         if is_trading_day(check_date):
             return check_date
-        check_date = check_date.replace(day=check_date.day - 1)
+        check_date = check_date - timedelta(days=1)
 
     # Fallback (shouldn't happen)
     return check_date
