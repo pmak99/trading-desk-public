@@ -9,8 +9,7 @@ TTL: 3 hours (10800 seconds)
 """
 
 import sqlite3
-import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
@@ -28,12 +27,17 @@ class CachedSentiment:
     @property
     def is_expired(self) -> bool:
         """Check if cache entry has expired (3 hour TTL)."""
-        return datetime.now() - self.cached_at > timedelta(hours=3)
+        # Use UTC for consistent timezone handling
+        now = datetime.now(timezone.utc)
+        cached_at_utc = self.cached_at.replace(tzinfo=timezone.utc) if self.cached_at.tzinfo is None else self.cached_at
+        return now - cached_at_utc > timedelta(hours=3)
 
     @property
     def age_minutes(self) -> int:
         """Age of cache entry in minutes."""
-        return int((datetime.now() - self.cached_at).total_seconds() / 60)
+        now = datetime.now(timezone.utc)
+        cached_at_utc = self.cached_at.replace(tzinfo=timezone.utc) if self.cached_at.tzinfo is None else self.cached_at
+        return int((now - cached_at_utc).total_seconds() / 60)
 
 
 class SentimentCache:
@@ -57,6 +61,7 @@ class SentimentCache:
     """
 
     DEFAULT_TTL_HOURS = 3
+    VALID_SOURCES = {"perplexity", "websearch"}
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize cache with optional custom database path."""
@@ -69,7 +74,7 @@ class SentimentCache:
 
     def _init_db(self):
         """Initialize database schema."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS sentiment_cache (
                     ticker TEXT NOT NULL,
@@ -95,7 +100,7 @@ class SentimentCache:
         """
         ticker = ticker.upper()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             conn.row_factory = sqlite3.Row
 
             # Get all entries for ticker+date, ordered by preference
@@ -132,11 +137,18 @@ class SentimentCache:
             date: Date string (YYYY-MM-DD format)
             source: "perplexity" or "websearch"
             sentiment: The sentiment analysis text
-        """
-        ticker = ticker.upper()
-        cached_at = datetime.now().isoformat()
 
-        with sqlite3.connect(self.db_path) as conn:
+        Raises:
+            ValueError: If source is not "perplexity" or "websearch"
+        """
+        if source not in self.VALID_SOURCES:
+            raise ValueError(f"Invalid source '{source}'. Must be one of: {self.VALID_SOURCES}")
+
+        ticker = ticker.upper()
+        # Use UTC for consistent timezone handling
+        cached_at = datetime.now(timezone.utc).isoformat()
+
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO sentiment_cache
                 (ticker, date, source, sentiment, cached_at)
@@ -146,9 +158,9 @@ class SentimentCache:
 
     def clear_expired(self) -> int:
         """Remove expired cache entries. Returns count of deleted entries."""
-        cutoff = (datetime.now() - timedelta(hours=self.DEFAULT_TTL_HOURS)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=self.DEFAULT_TTL_HOURS)).isoformat()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             cursor = conn.execute("""
                 DELETE FROM sentiment_cache
                 WHERE cached_at < ?
@@ -158,14 +170,14 @@ class SentimentCache:
 
     def clear_all(self) -> int:
         """Clear all cache entries. Returns count of deleted entries."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             cursor = conn.execute("DELETE FROM sentiment_cache")
             conn.commit()
             return cursor.rowcount
 
     def stats(self) -> dict:
         """Get cache statistics."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             conn.row_factory = sqlite3.Row
 
             total = conn.execute("SELECT COUNT(*) as cnt FROM sentiment_cache").fetchone()['cnt']
@@ -179,7 +191,7 @@ class SentimentCache:
                 by_source[row['source']] = row['cnt']
 
             # Count expired
-            cutoff = (datetime.now() - timedelta(hours=self.DEFAULT_TTL_HOURS)).isoformat()
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=self.DEFAULT_TTL_HOURS)).isoformat()
             expired = conn.execute("""
                 SELECT COUNT(*) as cnt
                 FROM sentiment_cache
@@ -207,7 +219,7 @@ def get_cached_sentiment(ticker: str, date: str = None) -> Optional[str]:
         Cached sentiment text or None if not cached/expired
     """
     if date is None:
-        date = datetime.now().strftime("%Y-%m-%d")
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     cache = SentimentCache()
     result = cache.get(ticker, date)
@@ -226,9 +238,12 @@ def cache_sentiment(ticker: str, sentiment: str, source: str = "perplexity", dat
         sentiment: Sentiment analysis text
         source: "perplexity" or "websearch"
         date: Optional date (defaults to today)
+
+    Raises:
+        ValueError: If source is not "perplexity" or "websearch"
     """
     if date is None:
-        date = datetime.now().strftime("%Y-%m-%d")
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     cache = SentimentCache()
     cache.set(ticker, date, source, sentiment)

@@ -104,7 +104,7 @@ EARNINGS SCAN: {DATE}
 │ ...  │ ...     │ ...        │ ...   │ ...                │
 └──────┴─────────┴────────────┴───────┴────────────────────┘
 
-Legend: ⭐ EXCELLENT (≥7x) | ✓ GOOD (≥4x) | ○ MARGINAL | 🚫 REJECT
+Legend: ⭐ EXCELLENT (≥7x) | ✓ GOOD (≥4x) | ○ MARGINAL (≥1.5x) | 🚫 REJECT
 
 📊 SUMMARY
    Total earnings: {N}
