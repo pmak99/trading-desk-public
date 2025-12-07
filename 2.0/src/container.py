@@ -286,25 +286,30 @@ class Container:
             thresholds = self.config.thresholds
 
             self._liquidity_scorer = LiquidityScorer(
-                # REJECT tier (minimum acceptable)
+                # REJECT tier (minimum acceptable) - spread > 15%
                 min_oi=thresholds.liquidity_reject_min_oi,
                 min_volume=thresholds.liquidity_reject_min_volume,
-                max_spread_pct=thresholds.liquidity_reject_max_spread_pct,
+                max_spread_pct=thresholds.liquidity_reject_max_spread_pct,  # 15%
 
-                # WARNING tier (good = WARNING in config)
-                good_oi=thresholds.liquidity_warning_min_oi,
+                # WARNING tier - OI 1-2x, spread > 12%
+                warning_oi=thresholds.liquidity_warning_min_oi,  # 200
+                warning_spread_pct=thresholds.liquidity_warning_max_spread_pct,  # 12%
+
+                # GOOD tier - OI 2-5x, spread > 8%
+                good_oi=thresholds.liquidity_good_min_oi,  # 500
                 good_volume=thresholds.liquidity_warning_min_volume,
-                good_spread_pct=thresholds.liquidity_warning_max_spread_pct,
+                good_spread_pct=thresholds.liquidity_good_max_spread_pct,  # 8%
 
-                # EXCELLENT tier
-                excellent_oi=thresholds.liquidity_excellent_min_oi,
+                # EXCELLENT tier - OI >= 5x, spread <= 8%
+                excellent_oi=thresholds.liquidity_excellent_min_oi,  # 1000
                 excellent_volume=thresholds.liquidity_excellent_min_volume,
                 excellent_spread_pct=thresholds.liquidity_excellent_max_spread_pct,
             )
-            logger.debug(f"Created LiquidityScorer with config thresholds: "
-                        f"EXCELLENT={thresholds.liquidity_excellent_min_oi} OI, "
-                        f"WARNING={thresholds.liquidity_warning_min_oi} OI, "
-                        f"REJECT={thresholds.liquidity_reject_min_oi} OI")
+            logger.debug(f"Created LiquidityScorer with 4-tier config: "
+                        f"EXCELLENT={thresholds.liquidity_excellent_min_oi} OI (spread<=8%), "
+                        f"GOOD={thresholds.liquidity_good_min_oi} OI (spread<=12%), "
+                        f"WARNING={thresholds.liquidity_warning_min_oi} OI (spread<=15%), "
+                        f"REJECT={thresholds.liquidity_reject_min_oi} OI (spread>15%)")
         return self._liquidity_scorer
 
     @property

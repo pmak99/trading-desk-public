@@ -57,20 +57,27 @@ class ThresholdsConfig:
     vrp_good: float = 1.4
     vrp_marginal: float = 1.2
 
-    # Liquidity filters - 3-TIER SYSTEM
-    # REJECT tier: Hard minimums
+    # Liquidity filters - 4-TIER SYSTEM
+    # OI Tiers: REJECT (<1x), WARNING (1-2x), GOOD (2-5x), EXCELLENT (>=5x) of position size
+    # Spread Tiers: REJECT (>15%), WARNING (>12%), GOOD (>8%), EXCELLENT (<=8%)
+    #
+    # REJECT tier: Hard minimums (spread > 15%)
     liquidity_reject_min_oi: int = 20
-    liquidity_reject_max_spread_pct: float = 100.0
+    liquidity_reject_max_spread_pct: float = 15.0  # Spread > 15% = REJECT
     liquidity_reject_min_volume: int = 0
 
-    # WARNING tier: Scoring targets
+    # WARNING tier: 1-2x position size, spread 12-15%
     liquidity_warning_min_oi: int = 200
-    liquidity_warning_max_spread_pct: float = 15.0
+    liquidity_warning_max_spread_pct: float = 12.0  # Spread > 12% = WARNING
     liquidity_warning_min_volume: int = 0
 
-    # EXCELLENT tier: All metrics must meet these
+    # GOOD tier: 2-5x position size, spread 8-12%
+    liquidity_good_min_oi: int = 500
+    liquidity_good_max_spread_pct: float = 8.0  # Spread > 8% = GOOD
+
+    # EXCELLENT tier: >=5x position size, spread <= 8%
     liquidity_excellent_min_oi: int = 1000
-    liquidity_excellent_max_spread_pct: float = 8.0
+    liquidity_excellent_max_spread_pct: float = 8.0  # Spread <= 8% = EXCELLENT
     liquidity_excellent_min_volume: int = 100
 
     # Data quality
@@ -412,12 +419,19 @@ class Config:
             vrp_excellent=float(os.getenv("VRP_EXCELLENT", str(profile["excellent"]))),
             vrp_good=float(os.getenv("VRP_GOOD", str(profile["good"]))),
             vrp_marginal=float(os.getenv("VRP_MARGINAL", str(profile["marginal"]))),
+            # 4-TIER LIQUIDITY SYSTEM
+            # REJECT: spread > 15%
             liquidity_reject_min_oi=int(os.getenv("LIQUIDITY_REJECT_MIN_OI", "20")),
-            liquidity_reject_max_spread_pct=float(os.getenv("LIQUIDITY_REJECT_MAX_SPREAD_PCT", "100.0")),
+            liquidity_reject_max_spread_pct=float(os.getenv("LIQUIDITY_REJECT_MAX_SPREAD_PCT", "15.0")),
             liquidity_reject_min_volume=int(os.getenv("LIQUIDITY_REJECT_MIN_VOLUME", "0")),
+            # WARNING: spread > 12%
             liquidity_warning_min_oi=int(os.getenv("LIQUIDITY_WARNING_MIN_OI", "200")),
-            liquidity_warning_max_spread_pct=float(os.getenv("LIQUIDITY_WARNING_MAX_SPREAD_PCT", "15.0")),
+            liquidity_warning_max_spread_pct=float(os.getenv("LIQUIDITY_WARNING_MAX_SPREAD_PCT", "12.0")),
             liquidity_warning_min_volume=int(os.getenv("LIQUIDITY_WARNING_MIN_VOLUME", "0")),
+            # GOOD: spread > 8%
+            liquidity_good_min_oi=int(os.getenv("LIQUIDITY_GOOD_MIN_OI", "500")),
+            liquidity_good_max_spread_pct=float(os.getenv("LIQUIDITY_GOOD_MAX_SPREAD_PCT", "8.0")),
+            # EXCELLENT: spread <= 8%
             liquidity_excellent_min_oi=int(os.getenv("LIQUIDITY_EXCELLENT_MIN_OI", "1000")),
             liquidity_excellent_max_spread_pct=float(os.getenv("LIQUIDITY_EXCELLENT_MAX_SPREAD_PCT", "8.0")),
             liquidity_excellent_min_volume=int(os.getenv("LIQUIDITY_EXCELLENT_MIN_VOLUME", "100")),

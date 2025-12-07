@@ -143,10 +143,12 @@ SCORE_EDGE_MAX_POINTS = 0                   # DISABLED - redundant with VRP
 SCORE_EDGE_TARGET = 1.0                     # N/A (disabled)
 
 # Liquidity Factor (20 points) - Moderate penalty for illiquidity
+# 4-Tier System: EXCELLENT (>=5x OI, <=8%), GOOD (2-5x, 8-12%), WARNING (1-2x, 12-15%), REJECT (<1x, >15%)
 SCORE_LIQUIDITY_MAX_POINTS = 20             # Moderate weight (don't over-penalize)
-SCORE_LIQUIDITY_EXCELLENT_POINTS = 20       # Full points for excellent liquidity
-SCORE_LIQUIDITY_WARNING_POINTS = 12         # Proportional penalty (60%)
-SCORE_LIQUIDITY_REJECT_POINTS = 4           # Small penalty, not zero (some REJECT trades win!)
+SCORE_LIQUIDITY_EXCELLENT_POINTS = 20       # Full points for excellent liquidity (>=5x OI, <=8% spread)
+SCORE_LIQUIDITY_GOOD_POINTS = 16            # Good liquidity - tradeable at full size (2-5x OI, 8-12% spread)
+SCORE_LIQUIDITY_WARNING_POINTS = 12         # Low liquidity - consider reducing size (1-2x OI, 12-15% spread)
+SCORE_LIQUIDITY_REJECT_POINTS = 4           # Very low - small penalty, not zero (some REJECT trades win!)
 
 # Implied Move Factor (25 points) - Secondary risk factor
 # Lower implied move = easier trade, but VRP edge matters more
@@ -178,17 +180,25 @@ def format_liquidity_display(tier_display: str) -> str:
     """
     Format liquidity tier for display with appropriate indicator.
 
+    4-Tier System:
+    - EXCELLENT: ✓ High (>=5x OI, <=8% spread)
+    - GOOD: ✓ Good (2-5x OI, 8-12% spread)
+    - WARNING: ⚠️ Low (1-2x OI, 12-15% spread)
+    - REJECT: ❌ REJECT (<1x OI, >15% spread)
+
     Args:
         tier_display: Tier string from check_liquidity_with_tier
 
     Returns:
-        Formatted display string like "✓ High", "⚠️  Low*", "❌ REJECT*"
+        Formatted display string like "✓ High", "✓ Good*", "⚠️  Low*", "❌ REJECT*"
     """
     base_tier, is_oi_only = parse_liquidity_tier(tier_display)
     suffix = "*" if is_oi_only else ""
 
     if base_tier == "EXCELLENT":
         return f"✓ High{suffix}"
+    elif base_tier == "GOOD":
+        return f"✓ Good{suffix}"
     elif base_tier == "WARNING":
         return f"⚠️  Low{suffix}"
     else:
@@ -205,11 +215,13 @@ SCORE_MOVE_EXTREME_POINTS = 4               # Points for extreme difficulty (>15
 SCORE_DEFAULT_MOVE_POINTS = 12.5            # Default when implied move is missing (middle)
 
 # Liquidity tier priority for sorting (lower number = higher priority)
+# 4-Tier System: EXCELLENT > GOOD > WARNING > REJECT
 LIQUIDITY_PRIORITY_ORDER = {
     'EXCELLENT': 0,
-    'WARNING': 1,
-    'REJECT': 2,
-    'UNKNOWN': 3
+    'GOOD': 1,
+    'WARNING': 2,
+    'REJECT': 3,
+    'UNKNOWN': 4
 }
 
 # Pre-compiled regex patterns for company name cleaning (performance optimization)
@@ -465,13 +477,118 @@ def get_liquidity_tier_for_display(ticker: str, expiration: date, container: Con
     return tier
 
 
+# Cache for hybrid liquidity checks (key includes implied move since it affects strike selection)
+_hybrid_liquidity_cache: Dict[Tuple[str, date, float], Tuple[bool, str, Dict]] = {}
+
+
+def check_liquidity_hybrid(
+    ticker: str,
+    expiration: date,
+    implied_move_pct: float,
+    container: Container,
+    max_loss_budget: float = 20000.0,
+    use_dynamic_thresholds: bool = True,
+) -> Tuple[bool, str, Dict]:
+    """
+    Hybrid liquidity check using C-then-B approach with dynamic thresholds.
+
+    This is the RECOMMENDED liquidity check for scan stage. It evaluates liquidity
+    at strikes that will actually be traded (outside implied move or 20-delta),
+    not mid-chain ATM strikes.
+
+    Method C: Check strikes just outside implied move (preferred)
+    Method B: Fall back to 20-delta strikes if C fails
+
+    Dynamic thresholds are based on position size for $20k max loss:
+    - REJECT: OI < 1x position size
+    - WARNING: OI < 5x position size
+    - EXCELLENT: OI >= 5x position size
+
+    Args:
+        ticker: Stock ticker symbol
+        expiration: Options expiration date
+        implied_move_pct: Implied move as percentage (e.g., 8.5 for 8.5%)
+        container: DI container for API access
+        max_loss_budget: Maximum loss budget (default $20,000)
+        use_dynamic_thresholds: Whether to use dynamic or static thresholds
+
+    Returns:
+        Tuple of (has_liquidity, display_tier, details)
+        - has_liquidity: True if WARNING or EXCELLENT, False if REJECT
+        - display_tier: "EXCELLENT", "WARNING", "REJECT" (with * if market closed)
+        - details: Dict with method used, strikes, OI values, thresholds, etc.
+    """
+    # Check cache first (include implied move in key since it affects strike selection)
+    cache_key = (ticker, expiration, round(implied_move_pct, 1))
+    if cache_key in _hybrid_liquidity_cache:
+        cached = _hybrid_liquidity_cache[cache_key]
+        logger.debug(f"{ticker}: Hybrid liquidity from cache: {cached[1]}")
+        return cached
+
+    try:
+        # Get option chain
+        tradier = container.tradier
+        chain_result = tradier.get_option_chain(ticker, expiration)
+
+        if chain_result.is_err:
+            logger.debug(f"{ticker}: No option chain available for hybrid check")
+            result = (False, "REJECT", {'method': 'NO_CHAIN', 'error': str(chain_result.error)})
+            _hybrid_liquidity_cache[cache_key] = result
+            return result
+
+        chain = chain_result.value
+
+        # Use LiquidityScorer's hybrid classification
+        liquidity_scorer = container.liquidity_scorer
+        tier, market_open, market_reason, details = liquidity_scorer.classify_hybrid_tier_market_aware(
+            chain=chain,
+            implied_move_pct=implied_move_pct,
+            max_loss_budget=max_loss_budget,
+            use_dynamic_thresholds=use_dynamic_thresholds,
+        )
+
+        # Determine if has acceptable liquidity
+        has_liquidity = tier != "REJECT"
+
+        # Add market status indicator when closed
+        if not market_open:
+            display_tier = f"{tier}*"
+            logger.debug(
+                f"{ticker}: HYBRID {tier} (OI-only, {market_reason}) "
+                f"method={details['method']}, "
+                f"call ${details['call_strike']} OI={details['call_oi']}, "
+                f"put ${details['put_strike']} OI={details['put_oi']}, "
+                f"min_oi={details['min_oi']}, ratio={details.get('oi_ratio', 'N/A')}"
+            )
+        else:
+            display_tier = tier
+            logger.debug(
+                f"{ticker}: HYBRID {tier} "
+                f"method={details['method']}, "
+                f"call ${details['call_strike']} OI={details['call_oi']}, "
+                f"put ${details['put_strike']} OI={details['put_oi']}, "
+                f"min_oi={details['min_oi']}, ratio={details.get('oi_ratio', 'N/A')}"
+            )
+
+        result = (has_liquidity, display_tier, details)
+        _hybrid_liquidity_cache[cache_key] = result
+        return result
+
+    except Exception as e:
+        logger.warning(f"{ticker}: Hybrid liquidity check failed: {e}")
+        return (False, "REJECT", {'method': 'ERROR', 'error': str(e)})
+
+
 def should_filter_ticker(
     ticker: str,
     expiration: date,
     container: Container,
     check_market_cap: bool = True,
-    check_liquidity: bool = True
-) -> Tuple[bool, Optional[str], Optional[str]]:
+    check_liquidity: bool = True,
+    implied_move_pct: Optional[float] = None,
+    use_hybrid_liquidity: bool = False,
+    max_loss_budget: float = 20000.0,
+) -> Tuple[bool, Optional[str], Optional[str], Optional[Dict]]:
     """
     Determine if ticker should be filtered out based on market cap (LIQUIDITY NO LONGER FILTERS).
 
@@ -479,17 +596,29 @@ def should_filter_ticker(
     cause filtering. All tradeable opportunities are shown regardless of liquidity tier,
     with appropriate warnings in the output.
 
+    When use_hybrid_liquidity=True and implied_move_pct is provided, uses the new
+    C-then-B hybrid liquidity check which evaluates strikes at actual trading levels
+    (outside implied move) with dynamic thresholds based on position size.
+
     Args:
         ticker: Stock ticker symbol
         expiration: Options expiration date
         container: DI container
         check_market_cap: Whether to check market cap threshold
         check_liquidity: Whether to check liquidity tier (for display only, doesn't filter)
+        implied_move_pct: Implied move percentage (required for hybrid check)
+        use_hybrid_liquidity: Use C-then-B hybrid check instead of mid-chain
+        max_loss_budget: Maximum loss budget for dynamic thresholds (default $20k)
 
     Returns:
-        (should_filter, reason, liquidity_tier) - True if should skip ticker, with reason and tier
+        (should_filter, reason, liquidity_tier, hybrid_details)
+        - should_filter: True if should skip ticker
+        - reason: Why filtered
+        - liquidity_tier: "EXCELLENT", "WARNING", or "REJECT"
+        - hybrid_details: Dict with method, strikes, OI if hybrid check used
     """
     liquidity_tier = None
+    hybrid_details = None
 
     # Check market cap (still filters)
     if check_market_cap:
@@ -497,15 +626,27 @@ def should_filter_ticker(
         if market_cap_millions is not None:
             min_market_cap = container.config.thresholds.min_market_cap_millions
             if market_cap_millions < min_market_cap:
-                return (True, f"Market cap ${market_cap_millions:.0f}M < ${min_market_cap:.0f}M", None)
+                return (True, f"Market cap ${market_cap_millions:.0f}M < ${min_market_cap:.0f}M", None, None)
 
     # Check liquidity tier (for display only - does NOT filter anymore)
     if check_liquidity:
-        has_liquidity, liquidity_tier = check_liquidity_with_tier(ticker, expiration, container)
+        if use_hybrid_liquidity and implied_move_pct is not None:
+            # Use new hybrid C-then-B approach with dynamic thresholds
+            has_liquidity, liquidity_tier, hybrid_details = check_liquidity_hybrid(
+                ticker=ticker,
+                expiration=expiration,
+                implied_move_pct=implied_move_pct,
+                container=container,
+                max_loss_budget=max_loss_budget,
+                use_dynamic_thresholds=True,
+            )
+        else:
+            # Fall back to old mid-chain approach
+            has_liquidity, liquidity_tier = check_liquidity_with_tier(ticker, expiration, container)
         # NOTE: We no longer filter based on liquidity tier
         # All opportunities are shown with their tier displayed as a warning
 
-    return (False, None, liquidity_tier)
+    return (False, None, liquidity_tier, hybrid_details)
 
 
 def parse_date(date_str: str) -> date:
@@ -1039,17 +1180,75 @@ def analyze_ticker(
         logger.info(f"  Edge Score: {vrp.edge_score:.2f}")
         logger.info(f"  Recommendation: {vrp.recommendation.value.upper()}")
 
-        # CRITICAL: Check liquidity tier (POST-LOSS ANALYSIS ADDITION)
-        liquidity_tier = get_liquidity_tier_for_display(ticker, expiration_date, container)
-        logger.info(f"  Liquidity Tier: {liquidity_tier}")
+        # CRITICAL: Check liquidity tier using HYBRID approach (C-then-B with dynamic thresholds)
+        # This evaluates liquidity at strikes outside implied move (where we'll actually trade)
+        # instead of mid-chain ATM strikes which can give false results
+        implied_move_pct = float(str(implied_move.implied_move_pct).rstrip('%'))
+        has_liquidity, liquidity_tier, hybrid_details = check_liquidity_hybrid(
+            ticker=ticker,
+            expiration=expiration_date,
+            implied_move_pct=implied_move_pct,
+            container=container,
+            max_loss_budget=20000.0,  # $20k max loss position sizing
+            use_dynamic_thresholds=True,
+        )
 
-        if liquidity_tier == "WARNING":
+        # Log hybrid liquidity details
+        if hybrid_details and hybrid_details.get('method') not in ('NO_CHAIN', 'ERROR', 'FAILED'):
+            thresholds = hybrid_details.get('thresholds', {})
+            oi_ratio = hybrid_details.get('oi_ratio')
+            oi_tier = hybrid_details.get('oi_tier', 'N/A')
+            spread_tier = hybrid_details.get('spread_tier', 'N/A')
+            price_tier = thresholds.get('price_tier', 'N/A')
+            spread_width = thresholds.get('spread_width', 'N/A')
+            contracts = thresholds.get('contracts', 'N/A')
+            max_spread = max(hybrid_details.get('call_spread_pct', 0), hybrid_details.get('put_spread_pct', 0))
+            logger.info(f"  Liquidity Tier: {liquidity_tier} (Hybrid {hybrid_details['method']})")
+            logger.info(f"    Call ${hybrid_details['call_strike']:.0f} OI={hybrid_details['call_oi']:,}, "
+                       f"Put ${hybrid_details['put_strike']:.0f} OI={hybrid_details['put_oi']:,}")
+            logger.info(f"    Position: {contracts} contracts × ${spread_width} spread ({price_tier} tier)")
+            # Show tier breakdown
+            oi_icon = {'EXCELLENT': '✓', 'GOOD': '✓', 'WARNING': '⚠️', 'REJECT': '❌'}.get(oi_tier, '?')
+            spread_icon = {'EXCELLENT': '✓', 'GOOD': '✓', 'WARNING': '⚠️', 'REJECT': '❌'}.get(spread_tier, '?')
+            logger.info(f"    OI: {oi_ratio:.1f}x → {oi_tier} {oi_icon} | Spread: {max_spread:.0f}% → {spread_tier} {spread_icon}")
+        else:
+            logger.info(f"  Liquidity Tier: {liquidity_tier}")
+
+        # 4-Tier Warning Messages:
+        # OI:     REJECT (<1x), WARNING (1-2x), GOOD (2-5x), EXCELLENT (>=5x)
+        # Spread: REJECT (>15%), WARNING (>12%), GOOD (>8%), EXCELLENT (<=8%)
+        tier_clean = liquidity_tier.replace('*', '')
+        if tier_clean == "GOOD":
+            # GOOD tier - tradeable but not excellent
+            logger.info(f"\n✓ GOOD liquidity for {ticker}")
+            oi_tier = hybrid_details.get('oi_tier', 'N/A')
+            spread_tier = hybrid_details.get('spread_tier', 'N/A')
+            if oi_tier == "GOOD":
+                oi_ratio = hybrid_details.get('oi_ratio', 0)
+                logger.info(f"   OI/Position ratio {oi_ratio:.1f}x (2-5x) - adequate for full size")
+            if spread_tier == "GOOD":
+                max_spread = max(hybrid_details.get('call_spread_pct', 0), hybrid_details.get('put_spread_pct', 0))
+                logger.info(f"   Bid/ask spread {max_spread:.0f}% (8-12%) - acceptable slippage")
+        elif tier_clean == "WARNING":
             logger.warning(f"\n⚠️  WARNING: Low liquidity detected for {ticker}")
-            logger.warning(f"   This ticker has moderate liquidity - expect wider spreads and potential slippage")
-            logger.warning(f"   Consider reducing position size or skipping this trade")
-        elif liquidity_tier == "REJECT":
+            oi_tier = hybrid_details.get('oi_tier', 'N/A')
+            spread_tier = hybrid_details.get('spread_tier', 'N/A')
+            if oi_tier == "WARNING":
+                oi_ratio = hybrid_details.get('oi_ratio', 0)
+                logger.warning(f"   OI/Position ratio {oi_ratio:.1f}x (1-2x) - consider reducing size")
+            if spread_tier == "WARNING":
+                max_spread = max(hybrid_details.get('call_spread_pct', 0), hybrid_details.get('put_spread_pct', 0))
+                logger.warning(f"   Bid/ask spread {max_spread:.0f}% (>12%) - expect slippage")
+        elif tier_clean == "REJECT":
             logger.warning(f"\n❌ CRITICAL: Very low liquidity for {ticker}")
-            logger.warning(f"   This ticker has very poor liquidity - DO NOT TRADE")
+            oi_tier = hybrid_details.get('oi_tier', 'N/A')
+            spread_tier = hybrid_details.get('spread_tier', 'N/A')
+            if oi_tier == "REJECT":
+                oi_ratio = hybrid_details.get('oi_ratio', 0)
+                logger.warning(f"   OI/Position ratio {oi_ratio:.1f}x (<1x) - DO NOT TRADE at full size")
+            if spread_tier == "REJECT":
+                max_spread = max(hybrid_details.get('call_spread_pct', 0), hybrid_details.get('put_spread_pct', 0))
+                logger.warning(f"   Bid/ask spread {max_spread:.0f}% (>15%) - DO NOT TRADE")
 
         if vrp.is_tradeable:
             logger.info("\n✅ TRADEABLE OPPORTUNITY")
@@ -1066,6 +1265,11 @@ def analyze_ticker(
                 directional_bias = skew_result.value.directional_bias.value.replace('_', ' ').upper()
                 logger.info(f"  Directional Bias: {directional_bias}")
 
+        # Build hybrid liquidity info for result
+        oi_ratio = None
+        if hybrid_details and hybrid_details.get('oi_ratio'):
+            oi_ratio = hybrid_details['oi_ratio']
+
         return {
             'ticker': ticker,
             'ticker_name': company_name,
@@ -1079,6 +1283,7 @@ def analyze_ticker(
             'recommendation': vrp.recommendation.value,
             'is_tradeable': vrp.is_tradeable,
             'liquidity_tier': liquidity_tier,  # CRITICAL ADDITION
+            'liquidity_oi_ratio': oi_ratio,  # NEW: OI/Position ratio from hybrid check
             'directional_bias': directional_bias,  # NEW: Directional bias from skew
             'status': 'SUCCESS'
         }
@@ -1134,7 +1339,7 @@ def filter_ticker_concurrent(
     Returns:
         (should_filter, reason) tuple
     """
-    should_filter, reason, _ = should_filter_ticker(
+    should_filter, reason, _, _ = should_filter_ticker(
         ticker, expiration_date, container,
         check_market_cap=True,
         check_liquidity=True
@@ -1235,16 +1440,18 @@ def calculate_scan_quality_score(result: dict) -> float:
     edge_points = 0.0  # Disabled - SCORE_EDGE_MAX_POINTS = 0
 
     # Factor 3: Liquidity Quality (max: SCORE_LIQUIDITY_MAX_POINTS = 20)
-    # Moderate penalty - don't over-penalize REJECT (some win!)
+    # 4-Tier System: EXCELLENT (20pts), GOOD (16pts), WARNING (12pts), REJECT (4pts)
     # Strip market-closed indicator (*) to get base tier for scoring
     liquidity_tier_raw = result.get('liquidity_tier', 'UNKNOWN')
     base_tier, _ = parse_liquidity_tier(liquidity_tier_raw)
     if base_tier == 'EXCELLENT':
-        liquidity_score = SCORE_LIQUIDITY_EXCELLENT_POINTS  # 20
+        liquidity_score = SCORE_LIQUIDITY_EXCELLENT_POINTS  # 20 (>=5x OI, <=8% spread)
+    elif base_tier == 'GOOD':
+        liquidity_score = SCORE_LIQUIDITY_GOOD_POINTS       # 16 (2-5x OI, 8-12% spread)
     elif base_tier == 'WARNING':
-        liquidity_score = SCORE_LIQUIDITY_WARNING_POINTS    # 12 (60%)
+        liquidity_score = SCORE_LIQUIDITY_WARNING_POINTS    # 12 (1-2x OI, 12-15% spread)
     elif base_tier == 'REJECT':
-        liquidity_score = SCORE_LIQUIDITY_REJECT_POINTS     # 4 (20%)
+        liquidity_score = SCORE_LIQUIDITY_REJECT_POINTS     # 4 (<1x OI, >15% spread)
     else:
         # Unknown = assume WARNING (conservative default)
         liquidity_score = SCORE_LIQUIDITY_WARNING_POINTS
@@ -1577,7 +1784,7 @@ def scanning_mode(
         )
 
         # Apply filters (market cap + liquidity) for scan mode
-        should_filter, filter_reason, _ = should_filter_ticker(
+        should_filter, filter_reason, _, _ = should_filter_ticker(
             ticker, expiration_date, container,
             check_market_cap=True,
             check_liquidity=True
@@ -1848,7 +2055,7 @@ def ticker_mode(
         )
 
         # Apply filters (market cap + liquidity) for list mode
-        should_filter, filter_reason, _ = should_filter_ticker(
+        should_filter, filter_reason, _, _ = should_filter_ticker(
             ticker, expiration_date, container,
             check_market_cap=True,
             check_liquidity=True
@@ -2350,7 +2557,7 @@ def whisper_mode(
         )
 
         # Apply filters (market cap + liquidity) for whisper mode
-        should_filter, filter_reason, _ = should_filter_ticker(
+        should_filter, filter_reason, _, _ = should_filter_ticker(
             ticker, expiration_date, container,
             check_market_cap=True,
             check_liquidity=True
