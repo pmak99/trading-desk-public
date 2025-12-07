@@ -42,18 +42,34 @@ class DirectionAdjustment:
     @property
     def changed(self) -> bool:
         """Did sentiment change the direction?"""
-        return self.original_bias.lower() != self.adjusted_bias.value
+        # Normalize original for proper comparison
+        original_normalized = normalize_skew_bias(self.original_bias)
+        return original_normalized != self.adjusted_bias.value
 
 
 def normalize_skew_bias(skew_bias: str) -> str:
-    """Normalize various skew bias formats to simple string."""
+    """Normalize various skew bias formats to simple string.
+
+    Maps 2.0's 7-level system to 4.0's 5-level system:
+    - STRONG_BULLISH → strong_bullish
+    - BULLISH → bullish
+    - WEAK_BULLISH → bullish (treated as bullish for conflict detection)
+    - NEUTRAL → neutral
+    - WEAK_BEARISH → bearish (treated as bearish for conflict detection)
+    - BEARISH → bearish
+    - STRONG_BEARISH → strong_bearish
+    """
     bias = skew_bias.lower().replace("directionalbias.", "").replace("_", " ").strip()
 
-    # Map to canonical names
+    # Map to canonical names (order matters - check "strong" first, then "weak")
     if "strong" in bias and "bull" in bias:
         return "strong_bullish"
     elif "strong" in bias and "bear" in bias:
         return "strong_bearish"
+    elif "weak" in bias and "bull" in bias:
+        return "bullish"  # Weak bullish → treat as bullish
+    elif "weak" in bias and "bear" in bias:
+        return "bearish"  # Weak bearish → treat as bearish
     elif "bull" in bias:
         return "bullish"
     elif "bear" in bias:
