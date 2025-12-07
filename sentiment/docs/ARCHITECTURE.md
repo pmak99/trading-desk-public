@@ -52,14 +52,14 @@ Execute:  Manual in Fidelity (human approval required)
 
 | MCP Server | Purpose | Cost | Tools |
 |------------|---------|------|-------|
-| **finnhub** | News, earnings surprises, insider trades | Free | `finnhub_news_sentiment`, `finnhub_stock_fundamentals`, `finnhub_stock_ownership` |
+| **finnhub** | News, earnings surprises, insider trades | Free (60/min) | `finnhub_news_sentiment`, `finnhub_stock_fundamentals`, `finnhub_stock_ownership` |
 | **alphavantage** | Earnings calendar, fundamentals | Free | `EARNINGS_CALENDAR`, `COMPANY_OVERVIEW` |
 | **alpaca** | Positions, account, market clock | Free | `alpaca_list_positions`, `alpaca_get_clock`, `alpaca_account_overview` |
 | **yahoo-finance** | Historical prices, fallback data | Free | `getStockHistory` |
 | **memory** | Knowledge graph, trade history | Free | `create_entities`, `search_nodes`, `add_observations` |
 | **sequential-thinking** | Complex multi-step reasoning | Free | `sequentialthinking` |
 
-### Perplexity MCP (Requires Setup)
+### Perplexity MCP (Configured ✅)
 
 | Tool | Purpose | Cost | Speed |
 |------|---------|------|-------|
@@ -191,6 +191,14 @@ Tiers:
 
 **Cost Control Rule:** Only fetch Perplexity sentiment for VRP ≥ 4.0x tickers.
 
+### Composite Scoring Weights (Scan Mode)
+
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| VRP Edge | 55% | Core signal quality (`min(VRP/4.0, 1.0) × 55`) |
+| Implied Move Difficulty | 25% | Easier moves get bonus |
+| Liquidity Quality | 20% | EXCELLENT=20, WARNING=12, REJECT=4 |
+
 ---
 
 ## Liquidity Tiers
@@ -218,17 +226,19 @@ Same ticker queried multiple times per day wastes API budget:
 Cache Key:    sentiment:{TICKER}:{YYYY-MM-DD}:{SOURCE}
 TTL:          3 hours (allows refresh for breaking news)
 Storage:      SQLite via 2.0's HybridCache
-SOURCE:       perplexity | websearch (tracks quality)
+SOURCE:       perplexity | websearch (tracks data quality)
 ```
 
 **Flow:**
 ```
-1. Check cache for ticker+date
+1. Check cache for ticker+date (any SOURCE, return newest)
 2. If HIT (< 3 hours old) → return cached (FREE, instant)
 3. If MISS → check daily budget
 4. If budget OK → call Perplexity, cache result
-5. If budget exhausted → fall back to WebSearch
+5. If budget exhausted → fall back to WebSearch, cache with source=websearch
 ```
+
+**Cache Lookup Priority:** Any source accepted. If multiple cached entries exist, prefer `perplexity` over `websearch` for higher quality sentiment.
 
 ### Daily Budget Tracking
 
@@ -388,7 +398,7 @@ from infrastructure.cache.hybrid_cache import HybridCache
 ## Implementation Phases
 
 ### Phase 0: Setup
-- [ ] Verify/configure Perplexity MCP
+- [x] Verify/configure Perplexity MCP ✅
 - [ ] Remove Gemini MCP (optional)
 - [ ] Delete old slash commands to be replaced
 
@@ -424,6 +434,6 @@ from infrastructure.cache.hybrid_cache import HybridCache
 
 ## References
 
-- **Detailed Implementation Plan:** `/home/user/.claude/plans/quizzical-sauteeing-mango.md`
-- **2.0 System Documentation:** `$PROJECT_ROOT/2.0/README.md`
-- **Project Instructions:** `$PROJECT_ROOT/CLAUDE.md`
+- **Detailed Implementation Plan:** `.claude/plans/` (search for "4.0 Slash Commands")
+- **2.0 System Documentation:** `2.0/README.md`
+- **Project Instructions:** `CLAUDE.md`
