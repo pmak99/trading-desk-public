@@ -89,15 +89,20 @@ Display a summary of key findings from each.
 
 3. **Try Perplexity (if budget OK):**
    ```
-   mcp__perplexity__perplexity_ask with query="What is the current sentiment and analyst consensus for {TICKER} ahead of their earnings? Include recent news, analyst upgrades/downgrades, whisper numbers, and any concerns or catalysts."
+   mcp__perplexity__perplexity_ask with query="For {TICKER} earnings, respond ONLY in this format:
+   Direction: [bullish/bearish/neutral]
+   Score: [number -1 to +1]
+   Catalysts: [3 bullets, max 10 words each]
+   Risks: [2 bullets, max 10 words each]"
    ```
    - Cache result: `INSERT INTO sentiment_cache (ticker, date, source, sentiment, cached_at) VALUES ('{TICKER}', '{DATE}', 'perplexity', '{RESULT}', '{NOW}');`
-   - Record API call: `INSERT OR REPLACE INTO api_budget (date, calls, cost, last_updated) VALUES ('{DATE}', COALESCE((SELECT calls FROM api_budget WHERE date='{DATE}'), 0) + 1, COALESCE((SELECT cost FROM api_budget WHERE date='{DATE}'), 0) + 0.01, '{NOW}');`
+   - Record API call: `INSERT OR REPLACE INTO api_budget (date, calls, cost, last_updated) VALUES ('{DATE}', COALESCE((SELECT calls FROM api_budget WHERE date='{DATE}'), 0) + 1, COALESCE((SELECT cost FROM api_budget WHERE date='{DATE}'), 0) + 0.006, '{NOW}');`
 
 4. **If Perplexity fails, try WebSearch:**
    ```
    WebSearch with query="{TICKER} earnings sentiment analyst rating {DATE}"
    ```
+   - Summarize results into the same structured format above
    - Cache with source="websearch"
 
 5. **If all fail, show graceful message:**
@@ -151,7 +156,9 @@ ANALYSIS: {TICKER}
    • Insider activity: {summary}
 
 🧠 AI SENTIMENT {(cached/fresh/websearch)}
-   {Perplexity or WebSearch sentiment analysis}
+   Direction: {BULLISH/BEARISH/NEUTRAL} | Score: {-1 to +1}
+   Catalysts: {bullet list, 3 max}
+   Risks: {bullet list, 2 max}
    [Or: "ℹ️ Skipped - VRP < 4x" / "ℹ️ Unavailable"]
 
 📈 STRATEGY RECOMMENDATIONS

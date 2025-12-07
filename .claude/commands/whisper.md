@@ -1,6 +1,6 @@
 # Find Most Anticipated Earnings
 
-Discover the week's most anticipated earnings with VRP analysis and sentiment - YOUR GO-TO FOR DISCOVERY.
+Discover the week's most anticipated earnings with VRP analysis and AI sentiment - YOUR GO-TO FOR DISCOVERY.
 
 ## Arguments
 $ARGUMENTS (format: [DATE] - optional, defaults to current week's Monday)
@@ -15,6 +15,25 @@ Morning:  /prime           → Pre-cache all sentiment
 Then:     /whisper         → Instant results (cache hits)
 Pick:     /analyze NVDA    → Deep dive on best candidate
 ```
+
+## Minimum Cutoffs
+
+- **2.0 Score ≥ 50** (pre-sentiment filter)
+- **4.0 Score ≥ 55** (post-sentiment filter)
+
+## 4.0 Sentiment-Adjusted Scoring
+
+**Formula:** `4.0 Score = 2.0 Score × (1 + Sentiment_Modifier)`
+
+| Sentiment | Score Range | Modifier |
+|-----------|-------------|----------|
+| Strong Bullish | +0.7 to +1.0 | +12% |
+| Bullish | +0.3 to +0.6 | +7% |
+| Neutral | -0.2 to +0.2 | 0% |
+| Bearish | -0.6 to -0.3 | -7% |
+| Strong Bearish | -1.0 to -0.7 | -12% |
+
+**4.0 Minimum:** After sentiment adjustment, only show if 4.0 Score ≥ 55
 
 ## Step-by-Step Instructions
 
@@ -45,10 +64,10 @@ This provides:
 - Liquidity grades
 - Quality scores
 
-### Step 4: Identify TOP 3 VRP > 4x Tickers
-Parse the whisper output to find the top 3 tickers with:
-- VRP >= 4.0x (GOOD or EXCELLENT tier)
-- Liquidity != REJECT
+### Step 4: Filter by 2.0 Score ≥ 50
+Parse the whisper output and filter to tickers with 2.0 Score ≥ 50.
+
+Take TOP 3 from filtered results for sentiment enrichment.
 
 ### Step 5: Gather Sentiment for TOP 3 (Conditional)
 
@@ -70,7 +89,11 @@ If calls >= 150 → skip to WebSearch fallback
 
 **5c. Try Perplexity (if budget OK):**
 ```
-mcp__perplexity__perplexity_ask with query="What is the current sentiment and analyst consensus for {TICKER} ahead of their earnings? Include recent news, analyst upgrades/downgrades, whisper numbers, and any concerns or catalysts."
+mcp__perplexity__perplexity_ask with query="For {TICKER} earnings, respond ONLY in this format:
+Direction: [bullish/bearish/neutral]
+Score: [number -1 to +1]
+Catalysts: [3 bullets, max 10 words each]
+Risks: [2 bullets, max 10 words each]"
 ```
 - Cache result with source="perplexity"
 - Record API call in budget tracker
@@ -79,6 +102,7 @@ mcp__perplexity__perplexity_ask with query="What is the current sentiment and an
 ```
 WebSearch with query="{TICKER} earnings sentiment analyst rating {DATE}"
 ```
+- Summarize results into the same structured format above
 - Cache with source="websearch"
 
 **5e. If all fail:**
@@ -86,7 +110,13 @@ WebSearch with query="{TICKER} earnings sentiment analyst rating {DATE}"
 ℹ️ Sentiment unavailable for {TICKER}
 ```
 
-### Step 6: Display Results
+### Step 6: Calculate 4.0 Scores & Final Filter
+For each ticker with sentiment:
+1. Apply sentiment modifier to get 4.0 Score
+2. Drop any ticker with 4.0 Score < 55
+3. Re-rank by 4.0 Score (descending)
+
+### Step 7: Display Results
 
 ## Output Format
 
@@ -109,25 +139,17 @@ MOST ANTICIPATED EARNINGS - Week of {DATE}
 
 Legend: ⭐ EXCELLENT (≥7x) | ✓ GOOD (≥4x) | ○ MARGINAL (≥1.5x)
 
-🔝 TOP OPPORTUNITIES (VRP > 4x)
+🔝 TOP OPPORTUNITIES (Sentiment-Adjusted)
 
-1️⃣ NVDA - {earnings_date} {BMO/AMC}
-   VRP: 8.2x (EXCELLENT) | Implied Move: 8.5%
-   Liquidity: EXCELLENT
-   🧠 Sentiment: {cached/fresh}
-   {Perplexity or WebSearch sentiment summary}
+│ # │ TICKER │ 2.0  │ Sentiment   │ Mod  │ 4.0  │ LIQ     │
+├───┼────────┼──────┼─────────────┼──────┼──────┼─────────┤
+│ 1 │ NVDA   │ 92.0 │ Bull (+0.6) │ +7%  │ 98.4 │ EXCEL   │
+│ 2 │ AMD    │ 85.0 │ Neut (+0.1) │  0%  │ 85.0 │ EXCEL   │
+│ 3 │ AVGO   │ 72.0 │ SBull(+0.8) │ +12% │ 80.6 │ WARN ⚠️ │
 
-2️⃣ AMD - {earnings_date} {BMO/AMC}
-   VRP: 6.1x (GOOD) | Implied Move: 6.2%
-   Liquidity: EXCELLENT
-   🧠 Sentiment: {cached/fresh}
-   {Perplexity or WebSearch sentiment summary}
-
-3️⃣ AVGO - {earnings_date} {BMO/AMC}
-   VRP: 5.4x (GOOD) | Implied Move: 5.8%
-   Liquidity: WARNING ⚠️
-   🧠 Sentiment: {cached/fresh}
-   {Perplexity or WebSearch sentiment summary}
+TOP PICK: NVDA (Dec 10 AMC)
+  VRP: 8.2x | Move: 8.5% | 4.0 Score: 98.4
+  Sentiment: {1-line summary, max 30 words}
 
 📊 CACHE STATUS
    Hits: X (instant, free)

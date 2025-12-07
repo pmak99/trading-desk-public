@@ -61,6 +61,11 @@ Then continue with collection.
 ```
 WebSearch with query="$TICKER earnings sentiment analyst expectations $DATE"
 ```
+Summarize results into structured format:
+- Direction: [bullish/bearish/neutral]
+- Score: [number -1 to +1]
+- Catalysts: [3 bullets, max 10 words each]
+- Risks: [2 bullets, max 10 words each]
 
 **4b. If WebSearch insufficient, try Perplexity:**
 Check budget first:
@@ -69,9 +74,13 @@ sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.d
   "SELECT COALESCE((SELECT calls FROM api_budget WHERE date=date('now')), 0) as calls;"
 ```
 
-If under budget (< 150):
+If under budget (< 40):
 ```
-mcp__perplexity__perplexity_ask with query="What is the current sentiment and analyst consensus for $TICKER ahead of their earnings on $DATE? Include recent news, analyst upgrades/downgrades, whisper numbers, and key concerns or catalysts."
+mcp__perplexity__perplexity_ask with query="For $TICKER earnings on $DATE, respond ONLY in this format:
+Direction: [bullish/bearish/neutral]
+Score: [number -1 to +1]
+Catalysts: [3 bullets, max 10 words each]
+Risks: [2 bullets, max 10 words each]"
 ```
 
 ### Step 5: Analyze Sentiment Direction
@@ -120,17 +129,9 @@ sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.d
 
 🔍 SENTIMENT ANALYSIS
    Source: WebSearch / Perplexity
-   Direction: BULLISH / BEARISH / NEUTRAL
-   Score: +0.6
-
-   Summary:
-   {2-3 sentence summary of key sentiment points}
-
-   Key Points:
-   • Analyst consensus: {X Buy, Y Hold, Z Sell}
-   • Recent news: {headline}
-   • Whisper: {if available}
-   • Concerns: {if any}
+   Direction: BULLISH / BEARISH / NEUTRAL | Score: +0.6
+   Catalysts: {3 bullets, max 10 words each}
+   Risks: {2 bullets, max 10 words each}
 
 ✅ SAVED TO HISTORY
    Record ID: $TICKER-$DATE
