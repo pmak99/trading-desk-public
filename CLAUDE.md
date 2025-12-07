@@ -131,13 +131,17 @@ DB_PATH=data/ivcrush.db  # Database location
 
 | Command | Purpose |
 |---------|---------|
-| `/prime` | Pre-cache sentiment for today's earnings (run morning) |
-| `/whisper` | Find most anticipated earnings with sentiment |
+| `/prime` | Pre-cache sentiment using whisper list (run morning) |
+| `/whisper` | Find most anticipated earnings with DIR column |
 | `/analyze TICKER` | Deep dive with VRP + sentiment + strategies |
 | `/alert` | Today's high-VRP opportunities |
 | `/scan DATE` | Scan all earnings for specific date |
 | `/collect TICKER` | Manually collect sentiment for backtesting |
+| `/backfill` | Record post-earnings outcomes |
+| `/maintenance` | Database backup, cleanup, data integrity |
 | `/health` | System health check |
+
+**Note:** Discovery threshold is 3x VRP (position sizing still uses 4x rule).
 
 ## 4.0 Scoring System
 
@@ -167,8 +171,28 @@ Catalysts: [2-3 bullets, max 10 words each]
 Risks: [1-2 bullets, max 10 words each]
 ```
 
+## Sentiment-Adjusted Directional Bias
+
+3-rule system for adjusting 2.0's skew-based direction using AI sentiment:
+
+| Rule | Condition | Action |
+|------|-----------|--------|
+| 1 | Neutral skew + sentiment signal | Sentiment breaks tie |
+| 2 | Conflict (bullish skew + bearish sentiment) | Go neutral (hedge) |
+| 3 | Otherwise | Keep original skew bias |
+
 ## Design Principles
 
 - **AI for discovery** (what to look at)
 - **Math for trading** (how to trade it)
 - Never let sentiment override VRP/liquidity rules
+
+## Testing
+
+```bash
+# 2.0 tests (521 pass)
+cd 2.0 && ./venv/bin/python -m pytest tests/ -v
+
+# 4.0 tests (184 pass)
+cd 4.0 && ../2.0/venv/bin/python -m pytest tests/ -v
+```

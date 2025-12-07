@@ -77,20 +77,35 @@ RECOMMENDED: BULL PUT SPREAD
   Probability: 69.1% | Theta: +$329/day
 ```
 
+## 4-Tier Liquidity System
+
+| Tier | OI/Position | Spread | Score Pts | Action |
+|------|-------------|--------|-----------|--------|
+| **EXCELLENT** | ≥5x | ≤8% | 20 | Full size |
+| **GOOD** | 2-5x | 8-12% | 16 | Full size |
+| **WARNING** | 1-2x | 12-15% | 12 | Reduce size |
+| **REJECT** | <1x | >15% | 4 | Do not trade |
+
+*Final tier = worse of (OI tier, Spread tier)*
+
 ## Claude Code Skills
 
 Slash commands available when using Claude Code:
 
 | Command | Description |
 |---------|-------------|
-| `/scan-today` | Run scan for today's earnings |
-| `/analyze TICKER` | Deep analysis of single ticker |
-| `/visualize TICKER` | ASCII charts of historical moves |
+| `/analyze TICKER` | Deep analysis with VRP + sentiment |
+| `/scan DATE` | Scan all earnings for specific date |
+| `/whisper` | Most anticipated earnings with sentiment |
+| `/prime` | Pre-cache sentiment (run morning) |
+| `/alert` | Today's high-VRP opportunities |
 | `/backtest` | Generate backtest performance report |
-| `/alert` | Check for high-VRP opportunities |
-| `/export-report` | Export scan results to CSV/JSON |
-| `/parse-statements` | Parse Fidelity PDF statements |
-| `/journal` | Update trading journal |
+| `/history TICKER` | ASCII charts of historical moves |
+| `/journal` | Parse Fidelity PDF statements |
+| `/maintenance` | System housekeeping tasks |
+| `/collect TICKER` | Manually collect sentiment |
+| `/backfill` | Record post-earnings outcomes |
+| `/health` | System health check |
 
 ## Configuration
 
@@ -134,8 +149,18 @@ KELLY_FRACTION=0.25
 ## Testing
 
 ```bash
-pytest tests/
+pytest tests/                    # Run all tests
+pytest tests/unit/ -v           # Unit tests with verbose output
+pytest tests/ --tb=short        # With short tracebacks
 ```
+
+**Test Coverage (Dec 2025):** 521 tests pass, 36% code coverage
+
+Key test files:
+- `test_calculators.py` - VRP and implied move calculations
+- `test_liquidity_scorer.py` - 4-tier liquidity system
+- `test_kelly_sizing.py` - EV-based position sizing
+- `test_consistency_enhanced.py` - Move pattern analysis
 
 ---
 
