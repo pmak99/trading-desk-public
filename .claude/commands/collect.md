@@ -49,8 +49,11 @@ If exists, show:
    Direction: {direction}
    Collected: {timestamp}
 
-   To re-collect, use: /collect $TICKER $DATE --force
+   To re-collect, delete existing record first:
+   sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
+     "DELETE FROM sentiment_history WHERE ticker='$TICKER' AND earnings_date='$DATE';"
 ```
+Then continue with collection.
 
 ### Step 4: Fetch Sentiment via Fallback Chain
 

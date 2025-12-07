@@ -331,28 +331,31 @@ from infrastructure.cache.hybrid_cache import HybridCache
 
 ```
 .claude/commands/           # Slash command definitions
-├── health.md              # /health
-├── analyze.md             # /analyze TICKER
-├── whisper.md             # /whisper
-├── prime.md               # /prime
-├── scan.md                # /scan DATE
-├── alert.md               # /alert
-├── history.md             # /history TICKER
-├── backtest.md            # /backtest
-└── journal.md             # /journal
+├── health.md              # /health - System diagnostics
+├── analyze.md             # /analyze TICKER - Deep analysis
+├── whisper.md             # /whisper - Weekly opportunities
+├── prime.md               # /prime - Cache warming
+├── scan.md                # /scan DATE - Date scanning
+├── alert.md               # /alert - Today's opportunities
+├── history.md             # /history TICKER - Historical moves
+├── backtest.md            # /backtest - Performance analysis
+├── journal.md             # /journal - PDF parsing
+├── collect.md             # /collect - Explicit sentiment collection
+└── backfill.md            # /backfill - Record post-earnings outcomes
 
 4.0/
+├── README.md              # System overview and usage
 ├── docs/
 │   └── ARCHITECTURE.md    # This document
 ├── src/
 │   ├── __init__.py        # 2.0 module imports
-│   ├── cache/
-│   │   ├── sentiment_cache.py   # Perplexity cache wrapper
-│   │   └── budget_tracker.py    # Daily API budget
-│   └── mcp/
-│       └── finnhub_client.py    # Finnhub rate limiting
+│   └── cache/
+│       ├── __init__.py          # Cache module exports
+│       ├── sentiment_cache.py   # 3-hour TTL cache
+│       ├── budget_tracker.py    # Daily API budget (150/day)
+│       └── sentiment_history.py # Permanent backtesting storage
 └── data/
-    └── sentiment_cache.db       # SQLite cache + budget
+    └── sentiment_cache.db       # SQLite: cache + budget + history
 ```
 
 ---
@@ -395,40 +398,44 @@ from infrastructure.cache.hybrid_cache import HybridCache
 
 ---
 
-## Implementation Phases
+## Implementation Status
 
-### Phase 0: Setup
-- [x] Verify/configure Perplexity MCP ✅
-- [ ] Remove Gemini MCP (optional)
-- [ ] Delete old slash commands to be replaced
+### Phase 0: Setup ✅ COMPLETE
+- [x] Verify/configure Perplexity MCP
+- [x] Gemini MCP retained (image generation available)
+- [x] Old slash commands replaced with 4.0 versions
 
-### Phase 1: Infrastructure
-- [ ] Create `4.0/src/` with 2.0 imports
-- [ ] Create `sentiment_cache.py`
-- [ ] Create `budget_tracker.py`
+### Phase 1: Infrastructure ✅ COMPLETE
+- [x] Create `4.0/src/` with 2.0 imports
+- [x] Create `sentiment_cache.py` (3-hour TTL cache)
+- [x] Create `budget_tracker.py` (150 calls/day limit)
+- [x] Create `sentiment_history.py` (permanent backtesting storage)
 
-### Phase 2: P0 Commands (Core)
-- [ ] `/health` - System diagnostics
-- [ ] `/analyze` - Single ticker analysis
-- [ ] `/whisper` - Weekly opportunities
-- [ ] `/prime` - Cache warming
+### Phase 2: P0 Commands ✅ COMPLETE
+- [x] `/health` - System diagnostics
+- [x] `/analyze` - Single ticker analysis
+- [x] `/whisper` - Weekly opportunities
+- [x] `/prime` - Cache warming with history collection
 
-### Phase 3: P1 Commands
-- [ ] `/scan` - Date-based scanning
-- [ ] `/alert` - Today's opportunities
+### Phase 3: P1 Commands ✅ COMPLETE
+- [x] `/scan` - Date-based scanning
+- [x] `/alert` - Today's opportunities
 
-### Phase 4: P2 Commands
-- [ ] `/history` - Historical visualization
-- [ ] `/backtest` - Performance analysis
+### Phase 4: P2 Commands ✅ COMPLETE
+- [x] `/history` - Historical visualization
+- [x] `/backtest` - Performance analysis
 
-### Phase 5: P3 Commands
-- [ ] `/journal` - PDF parsing
+### Phase 5: P3 Commands ✅ COMPLETE
+- [x] `/journal` - PDF parsing
 
-### Phase 6: Testing
-- [ ] Test cache hits/misses
-- [ ] Test fallback chain
-- [ ] Verify budget tracking
-- [ ] End-to-end workflow testing
+### Phase 6: Data Collection ✅ COMPLETE
+- [x] `/collect` - Explicit sentiment collection
+- [x] `/backfill` - Post-earnings outcome recording
+
+### Phase 7: Testing
+- [x] Cache operations benchmarked (<1ms)
+- [x] Budget tracking verified
+- [ ] Live trading validation (ongoing)
 
 ---
 

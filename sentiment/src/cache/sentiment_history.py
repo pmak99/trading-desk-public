@@ -451,6 +451,7 @@ def record_sentiment(
     source: str,
     sentiment_text: str,
     sentiment_score: Optional[float] = None,
+    sentiment_direction: Optional[SentimentDirection] = None,
     vrp_ratio: Optional[float] = None,
     implied_move_pct: Optional[float] = None
 ) -> None:
@@ -462,6 +463,7 @@ def record_sentiment(
         source=source,
         sentiment_text=sentiment_text,
         sentiment_score=sentiment_score,
+        sentiment_direction=sentiment_direction,
         vrp_ratio=vrp_ratio,
         implied_move_pct=implied_move_pct
     )
