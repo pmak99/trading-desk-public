@@ -14,9 +14,18 @@ from .budget_tracker import (
     record_perplexity_call,
     get_budget_status,
 )
+from .sentiment_history import (
+    SentimentHistory,
+    SentimentRecord,
+    SentimentDirection,
+    record_sentiment,
+    record_outcome,
+    get_pending_outcomes,
+    get_sentiment_stats,
+)
 
 __all__ = [
-    # Sentiment cache
+    # Sentiment cache (temporary, 3-hour TTL)
     "SentimentCache",
     "CachedSentiment",
     "get_cached_sentiment",
@@ -28,4 +37,12 @@ __all__ = [
     "check_budget",
     "record_perplexity_call",
     "get_budget_status",
+    # Sentiment history (permanent, for backtesting)
+    "SentimentHistory",
+    "SentimentRecord",
+    "SentimentDirection",
+    "record_sentiment",
+    "record_outcome",
+    "get_pending_outcomes",
+    "get_sentiment_stats",
 ]

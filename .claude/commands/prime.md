@@ -100,7 +100,25 @@ If exists → skip, mark as "○ already cached"
    - If success: cache with source="websearch"
    - If fail: mark as "✗ sentiment unavailable"
 
-**6c. Display progress:**
+**6c. Save to sentiment_history (permanent storage for backtesting):**
+After each successful fetch, also save to the permanent history table:
+```bash
+sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
+  "INSERT OR REPLACE INTO sentiment_history
+   (ticker, earnings_date, collected_at, source, sentiment_text,
+    sentiment_score, sentiment_direction, vrp_ratio, implied_move_pct, updated_at)
+   VALUES ('$TICKER', '$DATE', datetime('now'), '$SOURCE', '$SENTIMENT_TEXT',
+           $SCORE, '$DIRECTION', $VRP_RATIO, $IMPLIED_MOVE, datetime('now'));"
+```
+
+Score sentiment_direction as:
+- "bullish" if clearly positive (analyst upgrades, beat expectations, positive catalysts)
+- "bearish" if clearly negative (downgrades, concerns, negative catalysts)
+- "neutral" if mixed or unclear
+
+This builds a permanent dataset for validating AI sentiment value-add.
+
+**6d. Display progress:**
 ```
   ✓ NVDA - Perplexity (VRP 8.2x)
   ✓ AMD  - Perplexity (VRP 6.1x)
