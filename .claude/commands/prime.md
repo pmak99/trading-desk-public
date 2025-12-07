@@ -42,7 +42,14 @@ Detect non-trading days:
   ```
   → Continue with priming
 
-### Step 3: Run 2.0 Scan for Date
+### Step 3: Sync Earnings Calendar (2.0)
+First, refresh the earnings calendar to ensure we have latest data:
+```bash
+cd $PROJECT_ROOT/2.0 && ./trade.sh sync
+```
+This updates earnings dates from Alpha Vantage.
+
+### Step 4: Run 2.0 Scan for Date
 Execute scan to get all earnings for the date:
 ```bash
 cd $PROJECT_ROOT/2.0 && ./trade.sh scan $DATE
@@ -54,41 +61,45 @@ This provides:
 - Liquidity grades
 - Quality scores
 
-### Step 4: Filter Qualified Tickers
+### Step 5: Filter Qualified Tickers
 From scan results, filter to tickers where:
 - VRP >= 4.0x (GOOD or EXCELLENT tier)
 - Liquidity != REJECT
 
 These are worth caching sentiment for.
 
-### Step 5: Check Budget Status
+### Step 6: Check Budget Status
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
   "SELECT COALESCE((SELECT calls FROM api_budget WHERE date='$(date +%Y-%m-%d)'), 0) as calls;"
 ```
 
-If near budget limit (>120 calls), warn:
+If near budget limit (>32 calls), warn:
 ```
-⚠️ Budget warning: {calls}/150 calls used today
+⚠️ Budget warning: {calls}/40 calls used today
    Limiting priming to top {remaining} tickers
 ```
 
-### Step 6: Fetch Sentiment for Each Qualified Ticker
+### Step 7: Fetch Sentiment for Each Qualified Ticker
 
 For EACH qualified ticker (in order of VRP score):
 
-**6a. Check if already cached:**
+**7a. Check if already cached:**
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
   "SELECT 1 FROM sentiment_cache WHERE ticker='$TICKER' AND date='$DATE' AND cached_at > datetime('now', '-3 hours');"
 ```
 If exists → skip, mark as "○ already cached"
 
-**6b. If cache miss, fetch via fallback chain:**
+**7b. If cache miss, fetch via fallback chain:**
 
-1. **Try Perplexity (if budget OK):**
+1. **Try Perplexity (if budget OK, < 40 calls):**
    ```
-   mcp__perplexity__perplexity_ask with query="What is the current sentiment and analyst consensus for {TICKER} ahead of their earnings? Include recent news, analyst upgrades/downgrades, whisper numbers, and any concerns or catalysts."
+   mcp__perplexity__perplexity_ask with query="For {TICKER} earnings, respond ONLY in this format:
+   Direction: [bullish/bearish/neutral]
+   Score: [number -1 to +1]
+   Catalysts: [2 bullets, max 10 words each]
+   Risks: [1 bullet, max 10 words]"
    ```
    - If success: cache with source="perplexity", increment budget counter
    - If fail: continue to WebSearch
@@ -97,10 +108,11 @@ If exists → skip, mark as "○ already cached"
    ```
    WebSearch with query="{TICKER} earnings sentiment analyst rating {DATE}"
    ```
+   - Summarize results into same structured format above
    - If success: cache with source="websearch"
    - If fail: mark as "✗ sentiment unavailable"
 
-**6c. Save to sentiment_history (permanent storage for backtesting):**
+**7c. Save to sentiment_history (permanent storage for backtesting):**
 After each successful fetch, also save to the permanent history table:
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
@@ -118,7 +130,7 @@ Score sentiment_direction as:
 
 This builds a permanent dataset for validating AI sentiment value-add.
 
-**6d. Display progress:**
+**7d. Display progress:**
 ```
   ✓ NVDA - Perplexity (VRP 8.2x)
   ✓ AMD  - Perplexity (VRP 6.1x)
@@ -127,7 +139,7 @@ This builds a permanent dataset for validating AI sentiment value-add.
   ✗ MU   - sentiment unavailable
 ```
 
-### Step 7: Update Budget Tracker
+### Step 8: Update Budget Tracker
 After all fetches, record total calls made:
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
@@ -164,8 +176,8 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
    │ Cache hits:     2 (skipped)    │
    │ Failures:       0              │
    │                                │
-   │ API calls today: 8/150         │
-   │ Budget remaining: $4.76        │
+   │ API calls today: 8/40          │
+   │ Budget remaining: $4.95        │
    └────────────────────────────────┘
 
 ✅ System primed! All commands will use cached sentiment.

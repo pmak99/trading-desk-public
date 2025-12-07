@@ -67,9 +67,15 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
 ```
 
 **4b. If cache miss, use fallback chain:**
-1. Check budget (< 150 calls)
-2. Try Perplexity
-3. Fall back to WebSearch
+1. Check budget (< 40 calls)
+2. Try Perplexity with query:
+   ```
+   "For {TICKER} earnings, respond ONLY in this format:
+   Direction: [bullish/bearish/neutral]
+   Score: [number -1 to +1]
+   Catalysts: [2 bullets, max 8 words each]"
+   ```
+3. Fall back to WebSearch, summarize into same format
 4. Graceful skip if all fail
 
 ### Step 5: Check Existing Positions (Alpaca MCP)
@@ -99,8 +105,7 @@ For each alert ticker, check if user has existing exposure:
 │ Implied Move: 8.5% | Historical: 1.0%               │
 │ Liquidity: EXCELLENT                                │
 │                                                     │
-│ 🧠 Sentiment: {cached/fresh}                        │
-│ {Brief sentiment: bullish/bearish/mixed, key points}│
+│ 🧠 {BULL/BEAR/NEUT} (+0.6): {1-line, max 20 words}  │
 │                                                     │
 │ 💡 Run `/analyze NVDA` for strategy recommendations │
 └─────────────────────────────────────────────────────┘
@@ -113,8 +118,7 @@ For each alert ticker, check if user has existing exposure:
 │ Implied Move: 6.2% | Historical: 1.0%               │
 │ Liquidity: EXCELLENT                                │
 │                                                     │
-│ 🧠 Sentiment: {cached/fresh}                        │
-│ {Brief sentiment summary}                           │
+│ 🧠 {BULL/BEAR/NEUT} (+0.4): {1-line, max 20 words}  │
 │                                                     │
 │ ⚠️ Consider existing position before adding more    │
 └─────────────────────────────────────────────────────┘
