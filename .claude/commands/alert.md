@@ -30,14 +30,14 @@ If pre-market/after-hours:
 ```
 
 ### Step 2: Run Alert Check Script
-Execute the check_alerts script:
-```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk && python scripts/check_alerts.py
-```
-
-If no script exists, fall back to:
+Execute the check_alerts script (primary method):
 ```bash
 cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh scan $(date +%Y-%m-%d)
+```
+
+Alternative if custom script exists:
+```bash
+cd /Users/prashant/PycharmProjects/Trading\ Desk && python scripts/check_alerts.py
 ```
 
 This provides:
