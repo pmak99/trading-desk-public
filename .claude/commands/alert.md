@@ -1,132 +1,162 @@
-# Trading Alerts (Notification Skill)
+# Today's Trading Alerts
 
-Configure and manage alerts for high-VRP opportunities and position updates.
+Find today's high-VRP trading opportunities with sentiment analysis.
 
-## Quick Alert Check
+## Arguments
+None - automatically uses today's date
 
-Run the alert checker to scan for opportunities:
+## Purpose
+Quick command to check if there are any tradeable opportunities TODAY.
+Run this after market open to see what's actionable.
 
+## Step-by-Step Instructions
+
+### Step 1: Check Market Status (Alpaca MCP)
+```
+mcp__alpaca__alpaca_get_clock
+```
+
+If market is closed on weekend/holiday:
+```
+ℹ️ Market closed today ({reason})
+   No earnings to trade. Next trading day: {date}
+```
+→ Exit early
+
+If pre-market/after-hours:
+```
+⏰ Market: CLOSED - Opens/Closed at {time}
+   Showing today's earnings opportunities.
+```
+
+### Step 2: Run Alert Check Script
+Execute the check_alerts script:
 ```bash
 cd $PROJECT_ROOT && python scripts/check_alerts.py
 ```
 
-This will:
-- Run today's scan
-- Filter for VRP >= 4.0x opportunities
-- Highlight EXCELLENT tier setups
-- Show alert summary
-
-## Alert Types
-
-### 1. High-VRP Opportunity Alerts
-Trigger when scan finds opportunities meeting criteria:
-- VRP >= 7.0x (EXCELLENT tier)
-- Liquidity = EXCELLENT
-- POP >= 60%
-
-### 2. Position Status Alerts
-Monitor Alpaca positions for:
-- P&L threshold breaches (profit target or stop loss)
-- Position opened/closed
-- Order fills
-
-### 3. Earnings Calendar Alerts
-Upcoming earnings for watchlist tickers:
-- 1 day before earnings
-- Morning of earnings day
-
-## Check Current Alpaca Positions
-
+If no script exists, fall back to:
 ```bash
-# Via MCP - use alpaca_list_positions tool
+cd $PROJECT_ROOT/2.0 && ./trade.sh scan $(date +%Y-%m-%d)
 ```
 
-Use the Alpaca MCP server to check positions:
-- `mcp__alpaca__alpaca_list_positions` - List all open positions
-- `mcp__alpaca__alpaca_account_overview` - Account summary with positions
-- `mcp__alpaca__alpaca_get_position` - Get specific position details
+This provides:
+- Today's earnings with VRP analysis
+- Filtered to high-opportunity trades
 
-## Scan for Alert Conditions
+### Step 3: Filter High-VRP Alerts
+From results, identify tickers where:
+- VRP >= 4.0x (GOOD or EXCELLENT tier)
+- Liquidity != REJECT
+- Earnings timing is actionable (BMO if morning, AMC if afternoon)
 
-Run scan and filter for alert-worthy opportunities:
+If no alerts qualify:
+```
+📭 No high-VRP opportunities today.
+   Try `/scan {tomorrow}` to plan ahead.
+```
 
+### Step 4: Add Sentiment for Alerts (Conditional)
+
+For EACH alert (max 3):
+
+**4a. Check sentiment cache:**
 ```bash
-cd $PROJECT_ROOT/2.0 && ./trade.sh scan $(date +%Y-%m-%d) 2>&1 | grep -E "EXCELLENT.*VRP.*[7-9]\.[0-9]|VRP.*[1-9][0-9]\."
+sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
+  "SELECT sentiment, source FROM sentiment_cache WHERE ticker='$TICKER' AND date='$(date +%Y-%m-%d)' ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
 ```
 
-## Alert Message Format
+**4b. If cache miss, use fallback chain:**
+1. Check budget (< 150 calls)
+2. Try Perplexity
+3. Fall back to WebSearch
+4. Graceful skip if all fail
 
-When an alert condition is met, format the message:
-
+### Step 5: Check Existing Positions (Alpaca MCP)
 ```
-🚨 IV CRUSH ALERT
-
-Ticker: NVDA
-Earnings: 2025-12-15
-VRP: 8.2x (EXCELLENT)
-Implied Move: 12.5%
-Historical Mean: 1.52%
-Liquidity: EXCELLENT
-
-Recommended: Iron Condor
-- Strikes: 130/135/145/150
-- POP: 72%
-- Max Profit: $450
-- Max Risk: $550
-
-Action Required: Review and enter before close
+mcp__alpaca__alpaca_list_positions
 ```
 
-## Position Alert Format
+For each alert ticker, check if user has existing exposure:
+- Match positions where symbol starts with ticker
+- If found, add warning to that alert
+
+## Output Format
 
 ```
-📊 POSITION UPDATE
+══════════════════════════════════════════════════════
+🚨 TODAY'S TRADING ALERTS - {DATE}
+══════════════════════════════════════════════════════
 
-NVDA Iron Condor
-Status: PROFIT TARGET HIT
+⏰ Market: [OPEN/CLOSED] - [time info]
 
-Entry: $2.50 credit
-Current: $0.25 (90% profit)
-P&L: +$225
+🔔 HIGH-VRP ALERTS ({N} opportunities)
 
-Action: Consider closing to lock in gains
+┌─────────────────────────────────────────────────────┐
+│ 🚨 NVDA - EARNINGS TODAY (AMC)                      │
+├─────────────────────────────────────────────────────┤
+│ VRP: 8.2x ⭐ EXCELLENT                              │
+│ Implied Move: 8.5% | Historical: 1.0%               │
+│ Liquidity: EXCELLENT                                │
+│                                                     │
+│ 🧠 Sentiment: {cached/fresh}                        │
+│ {Brief sentiment: bullish/bearish/mixed, key points}│
+│                                                     │
+│ 💡 Run `/analyze NVDA` for strategy recommendations │
+└─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│ 🚨 AMD - EARNINGS TODAY (BMO)                       │
+│ ⚠️ EXISTING POSITION: 5 AMD250117C00140000          │
+├─────────────────────────────────────────────────────┤
+│ VRP: 6.1x ⭐ GOOD                                   │
+│ Implied Move: 6.2% | Historical: 1.0%               │
+│ Liquidity: EXCELLENT                                │
+│                                                     │
+│ 🧠 Sentiment: {cached/fresh}                        │
+│ {Brief sentiment summary}                           │
+│                                                     │
+│ ⚠️ Consider existing position before adding more    │
+└─────────────────────────────────────────────────────┘
+
+📊 SUMMARY
+   Alerts found: {N}
+   With sentiment: {M}
+   Existing positions: {P}
+
+⚠️ REMINDERS
+   • Always check liquidity before trading
+   • Use `/analyze TICKER` for full strategy
+   • Never trade REJECT liquidity (lesson: significant loss)
+
+══════════════════════════════════════════════════════
 ```
 
-## Integration Options
+## No Alerts Output
 
-### Manual Check
-Run `/alert` command to check for:
-- New high-VRP opportunities from today's scan
-- Current position P&L status
-- Upcoming earnings for watched tickers
+```
+══════════════════════════════════════════════════════
+🚨 TODAY'S TRADING ALERTS - {DATE}
+══════════════════════════════════════════════════════
 
-### Watchlist Management
-Maintain a watchlist of preferred tickers:
-- NVDA, TSLA, META, AMZN, GOOGL, AAPL, MSFT
-- AMD, CRM, NFLX, SNOW, PLTR
+⏰ Market: [OPEN/CLOSED]
 
-Check earnings dates for watchlist:
-```bash
-cd $PROJECT_ROOT/2.0 && ./trade.sh list NVDA,TSLA,META,AMZN $(date +%Y-%m-%d)
+📭 NO HIGH-VRP OPPORTUNITIES TODAY
+
+Scanned {N} tickers with earnings today:
+  • VRP < 4x: {M} tickers (no edge)
+  • Liquidity REJECT: {R} tickers (untradeable)
+  • Qualified: 0 tickers
+
+💡 SUGGESTIONS
+   • Run `/scan {tomorrow}` to plan ahead
+   • Run `/whisper` to see week's best opportunities
+   • Check back tomorrow morning
+
+══════════════════════════════════════════════════════
 ```
 
-## Usage Examples
-
-"Check for any high-VRP alerts today"
-"Show my current Alpaca positions"
-"Any earnings coming up for my watchlist?"
-"Alert me to NVDA opportunities this week"
-
-## External Integration (Future)
-
-To add Slack/Discord webhooks:
-1. Create webhook URL in Slack/Discord
-2. Add to environment: `SLACK_WEBHOOK_URL=https://...`
-3. Use curl to post alert messages
-
-Example webhook post:
-```bash
-curl -X POST -H 'Content-type: application/json' \
-  --data '{"text":"🚨 High VRP Alert: NVDA 8.2x"}' \
-  $SLACK_WEBHOOK_URL
-```
+## Cost Control
+- Maximum 3 Perplexity calls (high-VRP alerts only)
+- Cache-aware (if primed, uses cached sentiment)
+- Position check is free (Alpaca)

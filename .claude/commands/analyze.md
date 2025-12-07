@@ -1,22 +1,176 @@
 # Analyze Ticker for IV Crush
 
-Perform deep analysis on a specific ticker for IV Crush opportunity.
+Deep dive on a single ticker with full strategy generation - YOUR GO-TO FOR TRADING DECISIONS.
 
-Arguments: $ARGUMENTS (format: TICKER YYYY-MM-DD)
+## Arguments
+$ARGUMENTS (format: TICKER [EARNINGS_DATE])
 
-Example usage:
-- /analyze NVDA 2025-12-19
-- /analyze TSLA 2025-01-29
+Examples:
+- `/analyze NVDA` - Analyze NVDA with auto-detected earnings date
+- `/analyze NVDA 2025-12-19` - Analyze NVDA for specific earnings date
 
-Run the analysis:
+## Step-by-Step Instructions
 
+### Step 1: Check Existing Positions (Alpaca MCP)
+```
+mcp__alpaca__alpaca_list_positions
+```
+
+Check if user already has exposure to this ticker:
+- Look for any position where the symbol starts with the ticker (e.g., "NVDA" matches "NVDA", "NVDA250117C00140000")
+- If found, display warning:
+  ```
+  ⚠️ EXISTING POSITION: You have {qty} {symbol} contracts
+     Current P&L: ${unrealized_pl}
+     Consider risk of over-concentration before adding more exposure.
+  ```
+
+### Step 2: Run 2.0 Core Analysis
+Execute the proven 2.0 analysis script:
 ```bash
 cd $PROJECT_ROOT/2.0 && ./trade.sh $ARGUMENTS
 ```
 
-After running, provide:
-1. VRP assessment (ratio and recommendation tier)
-2. Implied vs Historical move comparison
-3. Liquidity score and any warnings
-4. Recommended strategy with strikes and Greeks
-5. Risk assessment and position sizing suggestion
+This provides:
+- VRP ratio and tier (EXCELLENT ≥7x, GOOD ≥4x, MARGINAL ≥1.5x, SKIP <1.5x)
+- Implied move vs historical mean
+- Liquidity tier (EXCELLENT/WARNING/REJECT)
+- Strategy recommendations with Greeks
+- Position sizing (Half-Kelly)
+
+**CRITICAL:** If Liquidity = REJECT, display prominent warning:
+```
+🚫 LIQUIDITY REJECT - DO NOT TRADE
+   Low open interest or wide spreads make this untradeable.
+   (Lesson from significant loss on WDAY/ZS/SYM)
+```
+
+### Step 3: Gather Free News Data (Finnhub MCP)
+Always fetch this regardless of VRP - it's free:
+
+**Recent News:**
+```
+mcp__finnhub__finnhub_news_sentiment with operation="company_news" and symbol="{TICKER}"
+```
+
+**Earnings Surprises:**
+```
+mcp__finnhub__finnhub_stock_fundamentals with operation="earnings_surprises" and symbol="{TICKER}"
+```
+
+**Insider Trades:**
+```
+mcp__finnhub__finnhub_stock_ownership with operation="insider_transactions" and symbol="{TICKER}"
+```
+
+Display a summary of key findings from each.
+
+### Step 4: AI Sentiment (Conditional - Only if VRP ≥ 4x AND Liquidity ≠ REJECT)
+
+**Skip sentiment if:**
+- VRP < 4x (no edge = don't waste API budget)
+- Liquidity = REJECT (not tradeable anyway)
+
+**If qualified, use fallback chain:**
+
+1. **Check sentiment cache first:**
+   ```bash
+   sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
+     "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='$TICKER' AND date='$(date +%Y-%m-%d)' ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
+   ```
+   If found and < 3 hours old → use cached sentiment, note "(cached)"
+
+2. **If cache miss, check budget:**
+   ```bash
+   sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
+     "SELECT calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
+   ```
+   If calls ≥ 150 → skip to WebSearch fallback
+
+3. **Try Perplexity (if budget OK):**
+   ```
+   mcp__perplexity__perplexity_ask with query="What is the current sentiment and analyst consensus for {TICKER} ahead of their earnings? Include recent news, analyst upgrades/downgrades, whisper numbers, and any concerns or catalysts."
+   ```
+   - Cache result: `INSERT INTO sentiment_cache (ticker, date, source, sentiment, cached_at) VALUES ('{TICKER}', '{DATE}', 'perplexity', '{RESULT}', '{NOW}');`
+   - Record API call: `INSERT OR REPLACE INTO api_budget (date, calls, cost, last_updated) VALUES ('{DATE}', COALESCE((SELECT calls FROM api_budget WHERE date='{DATE}'), 0) + 1, COALESCE((SELECT cost FROM api_budget WHERE date='{DATE}'), 0) + 0.01, '{NOW}');`
+
+4. **If Perplexity fails, try WebSearch:**
+   ```
+   WebSearch with query="{TICKER} earnings sentiment analyst rating {DATE}"
+   ```
+   - Cache with source="websearch"
+
+5. **If all fail, show graceful message:**
+   ```
+   ℹ️ AI sentiment unavailable. Displaying raw news from Finnhub above.
+   ```
+
+### Step 5: Store in Memory MCP (Optional)
+For high-conviction trades (VRP ≥ 7x), store analysis:
+```
+mcp__memory__create_entities with entities=[{
+  "name": "{TICKER}-{DATE}",
+  "entityType": "analysis",
+  "observations": [
+    "VRP: {ratio}x ({tier})",
+    "Implied Move: {pct}%",
+    "Liquidity: {tier}",
+    "Sentiment: {summary}"
+  ]
+}]
+```
+
+## Output Format
+
+```
+══════════════════════════════════════════════════════
+ANALYSIS: {TICKER}
+══════════════════════════════════════════════════════
+
+[If existing position: ⚠️ EXISTING POSITION warning]
+
+📅 EARNINGS INFO
+   Date: {date} ({BMO/AMC})
+   Days until: {N}
+
+📊 VRP ASSESSMENT
+   Implied Move: {X.X}%
+   Historical Mean: {X.X}%
+   VRP Ratio: {X.X}x → {EXCELLENT/GOOD/MARGINAL/SKIP}
+   [Scoring weights: 55% VRP, 25% Move, 20% Liquidity]
+
+💧 LIQUIDITY
+   Tier: {EXCELLENT/WARNING/REJECT}
+   [Details: OI, spread width, volume]
+   [If REJECT: 🚫 DO NOT TRADE]
+
+📰 NEWS SUMMARY (Finnhub)
+   • {Recent headline 1}
+   • {Recent headline 2}
+   • Earnings history: {beat/miss pattern}
+   • Insider activity: {summary}
+
+🧠 AI SENTIMENT {(cached/fresh/websearch)}
+   {Perplexity or WebSearch sentiment analysis}
+   [Or: "ℹ️ Skipped - VRP < 4x" / "ℹ️ Unavailable"]
+
+📈 STRATEGY RECOMMENDATIONS
+   [2-3 ranked strategies from 2.0 with:]
+   - Strategy type and strikes
+   - Credit/debit and max profit/loss
+   - POP (probability of profit)
+   - Greeks (delta, theta, vega)
+   - Position sizing (Half-Kelly)
+
+⚠️ RISK NOTES
+   • [Any concerns from sentiment]
+   • [Liquidity warnings if WARNING tier]
+   • [High implied move caution if > 15%]
+
+══════════════════════════════════════════════════════
+```
+
+## Cost Control
+- Finnhub calls: Always (free, 60/min limit)
+- Perplexity: Only if VRP ≥ 4x AND Liquidity ≠ REJECT AND cache miss AND budget OK
+- Maximum 1 Perplexity call per /analyze
