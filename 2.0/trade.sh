@@ -574,14 +574,12 @@ case "${1:-}" in
             exit 1
         fi
         health_check
-        backup_database
         scan_earnings "$2"
         show_summary
         ;;
 
     whisper)
         health_check
-        backup_database
 
         # Extract week argument if provided
         WEEK_ARG=""
@@ -604,7 +602,6 @@ case "${1:-}" in
             exit 1
         fi
         health_check
-        backup_database
         analyze_list "$2" "$3" "${4:-1}"
         show_summary
         ;;
@@ -622,7 +619,6 @@ case "${1:-}" in
             exit 1
         fi
         health_check
-        backup_database
         analyze_single "$1" "$2" "${3:-}"
         show_summary
         ;;
