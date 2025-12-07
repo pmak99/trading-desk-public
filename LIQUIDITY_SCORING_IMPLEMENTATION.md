@@ -1,7 +1,7 @@
 # Liquidity Scoring Implementation
 
-## Date: November 27, 2025
-## Status: ✅ COMPLETE - READY FOR DEPLOYMENT
+## Date: November 27, 2025 (Updated: December 7, 2025)
+## Status: ✅ COMPLETE - 4-TIER SYSTEM DEPLOYED
 
 ---
 
@@ -91,56 +91,25 @@ Scoring factors (when Greeks available):
 
 **Location:** Lines 240-279
 
-**Implementation:**
+**Implementation (Updated Dec 2025 - 4-Tier System):**
+
 ```python
-def _calculate_liquidity_score(self, strategy: Strategy) -> float:
-    """
-    Calculate liquidity quality score (POST-LOSS ANALYSIS - Added Nov 2025).
-
-    After -significant loss from WDAY/ZS/SYM, liquidity became critical.
-    Poor liquidity caused:
-    - Wide bid-ask spreads on entry/exit
-    - Slippage amplified losses by ~20%
-    - Expensive fills when trying to close positions
-
-    Scoring logic (3-tier system):
-    - EXCELLENT tier: 100% of liquidity_weight (25 points max)
-    - WARNING tier: 50% of liquidity_weight (12.5 points max)
-    - REJECT tier: 0% (should be filtered before scoring)
-    - No tier info: 100% (assume EXCELLENT for backward compatibility)
-
-    Args:
-        strategy: Strategy with optional liquidity metrics
-
-    Returns:
-        Liquidity score (0-25)
-    """
-    # If no liquidity tier info, assume EXCELLENT (backward compatibility)
-    if strategy.liquidity_tier is None:
-        return self.weights.liquidity_weight
-
-    tier = strategy.liquidity_tier.upper()
-
-    if tier == "EXCELLENT":
-        # Full score for excellent liquidity
-        return self.weights.liquidity_weight
-    elif tier == "WARNING":
-        # Half score for warning liquidity (risky but tradeable)
-        return self.weights.liquidity_weight * 0.5
-    elif tier == "REJECT":
-        # Zero score for reject tier (should be filtered before this)
-        return 0.0
-    else:
-        # Unknown tier, assume EXCELLENT
-        return self.weights.liquidity_weight
+# Scoring logic (4-tier system):
+# - EXCELLENT tier: ≥5x OI, ≤8% spread  → 20 points (100%)
+# - GOOD tier:      2-5x OI, 8-12% spread → 16 points (80%)
+# - WARNING tier:   1-2x OI, 12-15% spread → 12 points (60%)
+# - REJECT tier:    <1x OI, >15% spread → 4 points (20%)
+# - No tier info: assume EXCELLENT for backward compatibility
 ```
 
 **Key Features:**
-- 3-tier scoring system matching liquidity classification
-- EXCELLENT: Full 25 points
-- WARNING: Half score (12.5 points) - 12.5 point penalty
-- REJECT: Zero points (should never reach scorer)
+- 4-tier scoring system matching liquidity classification
+- EXCELLENT: 20 points (full tradeable, optimal execution)
+- GOOD: 16 points (full tradeable, acceptable slippage)
+- WARNING: 12 points (reduce size, expect slippage)
+- REJECT: 4 points (do not trade at full size)
 - Backward compatible: None = EXCELLENT
+- Final tier = worse of (OI tier, Spread tier)
 
 ---
 

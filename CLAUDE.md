@@ -28,6 +28,17 @@ VRP Ratio = Implied Move / Historical Mean Move
 | Implied Move Difficulty | 25% | Easier moves get bonus |
 | Liquidity Quality | 20% | Open interest, bid-ask spreads |
 
+## 4-Tier Liquidity System
+
+| Tier | OI/Position | Spread | Score Pts | Action |
+|------|-------------|--------|-----------|--------|
+| **EXCELLENT** | ≥5x | ≤8% | 20 | Full size |
+| **GOOD** | 2-5x | 8-12% | 16 | Full size |
+| **WARNING** | 1-2x | 12-15% | 12 | Reduce size |
+| **REJECT** | <1x | >15% | 4 | Do not trade |
+
+*Final tier = worse of (OI tier, Spread tier)*
+
 ## Critical Rules
 
 1. **Never trade REJECT liquidity** - learned from significant loss on WDAY/ZS/SYM
@@ -35,6 +46,7 @@ VRP Ratio = Implied Move / Historical Mean Move
 3. **Prefer spreads over naked options** for defined risk
 4. **Half-Kelly sizing** (0.25 fraction) for position sizing
 5. **Always check liquidity score first** before evaluating VRP
+6. **GOOD tier is tradeable** at full size (2-5x OI, 8-12% spread)
 
 ## API Priority Order
 
@@ -84,7 +96,7 @@ VRP Ratio = Implied Move / Historical Mean Move
 ## When Analyzing Trades
 
 1. Run health check first (`./trade.sh health`)
-2. Check liquidity tier - reject if WARNING or REJECT
+2. Check liquidity tier - REJECT is no-trade, WARNING reduce size, GOOD/EXCELLENT full size
 3. Verify VRP ratio meets threshold (>4x preferred)
 4. Review implied vs historical move spread
 5. Check POP (probability of profit) - target 60%+
