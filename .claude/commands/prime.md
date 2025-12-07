@@ -1,16 +1,17 @@
 # Prime System - Pre-Cache Sentiment
 
-Pre-cache sentiment for today's earnings - run once in the morning to make all other commands instant.
+Pre-cache sentiment for the week's most anticipated earnings - run once in the morning to make all other commands instant.
 
 ## Arguments
-$ARGUMENTS (format: [DATE] - optional, defaults to today)
+$ARGUMENTS (format: [DATE] - optional, defaults to current week)
 
 Examples:
-- `/prime` - Prime for today's earnings
-- `/prime 2025-12-09` - Prime for specific date
+- `/prime` - Prime for current week's most anticipated
+- `/prime 2025-12-09` - Prime for week containing that date
 
 ## Purpose
 Run `/prime` once at 7-8 AM before market open:
+- Caches sentiment for most anticipated earnings (whisper list)
 - All subsequent `/whisper`, `/analyze`, `/alert` commands hit cache instantly
 - Predictable daily cost (you control when to spend API budget)
 - No waiting for Perplexity during trading hours
@@ -18,7 +19,7 @@ Run `/prime` once at 7-8 AM before market open:
 ## Step-by-Step Instructions
 
 ### Step 1: Parse Date Argument
-- If no date provided, use today's date
+- If no date provided, use current week
 - Format: YYYY-MM-DD
 
 ### Step 2: Check Market Status (Alpaca MCP)
@@ -31,9 +32,9 @@ Detect non-trading days:
   ```
   ⚠️ No trading today ({reason})
      Skipping Perplexity calls to save budget.
-     Showing last trading day data for reference.
+     Showing whisper results for reference.
   ```
-  → Skip Steps 5-6, just display scan results
+  → Skip sentiment fetching, just display whisper results
 
 - If `is_open=false` but regular pre-market:
   ```
@@ -42,60 +43,54 @@ Detect non-trading days:
   ```
   → Continue with priming
 
-### Step 3: Sync Earnings Calendar (2.0)
-First, refresh the earnings calendar to ensure we have latest data:
+### Step 3: Run 2.0 Whisper Mode
+Execute whisper to get the week's most anticipated earnings:
 ```bash
-cd $PROJECT_ROOT/2.0 && ./trade.sh sync
-```
-This updates earnings dates from Alpha Vantage.
-
-### Step 4: Run 2.0 Scan for Date
-Execute scan to get all earnings for the date:
-```bash
-cd $PROJECT_ROOT/2.0 && ./trade.sh scan $DATE
+cd $PROJECT_ROOT/2.0 && ./trade.sh whisper
 ```
 
 This provides:
-- All tickers with earnings on date
-- VRP ratios and tiers
+- Most anticipated tickers from Earnings Whispers
+- VRP ratios and tiers for each
 - Liquidity grades
 - Quality scores
+- Earnings dates for the week
 
-### Step 5: Filter Qualified Tickers
-From scan results, filter to tickers where:
+### Step 4: Filter Qualified Tickers
+From whisper results, filter to tickers where:
 - VRP >= 3.0x (discovery threshold for sentiment priming)
 - Liquidity != REJECT
 
 Note: 3x is the discovery threshold for priming. Position sizing still uses 4x rule.
 
-### Step 6: Check Budget Status
+### Step 5: Check Budget Status
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
   "SELECT COALESCE((SELECT calls FROM api_budget WHERE date='$(date +%Y-%m-%d)'), 0) as calls;"
 ```
 
-If near budget limit (>32 calls), warn:
+If near budget limit (>120 calls), warn:
 ```
-⚠️ Budget warning: {calls}/40 calls used today
+⚠️ Budget warning: {calls}/150 calls used today
    Limiting priming to top {remaining} tickers
 ```
 
-### Step 7: Fetch Sentiment for Each Qualified Ticker
+### Step 6: Fetch Sentiment for Each Qualified Ticker
 
 For EACH qualified ticker (in order of VRP score):
 
-**7a. Check if already cached:**
+**6a. Check if already cached:**
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
-  "SELECT 1 FROM sentiment_cache WHERE ticker='$TICKER' AND date='$DATE' AND cached_at > datetime('now', '-3 hours');"
+  "SELECT 1 FROM sentiment_cache WHERE ticker='$TICKER' AND date='$EARNINGS_DATE' AND cached_at > datetime('now', '-3 hours');"
 ```
 If exists → skip, mark as "○ already cached"
 
-**7b. If cache miss, fetch via fallback chain:**
+**6b. If cache miss, fetch via fallback chain:**
 
-1. **Try Perplexity (if budget OK, < 40 calls):**
+1. **Try Perplexity (if budget OK, < 150 calls):**
    ```
-   mcp__perplexity__perplexity_ask with query="For {TICKER} earnings, respond ONLY in this format:
+   mcp__perplexity__perplexity_ask with query="For {TICKER} earnings on {DATE}, respond ONLY in this format:
    Direction: [bullish/bearish/neutral]
    Score: [number -1 to +1]
    Catalysts: [2 bullets, max 10 words each]
@@ -106,13 +101,13 @@ If exists → skip, mark as "○ already cached"
 
 2. **Try WebSearch (fallback):**
    ```
-   WebSearch with query="{TICKER} earnings sentiment analyst rating {DATE}"
+   WebSearch with query="{TICKER} earnings sentiment analyst rating December 2025"
    ```
    - Summarize results into same structured format above
    - If success: cache with source="websearch"
    - If fail: mark as "✗ sentiment unavailable"
 
-**7c. Save to sentiment_history (permanent storage for backtesting):**
+**6c. Save to sentiment_history (permanent storage for backtesting):**
 After each successful fetch, also save to the permanent history table:
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
@@ -130,16 +125,17 @@ Score sentiment_direction as:
 
 This builds a permanent dataset for validating AI sentiment value-add.
 
-**7d. Display progress:**
+**6d. Display progress:**
 ```
-  ✓ NVDA - Perplexity (VRP 8.2x)
-  ✓ AMD  - Perplexity (VRP 6.1x)
-  ✓ AVGO - WebSearch fallback (VRP 5.4x)
-  ○ ORCL - already in cache
-  ✗ MU   - sentiment unavailable
+  ✓ LULU  - Perplexity (VRP 5.27x, Dec 11)
+  ✓ RH    - Perplexity (VRP 4.14x, Dec 11)
+  ✓ ORCL  - Perplexity (VRP 3.87x, Dec 10)
+  ✓ AVGO  - WebSearch (VRP 3.19x, Dec 11)
+  ○ TOL   - already cached
+  ✗ CIEN  - sentiment unavailable
 ```
 
-### Step 8: Update Budget Tracker
+### Step 7: Update Budget Tracker
 After all fetches, record total calls made:
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
@@ -153,51 +149,53 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
 
 ```
 ══════════════════════════════════════════════════════
-🔄 PRIMING SYSTEM FOR {DATE}
+🔄 PRIMING SYSTEM - WHISPER MODE (Week of {DATE})
 ══════════════════════════════════════════════════════
 
 ⚠️ Market Status: [status message if relevant]
 
-📊 SCAN RESULTS
-   Earnings found: {N} tickers
+📊 WHISPER RESULTS
+   Most anticipated: {N} tickers
    VRP >= 3x qualified: {M} tickers
    Liquidity REJECT: {R} tickers (excluded)
 
 🔄 FETCHING SENTIMENT
-   ✓ NVDA - Perplexity (VRP 8.2x)
-   ✓ AMD  - Perplexity (VRP 6.1x)
-   ✓ AVGO - WebSearch (VRP 5.4x)
-   ○ ORCL - already cached
-   ○ MU   - already cached
+   ✓ LULU  - Perplexity (VRP 5.27x, Dec 11)
+   ✓ RH    - Perplexity (VRP 4.14x, Dec 11)
+   ✓ ORCL  - Perplexity (VRP 3.87x, Dec 10)
+   ✓ AVGO  - WebSearch (VRP 3.19x, Dec 11)
+   ○ TOL   - already cached
+
 
 📦 PRIMING COMPLETE
    ┌────────────────────────────────┐
-   │ New caches:     3              │
-   │ Cache hits:     2 (skipped)    │
+   │ New caches:     4              │
+   │ Cache hits:     1 (skipped)    │
    │ Failures:       0              │
    │                                │
-   │ API calls today: 8/40          │
+   │ API calls today: 4/150         │
    │ Budget remaining: $4.95        │
    └────────────────────────────────┘
 
 ✅ System primed! All commands will use cached sentiment.
 
 💡 NEXT STEPS
-   Run `/whisper` to see most anticipated (instant)
+   Run `/whisper` to see ranked opportunities (instant)
    Run `/analyze TICKER` for full analysis (instant sentiment)
 ══════════════════════════════════════════════════════
 ```
 
 ## Cost Control
-- Only primes VRP >= 3x tickers (discovery threshold, captures more opportunities)
+- Uses whisper mode (most anticipated) instead of full scan
+- Only primes VRP >= 3x tickers (discovery threshold)
 - Position sizing still uses 4x rule (3x is for discovery, not full sizing)
 - Skips already-cached tickers (no duplicate calls)
 - Skips non-trading days entirely (save budget)
 - Shows budget status after completion
-- Typically 5-12 calls per day depending on earnings density
+- Typically 5-12 calls per week depending on whisper list
 
 ## Weekend/Holiday Handling
 - Detects via `mcp__alpaca__alpaca_get_clock`
 - Skips Perplexity calls on non-trading days
-- Still shows scan results for planning
+- Still shows whisper results for planning
 - Suggests priming on next trading day
