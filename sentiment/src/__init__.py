@@ -46,6 +46,15 @@ try:
 except ImportError as e:
     logger.warning(f"Could not import 2.0 utils modules: {e}")
 
+# 4.0 Sentiment-adjusted direction
+try:
+    from .sentiment_direction import (
+        adjust_direction, format_adjustment, quick_adjust,
+        DirectionAdjustment, AdjustedBias
+    )
+except ImportError as e:
+    logger.warning(f"Could not import sentiment_direction: {e}")
+
 __version__ = "4.0.0"
 __all__ = [
     # Domain
@@ -59,4 +68,7 @@ __all__ = [
     "HybridCache", "ConnectionPool",
     # Utils
     "TokenBucketRateLimiter", "CircuitBreaker",
+    # 4.0 Sentiment
+    "adjust_direction", "format_adjustment", "quick_adjust",
+    "DirectionAdjustment", "AdjustedBias",
 ]
