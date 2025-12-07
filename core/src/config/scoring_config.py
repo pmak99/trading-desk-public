@@ -70,14 +70,17 @@ class ScoringThresholds:
     skew_moderate_range: float = 0.35  # ±15-35% is moderate
     # >35% is extreme skew
 
-    # Liquidity thresholds
-    min_open_interest: int = 100  # Minimum OI for acceptable
-    good_open_interest: int = 500  # Good liquidity
+    # Liquidity thresholds (4-tier aligned with hybrid liquidity system)
+    # OI Tiers: REJECT (<1x), WARNING (1-2x), GOOD (2-5x), EXCELLENT (>=5x) of position size
+    min_open_interest: int = 100  # Minimum OI for WARNING tier
+    warning_open_interest: int = 200  # WARNING->GOOD threshold (2x min)
+    good_open_interest: int = 500  # Good liquidity (GOOD->EXCELLENT)
     excellent_open_interest: int = 1000  # Excellent liquidity
 
-    max_spread_excellent: float = 5.0  # Spread ≤5% = excellent
-    max_spread_good: float = 10.0  # Spread ≤10% = good
-    max_spread_marginal: float = 15.0  # Spread ≤15% = marginal
+    max_spread_excellent: float = 8.0  # Spread ≤8% = excellent (4-tier aligned)
+    max_spread_good: float = 12.0  # Spread ≤12% = good (4-tier aligned)
+    max_spread_warning: float = 15.0  # Spread ≤15% = warning
+    max_spread_marginal: float = 15.0  # Spread >15% = reject (kept for backward compat)
 
     min_volume: int = 50  # Minimum daily volume
     good_volume: int = 100  # Good volume

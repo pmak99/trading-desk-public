@@ -222,28 +222,32 @@ class TickerScorer:
         """
         scores = []
 
-        # Open Interest component (0-10 points)
+        # Open Interest component (0-10 points) - 4-tier aligned
+        # EXCELLENT (>=5x): 10pts, GOOD (2-5x): 7.5pts, WARNING (1-2x): 5pts, REJECT (<1x): 0pts
         if open_interest is not None:
-            if open_interest >= self.thresholds.excellent_open_interest:
+            if open_interest >= self.thresholds.excellent_open_interest:  # >=1000
                 scores.append(10.0)
-            elif open_interest >= self.thresholds.good_open_interest:
+            elif open_interest >= self.thresholds.good_open_interest:  # >=500
                 scores.append(7.5)
-            elif open_interest >= self.thresholds.min_open_interest:
+            elif open_interest >= self.thresholds.warning_open_interest:  # >=200
                 scores.append(5.0)
-            else:
+            elif open_interest >= self.thresholds.min_open_interest:  # >=100
+                scores.append(2.5)
+            else:  # <100 = REJECT
                 scores.append(0.0)
         else:
             scores.append(5.0)  # Neutral if unknown
 
-        # Spread component (0-10 points)
+        # Spread component (0-10 points) - 4-tier aligned
+        # EXCELLENT (<=8%): 10pts, GOOD (<=12%): 7.5pts, WARNING (<=15%): 5pts, REJECT (>15%): 0pts
         if bid_ask_spread_pct is not None:
-            if bid_ask_spread_pct <= self.thresholds.max_spread_excellent:
+            if bid_ask_spread_pct <= self.thresholds.max_spread_excellent:  # <=8%
                 scores.append(10.0)
-            elif bid_ask_spread_pct <= self.thresholds.max_spread_good:
+            elif bid_ask_spread_pct <= self.thresholds.max_spread_good:  # <=12%
                 scores.append(7.5)
-            elif bid_ask_spread_pct <= self.thresholds.max_spread_marginal:
+            elif bid_ask_spread_pct <= self.thresholds.max_spread_marginal:  # <=15%
                 scores.append(5.0)
-            else:
+            else:  # >15% = REJECT
                 scores.append(0.0)
         else:
             scores.append(5.0)  # Neutral if unknown
