@@ -11,7 +11,7 @@ Limits:
 """
 
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 from dataclasses import dataclass
@@ -60,9 +60,9 @@ class BudgetTracker:
         print(f"Calls today: {info.calls_today}/{tracker.MAX_DAILY_CALLS}")
     """
 
-    MAX_DAILY_CALLS = 150  # ~$4.50 at $0.03 per call average
+    MAX_DAILY_CALLS = 150  # Budget allows ~150 calls/day
     WARN_THRESHOLD = 0.80  # 80% = 120 calls
-    COST_PER_CALL_ESTIMATE = 0.03  # Conservative estimate
+    COST_PER_CALL_ESTIMATE = 0.01  # ~$0.01 per sonar-pro call
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize tracker with optional custom database path."""
@@ -75,7 +75,7 @@ class BudgetTracker:
 
     def _init_db(self):
         """Initialize database schema."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS api_budget (
                     date TEXT PRIMARY KEY,
@@ -96,7 +96,7 @@ class BudgetTracker:
         conn.execute("""
             INSERT OR IGNORE INTO api_budget (date, calls, cost, last_updated)
             VALUES (?, 0, 0.0, ?)
-        """, (today, datetime.now().isoformat()))
+        """, (today, datetime.now(timezone.utc).isoformat()))
 
     def can_call(self) -> bool:
         """Check if we can make another API call today."""
@@ -120,7 +120,7 @@ class BudgetTracker:
 
         today = self._get_today()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             self._ensure_today_row(conn)
             conn.execute("""
                 UPDATE api_budget
@@ -128,14 +128,14 @@ class BudgetTracker:
                     cost = cost + ?,
                     last_updated = ?
                 WHERE date = ?
-            """, (cost, datetime.now().isoformat(), today))
+            """, (cost, datetime.now(timezone.utc).isoformat(), today))
             conn.commit()
 
     def get_info(self) -> BudgetInfo:
         """Get current budget information."""
         today = self._get_today()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             conn.row_factory = sqlite3.Row
             self._ensure_today_row(conn)
 
@@ -170,7 +170,7 @@ class BudgetTracker:
         today = date.today()
         month_start = today.replace(day=1).isoformat()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             conn.row_factory = sqlite3.Row
 
             row = conn.execute("""
@@ -198,12 +198,12 @@ class BudgetTracker:
         """Reset today's counts (for testing)."""
         today = self._get_today()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             conn.execute("""
                 UPDATE api_budget
                 SET calls = 0, cost = 0.0, last_updated = ?
                 WHERE date = ?
-            """, (datetime.now().isoformat(), today))
+            """, (datetime.now(timezone.utc).isoformat(), today))
             conn.commit()
 
 
