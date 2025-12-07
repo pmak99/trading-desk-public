@@ -1,169 +1,208 @@
-# Backtest Report Generator
+# Backtest Performance Analysis
 
-Generate comprehensive backtest reports analyzing historical IV Crush strategy performance.
+Analyze trading performance with AI-powered insights and recommendations.
 
-## Quick Backtest Report
+## Arguments
+$ARGUMENTS (format: [TICKER] - optional)
 
-Run the full backtest report:
+Examples:
+- `/backtest` - Analyze all trades
+- `/backtest NVDA` - Analyze NVDA trades only
 
+## Purpose
+Review trading performance to identify:
+- Win rate by VRP tier
+- Best/worst performing tickers
+- Strategy type effectiveness
+- Lessons from losses
+
+## Step-by-Step Instructions
+
+### Step 1: Parse Arguments
+- If ticker provided, filter to that ticker
+- If no ticker, analyze all trades
+
+### Step 2: Run Backtest Report Script
+Execute the backtest script:
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk && python scripts/backtest_report.py
+cd /Users/prashant/PycharmProjects/Trading\ Desk && python scripts/backtest_report.py $TICKER
 ```
 
-For a specific ticker:
-
+If script doesn't exist or fails, query the trade journal directly:
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk && python scripts/backtest_report.py NVDA
+# Check for trade journal in 4.0/data/
+ls /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/*.json 2>/dev/null
+
+# Or query historical trades from any available source
 ```
 
-## Manual Queries
+### Step 3: Calculate Performance Metrics
+From trade data, compute:
 
-Analyze historical performance using the moves database:
+**Overall Metrics:**
+- Total trades
+- Win rate (%)
+- Total P&L ($)
+- Average win ($)
+- Average loss ($)
+- Profit factor (gross wins / gross losses)
+- Largest win / loss
 
-```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && sqlite3 -header data/ivcrush.db "
-SELECT
-    COUNT(*) as total_earnings,
-    AVG(actual_move_pct) as avg_move,
-    MAX(actual_move_pct) as max_move,
-    MIN(actual_move_pct) as min_move,
-    SUM(CASE WHEN direction = 'UP' THEN 1 ELSE 0 END) as up_moves,
-    SUM(CASE WHEN direction = 'DOWN' THEN 1 ELSE 0 END) as down_moves
-FROM historical_moves
-"
+**By VRP Tier:**
+- EXCELLENT (≥7x): Win rate, avg P&L
+- GOOD (≥4x): Win rate, avg P&L
+- MARGINAL (≥1.5x): Win rate, avg P&L
+- SKIP (<1.5x): Win rate, avg P&L (should be 0 trades)
+
+**By Liquidity Tier:**
+- EXCELLENT: Win rate, avg P&L
+- WARNING: Win rate, avg P&L
+- REJECT: Win rate, avg P&L (should be 0 trades)
+
+**By Strategy Type:**
+- Iron Condors: Win rate, avg P&L
+- Spreads: Win rate, avg P&L
+- Naked options: Win rate, avg P&L
+- Strangles: Win rate, avg P&L
+
+### Step 4: AI Performance Analysis
+Using Claude's built-in analysis (no MCP cost):
+
+1. **Edge Validation**
+   - Does higher VRP correlate with better results?
+   - Is the VRP threshold (4x) appropriate?
+
+2. **Liquidity Impact**
+   - Are WARNING tier trades underperforming?
+   - Any REJECT tier violations to flag?
+
+3. **Strategy Effectiveness**
+   - Which strategy types work best?
+   - Any strategies to avoid?
+
+4. **Ticker Patterns**
+   - Best performing tickers (consistent winners)
+   - Worst performing tickers (avoid list)
+   - Any sector patterns?
+
+5. **Loss Analysis**
+   - Common causes of losses
+   - Avoidable vs unavoidable losses
+   - Lessons to apply
+
+6. **Recommendations**
+   - Actionable improvements
+   - Risk management suggestions
+   - Position sizing adjustments
+
+## Output Format
+
+```
+══════════════════════════════════════════════════════
+BACKTEST REPORT {[TICKER] or "ALL TRADES"}
+══════════════════════════════════════════════════════
+
+📊 OVERALL PERFORMANCE
+┌────────────────────┬───────────────┐
+│ Metric             │ Value         │
+├────────────────────┼───────────────┤
+│ Total Trades       │ {N}           │
+│ Win Rate           │ {X.X}%        │
+│ Total P&L          │ ${X,XXX}      │
+│ Average Win        │ ${XXX}        │
+│ Average Loss       │ -${XXX}       │
+│ Profit Factor      │ {X.XX}        │
+│ Largest Win        │ ${X,XXX}      │
+│ Largest Loss       │ -${X,XXX}     │
+└────────────────────┴───────────────┘
+
+📈 PERFORMANCE BY VRP TIER
+┌──────────────┬────────┬──────────┬───────────┐
+│ VRP Tier     │ Trades │ Win Rate │ Avg P&L   │
+├──────────────┼────────┼──────────┼───────────┤
+│ EXCELLENT ⭐ │ {N}    │ {X}%     │ ${XXX}    │
+│ GOOD ✓       │ {N}    │ {X}%     │ ${XXX}    │
+│ MARGINAL ○   │ {N}    │ {X}%     │ ${XXX}    │
+│ SKIP ✗       │ {N}    │ {X}%     │ ${XXX}    │
+└──────────────┴────────┴──────────┴───────────┘
+
+💧 PERFORMANCE BY LIQUIDITY
+┌──────────────┬────────┬──────────┬───────────┐
+│ Liquidity    │ Trades │ Win Rate │ Avg P&L   │
+├──────────────┼────────┼──────────┼───────────┤
+│ EXCELLENT    │ {N}    │ {X}%     │ ${XXX}    │
+│ WARNING ⚠️   │ {N}    │ {X}%     │ ${XXX}    │
+│ REJECT 🚫    │ {N}    │ {X}%     │ ${XXX}    │
+└──────────────┴────────┴──────────┴───────────┘
+
+📋 PERFORMANCE BY STRATEGY
+┌──────────────┬────────┬──────────┬───────────┐
+│ Strategy     │ Trades │ Win Rate │ Avg P&L   │
+├──────────────┼────────┼──────────┼───────────┤
+│ Iron Condor  │ {N}    │ {X}%     │ ${XXX}    │
+│ Put Spread   │ {N}    │ {X}%     │ ${XXX}    │
+│ Call Spread  │ {N}    │ {X}%     │ ${XXX}    │
+│ Naked Put    │ {N}    │ {X}%     │ ${XXX}    │
+│ Strangle     │ {N}    │ {X}%     │ ${XXX}    │
+└──────────────┴────────┴──────────┴───────────┘
+
+🏆 TOP PERFORMERS (Best Avg P&L)
+1. {TICKER} - {N} trades, {X}% win rate, ${XXX} avg
+2. {TICKER} - {N} trades, {X}% win rate, ${XXX} avg
+3. {TICKER} - {N} trades, {X}% win rate, ${XXX} avg
+
+⚠️ UNDERPERFORMERS (Worst Avg P&L)
+1. {TICKER} - {N} trades, {X}% win rate, -${XXX} avg
+2. {TICKER} - {N} trades, {X}% win rate, -${XXX} avg
+3. {TICKER} - {N} trades, {X}% win rate, -${XXX} avg
+
+🧠 AI ANALYSIS & INSIGHTS
+
+**Edge Validation:**
+{Analysis of VRP correlation with results}
+
+**Liquidity Impact:**
+{Analysis of liquidity tier performance}
+[If REJECT trades exist: 🚫 WARNING: {N} trades in REJECT liquidity
+ These should have been skipped. Total loss: -${XXX}]
+
+**Strategy Effectiveness:**
+{Which strategies work best for your trading style}
+
+**Key Lessons from Losses:**
+• {Lesson 1}
+• {Lesson 2}
+• {Lesson 3}
+
+**Actionable Recommendations:**
+1. {Specific improvement}
+2. {Specific improvement}
+3. {Specific improvement}
+
+══════════════════════════════════════════════════════
 ```
 
-## Backtest Scenarios
+## No Data Output
 
-### 1. VRP Threshold Analysis
-Test different VRP thresholds to find optimal entry criteria:
+```
+══════════════════════════════════════════════════════
+BACKTEST REPORT
+══════════════════════════════════════════════════════
 
-```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && sqlite3 data/ivcrush.db "
-SELECT ticker, COUNT(*) as earnings_count, AVG(actual_move_pct) as avg_move
-FROM historical_moves
-GROUP BY ticker
-HAVING COUNT(*) >= 4
-ORDER BY avg_move ASC
-LIMIT 20
-"
+❌ NO TRADE DATA FOUND
+
+No trade journal data available for analysis.
+
+To populate trade history:
+1. Run `/journal` to parse Fidelity statements
+2. Or manually add trades to journal
+
+Once you have trade data, run `/backtest` again.
+
+══════════════════════════════════════════════════════
 ```
 
-Best tickers for IV Crush = Low average actual moves (consistently small movers)
-
-### 2. Win Rate by Move Size
-Calculate theoretical win rate at different implied move levels:
-
-```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && sqlite3 data/ivcrush.db "
-SELECT
-    CASE
-        WHEN actual_move_pct < 5 THEN '0-5%'
-        WHEN actual_move_pct < 10 THEN '5-10%'
-        WHEN actual_move_pct < 15 THEN '10-15%'
-        ELSE '15%+'
-    END as move_bucket,
-    COUNT(*) as count,
-    AVG(actual_move_pct) as avg_move
-FROM historical_moves
-GROUP BY move_bucket
-ORDER BY move_bucket
-"
-```
-
-### 3. Seasonal Analysis
-Performance by month/quarter:
-
-```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && sqlite3 data/ivcrush.db "
-SELECT
-    strftime('%m', earnings_date) as month,
-    COUNT(*) as earnings_count,
-    AVG(actual_move_pct) as avg_move
-FROM historical_moves
-GROUP BY month
-ORDER BY month
-"
-```
-
-### 4. Direction Bias Analysis
-Analyze up vs down move distribution:
-
-```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && sqlite3 data/ivcrush.db "
-SELECT
-    direction,
-    COUNT(*) as count,
-    AVG(actual_move_pct) as avg_move,
-    MAX(actual_move_pct) as max_move
-FROM historical_moves
-GROUP BY direction
-"
-```
-
-## Backtest Report Template
-
-Generate a comprehensive report including:
-
-### Executive Summary
-- Total earnings events analyzed
-- Historical win rate (actual < implied)
-- Average move vs typical implied move
-- Best and worst performing periods
-
-### Risk Metrics
-- Maximum drawdown scenario
-- Worst single event (largest actual move)
-- Tail risk (moves > 20%)
-- VaR at 95% confidence
-
-### Strategy Optimization
-- Optimal VRP threshold based on historical data
-- Best tickers for strategy (low volatility, consistent)
-- Tickers to avoid (high volatility, unpredictable)
-- Seasonal adjustments
-
-### Performance Attribution
-- P&L by ticker
-- P&L by month
-- Win rate trends over time
-- Profit factor analysis
-
-## Live Performance Comparison
-
-Compare backtest to actual 2025 trading results:
-
-```bash
-cat "/Users/prashant/PycharmProjects/Trading Desk/docs/2025 Trades/trading_data_2025_v3.json"
-```
-
-Report should show:
-- Backtest expected win rate vs actual
-- Backtest expected P&L vs actual
-- Variance analysis
-- Areas for improvement
-
-## Key Metrics to Calculate
-
-| Metric | Formula | Target |
-|--------|---------|--------|
-| Win Rate | Wins / Total Trades | > 55% |
-| Profit Factor | Gross Wins / Gross Losses | > 1.2 |
-| Sharpe Ratio | (Return - Rf) / Std Dev | > 1.0 |
-| Max Drawdown | Peak to Trough | < 15% |
-| Avg Win/Loss | Avg Win / Avg Loss | > 0.8 |
-
-## Usage Examples
-
-"Run a backtest report for NVDA"
-"Analyze seasonal performance patterns"
-"Compare my 2025 results to historical expectations"
-"Find the optimal VRP threshold"
-"Which tickers should I focus on?"
-
-## Database Info
-
-Historical moves database: `2.0/data/ivcrush.db`
-- Table: `historical_moves`
-- Records: 4,926 earnings events
-- Fields: ticker, earnings_date, close_before, close_after, actual_move_pct, direction
+## Cost Control
+- No Perplexity calls (uses Claude's built-in analysis)
+- Local data query only
+- AI insights generated in-context
