@@ -1,6 +1,6 @@
 # Maintenance Mode
 
-Run system maintenance tasks: backups, data cleanup, integrity checks, and backfill missing data.
+Run system maintenance tasks: backups, data cleanup, integrity checks, sync calendar, and backfill missing data.
 
 ## Arguments
 $ARGUMENTS (optional: specific task to run)
@@ -8,12 +8,14 @@ $ARGUMENTS (optional: specific task to run)
 Examples:
 - `/maintenance` - Run all maintenance tasks
 - `/maintenance backup` - Only run database backup
+- `/maintenance sync` - Only sync earnings calendar
 - `/maintenance backfill` - Only backfill missing historical data
 - `/maintenance cleanup` - Only clean expired caches
 
 ## Purpose
 Run `/maintenance` weekly (or after heavy usage):
 - Backup databases before they grow too large
+- Sync earnings calendar with Alpha Vantage + Yahoo Finance
 - Backfill missing historical moves for new tickers
 - Clean expired sentiment cache entries
 - Validate data integrity
@@ -24,7 +26,7 @@ Run `/maintenance` weekly (or after heavy usage):
 ### Step 1: Parse Arguments
 - If no argument, run ALL tasks
 - If specific task provided, run only that task
-- Valid tasks: `backup`, `backfill`, `cleanup`, `validate`, `status`
+- Valid tasks: `backup`, `sync`, `backfill`, `cleanup`, `validate`, `status`
 
 ### Step 2: Show Current Status
 ```bash
@@ -61,15 +63,30 @@ cp "$DB_FILE" "$BACKUP_DIR/sentiment_cache_${TIMESTAMP}.db"
 cd "$BACKUP_DIR" && ls -t *.db 2>/dev/null | tail -n +6 | xargs rm -f
 ```
 
-### Step 4: Backfill Missing Historical Data (if running all or `backfill`)
+### Step 4: Sync Earnings Calendar (if running all or `sync`)
 
-**4a. Find tickers with sparse data (<5 historical moves):**
+Run the 2.0 sync command to refresh earnings dates from Alpha Vantage + Yahoo Finance:
+```bash
+cd $PROJECT_ROOT/2.0 && ./trade.sh sync
+```
+
+This discovers new earnings announcements and validates dates using cross-reference validation.
+
+Display progress:
+```
+  ✓ Calendar synced - 15 new earnings discovered
+  ✓ 3 date corrections applied
+```
+
+### Step 5: Backfill Missing Historical Data (if running all or `backfill`)
+
+**5a. Find tickers with sparse data (<5 historical moves):**
 ```bash
 sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
   "SELECT ticker, COUNT(*) as cnt FROM historical_moves GROUP BY ticker HAVING cnt < 5 ORDER BY cnt;"
 ```
 
-**4b. For each sparse ticker, run backfill:**
+**5b. For each sparse ticker, run backfill:**
 ```bash
 cd $PROJECT_ROOT/2.0 && \
   ./venv/bin/python scripts/backfill_yfinance.py $TICKER --start-date 2023-01-01
@@ -82,42 +99,42 @@ Display progress:
   ○ No other tickers need backfill
 ```
 
-### Step 5: Cleanup Expired Caches (if running all or `cleanup`)
+### Step 6: Cleanup Expired Caches (if running all or `cleanup`)
 
-**5a. Remove expired sentiment cache entries (>24 hours old):**
+**6a. Remove expired sentiment cache entries (>24 hours old):**
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
   "DELETE FROM sentiment_cache WHERE cached_at < datetime('now', '-24 hours');"
 ```
 
-**5b. Report deleted entries:**
+**6b. Report deleted entries:**
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
   "SELECT changes();"
 ```
 
-**5c. Vacuum databases to reclaim space:**
+**6c. Vacuum databases to reclaim space:**
 ```bash
 sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db "VACUUM;"
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db "VACUUM;"
 ```
 
-### Step 6: Data Integrity Validation (if running all or `validate`)
+### Step 7: Data Integrity Validation (if running all or `validate`)
 
-**6a. Check for orphaned records:**
+**7a. Check for orphaned records:**
 ```bash
 # Tickers in earnings but not in historical_moves
 sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
   "SELECT DISTINCT ticker FROM earnings_calendar WHERE ticker NOT IN (SELECT DISTINCT ticker FROM historical_moves) LIMIT 10;"
 ```
 
-**6b. Check for duplicate entries:**
+**7b. Check for duplicate entries:**
 ```bash
 sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
   "SELECT ticker, earnings_date, COUNT(*) as cnt FROM historical_moves GROUP BY ticker, earnings_date HAVING cnt > 1;"
 ```
 
-**6c. Check sentiment_history for backtesting data:**
+**7c. Check sentiment_history for backtesting data:**
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
   "SELECT COUNT(*) as total,
@@ -125,15 +142,15 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
    FROM sentiment_history;"
 ```
 
-### Step 7: Budget Reset Check
+### Step 8: Budget Reset Check
 
-**7a. Check if budget needs reset (new day):**
+**8a. Check if budget needs reset (new day):**
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
   "SELECT date, calls, cost FROM api_budget ORDER BY date DESC LIMIT 3;"
 ```
 
-**7b. Show monthly spend:**
+**8b. Show monthly spend:**
 ```bash
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
   "SELECT strftime('%Y-%m', date) as month, SUM(calls) as total_calls, SUM(cost) as total_cost
@@ -158,6 +175,10 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
    ✓ 2.0 database backed up → ivcrush_20251207_143022.db
    ✓ 4.0 database backed up → sentiment_cache_20251207_143022.db
    ✓ Pruned 2 old backups
+
+🔄 SYNC
+   ✓ Calendar synced - 15 new earnings discovered
+   ✓ 3 date corrections applied
 
 📈 BACKFILL
    ✓ SAIL - backfilled 10 moves (was 2)
@@ -190,6 +211,7 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
 | Task | What it does | When to run |
 |------|--------------|-------------|
 | `backup` | Copy databases to backups/ | Weekly or before major changes |
+| `sync` | Refresh earnings calendar from Alpha Vantage + Yahoo | Weekly or before whisper |
 | `backfill` | Fill missing historical moves | After adding new tickers |
 | `cleanup` | Remove expired caches, vacuum | Weekly |
 | `validate` | Check data integrity | After errors or monthly |
