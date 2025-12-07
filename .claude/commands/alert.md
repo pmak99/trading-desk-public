@@ -46,7 +46,7 @@ This provides:
 
 ### Step 3: Filter High-VRP Alerts
 From results, identify tickers where:
-- VRP >= 4.0x (GOOD or EXCELLENT tier)
+- VRP >= 3.0x (discovery threshold for alerts)
 - Liquidity != REJECT
 - Earnings timing is actionable (BMO if morning, AMC if afternoon)
 
@@ -148,7 +148,7 @@ For each alert ticker, check if user has existing exposure:
 📭 NO HIGH-VRP OPPORTUNITIES TODAY
 
 Scanned {N} tickers with earnings today:
-  • VRP < 4x: {M} tickers (no edge)
+  • VRP < 3x: {M} tickers (insufficient edge)
   • Liquidity REJECT: {R} tickers (untradeable)
   • Qualified: 0 tickers
 

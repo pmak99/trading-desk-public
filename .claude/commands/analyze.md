@@ -65,10 +65,10 @@ mcp__finnhub__finnhub_stock_ownership with operation="insider_transactions" and 
 
 Display a summary of key findings from each.
 
-### Step 4: AI Sentiment (Conditional - Only if VRP ≥ 4x AND Liquidity ≠ REJECT)
+### Step 4: AI Sentiment (Conditional - Only if VRP ≥ 3x AND Liquidity ≠ REJECT)
 
 **Skip sentiment if:**
-- VRP < 4x (no edge = don't waste API budget)
+- VRP < 3x (insufficient edge for discovery)
 - Liquidity = REJECT (not tradeable anyway)
 
 **If qualified, use fallback chain:**
@@ -200,7 +200,7 @@ ANALYSIS: {TICKER}
    Direction: {BULLISH/BEARISH/NEUTRAL} | Score: {-1 to +1}
    Catalysts: {bullet list, 3 max}
    Risks: {bullet list, 2 max}
-   [Or: "ℹ️ Skipped - VRP < 4x" / "ℹ️ Unavailable"]
+   [Or: "ℹ️ Skipped - VRP < 3x" / "ℹ️ Unavailable"]
 
 🎯 DIRECTION (4.0 Adjusted)
    2.0 Skew: {NEUTRAL/BULLISH/BEARISH} → 4.0: {ADJUSTED}
@@ -225,5 +225,5 @@ ANALYSIS: {TICKER}
 
 ## Cost Control
 - Finnhub calls: Always (free, 60/min limit)
-- Perplexity: Only if VRP ≥ 4x AND Liquidity ≠ REJECT AND cache miss AND budget OK
+- Perplexity: Only if VRP ≥ 3x AND Liquidity ≠ REJECT AND cache miss AND budget OK
 - Maximum 1 Perplexity call per /analyze
