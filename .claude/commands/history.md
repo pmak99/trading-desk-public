@@ -35,7 +35,8 @@ cd $PROJECT_ROOT && python scripts/visualize_moves.py $TICKER
 If script doesn't exist, query database directly:
 ```bash
 sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
-  "SELECT earnings_date, actual_move_pct, direction
+  "SELECT earnings_date, intraday_move_pct, gap_move_pct,
+          CASE WHEN gap_move_pct >= 0 THEN 'UP' ELSE 'DOWN' END as direction
    FROM historical_moves
    WHERE ticker='$TICKER'
    ORDER BY earnings_date DESC

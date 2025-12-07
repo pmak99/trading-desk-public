@@ -37,10 +37,11 @@ If not found:
 ```bash
 sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
   "SELECT intraday_move_pct, gap_move_pct,
-          CASE WHEN gap_move_pct > 0 THEN 'UP' ELSE 'DOWN' END as direction
+          CASE WHEN gap_move_pct >= 0 THEN 'UP' ELSE 'DOWN' END as direction
    FROM historical_moves
    WHERE ticker='$TICKER' AND earnings_date='$DATE';"
 ```
+Note: `intraday_move_pct` is the actual move, `gap_move_pct` determines direction (UP if >= 0).
 
 If no outcome data yet:
 ```
