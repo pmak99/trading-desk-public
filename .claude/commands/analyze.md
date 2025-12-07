@@ -110,7 +110,48 @@ Display a summary of key findings from each.
    ℹ️ AI sentiment unavailable. Displaying raw news from Finnhub above.
    ```
 
-### Step 5: Store in Memory MCP (Optional)
+### Step 5: Sentiment-Adjusted Direction (4.0 Enhancement)
+
+If sentiment was gathered, adjust the directional bias from 2.0's skew analysis:
+
+**Run the adjustment:**
+```python
+# From the 2.0 output, extract skew bias (e.g., "NEUTRAL", "BULLISH", "STRONG_BULLISH")
+# From sentiment, extract score (-1 to +1)
+
+import sys
+sys.path.insert(0, '$PROJECT_ROOT/4.0/src')
+from sentiment_direction import adjust_direction, format_adjustment
+
+# Example:
+adj = adjust_direction(skew_bias="NEUTRAL", sentiment_score=0.4)
+print(format_adjustment(adj))
+```
+
+**Simple 3-Rule System:**
+| Original Skew | Sentiment | Result | Rule |
+|---------------|-----------|--------|------|
+| NEUTRAL | Bullish (≥+0.2) | → BULLISH | Sentiment breaks tie |
+| NEUTRAL | Bearish (≤-0.2) | → BEARISH | Sentiment breaks tie |
+| BULLISH | Bearish (≤-0.2) | → NEUTRAL | Conflict → hedge |
+| BEARISH | Bullish (≥+0.2) | → NEUTRAL | Conflict → hedge |
+| Any | Aligned/Neutral | → Keep original | Skew dominates |
+
+**Display in output:**
+```
+🎯 DIRECTION (4.0 Adjusted)
+   2.0 Skew: {original} → 4.0: {adjusted}
+   Rule: {tiebreak_bullish|conflict_hedge|skew_dominates}
+   Confidence: {X%}
+```
+
+**Strategy Impact:**
+- BULLISH → Favor bull put spreads over straddles
+- BEARISH → Favor bear call spreads over straddles
+- NEUTRAL → Straddles, iron condors (hedged)
+- Conflict (CHANGED to NEUTRAL) → Strongly prefer hedged strategies
+
+### Step 6: Store in Memory MCP (Optional)
 For high-conviction trades (VRP ≥ 7x), store analysis:
 ```
 mcp__memory__create_entities with entities=[{
@@ -160,6 +201,11 @@ ANALYSIS: {TICKER}
    Catalysts: {bullet list, 3 max}
    Risks: {bullet list, 2 max}
    [Or: "ℹ️ Skipped - VRP < 4x" / "ℹ️ Unavailable"]
+
+🎯 DIRECTION (4.0 Adjusted)
+   2.0 Skew: {NEUTRAL/BULLISH/BEARISH} → 4.0: {ADJUSTED}
+   Rule: {tiebreak|conflict_hedge|skew_dominates}
+   [If CHANGED: "⚠️ Sentiment shifted direction - review strategy alignment"]
 
 📈 STRATEGY RECOMMENDATIONS
    [2-3 ranked strategies from 2.0 with:]
