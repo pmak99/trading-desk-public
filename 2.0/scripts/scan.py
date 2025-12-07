@@ -73,6 +73,7 @@ from src.infrastructure.data_sources.earnings_whisper_scraper import (
 from src.infrastructure.cache.hybrid_cache import HybridCache
 from src.application.services.earnings_date_validator import EarningsDateValidator
 from src.infrastructure.data_sources.yahoo_finance_earnings import YahooFinanceEarnings
+from src.utils.market_hours import is_market_open, get_market_status, is_trading_day
 import os
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,47 @@ SCORE_LIQUIDITY_REJECT_POINTS = 4           # Small penalty, not zero (some REJE
 SCORE_MOVE_MAX_POINTS = 25                  # Reduced weight - secondary to VRP
 SCORE_MOVE_USE_CONTINUOUS = True            # Linear interpolation (no cliff effects)
 SCORE_MOVE_BASELINE_PCT = 20.0              # 20% implied move = 0 points
+
+# Market hours indicator
+MARKET_CLOSED_INDICATOR = "*"  # Appended to tier when using OI-only scoring
+
+def parse_liquidity_tier(tier_display: str) -> tuple:
+    """
+    Parse liquidity tier display string into base tier and market status.
+
+    Args:
+        tier_display: Tier string like "EXCELLENT", "WARNING*", "REJECT*"
+
+    Returns:
+        Tuple of (base_tier, is_oi_only)
+        - base_tier: "EXCELLENT", "WARNING", or "REJECT"
+        - is_oi_only: True if asterisk present (market closed, OI-only scoring)
+    """
+    is_oi_only = tier_display.endswith(MARKET_CLOSED_INDICATOR)
+    base_tier = tier_display.rstrip(MARKET_CLOSED_INDICATOR)
+    return (base_tier, is_oi_only)
+
+
+def format_liquidity_display(tier_display: str) -> str:
+    """
+    Format liquidity tier for display with appropriate indicator.
+
+    Args:
+        tier_display: Tier string from check_liquidity_with_tier
+
+    Returns:
+        Formatted display string like "✓ High", "⚠️  Low*", "❌ REJECT*"
+    """
+    base_tier, is_oi_only = parse_liquidity_tier(tier_display)
+    suffix = "*" if is_oi_only else ""
+
+    if base_tier == "EXCELLENT":
+        return f"✓ High{suffix}"
+    elif base_tier == "WARNING":
+        return f"⚠️  Low{suffix}"
+    else:
+        return f"❌ REJECT{suffix}"
+
 
 # Discrete thresholds (fallback if continuous disabled)
 SCORE_MOVE_EASY_THRESHOLD = 8.0             # Implied move % considered "easy" (full points)
@@ -328,10 +370,13 @@ def get_ticker_name(ticker: str) -> Optional[str]:
 
 def check_liquidity_with_tier(ticker: str, expiration: date, container: Container) -> Tuple[bool, str]:
     """
-    Check liquidity tier using LiquidityScorer (single source of truth).
+    Check liquidity tier using LiquidityScorer with market-hours awareness.
 
     This is now a thin wrapper around the LiquidityScorer class, which provides
     the single source of truth for all liquidity tier classification across all modes.
+
+    When markets are closed (weekends, holidays, after-hours), volume is always 0.
+    In these cases, the scorer uses OI-only mode to avoid false REJECT classifications.
 
     Args:
         ticker: Stock ticker symbol
@@ -341,7 +386,7 @@ def check_liquidity_with_tier(ticker: str, expiration: date, container: Containe
     Returns:
         Tuple of (has_liquidity: bool, tier: str)
         - has_liquidity: True if acceptable (WARNING or EXCELLENT), False if REJECT
-        - tier: "EXCELLENT", "WARNING", or "REJECT"
+        - tier: "EXCELLENT", "WARNING", or "REJECT" (with market status suffix when closed)
     """
     # Check cache first
     cache_key = (ticker, expiration)
@@ -377,18 +422,26 @@ def check_liquidity_with_tier(ticker: str, expiration: date, container: Containe
         mid_call = calls_list[len(calls_list) // 2][1]
         mid_put = puts_list[len(puts_list) // 2][1]
 
-        # Use LiquidityScorer to classify tier (single source of truth)
+        # Use LiquidityScorer with market-hours awareness
         liquidity_scorer = container.liquidity_scorer
-        tier = liquidity_scorer.classify_straddle_tier(mid_call, mid_put)
+        tier, market_open, market_reason = liquidity_scorer.classify_straddle_tier_market_aware(mid_call, mid_put)
 
         # Determine if has acceptable liquidity (WARNING or EXCELLENT = True, REJECT = False)
         has_liquidity = tier != "REJECT"
 
-        logger.debug(f"{ticker}: {tier} liquidity tier (call OI={mid_call.open_interest}, put OI={mid_put.open_interest}, "
-                    f"call vol={mid_call.volume}, put vol={mid_put.volume}, "
-                    f"call spread={mid_call.spread_pct:.1f}%, put spread={mid_put.spread_pct:.1f}%)")
+        # Add market status indicator when closed
+        if not market_open:
+            display_tier = f"{tier}*"  # Asterisk indicates OI-only scoring
+            logger.debug(f"{ticker}: {tier} liquidity tier (OI-only, market: {market_reason}) "
+                        f"(call OI={mid_call.open_interest}, put OI={mid_put.open_interest}, "
+                        f"call spread={mid_call.spread_pct:.1f}%, put spread={mid_put.spread_pct:.1f}%)")
+        else:
+            display_tier = tier
+            logger.debug(f"{ticker}: {tier} liquidity tier (call OI={mid_call.open_interest}, put OI={mid_put.open_interest}, "
+                        f"call vol={mid_call.volume}, put vol={mid_put.volume}, "
+                        f"call spread={mid_call.spread_pct:.1f}%, put spread={mid_put.spread_pct:.1f}%)")
 
-        result = (has_liquidity, tier)
+        result = (has_liquidity, display_tier)
         _liquidity_cache[cache_key] = result
         return result
 
@@ -1183,12 +1236,14 @@ def calculate_scan_quality_score(result: dict) -> float:
 
     # Factor 3: Liquidity Quality (max: SCORE_LIQUIDITY_MAX_POINTS = 20)
     # Moderate penalty - don't over-penalize REJECT (some win!)
-    liquidity_tier = result.get('liquidity_tier', 'UNKNOWN')
-    if liquidity_tier == 'EXCELLENT':
+    # Strip market-closed indicator (*) to get base tier for scoring
+    liquidity_tier_raw = result.get('liquidity_tier', 'UNKNOWN')
+    base_tier, _ = parse_liquidity_tier(liquidity_tier_raw)
+    if base_tier == 'EXCELLENT':
         liquidity_score = SCORE_LIQUIDITY_EXCELLENT_POINTS  # 20
-    elif liquidity_tier == 'WARNING':
+    elif base_tier == 'WARNING':
         liquidity_score = SCORE_LIQUIDITY_WARNING_POINTS    # 12 (60%)
-    elif liquidity_tier == 'REJECT':
+    elif base_tier == 'REJECT':
         liquidity_score = SCORE_LIQUIDITY_REJECT_POINTS     # 4 (20%)
     else:
         # Unknown = assume WARNING (conservative default)
@@ -1334,10 +1389,14 @@ def _display_scan_results(
         logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'Score':<7} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Liquidity':<12}")
         logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*7} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*12}")
 
-        # Sort by quality score
+        # Sort by quality score (strip asterisk for sorting)
         def sort_key(x):
-            tier = x.get('liquidity_tier', 'UNKNOWN')
-            return (-x['_quality_score'], LIQUIDITY_PRIORITY_ORDER.get(tier, 3))
+            tier_raw = x.get('liquidity_tier', 'UNKNOWN')
+            base_tier, _ = parse_liquidity_tier(tier_raw)
+            return (-x['_quality_score'], LIQUIDITY_PRIORITY_ORDER.get(base_tier, 3))
+
+        # Check if any result has OI-only indicator (market closed)
+        has_oi_only = any(r.get('liquidity_tier', '').endswith('*') for r in tradeable)
 
         for i, r in enumerate(sorted(tradeable, key=sort_key), 1):
             ticker = r['ticker']
@@ -1350,12 +1409,17 @@ def _display_scan_results(
             edge = f"{r['edge_score']:.2f}"
             rec = r['recommendation'].upper()
 
+            # Use helper function for consistent liquidity display
             liquidity_tier = r.get('liquidity_tier', 'UNKNOWN')
-            liq_display = "✓ High" if liquidity_tier == "EXCELLENT" else ("⚠️  Low" if liquidity_tier == "WARNING" else "❌ REJECT")
+            liq_display = format_liquidity_display(liquidity_tier)
 
             logger.info(
                 f"   {i:<3} {ticker:<8} {name:<20} {score_display:<7} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {liq_display:<12}"
             )
+
+        # Add footer note if market closed (OI-only scoring)
+        if has_oi_only:
+            logger.info(f"\n   * Liquidity based on OI only (market closed, volume unavailable)")
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:
@@ -1581,8 +1645,12 @@ def scanning_mode(
 
         # Sort by: 1) Quality Score (descending), 2) Liquidity (EXCELLENT, WARNING, REJECT)
         def sort_key_scan(x):
-            tier = x.get('liquidity_tier', 'UNKNOWN')
-            return (-x['_quality_score'], LIQUIDITY_PRIORITY_ORDER.get(tier, 3))
+            tier_raw = x.get('liquidity_tier', 'UNKNOWN')
+            base_tier, _ = parse_liquidity_tier(tier_raw)
+            return (-x['_quality_score'], LIQUIDITY_PRIORITY_ORDER.get(base_tier, 3))
+
+        # Check if any result has OI-only indicator (market closed)
+        has_oi_only = any(r.get('liquidity_tier', '').endswith('*') for r in tradeable)
 
         # Table rows
         for i, r in enumerate(sorted(tradeable, key=sort_key_scan), 1):
@@ -1604,18 +1672,17 @@ def scanning_mode(
             edge = f"{r['edge_score']:.2f}"
             rec = r['recommendation'].upper()
 
-            # CRITICAL: Display liquidity tier with color coding
+            # Use helper function for consistent liquidity display
             liquidity_tier = r.get('liquidity_tier', 'UNKNOWN')
-            if liquidity_tier == "EXCELLENT":
-                liq_display = "✓ High"
-            elif liquidity_tier == "WARNING":
-                liq_display = "⚠️  Low"
-            else:
-                liq_display = "❌ REJECT"
+            liq_display = format_liquidity_display(liquidity_tier)
 
             logger.info(
                 f"   {i:<3} {ticker:<8} {name:<20} {score_display:<7} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {liq_display:<12}"
             )
+
+        # Add footer note if market closed (OI-only scoring)
+        if has_oi_only:
+            logger.info(f"\n   * Liquidity based on OI only (market closed, volume unavailable)")
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:
@@ -1853,8 +1920,12 @@ def ticker_mode(
 
         # Sort by: 1) Earnings date (ascending), 2) Quality Score (descending), 3) Liquidity (EXCELLENT, WARNING, REJECT)
         def sort_key_ticker(x):
-            tier = x.get('liquidity_tier', 'UNKNOWN')
-            return (x['earnings_date'], -x['_quality_score'], LIQUIDITY_PRIORITY_ORDER.get(tier, 3))
+            tier_raw = x.get('liquidity_tier', 'UNKNOWN')
+            base_tier, _ = parse_liquidity_tier(tier_raw)
+            return (x['earnings_date'], -x['_quality_score'], LIQUIDITY_PRIORITY_ORDER.get(base_tier, 3))
+
+        # Check if any result has OI-only indicator (market closed)
+        has_oi_only = any(r.get('liquidity_tier', '').endswith('*') for r in tradeable)
 
         # Table rows
         for i, r in enumerate(sorted(tradeable, key=sort_key_ticker), 1):
@@ -1878,18 +1949,17 @@ def ticker_mode(
             bias = r.get('directional_bias', 'NEUTRAL')  # NEW: Display directional bias
             earnings = r['earnings_date']
 
-            # CRITICAL: Display liquidity tier with color coding
+            # Use helper function for consistent liquidity display
             liquidity_tier = r.get('liquidity_tier', 'UNKNOWN')
-            if liquidity_tier == "EXCELLENT":
-                liq_display = "✓ High"
-            elif liquidity_tier == "WARNING":
-                liq_display = "⚠️  Low"
-            else:
-                liq_display = "❌ REJECT"
+            liq_display = format_liquidity_display(liquidity_tier)
 
             logger.info(
                 f"   {i:<3} {ticker:<8} {name:<20} {score_display:<7} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<15} {earnings:<12} {liq_display:<12}"
             )
+
+        # Add footer note if market closed (OI-only scoring)
+        if has_oi_only:
+            logger.info(f"\n   * Liquidity based on OI only (market closed, volume unavailable)")
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:
@@ -2355,12 +2425,16 @@ def whisper_mode(
 
         # Sort by: 1) Earnings date (ascending), 2) Quality Score (descending), 3) Liquidity (EXCELLENT, WARNING, REJECT)
         def sort_key(x):
-            tier = x.get('liquidity_tier', 'UNKNOWN')
+            tier_raw = x.get('liquidity_tier', 'UNKNOWN')
+            base_tier, _ = parse_liquidity_tier(tier_raw)
             return (
                 x['earnings_date'],          # Sort by date (ascending - soonest first)
                 -x['_quality_score'],        # Then by Quality Score (descending - highest first)
-                LIQUIDITY_PRIORITY_ORDER.get(tier, 3)  # Then by liquidity (EXCELLENT first, REJECT last)
+                LIQUIDITY_PRIORITY_ORDER.get(base_tier, 3)  # Then by liquidity (EXCELLENT first, REJECT last)
             )
+
+        # Check if any result has OI-only indicator (market closed)
+        has_oi_only = any(r.get('liquidity_tier', '').endswith('*') for r in tradeable)
 
         # Table rows with day separators
         prev_earnings_date = None
@@ -2396,18 +2470,17 @@ def whisper_mode(
                 logger.info(f"   {'-'*3} {'-'*8} {'-'*20} {'-'*7} {'-'*8} {'-'*9} {'-'*7} {'-'*15} {'-'*15} {'-'*12} {'-'*12}")
             prev_earnings_date = earnings
 
-            # CRITICAL: Display liquidity tier with color coding
+            # Use helper function for consistent liquidity display
             liquidity_tier = r.get('liquidity_tier', 'UNKNOWN')
-            if liquidity_tier == "EXCELLENT":
-                liq_display = "✓ High"
-            elif liquidity_tier == "WARNING":
-                liq_display = "⚠️  Low"
-            else:
-                liq_display = "❌ REJECT"
+            liq_display = format_liquidity_display(liquidity_tier)
 
             logger.info(
                 f"   {i:<3} {ticker:<8} {name:<20} {score_display:<7} {vrp:<8} {implied:<9} {edge:<7} {rec:<15} {bias:<15} {earnings:<12} {liq_display:<12}"
             )
+
+        # Add footer note if market closed (OI-only scoring)
+        if has_oi_only:
+            logger.info(f"\n   * Liquidity based on OI only (market closed, volume unavailable)")
 
         logger.info(f"\n💡 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:

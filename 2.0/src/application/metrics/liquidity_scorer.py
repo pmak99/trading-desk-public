@@ -8,12 +8,18 @@ Evaluates option liquidity quality using multiple factors:
 - Depth (size at bid/ask)
 
 Returns a composite liquidity score (0-100) and individual metrics.
+
+Market Hours Awareness:
+When markets are closed (weekends, holidays, after-hours), volume is always 0.
+The scorer can operate in "OI-only" mode to avoid false REJECT classifications
+during these periods. Use classify_straddle_tier_market_aware() for this behavior.
 """
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 from src.domain.types import OptionQuote, Money
+from src.utils.market_hours import is_market_open, get_market_status
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +287,87 @@ class LiquidityScorer:
         # Both are EXCELLENT
         else:
             return "EXCELLENT"
+
+    def _classify_tier_oi_only(self, oi: int, spread_pct: float) -> str:
+        """
+        Classify liquidity tier using only OI and spread (ignoring volume).
+
+        Used when markets are closed and volume is expected to be 0.
+        This prevents false REJECT classifications during weekends/after-hours.
+
+        Args:
+            oi: Open interest
+            spread_pct: Bid-ask spread percentage
+
+        Returns:
+            "EXCELLENT", "WARNING", or "REJECT"
+        """
+        # REJECT tier: OI or spread fails minimum thresholds
+        if oi < self.min_oi or spread_pct > self.max_spread_pct:
+            return "REJECT"
+
+        # EXCELLENT tier: Both OI and spread meet excellent thresholds
+        if oi >= self.excellent_oi and spread_pct <= self.excellent_spread_pct:
+            return "EXCELLENT"
+
+        # WARNING tier: Meets minimums but not excellent
+        return "WARNING"
+
+    def classify_option_tier_oi_only(self, option: OptionQuote) -> str:
+        """
+        Classify a single option's liquidity tier using OI-only mode.
+
+        Used when markets are closed to avoid false rejections from volume=0.
+
+        Args:
+            option: Option quote with market data
+
+        Returns:
+            "EXCELLENT", "WARNING", or "REJECT"
+        """
+        oi = option.open_interest or 0
+        spread_pct = self.calculate_spread_pct(option)
+        return self._classify_tier_oi_only(oi, spread_pct)
+
+    def classify_straddle_tier_market_aware(
+        self, call: OptionQuote, put: OptionQuote
+    ) -> Tuple[str, bool, str]:
+        """
+        Classify liquidity tier for a straddle with market-hours awareness.
+
+        When markets are closed (weekends, holidays, after-hours), volume is
+        expected to be 0. This method uses OI-only scoring in those cases to
+        avoid false REJECT classifications.
+
+        Args:
+            call: Call option quote
+            put: Put option quote
+
+        Returns:
+            Tuple of (tier, is_market_open, market_status_reason)
+            - tier: "EXCELLENT", "WARNING", or "REJECT"
+            - is_market_open: True if market is currently open
+            - market_status_reason: e.g., "Weekend (Saturday)", "After Hours"
+        """
+        market_open, market_reason = get_market_status()
+
+        if market_open:
+            # Market is open - use full scoring with volume
+            tier = self.classify_straddle_tier(call, put)
+        else:
+            # Market is closed - use OI-only scoring
+            call_tier = self.classify_option_tier_oi_only(call)
+            put_tier = self.classify_option_tier_oi_only(put)
+
+            # Same logic as classify_straddle_tier but with OI-only tiers
+            if call_tier == "REJECT" or put_tier == "REJECT":
+                tier = "REJECT"
+            elif call_tier == "WARNING" or put_tier == "WARNING":
+                tier = "WARNING"
+            else:
+                tier = "EXCELLENT"
+
+        return (tier, market_open, market_reason)
 
     def _redistribute_weights_without_depth(self) -> dict:
         """
