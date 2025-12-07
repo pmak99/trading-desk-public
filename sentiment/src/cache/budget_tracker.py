@@ -2,12 +2,23 @@
 Budget Tracker for Perplexity API Usage
 
 Tracks daily API calls and cost to stay within $5/month budget.
-Resets automatically based on date comparison (no cron needed).
+Budget resets on the 1st of each month.
+Daily limits reset automatically based on date comparison (no cron needed).
+
+Perplexity Pricing (sonar model - configured via PERPLEXITY_ASK_MODEL=sonar):
+- Input: $1/1M tokens
+- Output: $1/1M tokens
+- Typical query (~150 input, ~400 output): ~$0.00055
+- Estimated cost per call: ~$0.001 (conservative, includes overhead)
 
 Limits:
-- Max: 150 calls/day (~$4.50 of $5 budget)
-- Warn: At 80% (120 calls)
+- Monthly budget: $5.00
+- Max: 200 calls/day (~$0.20/day, ~$4.40/month at 22 trading days)
+- Warn: At 80% (160 calls)
 - Hard stop: At 100% (graceful degradation to WebSearch)
+
+Note: Using sonar (basic) instead of sonar-pro for 10x cost savings.
+Quality is sufficient for sentiment synthesis queries.
 """
 
 import sqlite3
@@ -60,9 +71,11 @@ class BudgetTracker:
         print(f"Calls today: {info.calls_today}/{tracker.MAX_DAILY_CALLS}")
     """
 
-    MAX_DAILY_CALLS = 150  # Budget allows ~150 calls/day
-    WARN_THRESHOLD = 0.80  # 80% = 120 calls
-    COST_PER_CALL_ESTIMATE = 0.01  # ~$0.01 per sonar-pro call
+    # Budget constants
+    MONTHLY_BUDGET = 5.00  # $5/month budget
+    MAX_DAILY_CALLS = 200  # ~200 calls/day with sonar model (~$0.001/call)
+    WARN_THRESHOLD = 0.80  # 80% = 160 calls
+    COST_PER_CALL_ESTIMATE = 0.001  # ~$0.001 per sonar call (conservative)
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize tracker with optional custom database path."""
