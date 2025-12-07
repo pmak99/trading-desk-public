@@ -1,0 +1,106 @@
+{
+  "scan_date": "2025-12-07",
+  "total_tickers": 8,
+  "results": [
+    {
+      "ticker": "AVAV",
+      "scan_date": "2025-12-07",
+      "implied_move_pct": 12.62,
+      "recommended_strategy": "Straddle",
+      "vrp_ratio": 3.13,
+      "historical_mean_pct": 4.04,
+      "overall_score": 2.81,
+      "edge_score": 2.81,
+      "vrp_tier": "EXCELLENT",
+      "liquidity_tier": "REJECT",
+      "tradeable": true
+    },
+    {
+      "ticker": "CASY",
+      "scan_date": "2025-12-07",
+      "implied_move_pct": 7.47,
+      "recommended_strategy": "Straddle",
+      "vrp_ratio": 3.0,
+      "historical_mean_pct": 2.49,
+      "overall_score": 2.35,
+      "edge_score": 2.35,
+      "vrp_tier": "EXCELLENT",
+      "liquidity_tier": "REJECT",
+      "tradeable": true
+    },
+    {
+      "ticker": "BRZE",
+      "scan_date": "2025-12-07",
+      "implied_move_pct": 15.0,
+      "recommended_strategy": "Straddle",
+      "vrp_ratio": 2.95,
+      "historical_mean_pct": 5.08,
+      "overall_score": 2.42,
+      "edge_score": 2.42,
+      "vrp_tier": "EXCELLENT",
+      "liquidity_tier": "WARNING",
+      "tradeable": true
+    },
+    {
+      "ticker": "SAIL",
+      "scan_date": "2025-12-07",
+      "implied_move_pct": 13.52,
+      "recommended_strategy": "Straddle",
+      "vrp_ratio": 1.56,
+      "historical_mean_pct": 8.67,
+      "overall_score": 1.46,
+      "edge_score": 1.46,
+      "vrp_tier": "GOOD",
+      "liquidity_tier": "WARNING",
+      "tradeable": true
+    },
+    {
+      "ticker": "CPB",
+      "scan_date": "2025-12-07",
+      "implied_move_pct": 5.78,
+      "recommended_strategy": "Straddle",
+      "vrp_ratio": 1.39,
+      "historical_mean_pct": 4.14,
+      "overall_score": 1.24,
+      "edge_score": 1.24,
+      "vrp_tier": "MARGINAL",
+      "liquidity_tier": "REJECT"
+    },
+    {
+      "ticker": "AZO",
+      "scan_date": "2025-12-07",
+      "implied_move_pct": 5.45,
+      "recommended_strategy": "Straddle",
+      "vrp_ratio": 1.29,
+      "historical_mean_pct": 4.24,
+      "overall_score": 1.14,
+      "edge_score": 1.14,
+      "vrp_tier": "MARGINAL",
+      "liquidity_tier": "REJECT"
+    },
+    {
+      "ticker": "OLLI",
+      "scan_date": "2025-12-07",
+      "implied_move_pct": 8.94,
+      "recommended_strategy": "Straddle",
+      "vrp_ratio": 1.07,
+      "historical_mean_pct": 8.36,
+      "overall_score": 0.95,
+      "edge_score": 0.95,
+      "vrp_tier": "SKIP",
+      "liquidity_tier": "REJECT"
+    },
+    {
+      "ticker": "GME",
+      "scan_date": "2025-12-07",
+      "implied_move_pct": 8.7,
+      "recommended_strategy": "Straddle",
+      "vrp_ratio": 0.99,
+      "historical_mean_pct": 8.79,
+      "overall_score": 0.82,
+      "edge_score": 0.82,
+      "vrp_tier": "SKIP",
+      "liquidity_tier": "WARNING"
+    }
+  ]
+}
