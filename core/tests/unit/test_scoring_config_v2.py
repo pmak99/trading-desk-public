@@ -128,14 +128,15 @@ class TestScoringThresholds:
         assert thresholds.vrp_marginal == 1.4
 
     def test_liquidity_thresholds(self):
-        """Liquidity thresholds are properly set."""
+        """Liquidity thresholds are properly set (4-tier aligned)."""
         thresholds = ScoringThresholds()
         assert thresholds.min_open_interest == 100
         assert thresholds.good_open_interest == 500
         assert thresholds.excellent_open_interest == 1000
-        assert thresholds.max_spread_excellent == 5.0
-        assert thresholds.max_spread_good == 10.0
-        assert thresholds.max_spread_marginal == 15.0
+        # 4-tier aligned spread thresholds
+        assert thresholds.max_spread_excellent == 8.0  # <=8% excellent
+        assert thresholds.max_spread_good == 12.0  # <=12% good
+        assert thresholds.max_spread_warning == 15.0  # <=15% warning
 
 
 class TestScoringConfig:

@@ -444,6 +444,8 @@ class TestConfigurationEdgeCases:
             ResilienceConfig,
             AlgorithmConfig,
             LoggingConfig,
+            StrategyConfig,
+            ScanConfig,
         )
         from src.config.validation import validate_configuration
 
@@ -459,6 +461,8 @@ class TestConfigurationEdgeCases:
                 vrp_good=1.2,
                 vrp_marginal=1.1,
             ),
+            strategy=StrategyConfig(),
+            scan=ScanConfig(),
             rate_limits=RateLimitConfig(
                 alpha_vantage_per_minute=1,  # Minimum
                 tradier_per_second=1,
@@ -486,6 +490,8 @@ class TestConfigurationEdgeCases:
             ResilienceConfig,
             AlgorithmConfig,
             LoggingConfig,
+            StrategyConfig,
+            ScanConfig,
         )
         from src.config.validation import validate_configuration, ConfigurationError
 
@@ -497,6 +503,8 @@ class TestConfigurationEdgeCases:
             database=DatabaseConfig(path=tmp_path / "test.db"),
             cache=CacheConfig(l1_ttl=30, l2_ttl=30),  # Equal!
             thresholds=ThresholdsConfig(),
+            strategy=StrategyConfig(),
+            scan=ScanConfig(),
             rate_limits=RateLimitConfig(),
             resilience=ResilienceConfig(),
             algorithms=AlgorithmConfig(),

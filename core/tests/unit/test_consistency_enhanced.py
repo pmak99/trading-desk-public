@@ -37,6 +37,9 @@ class TestConsistencyAnalyzerEnhanced:
 
         Returns:
             List of HistoricalMove (newest first)
+
+        Note: The ConsistencyAnalyzerEnhanced defaults to using close_move_pct,
+        so we set that field according to the pattern.
         """
         moves = []
         base_date = date.today()
@@ -69,10 +72,10 @@ class TestConsistencyAnalyzerEnhanced:
                 earnings_open=Money(102.0),
                 earnings_high=Money(105.0),
                 earnings_low=Money(98.0),
-                earnings_close=Money(103.0),
-                intraday_move_pct=Percentage(move_pct),
+                earnings_close=Money(100.0 + move_pct),  # Set earnings_close for consistency
+                intraday_move_pct=Percentage(move_pct),  # Keep for intraday metric
                 gap_move_pct=Percentage(2.0),
-                close_move_pct=Percentage(3.0)
+                close_move_pct=Percentage(move_pct)  # Set to match pattern (default metric)
             )
             moves.append(move)
 
@@ -148,7 +151,7 @@ class TestConsistencyAnalyzerEnhanced:
         moves = []
         base_date = date.today()
 
-        # Recent quarters: 8% moves
+        # Recent quarters: 8% moves (close_move_pct is the default metric)
         for i in range(4):
             move = HistoricalMove(
                 ticker="TEST",
@@ -157,10 +160,10 @@ class TestConsistencyAnalyzerEnhanced:
                 earnings_open=Money(102.0),
                 earnings_high=Money(108.0),
                 earnings_low=Money(92.0),
-                earnings_close=Money(103.0),
+                earnings_close=Money(108.0),  # 8% move
                 intraday_move_pct=Percentage(8.0),
                 gap_move_pct=Percentage(2.0),
-                close_move_pct=Percentage(3.0)
+                close_move_pct=Percentage(8.0)  # 8% - default metric
             )
             moves.append(move)
 
@@ -173,10 +176,10 @@ class TestConsistencyAnalyzerEnhanced:
                 earnings_open=Money(102.0),
                 earnings_high=Money(104.0),
                 earnings_low=Money(96.0),
-                earnings_close=Money(103.0),
+                earnings_close=Money(104.0),  # 4% move
                 intraday_move_pct=Percentage(4.0),
                 gap_move_pct=Percentage(2.0),
-                close_move_pct=Percentage(3.0)
+                close_move_pct=Percentage(4.0)  # 4% - default metric
             )
             moves.append(move)
 

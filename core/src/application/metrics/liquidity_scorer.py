@@ -230,10 +230,17 @@ class LiquidityScorer:
 
     def _classify_tier(self, oi: int, volume: int, spread_pct: float) -> str:
         """
-        Classify liquidity into 3-tier system (EXCELLENT/WARNING/REJECT).
+        Classify liquidity into 4-tier system (EXCELLENT/GOOD/WARNING/REJECT).
 
         This is the single source of truth for tier classification across all modes.
-        Uses 2-out-of-3 rule for EXCELLENT tier to be less conservative.
+
+        4-Tier System (from CLAUDE.md):
+        - EXCELLENT: OI >= 5x position (excellent_oi), spread <= 8%
+        - GOOD:      OI 2-5x position (good_oi to excellent_oi), spread 8-12%
+        - WARNING:   OI 1-2x position (warning_oi to good_oi), spread 12-15%
+        - REJECT:    OI < 1x position (below warning_oi), spread > 15%
+
+        Final tier = worse of (OI tier, Spread tier)
 
         Args:
             oi: Open interest
@@ -241,29 +248,33 @@ class LiquidityScorer:
             spread_pct: Bid-ask spread percentage
 
         Returns:
-            "EXCELLENT", "WARNING", or "REJECT"
+            "EXCELLENT", "GOOD", "WARNING", or "REJECT"
         """
-        # REJECT tier: Any metric fails minimum thresholds
-        if (oi < self.min_oi
-            or volume < self.min_volume
-            or spread_pct > self.max_spread_pct):
-            return "REJECT"
+        # Determine OI-based tier
+        if oi < self.min_oi or volume < self.min_volume:
+            oi_tier = "REJECT"
+        elif oi < self.warning_oi:
+            oi_tier = "REJECT"
+        elif oi < self.good_oi:
+            oi_tier = "WARNING"
+        elif oi < self.excellent_oi:
+            oi_tier = "GOOD"
+        else:
+            oi_tier = "EXCELLENT"
 
-        # EXCELLENT tier: At least 2 out of 3 metrics meet excellent thresholds
-        # This is less conservative than requiring all 3
-        excellent_count = 0
-        if oi >= self.excellent_oi:
-            excellent_count += 1
-        if volume >= self.excellent_volume:
-            excellent_count += 1
-        if spread_pct <= self.excellent_spread_pct:
-            excellent_count += 1
+        # Determine spread-based tier
+        if spread_pct > self.max_spread_pct:  # >15%
+            spread_tier = "REJECT"
+        elif spread_pct > self.warning_spread_pct:  # >12%
+            spread_tier = "WARNING"
+        elif spread_pct > self.good_spread_pct:  # >8%
+            spread_tier = "GOOD"
+        else:  # <=8%
+            spread_tier = "EXCELLENT"
 
-        if excellent_count >= 2:
-            return "EXCELLENT"
-
-        # WARNING tier: Meets minimums but not excellent
-        return "WARNING"
+        # Final tier is the worse of the two
+        tier_order = {"REJECT": 0, "WARNING": 1, "GOOD": 2, "EXCELLENT": 3}
+        return min([oi_tier, spread_tier], key=lambda t: tier_order[t])
 
     def classify_option_tier(self, option: OptionQuote) -> str:
         """
@@ -273,7 +284,7 @@ class LiquidityScorer:
             option: Option quote with market data
 
         Returns:
-            "EXCELLENT", "WARNING", or "REJECT"
+            "EXCELLENT", "GOOD", "WARNING", or "REJECT"
         """
         oi = option.open_interest or 0
         volume = option.volume or 0
@@ -292,21 +303,14 @@ class LiquidityScorer:
             put: Put option quote
 
         Returns:
-            "EXCELLENT", "WARNING", or "REJECT"
+            "EXCELLENT", "GOOD", "WARNING", or "REJECT"
         """
         call_tier = self.classify_option_tier(call)
         put_tier = self.classify_option_tier(put)
 
-        # Tier priority: REJECT > WARNING > EXCELLENT
-        # If either leg is REJECT, entire straddle is REJECT
-        if call_tier == "REJECT" or put_tier == "REJECT":
-            return "REJECT"
-        # If either leg is WARNING, entire straddle is WARNING
-        elif call_tier == "WARNING" or put_tier == "WARNING":
-            return "WARNING"
-        # Both are EXCELLENT
-        else:
-            return "EXCELLENT"
+        # Final tier is the worse of the two
+        tier_order = {"REJECT": 0, "WARNING": 1, "GOOD": 2, "EXCELLENT": 3}
+        return min([call_tier, put_tier], key=lambda t: tier_order[t])
 
     def _classify_tier_oi_only(self, oi: int, spread_pct: float) -> str:
         """
@@ -315,23 +319,46 @@ class LiquidityScorer:
         Used when markets are closed and volume is expected to be 0.
         This prevents false REJECT classifications during weekends/after-hours.
 
+        4-Tier System (from CLAUDE.md):
+        - EXCELLENT: OI >= excellent_oi, spread <= 8%
+        - GOOD:      OI >= good_oi, spread <= 12%
+        - WARNING:   OI >= warning_oi, spread <= 15%
+        - REJECT:    OI < warning_oi or spread > 15%
+
+        Final tier = worse of (OI tier, Spread tier)
+
         Args:
             oi: Open interest
             spread_pct: Bid-ask spread percentage
 
         Returns:
-            "EXCELLENT", "WARNING", or "REJECT"
+            "EXCELLENT", "GOOD", "WARNING", or "REJECT"
         """
-        # REJECT tier: OI or spread fails minimum thresholds
-        if oi < self.min_oi or spread_pct > self.max_spread_pct:
-            return "REJECT"
+        # Determine OI-based tier
+        if oi < self.min_oi:
+            oi_tier = "REJECT"
+        elif oi < self.warning_oi:
+            oi_tier = "REJECT"
+        elif oi < self.good_oi:
+            oi_tier = "WARNING"
+        elif oi < self.excellent_oi:
+            oi_tier = "GOOD"
+        else:
+            oi_tier = "EXCELLENT"
 
-        # EXCELLENT tier: Both OI and spread meet excellent thresholds
-        if oi >= self.excellent_oi and spread_pct <= self.excellent_spread_pct:
-            return "EXCELLENT"
+        # Determine spread-based tier
+        if spread_pct > self.max_spread_pct:  # >15%
+            spread_tier = "REJECT"
+        elif spread_pct > self.warning_spread_pct:  # >12%
+            spread_tier = "WARNING"
+        elif spread_pct > self.good_spread_pct:  # >8%
+            spread_tier = "GOOD"
+        else:  # <=8%
+            spread_tier = "EXCELLENT"
 
-        # WARNING tier: Meets minimums but not excellent
-        return "WARNING"
+        # Final tier is the worse of the two
+        tier_order = {"REJECT": 0, "WARNING": 1, "GOOD": 2, "EXCELLENT": 3}
+        return min([oi_tier, spread_tier], key=lambda t: tier_order[t])
 
     def classify_option_tier_oi_only(self, option: OptionQuote) -> str:
         """
@@ -343,7 +370,7 @@ class LiquidityScorer:
             option: Option quote with market data
 
         Returns:
-            "EXCELLENT", "WARNING", or "REJECT"
+            "EXCELLENT", "GOOD", "WARNING", or "REJECT"
         """
         oi = option.open_interest or 0
         spread_pct = self.calculate_spread_pct(option)
@@ -365,7 +392,7 @@ class LiquidityScorer:
 
         Returns:
             Tuple of (tier, is_market_open, market_status_reason)
-            - tier: "EXCELLENT", "WARNING", or "REJECT"
+            - tier: "EXCELLENT", "GOOD", "WARNING", or "REJECT"
             - is_market_open: True if market is currently open
             - market_status_reason: e.g., "Weekend (Saturday)", "After Hours"
         """
@@ -379,13 +406,9 @@ class LiquidityScorer:
             call_tier = self.classify_option_tier_oi_only(call)
             put_tier = self.classify_option_tier_oi_only(put)
 
-            # Same logic as classify_straddle_tier but with OI-only tiers
-            if call_tier == "REJECT" or put_tier == "REJECT":
-                tier = "REJECT"
-            elif call_tier == "WARNING" or put_tier == "WARNING":
-                tier = "WARNING"
-            else:
-                tier = "EXCELLENT"
+            # Final tier is the worse of the two
+            tier_order = {"REJECT": 0, "WARNING": 1, "GOOD": 2, "EXCELLENT": 3}
+            tier = min([call_tier, put_tier], key=lambda t: tier_order[t])
 
         return (tier, market_open, market_reason)
 

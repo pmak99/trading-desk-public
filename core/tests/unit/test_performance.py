@@ -10,6 +10,9 @@ import asyncio
 import time
 from unittest.mock import patch
 
+# Enable pytest-asyncio for this module
+pytestmark = pytest.mark.asyncio
+
 from src.utils.performance import (
     PerformanceMonitor,
     track_performance,

@@ -24,6 +24,7 @@ from scripts.scan import (
     SCORE_EDGE_TARGET,
     SCORE_LIQUIDITY_MAX_POINTS,
     SCORE_LIQUIDITY_EXCELLENT_POINTS,
+    SCORE_LIQUIDITY_GOOD_POINTS,
     SCORE_LIQUIDITY_WARNING_POINTS,
     SCORE_LIQUIDITY_REJECT_POINTS,
     SCORE_MOVE_MAX_POINTS,
@@ -254,26 +255,27 @@ def test_helper_function():
 
 
 def test_liquidity_priority_order():
-    """Test LIQUIDITY_PRIORITY_ORDER constant."""
+    """Test LIQUIDITY_PRIORITY_ORDER constant with 4-tier system."""
     print("\n" + "=" * 80)
-    print("TEST: LIQUIDITY_PRIORITY_ORDER Constant")
+    print("TEST: LIQUIDITY_PRIORITY_ORDER Constant (4-Tier)")
     print("=" * 80)
 
     # Verify constant structure
     print(f"\nLIQUIDITY_PRIORITY_ORDER = {LIQUIDITY_PRIORITY_ORDER}")
 
-    # Check expected keys
-    expected_keys = {'EXCELLENT', 'WARNING', 'REJECT', 'UNKNOWN'}
+    # Check expected keys (4-tier: EXCELLENT, GOOD, WARNING, REJECT + UNKNOWN)
+    expected_keys = {'EXCELLENT', 'GOOD', 'WARNING', 'REJECT', 'UNKNOWN'}
     actual_keys = set(LIQUIDITY_PRIORITY_ORDER.keys())
     assert actual_keys == expected_keys, f"Expected keys {expected_keys}, got {actual_keys}"
     print(f"✓ All expected keys present: {expected_keys}")
 
     # Check ordering (lower number = higher priority)
     assert LIQUIDITY_PRIORITY_ORDER['EXCELLENT'] == 0, "EXCELLENT should be priority 0"
-    assert LIQUIDITY_PRIORITY_ORDER['WARNING'] == 1, "WARNING should be priority 1"
-    assert LIQUIDITY_PRIORITY_ORDER['REJECT'] == 2, "REJECT should be priority 2"
-    assert LIQUIDITY_PRIORITY_ORDER['UNKNOWN'] == 3, "UNKNOWN should be priority 3"
-    print(f"✓ Priorities correctly ordered: EXCELLENT(0) > WARNING(1) > REJECT(2) > UNKNOWN(3)")
+    assert LIQUIDITY_PRIORITY_ORDER['GOOD'] == 1, "GOOD should be priority 1"
+    assert LIQUIDITY_PRIORITY_ORDER['WARNING'] == 2, "WARNING should be priority 2"
+    assert LIQUIDITY_PRIORITY_ORDER['REJECT'] == 3, "REJECT should be priority 3"
+    assert LIQUIDITY_PRIORITY_ORDER['UNKNOWN'] == 4, "UNKNOWN should be priority 4"
+    print(f"✓ Priorities correctly ordered: EXCELLENT(0) > GOOD(1) > WARNING(2) > REJECT(3) > UNKNOWN(4)")
 
     # Test sorting with priority
     test_data = [
@@ -281,15 +283,16 @@ def test_liquidity_priority_order():
         {'ticker': 'B', '_quality_score': 80.0, 'liquidity_tier': 'EXCELLENT'},
         {'ticker': 'C', '_quality_score': 80.0, 'liquidity_tier': 'WARNING'},
         {'ticker': 'D', '_quality_score': 80.0, 'liquidity_tier': 'UNKNOWN'},
+        {'ticker': 'E', '_quality_score': 80.0, 'liquidity_tier': 'GOOD'},
     ]
 
     sorted_data = sorted(test_data, key=lambda x: (
         -x['_quality_score'],
-        LIQUIDITY_PRIORITY_ORDER.get(x['liquidity_tier'], 3)
+        LIQUIDITY_PRIORITY_ORDER.get(x['liquidity_tier'], 4)
     ))
 
     sorted_tickers = [d['ticker'] for d in sorted_data]
-    expected_order = ['B', 'C', 'A', 'D']  # EXCELLENT, WARNING, REJECT, UNKNOWN
+    expected_order = ['B', 'E', 'C', 'A', 'D']  # EXCELLENT, GOOD, WARNING, REJECT, UNKNOWN
     assert sorted_tickers == expected_order, f"Expected {expected_order}, got {sorted_tickers}"
     print(f"✓ Sorting works correctly: {' > '.join(sorted_tickers)}")
 
@@ -297,9 +300,9 @@ def test_liquidity_priority_order():
 
 
 def test_constants_consistency():
-    """Test that all scoring constants are consistent."""
+    """Test that all scoring constants are consistent (4-tier system)."""
     print("\n" + "=" * 80)
-    print("TEST: Scoring Constants Consistency")
+    print("TEST: Scoring Constants Consistency (4-Tier)")
     print("=" * 80)
 
     # Verify constants sum to 100
@@ -314,11 +317,19 @@ def test_constants_consistency():
     assert SCORE_EDGE_TARGET > 0, "Edge target must be > 0"
     print(f"✓ Targets are positive: VRP={SCORE_VRP_TARGET}, Edge={SCORE_EDGE_TARGET}")
 
-    # Verify liquidity tier consistency
+    # Verify 4-tier liquidity tier consistency
     assert SCORE_LIQUIDITY_EXCELLENT_POINTS == SCORE_LIQUIDITY_MAX_POINTS, "EXCELLENT should equal MAX"
-    assert SCORE_LIQUIDITY_WARNING_POINTS == SCORE_LIQUIDITY_EXCELLENT_POINTS / 2, "WARNING should be 50% of EXCELLENT"
-    assert SCORE_LIQUIDITY_REJECT_POINTS == 0, "REJECT should be 0"
-    print(f"✓ Liquidity tiers consistent: EXCELLENT={SCORE_LIQUIDITY_EXCELLENT_POINTS}, WARNING={SCORE_LIQUIDITY_WARNING_POINTS}, REJECT={SCORE_LIQUIDITY_REJECT_POINTS}")
+    assert SCORE_LIQUIDITY_GOOD_POINTS == 16, "GOOD should be 16 points"
+    assert SCORE_LIQUIDITY_WARNING_POINTS == 12, "WARNING should be 12 points"
+    assert SCORE_LIQUIDITY_REJECT_POINTS == 4, "REJECT should be 4 points (not zero!)"
+    print(f"✓ 4-Tier liquidity: EXCELLENT={SCORE_LIQUIDITY_EXCELLENT_POINTS}, GOOD={SCORE_LIQUIDITY_GOOD_POINTS}, WARNING={SCORE_LIQUIDITY_WARNING_POINTS}, REJECT={SCORE_LIQUIDITY_REJECT_POINTS}")
+
+    # Verify tier ordering
+    assert SCORE_LIQUIDITY_EXCELLENT_POINTS > SCORE_LIQUIDITY_GOOD_POINTS, "EXCELLENT > GOOD"
+    assert SCORE_LIQUIDITY_GOOD_POINTS > SCORE_LIQUIDITY_WARNING_POINTS, "GOOD > WARNING"
+    assert SCORE_LIQUIDITY_WARNING_POINTS > SCORE_LIQUIDITY_REJECT_POINTS, "WARNING > REJECT"
+    assert SCORE_LIQUIDITY_REJECT_POINTS > 0, "REJECT > 0 (some REJECT trades win!)"
+    print(f"✓ Tier ordering correct: EXCELLENT > GOOD > WARNING > REJECT > 0")
 
     # Verify move thresholds are ordered
     assert SCORE_MOVE_EASY_THRESHOLD < SCORE_MOVE_MODERATE_THRESHOLD, "Easy < Moderate"
