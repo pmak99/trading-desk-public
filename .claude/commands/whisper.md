@@ -110,11 +110,20 @@ WebSearch with query="{TICKER} earnings sentiment analyst rating {DATE}"
 ℹ️ Sentiment unavailable for {TICKER}
 ```
 
-### Step 6: Calculate 4.0 Scores & Final Filter
+### Step 6: Calculate 4.0 Scores & Adjusted Direction
 For each ticker with sentiment:
 1. Apply sentiment modifier to get 4.0 Score
-2. Drop any ticker with 4.0 Score < 55
-3. Re-rank by 4.0 Score (descending)
+2. Calculate adjusted direction using sentiment_direction module:
+   ```python
+   import sys
+   sys.path.insert(0, '$PROJECT_ROOT/4.0/src')
+   from sentiment_direction import quick_adjust
+
+   # skew_bias from 2.0 output, sentiment_score from Step 5
+   adjusted_dir = quick_adjust(skew_bias, sentiment_score)
+   ```
+3. Drop any ticker with 4.0 Score < 55
+4. Re-rank by 4.0 Score (descending)
 
 ### Step 7: Display Results
 
@@ -141,11 +150,13 @@ Legend: ⭐ EXCELLENT (≥7x) | ✓ GOOD (≥4x) | ○ MARGINAL (≥1.5x)
 
 🔝 TOP OPPORTUNITIES (Sentiment-Adjusted)
 
-│ # │ TICKER │ 2.0  │ Sentiment   │ Mod  │ 4.0  │ LIQ     │
-├───┼────────┼──────┼─────────────┼──────┼──────┼─────────┤
-│ 1 │ NVDA   │ 92.0 │ Bull (+0.6) │ +7%  │ 98.4 │ EXCEL   │
-│ 2 │ AMD    │ 85.0 │ Neut (+0.1) │  0%  │ 85.0 │ EXCEL   │
-│ 3 │ AVGO   │ 72.0 │ SBull(+0.8) │ +12% │ 80.6 │ WARN ⚠️ │
+│ # │ TICKER │ 2.0  │ Sentiment   │ 4.0  │ DIR (4.0)   │ LIQ     │
+├───┼────────┼──────┼─────────────┼──────┼─────────────┼─────────┤
+│ 1 │ NVDA   │ 92.0 │ Bull (+0.6) │ 98.4 │ BULLISH     │ EXCEL   │
+│ 2 │ ORCL   │ 74.0 │ Bull (+0.4) │ 79.2 │ BULLISH*    │ GOOD    │
+│ 3 │ LULU   │ 68.0 │ Bear (-0.2) │ 63.2 │ NEUTRAL*    │ WARN ⚠️ │
+
+* = direction changed from 2.0 skew (sentiment override)
 
 TOP PICK: NVDA (Dec 10 AMC)
   VRP: 8.2x | Move: 8.5% | 4.0 Score: 98.4
