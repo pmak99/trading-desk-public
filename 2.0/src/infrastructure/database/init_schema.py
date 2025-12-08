@@ -62,6 +62,7 @@ def init_database(db_path: Path) -> None:
                 confirmed BOOLEAN DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_validated_at DATETIME,
                 PRIMARY KEY (ticker, earnings_date)
             )
         ''')

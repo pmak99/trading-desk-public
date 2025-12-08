@@ -48,6 +48,25 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# Skip conflict validation for tickers validated within this threshold
+VALIDATION_SKIP_HOURS = 48
+
+
+def should_skip_validation(last_validated_at: datetime | None) -> bool:
+    """
+    Check if conflict validation can be skipped based on last validation time.
+
+    Args:
+        last_validated_at: Timestamp of last validation, or None if never validated
+
+    Returns:
+        True if validation was performed within VALIDATION_SKIP_HOURS, False otherwise
+    """
+    if last_validated_at is None:
+        return False
+    hours_since_validation = (datetime.now() - last_validated_at).total_seconds() / 3600
+    return hours_since_validation < VALIDATION_SKIP_HOURS
+
 
 class SyncStats:
     """Track synchronization statistics."""
@@ -57,6 +76,7 @@ class SyncStats:
         self.updated_dates = 0
         self.unchanged_dates = 0
         self.conflicts_detected = 0
+        self.validation_skipped = 0  # Tickers skipped due to recent validation
         self.errors = 0
         self.tickers_processed: Set[str] = set()
         self.changes: List[Dict] = []
@@ -70,6 +90,7 @@ class SyncStats:
         logger.info(f"  ✓ New earnings dates: {self.new_dates}")
         logger.info(f"  ↻ Updated dates: {self.updated_dates}")
         logger.info(f"  = Unchanged: {self.unchanged_dates}")
+        logger.info(f"  ⏭️  Validation skipped (recent): {self.validation_skipped}")
         logger.info(f"  ⚠️  Conflicts detected: {self.conflicts_detected}")
         logger.info(f"  ✗ Errors: {self.errors}")
 
@@ -84,12 +105,12 @@ class SyncStats:
 
 def get_database_dates(
     db_path: str, horizon_days: int = 90
-) -> Dict[str, Tuple[date, EarningsTiming, datetime]]:
+) -> Dict[str, Tuple[date, EarningsTiming, datetime, datetime | None]]:
     """
     Get current earnings dates from database.
 
     Returns:
-        Dict[ticker] = (earnings_date, timing, updated_at)
+        Dict[ticker] = (earnings_date, timing, updated_at, last_validated_at)
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -99,7 +120,7 @@ def get_database_dates(
 
     cursor.execute(
         """
-        SELECT ticker, earnings_date, timing, updated_at
+        SELECT ticker, earnings_date, timing, updated_at, last_validated_at
         FROM earnings_calendar
         WHERE earnings_date >= ? AND earnings_date <= ?
         ORDER BY earnings_date
@@ -109,11 +130,14 @@ def get_database_dates(
 
     result = {}
     for row in cursor.fetchall():
-        ticker, earnings_date_str, timing_str, updated_at_str = row
+        ticker, earnings_date_str, timing_str, updated_at_str, last_validated_str = row
         earnings_date = datetime.strptime(earnings_date_str, "%Y-%m-%d").date()
         timing = EarningsTiming(timing_str)
         updated_at = datetime.strptime(updated_at_str, "%Y-%m-%d %H:%M:%S")
-        result[ticker] = (earnings_date, timing, updated_at)
+        last_validated_at = None
+        if last_validated_str:
+            last_validated_at = datetime.strptime(last_validated_str, "%Y-%m-%d %H:%M:%S")
+        result[ticker] = (earnings_date, timing, updated_at, last_validated_at)
 
     conn.close()
     return result
@@ -243,7 +267,7 @@ def sync_earnings_calendar(
 
         # Check if ticker exists in database
         if ticker in db_dates:
-            db_date, db_timing, db_updated_at = db_dates[ticker]
+            db_date, db_timing, db_updated_at, last_validated_at = db_dates[ticker]
             days_stale = (datetime.now() - db_updated_at).days
 
             # Check if date changed
@@ -256,31 +280,21 @@ def sync_earnings_calendar(
                     f"{'='*70}"
                 )
 
-                # Cross-validate with Yahoo Finance
-                result = validator.validate_earnings_date(ticker)
-
-                if result.is_ok:
-                    validation = result.value
-
-                    if validation.has_conflict:
-                        stats.conflicts_detected += 1
-                        logger.warning(
-                            f"  ⚠️  CONFLICT: {validation.conflict_details}"
-                        )
-
-                    consensus_date = validation.consensus_date
-                    consensus_timing = validation.consensus_timing
-
+                # Check if we can skip validation (validated within 48 hours)
+                if should_skip_validation(last_validated_at):
+                    hours_ago = (datetime.now() - last_validated_at).total_seconds() / 3600
                     logger.info(
-                        f"  ✓ Consensus: {consensus_date} ({consensus_timing.value})"
+                        f"  ⏭️  Skipping validation (validated {hours_ago:.1f}h ago) - using AV date"
                     )
+                    stats.validation_skipped += 1
 
-                    # Update database
+                    # Use Alpha Vantage date directly (no cross-validation)
                     if not dry_run:
                         save_result = earnings_repo.save_earnings_event(
                             ticker=ticker,
-                            earnings_date=consensus_date,
-                            timing=consensus_timing,
+                            earnings_date=av_date,
+                            timing=av_timing,
+                            update_validation_timestamp=False,  # Keep existing validation timestamp
                         )
                         if save_result.is_ok:
                             stats.updated_dates += 1
@@ -288,11 +302,9 @@ def sync_earnings_calendar(
                                 {
                                     "ticker": ticker,
                                     "old_date": db_date,
-                                    "new_date": consensus_date,
-                                    "timing": consensus_timing,
-                                    "reason": "Date changed"
-                                    if db_date != consensus_date
-                                    else "Timing changed",
+                                    "new_date": av_date,
+                                    "timing": av_timing,
+                                    "reason": "Date changed (validation skipped)",
                                 }
                             )
                             logger.info(f"  💾 Updated database")
@@ -303,46 +315,111 @@ def sync_earnings_calendar(
                         stats.updated_dates += 1
                         logger.info(f"  🔍 DRY RUN - Would update database")
                 else:
-                    logger.error(f"  ✗ Validation failed: {result.error}")
-                    stats.errors += 1
+                    # Cross-validate with Yahoo Finance
+                    result = validator.validate_earnings_date(ticker)
+
+                    if result.is_ok:
+                        validation = result.value
+
+                        if validation.has_conflict:
+                            stats.conflicts_detected += 1
+                            logger.warning(
+                                f"  ⚠️  CONFLICT: {validation.conflict_details}"
+                            )
+
+                        consensus_date = validation.consensus_date
+                        consensus_timing = validation.consensus_timing
+
+                        logger.info(
+                            f"  ✓ Consensus: {consensus_date} ({consensus_timing.value})"
+                        )
+
+                        # Update database
+                        if not dry_run:
+                            save_result = earnings_repo.save_earnings_event(
+                                ticker=ticker,
+                                earnings_date=consensus_date,
+                                timing=consensus_timing,
+                            )
+                            if save_result.is_ok:
+                                stats.updated_dates += 1
+                                stats.changes.append(
+                                    {
+                                        "ticker": ticker,
+                                        "old_date": db_date,
+                                        "new_date": consensus_date,
+                                        "timing": consensus_timing,
+                                        "reason": "Date changed"
+                                        if db_date != consensus_date
+                                        else "Timing changed",
+                                    }
+                                )
+                                logger.info(f"  💾 Updated database")
+                            else:
+                                logger.error(f"  ✗ Failed to update: {save_result.error}")
+                                stats.errors += 1
+                        else:
+                            stats.updated_dates += 1
+                            logger.info(f"  🔍 DRY RUN - Would update database")
+                    else:
+                        logger.error(f"  ✗ Validation failed: {result.error}")
+                        stats.errors += 1
             else:
                 # Date unchanged, but check if stale
                 if days_stale > 7:
-                    logger.debug(
-                        f"{ticker}: Unchanged but stale ({days_stale}d) - re-validating..."
-                    )
+                    # Check if we can skip validation (validated within 48 hours)
+                    if should_skip_validation(last_validated_at):
+                        hours_ago = (datetime.now() - last_validated_at).total_seconds() / 3600
+                        logger.debug(
+                            f"{ticker}: Stale ({days_stale}d) but validated {hours_ago:.1f}h ago - skipping"
+                        )
+                        stats.validation_skipped += 1
+                        stats.unchanged_dates += 1
+                    else:
+                        logger.debug(
+                            f"{ticker}: Unchanged but stale ({days_stale}d) - re-validating..."
+                        )
 
-                    # Re-validate to ensure still accurate
-                    result = validator.validate_earnings_date(ticker)
-                    if result.is_ok:
-                        validation = result.value
-                        if validation.consensus_date != db_date:
-                            # Date changed according to validation
-                            logger.info(
-                                f"\n{'='*70}\n"
-                                f"STALE DATA CORRECTION: {ticker}\n"
-                                f"  Database: {db_date} ({db_timing.value}) [{days_stale}d stale]\n"
-                                f"  Validated: {validation.consensus_date} ({validation.consensus_timing.value})\n"
-                                f"{'='*70}"
-                            )
-
-                            if not dry_run:
-                                save_result = earnings_repo.save_earnings_event(
-                                    ticker=ticker,
-                                    earnings_date=validation.consensus_date,
-                                    timing=validation.consensus_timing,
+                        # Re-validate to ensure still accurate
+                        result = validator.validate_earnings_date(ticker)
+                        if result.is_ok:
+                            validation = result.value
+                            if validation.consensus_date != db_date:
+                                # Date changed according to validation
+                                logger.info(
+                                    f"\n{'='*70}\n"
+                                    f"STALE DATA CORRECTION: {ticker}\n"
+                                    f"  Database: {db_date} ({db_timing.value}) [{days_stale}d stale]\n"
+                                    f"  Validated: {validation.consensus_date} ({validation.consensus_timing.value})\n"
+                                    f"{'='*70}"
                                 )
-                                if save_result.is_ok:
-                                    stats.updated_dates += 1
-                                    stats.changes.append(
-                                        {
-                                            "ticker": ticker,
-                                            "old_date": db_date,
-                                            "new_date": validation.consensus_date,
-                                            "timing": validation.consensus_timing,
-                                            "reason": "Stale data corrected",
-                                        }
+
+                                if not dry_run:
+                                    save_result = earnings_repo.save_earnings_event(
+                                        ticker=ticker,
+                                        earnings_date=validation.consensus_date,
+                                        timing=validation.consensus_timing,
                                     )
+                                    if save_result.is_ok:
+                                        stats.updated_dates += 1
+                                        stats.changes.append(
+                                            {
+                                                "ticker": ticker,
+                                                "old_date": db_date,
+                                                "new_date": validation.consensus_date,
+                                                "timing": validation.consensus_timing,
+                                                "reason": "Stale data corrected",
+                                            }
+                                        )
+                            else:
+                                # Date confirmed unchanged, update validation timestamp
+                                if not dry_run:
+                                    earnings_repo.save_earnings_event(
+                                        ticker=ticker,
+                                        earnings_date=db_date,
+                                        timing=db_timing,
+                                    )
+                                stats.unchanged_dates += 1
                         else:
                             stats.unchanged_dates += 1
                 else:
