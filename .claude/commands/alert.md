@@ -78,15 +78,6 @@ sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.d
 3. Fall back to WebSearch, summarize into same format
 4. Graceful skip if all fail
 
-### Step 5: Check Existing Positions (Alpaca MCP)
-```
-mcp__alpaca__alpaca_list_positions
-```
-
-For each alert ticker, check if user has existing exposure:
-- Match positions where symbol starts with ticker
-- If found, add warning to that alert
-
 ## Output Format
 
 ```
@@ -112,7 +103,6 @@ For each alert ticker, check if user has existing exposure:
 
 ┌─────────────────────────────────────────────────────┐
 │ 🚨 AMD - EARNINGS TODAY (BMO)                       │
-│ ⚠️ EXISTING POSITION: 5 AMD250117C00140000          │
 ├─────────────────────────────────────────────────────┤
 │ VRP: 6.1x ⭐ GOOD                                   │
 │ Implied Move: 6.2% | Historical: 1.0%               │
@@ -120,13 +110,12 @@ For each alert ticker, check if user has existing exposure:
 │                                                     │
 │ 🧠 {BULL/BEAR/NEUT} (+0.4): {1-line, max 20 words}  │
 │                                                     │
-│ ⚠️ Consider existing position before adding more    │
+│ 💡 Run `/analyze AMD` for strategy recommendations  │
 └─────────────────────────────────────────────────────┘
 
 📊 SUMMARY
    Alerts found: {N}
    With sentiment: {M}
-   Existing positions: {P}
 
 ⚠️ REMINDERS
    • Always check liquidity before trading
@@ -163,4 +152,3 @@ Scanned {N} tickers with earnings today:
 ## Cost Control
 - Maximum 3 Perplexity calls (high-VRP alerts only)
 - Cache-aware (if primed, uses cached sentiment)
-- Position check is free (Alpaca)
