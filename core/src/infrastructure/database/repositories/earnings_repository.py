@@ -41,7 +41,8 @@ class EarningsRepository(BaseRepository):
         super().__init__(db_path, pool)
 
     def save_earnings_event(
-        self, ticker: str, earnings_date: date, timing: EarningsTiming
+        self, ticker: str, earnings_date: date, timing: EarningsTiming,
+        update_validation_timestamp: bool = True
     ) -> Result[None, AppError]:
         """
         Save earnings event to database.
@@ -50,6 +51,7 @@ class EarningsRepository(BaseRepository):
             ticker: Stock ticker symbol
             earnings_date: Date of earnings announcement
             timing: BMO, AMC, or DMH
+            update_validation_timestamp: If True, update last_validated_at to now
 
         Returns:
             Result with None on success or AppError on failure
@@ -57,14 +59,24 @@ class EarningsRepository(BaseRepository):
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    '''
-                    INSERT OR REPLACE INTO earnings_calendar
-                    (ticker, earnings_date, timing, confirmed)
-                    VALUES (?, ?, ?, 1)
-                    ''',
-                    (ticker, earnings_date.isoformat(), timing.value),
-                )
+                if update_validation_timestamp:
+                    cursor.execute(
+                        '''
+                        INSERT OR REPLACE INTO earnings_calendar
+                        (ticker, earnings_date, timing, confirmed, last_validated_at)
+                        VALUES (?, ?, ?, 1, datetime('now'))
+                        ''',
+                        (ticker, earnings_date.isoformat(), timing.value),
+                    )
+                else:
+                    cursor.execute(
+                        '''
+                        INSERT OR REPLACE INTO earnings_calendar
+                        (ticker, earnings_date, timing, confirmed)
+                        VALUES (?, ?, ?, 1)
+                        ''',
+                        (ticker, earnings_date.isoformat(), timing.value),
+                    )
                 conn.commit()
 
             logger.debug(
