@@ -2,8 +2,8 @@
 Budget Tracker for Perplexity API Usage
 
 Tracks daily API calls and cost to stay within $5/month budget.
-Budget resets on the 1st of each month.
-Daily limits reset automatically based on date comparison (no cron needed).
+Daily limits (40 calls) reset automatically at midnight based on date comparison.
+Monthly cost tracking resets on the 1st of each month.
 
 Perplexity Pricing (sonar model - configured via PERPLEXITY_ASK_MODEL=sonar):
 - Input: $1/1M tokens

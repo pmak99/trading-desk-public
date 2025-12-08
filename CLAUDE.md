@@ -129,17 +129,44 @@ DB_PATH=data/ivcrush.db  # Database location
 
 ## 4.0 Slash Commands
 
-| Command | Purpose |
-|---------|---------|
-| `/prime` | Pre-cache sentiment using whisper list (run morning) |
-| `/whisper` | Find most anticipated earnings with full 4.0 table |
-| `/analyze TICKER` | Deep dive with VRP + sentiment + strategies |
-| `/alert` | Today's high-VRP opportunities |
-| `/scan DATE` | Scan all earnings for specific date |
-| `/collect TICKER` | Manually collect sentiment for backtesting |
-| `/backfill` | Record post-earnings outcomes |
-| `/maintenance` | Database backup, cleanup, data integrity |
-| `/health` | System health check |
+### Discovery & Analysis
+| Command | Arguments | Purpose |
+|---------|-----------|---------|
+| `/whisper` | `[DATE]` | Find most anticipated earnings this week with VRP + sentiment |
+| `/analyze` | `TICKER [DATE]` | Deep dive on single ticker - VRP, strategies, sentiment |
+| `/scan` | `DATE` | Scan all tickers with earnings on specific date |
+| `/alert` | none | Today's high-VRP opportunities (auto-uses today's date) |
+
+### System Operations
+| Command | Arguments | Purpose |
+|---------|-----------|---------|
+| `/prime` | `[DATE]` | Pre-cache sentiment for week's earnings (run 7-8 AM) |
+| `/health` | none | Verify MCP connections, market status, API budgets |
+| `/maintenance` | `[task]` | Backups, cleanup, sync calendar, integrity checks |
+
+### Data Collection (Backtesting)
+| Command | Arguments | Purpose |
+|---------|-----------|---------|
+| `/collect` | `TICKER [DATE]` | Store pre-earnings sentiment for backtesting |
+| `/backfill` | `TICKER DATE \| --pending \| --stats` | Record post-earnings outcomes |
+
+### Analysis & Reporting
+| Command | Arguments | Purpose |
+|---------|-----------|---------|
+| `/history` | `TICKER` | Visualize historical earnings moves with AI patterns |
+| `/backtest` | `[TICKER]` | Analyze trading performance with AI insights |
+| `/journal` | none | Parse Fidelity PDFs into trade journal |
+| `/export-report` | none | Export scan results to CSV/Excel |
+
+### Typical Daily Workflow
+```
+7:00 AM   /health              → Verify all systems operational
+7:15 AM   /prime               → Pre-cache sentiment (predictable cost)
+9:30 AM   /whisper             → Instant results from cache
+          /analyze NVDA        → Deep dive on best candidate
+          Execute in Fidelity  → Human approval required
+Evening   /backfill --pending  → Record outcomes for completed earnings
+```
 
 **Command Features:**
 - All commands show progress updates (`[1/N] Step description...`)

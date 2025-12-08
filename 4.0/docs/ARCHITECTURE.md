@@ -23,25 +23,45 @@ Version 4.0 transforms the IV Crush trading system into an **AI-first platform**
 
 ## Slash Commands
 
+### Discovery & Analysis
 | Command | Usage | Purpose | AI Enhancement |
 |---------|-------|---------|----------------|
-| `/health` | `/health` | System health + MCP connectivity | None (diagnostic) |
-| `/analyze` | `/analyze NVDA` | Deep ticker analysis + strategies | Finnhub news + Perplexity sentiment |
-| `/whisper` | `/whisper` | Most anticipated earnings this week | Perplexity for top 3 |
-| `/prime` | `/prime` | Pre-cache sentiment for today | Bulk Perplexity fetch |
-| `/scan` | `/scan 2025-12-09` | Scan earnings by date | Perplexity for top 3 |
+| `/whisper` | `/whisper [DATE]` | Most anticipated earnings this week | Perplexity sentiment for all qualified |
+| `/analyze` | `/analyze TICKER [DATE]` | Deep ticker analysis + strategies | Finnhub news + Perplexity sentiment |
+| `/scan` | `/scan DATE` | Scan all earnings on specific date | VRP analysis, no sentiment |
 | `/alert` | `/alert` | Today's high-VRP opportunities | Perplexity sentiment |
-| `/history` | `/history NVDA` | Historical moves visualization | Claude pattern analysis |
-| `/backtest` | `/backtest` | Performance analysis | Claude AI insights |
-| `/journal` | `/journal` | Parse Fidelity PDFs | None (utility) |
 
-**Typical Workflow:**
+### System Operations
+| Command | Usage | Purpose | AI Enhancement |
+|---------|-------|---------|----------------|
+| `/prime` | `/prime [DATE]` | Pre-cache sentiment for week | Bulk Perplexity fetch |
+| `/health` | `/health` | System health + MCP connectivity | None (diagnostic) |
+| `/maintenance` | `/maintenance [task]` | Backups, cleanup, sync, integrity | None (utility) |
+
+### Data Collection (Backtesting)
+| Command | Usage | Purpose | AI Enhancement |
+|---------|-------|---------|----------------|
+| `/collect` | `/collect TICKER [DATE]` | Store pre-earnings sentiment | Perplexity sentiment |
+| `/backfill` | `/backfill TICKER DATE` | Record post-earnings outcomes | None (data entry) |
+| `/backfill` | `/backfill --pending` | Backfill all pending outcomes | None (batch) |
+| `/backfill` | `/backfill --stats` | Show prediction accuracy | None (analysis) |
+
+### Analysis & Reporting
+| Command | Usage | Purpose | AI Enhancement |
+|---------|-------|---------|----------------|
+| `/history` | `/history TICKER` | Historical moves visualization | Claude pattern analysis |
+| `/backtest` | `/backtest [TICKER]` | Performance analysis | Claude AI insights |
+| `/journal` | `/journal` | Parse Fidelity PDFs | None (utility) |
+| `/export-report` | `/export-report` | Export scan results to CSV | None (utility) |
+
+**Typical Daily Workflow:**
 ```
-Morning:  /health           → Verify all systems operational
-          /prime            → Pre-cache sentiment (predictable cost)
-          /whisper          → Find best opportunities (instant, cached)
-Pick:     /analyze NVDA     → Deep dive on best candidate
-Execute:  Manual in Fidelity (human approval required)
+7:00 AM   /health           → Verify all systems operational
+7:15 AM   /prime            → Pre-cache sentiment (predictable cost)
+9:30 AM   /whisper          → Find best opportunities (instant, cached)
+          /analyze NVDA     → Deep dive on best candidate
+          Manual in Fidelity → Human approval required
+Evening   /backfill --pending → Record outcomes for completed earnings
 ```
 
 ---
@@ -368,17 +388,19 @@ from infrastructure.cache.hybrid_cache import HybridCache
 
 ```
 .claude/commands/           # Slash command definitions
-├── health.md              # /health - System diagnostics
-├── analyze.md             # /analyze TICKER - Deep analysis
-├── whisper.md             # /whisper - Weekly opportunities
-├── prime.md               # /prime - Cache warming
-├── scan.md                # /scan DATE - Date scanning
 ├── alert.md               # /alert - Today's opportunities
+├── analyze.md             # /analyze TICKER [DATE] - Deep analysis
+├── backfill.md            # /backfill - Record post-earnings outcomes
+├── backtest.md            # /backtest [TICKER] - Performance analysis
+├── collect.md             # /collect TICKER - Explicit sentiment collection
+├── export-report.md       # /export-report - CSV/Excel export
+├── health.md              # /health - System diagnostics
 ├── history.md             # /history TICKER - Historical moves
-├── backtest.md            # /backtest - Performance analysis
 ├── journal.md             # /journal - PDF parsing
-├── collect.md             # /collect - Explicit sentiment collection
-└── backfill.md            # /backfill - Record post-earnings outcomes
+├── maintenance.md         # /maintenance [task] - System maintenance
+├── prime.md               # /prime [DATE] - Cache warming
+├── scan.md                # /scan DATE - Date scanning
+└── whisper.md             # /whisper [DATE] - Weekly opportunities
 
 4.0/
 ├── README.md              # System overview and usage
@@ -389,7 +411,7 @@ from infrastructure.cache.hybrid_cache import HybridCache
 │   └── cache/
 │       ├── __init__.py          # Cache module exports
 │       ├── sentiment_cache.py   # 3-hour TTL cache
-│       ├── budget_tracker.py    # Daily API budget (150/day)
+│       ├── budget_tracker.py    # Daily API budget (40/day)
 │       └── sentiment_history.py # Permanent backtesting storage
 └── data/
     └── sentiment_cache.db       # SQLite: cache + budget + history
