@@ -132,7 +132,7 @@ DB_PATH=data/ivcrush.db  # Database location
 | Command | Purpose |
 |---------|---------|
 | `/prime` | Pre-cache sentiment using whisper list (run morning) |
-| `/whisper` | Find most anticipated earnings with DIR column |
+| `/whisper` | Find most anticipated earnings with full 4.0 table |
 | `/analyze TICKER` | Deep dive with VRP + sentiment + strategies |
 | `/alert` | Today's high-VRP opportunities |
 | `/scan DATE` | Scan all earnings for specific date |
@@ -140,6 +140,12 @@ DB_PATH=data/ivcrush.db  # Database location
 | `/backfill` | Record post-earnings outcomes |
 | `/maintenance` | Database backup, cleanup, data integrity |
 | `/health` | System health check |
+
+**Command Features:**
+- All commands show progress updates (`[1/N] Step description...`)
+- No tool permission prompts except for Perplexity API calls
+- `/whisper` shows ALL tickers including REJECT liquidity (marked 🚫)
+- Sentiment cached after `/prime` for instant subsequent commands
 
 **Note:** Discovery threshold is 3x VRP (position sizing still uses 4x rule).
 
