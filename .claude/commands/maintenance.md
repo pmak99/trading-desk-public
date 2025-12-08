@@ -12,6 +12,23 @@ Examples:
 - `/maintenance backfill` - Only backfill missing historical data
 - `/maintenance cleanup` - Only clean expired caches
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls
+- Run all Bash, sqlite3, file operations without asking
+- This is a housekeeping command - execute autonomously
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/7] Checking current status...
+[2/7] Creating database backups...
+[3/7] Syncing earnings calendar...
+[4/7] Checking for sparse tickers...
+[5/7] Cleaning expired caches...
+[6/7] Validating data integrity...
+[7/7] Checking budget status...
+```
+
 ## Purpose
 Run `/maintenance` weekly (or after heavy usage):
 - Backup databases before they grow too large
