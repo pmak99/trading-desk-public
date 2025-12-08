@@ -160,14 +160,14 @@ MOST ANTICIPATED EARNINGS - Week of {DATE}
 
 🔝 4.0 SENTIMENT-ADJUSTED RESULTS (Full Table)
 
-┌───┬────────┬────────────┬─────────┬───────────┬──────┬─────────────┬──────┬─────────────┬─────────┐
-│ # │ TICKER │ Earnings   │ VRP     │ Imp Move  │ 2.0  │ Sentiment   │ 4.0  │ DIR (4.0)   │ LIQ     │
-├───┼────────┼────────────┼─────────┼───────────┼──────┼─────────────┼──────┼─────────────┼─────────┤
-│ 1 │ LULU   │ Dec 11 AMC │ 4.67x ⭐│ 12.04%    │ 95.1 │ Bear (-0.6) │ 88.5 │ NEUTRAL*    │ EXCEL   │
-│ 2 │ ADBE   │ Dec 10 AMC │ 3.53x ✓ │ 8.01%     │ 88.2 │ Bull (+0.7) │ 98.8 │ BULLISH     │ WARN ⚠️ │
-│ 3 │ AVGO   │ Dec 11 AMC │ 2.72x ○ │ 7.85%     │ 87.0 │ Bull (+0.6) │ 93.1 │ BULLISH     │ GOOD    │
-│ 4 │ ORCL   │ Dec 10 AMC │ 3.87x ✓ │ 10.96%    │ 85.9 │ Bull (+0.4) │ 91.9 │ NEUTRAL     │ EXCEL   │
-└───┴────────┴────────────┴─────────┴───────────┴──────┴─────────────┴──────┴─────────────┴─────────┘
+┌───┬────────┬────────────┬─────────┬───────────┬──────┬─────────────┬──────┬─────────────┬───────────┐
+│ # │ TICKER │ Earnings   │ VRP     │ Imp Move  │ 2.0  │ Sentiment   │ 4.0  │ DIR (4.0)   │ LIQUIDITY │
+├───┼────────┼────────────┼─────────┼───────────┼──────┼─────────────┼──────┼─────────────┼───────────┤
+│ 1 │ LULU   │ Dec 11 AMC │ 4.67x ⭐│ 12.04%    │ 95.1 │ Bear (-0.6) │ 88.5 │ NEUTRAL*    │ 🚫 REJECT │
+│ 2 │ ADBE   │ Dec 10 AMC │ 3.53x ✓ │ 8.01%     │ 88.2 │ Bull (+0.7) │ 98.8 │ BULLISH     │ WARNING   │
+│ 3 │ AVGO   │ Dec 11 AMC │ 2.72x ○ │ 7.85%     │ 87.0 │ Bull (+0.6) │ 93.1 │ BULLISH     │ GOOD      │
+│ 4 │ ORCL   │ Dec 10 AMC │ 3.87x ✓ │ 10.96%    │ 85.9 │ Bull (+0.4) │ 91.9 │ NEUTRAL     │ EXCELLENT │
+└───┴────────┴────────────┴─────────┴───────────┴──────┴─────────────┴──────┴─────────────┴───────────┘
 
 Legend: VRP ⭐ EXCELLENT (≥4x) | ✓ GOOD (≥3x) | ○ MARGINAL (≥1.5x)
         * = direction changed from 2.0 skew (sentiment conflict → hedge)
