@@ -76,11 +76,24 @@ mcp__finnhub__finnhub_stock_ownership with operation="get_insider_transactions",
 
 **Note:** The `limit` parameter reduces API response size to prevent context overflow.
 
-**Output format** - extract only:
-- **News:** 3-5 most relevant headlines (title + source only)
-- **Insider:** Summarize as "X buys, Y sells in last 90 days" with notable transactions
+**Extract from responses (ignore other fields):**
 
-Do NOT include full article summaries or all insider transactions in output.
+**News** - use only `headline` and `source` fields:
+```
+📰 NEWS (last 7 days)
+   • "{headline}" - {source}
+   • "{headline}" - {source}
+   ... (up to 5 headlines)
+```
+
+**Insider Transactions** - count by `transactionCode` (S=sell, P=buy, G=gift):
+```
+👔 INSIDER ACTIVITY
+   Sells: {count} transactions
+   Buys: {count} transactions
+   Notable: {name} {sold/bought} {change} shares @ ${transactionPrice}
+```
+Only mention 1-2 notable transactions (largest by dollar value = |change| × transactionPrice).
 
 ### Step 3: AI Sentiment (Conditional - Only if VRP ≥ 3x AND Liquidity ≠ REJECT)
 
