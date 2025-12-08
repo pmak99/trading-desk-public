@@ -147,6 +147,18 @@ class MigrationManager:
             sql_down=None  # No safe rollback without data loss
         ))
 
+        # Migration 003: Add last_validated_at to earnings_calendar
+        # Tracks when conflict validation was last performed to skip re-validation
+        # if validated within 48 hours
+        self.migrations.append(Migration(
+            version=3,
+            name="add_last_validated_at_column",
+            sql_up="""
+                -- Handled in _apply_migration_003
+            """,  # Actual migration happens in _apply_migration_003
+            sql_down=None  # SQLite doesn't support DROP COLUMN easily
+        ))
+
         # Sort migrations by version (safety check)
         self.migrations.sort(key=lambda m: m.version)
 
@@ -264,6 +276,8 @@ class MigrationManager:
                 # Special handling for specific migrations
                 if migration.version == 2:
                     self._apply_migration_002(cursor)
+                elif migration.version == 3:
+                    self._apply_migration_003(cursor)
                 else:
                     # Standard SQL execution
                     cursor.executescript(migration.sql_up)
@@ -307,6 +321,33 @@ class MigrationManager:
             cursor.execute("ALTER TABLE cache ADD COLUMN expiration TEXT")
         else:
             logger.debug("Cache table already has expiration column")
+
+    def _apply_migration_003(self, cursor: sqlite3.Cursor):
+        """
+        Apply migration 003: Add last_validated_at column to earnings_calendar.
+
+        Tracks when conflict validation was last performed to enable
+        skipping re-validation for tickers validated within 48 hours.
+        """
+        # Check if earnings_calendar table exists
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='earnings_calendar'
+        """)
+        if not cursor.fetchone():
+            # Table doesn't exist, skip migration
+            logger.debug("earnings_calendar table doesn't exist, skipping migration")
+            return
+
+        # Check if last_validated_at column already exists
+        cursor.execute("PRAGMA table_info(earnings_calendar)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if 'last_validated_at' not in columns:
+            logger.info("Adding last_validated_at column to earnings_calendar table")
+            cursor.execute("ALTER TABLE earnings_calendar ADD COLUMN last_validated_at DATETIME")
+        else:
+            logger.debug("earnings_calendar table already has last_validated_at column")
 
     def rollback(self, target_version: int) -> int:
         """
