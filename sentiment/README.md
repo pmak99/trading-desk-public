@@ -6,8 +6,11 @@ AI-enhanced layer on top of the proven 2.0 IV Crush system. Adds sentiment analy
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    SLASH COMMANDS                           │
-│  /health  /prime  /whisper  /analyze  /alert  /collect     │
+│                    SLASH COMMANDS (13 total)                │
+│  Discovery: /whisper /analyze /scan /alert                  │
+│  System: /prime /health /maintenance                        │
+│  Data: /collect /backfill  Reports: /history /backtest      │
+│  Utils: /journal /export-report                             │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -79,32 +82,48 @@ Risks: [1-2 bullets, max 10 words each]
 
 ## Slash Commands
 
+### Discovery & Analysis
 | Command | Purpose | AI Cost |
 |---------|---------|---------|
-| `/health` | System health check | Free |
-| `/prime [DATE]` | Pre-cache sentiment (uses whisper list) | ~3-8 calls |
-| `/whisper [DATE]` | Most anticipated with DIR column | ~3 calls |
-| `/analyze TICKER` | Deep analysis with strategies | ~1 call |
+| `/whisper [DATE]` | Most anticipated earnings this week | ~3-8 calls |
+| `/analyze TICKER [DATE]` | Deep analysis with strategies | ~1 call |
+| `/scan DATE` | Scan all earnings on specific date | Free |
 | `/alert` | Today's high-VRP opportunities | ~3 calls |
-| `/scan DATE` | Scan all earnings on date | ~3 calls |
-| `/collect TICKER` | Explicitly collect sentiment | ~1 call |
-| `/backfill` | Record post-earnings outcomes | Free |
-| `/maintenance` | Database backup, cleanup, health | Free |
+
+### System Operations
+| Command | Purpose | AI Cost |
+|---------|---------|---------|
+| `/prime [DATE]` | Pre-cache sentiment (uses whisper list) | ~3-8 calls |
+| `/health` | System health check | Free |
+| `/maintenance [task]` | Database backup, cleanup, sync | Free |
+
+### Data Collection (Backtesting)
+| Command | Purpose | AI Cost |
+|---------|---------|---------|
+| `/collect TICKER [DATE]` | Explicitly collect sentiment | ~1 call |
+| `/backfill TICKER DATE` | Record post-earnings outcome | Free |
+| `/backfill --pending` | Backfill all pending outcomes | Free |
+| `/backfill --stats` | Show prediction accuracy | Free |
+
+### Analysis & Reporting
+| Command | Purpose | AI Cost |
+|---------|---------|---------|
+| `/history TICKER` | Visualize historical moves | Free |
+| `/backtest [TICKER]` | Performance analysis | Free |
+| `/journal` | Parse Fidelity PDFs | Free |
+| `/export-report` | Export scan results to CSV | Free |
 
 **Note:** Discovery threshold is 3x VRP (position sizing still uses 4x rule).
 
 ## Daily Workflow
 
 ```
-Morning (7-8 AM):
-  /prime                    # Sync earnings + cache sentiment
-
-During Day:
-  /whisper                  # Find opportunities (instant - cached)
-  /analyze NVDA             # Deep dive (instant sentiment)
-
-After Earnings:
-  /backfill --pending       # Record outcomes for backtesting
+7:00 AM   /health              # Verify all systems operational
+7:15 AM   /prime               # Pre-cache sentiment (predictable cost)
+9:30 AM   /whisper             # Find opportunities (instant - cached)
+          /analyze NVDA        # Deep dive (instant sentiment)
+          Manual in Fidelity   # Human approval required
+Evening   /backfill --pending  # Record outcomes for backtesting
 ```
 
 ## Budget & Cost
