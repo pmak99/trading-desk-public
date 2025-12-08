@@ -16,6 +16,20 @@ Then:     /whisper         → Instant results (cache hits)
 Pick:     /analyze NVDA    → Deep dive on best candidate
 ```
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls EXCEPT mcp__perplexity__* calls
+- Run all Bash, sqlite3, Glob, Grep, Read commands without asking
+- Only pause for Perplexity calls to confirm API usage
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/4] Checking market status...
+[2/4] Running 2.0 analysis for qualified tickers...
+[3/4] Loading cached sentiment...
+[4/4] Calculating 4.0 scores...
+```
+
 ## Minimum Cutoffs
 
 - **2.0 Score ≥ 50** (pre-sentiment filter)
@@ -40,17 +54,23 @@ Pick:     /analyze NVDA    → Deep dive on best candidate
 ### Step 1: Parse Date Argument
 - If no date provided, use current week's Monday
 - If date provided, use that as the week start
+- IMPORTANT: Get actual current date from system, not assumptions
 
 ### Step 2: Check Market Status (Alpaca MCP)
 ```
 mcp__alpaca__alpaca_get_clock
 ```
 
-If market is closed:
-```
-⚠️ Market closed - VRP uses prior close data
-   Next open: {timestamp}
-```
+**Date Detection Rules:**
+- `is_open=true` → Market is open
+- `is_open=false` AND it's weekday pre-9:30 AM ET → Pre-market
+- `is_open=false` AND it's weekday post-4:00 PM ET → After-hours
+- `is_open=false` AND Saturday/Sunday → Weekend
+
+Display appropriate status:
+- Pre-market: `⚠️ Pre-market - VRP uses prior close. Options refresh at 9:30 AM ET`
+- After-hours: `⚠️ After-hours - Using today's close data`
+- Weekend: `⚠️ Weekend - Using Friday's close data`
 
 ### Step 3: Run 2.0 Whisper Analysis
 Execute the proven 2.0 whisper mode:
@@ -67,7 +87,9 @@ This provides:
 ### Step 4: Filter by 2.0 Score ≥ 50
 Parse the whisper output and filter to tickers with 2.0 Score ≥ 50.
 
-Take TOP 3 from filtered results for sentiment enrichment.
+**IMPORTANT:** Do NOT suppress REJECT liquidity tickers from display. Show ALL qualified tickers (VRP >= 3x) in the results table, clearly marking REJECT ones as untradeable. This gives visibility into what opportunities exist even if liquidity is poor.
+
+Take TOP 5 from filtered results for sentiment enrichment (skip REJECT for sentiment fetch to save budget, but still display them).
 
 ### Step 5: Gather Sentiment for TOP 3 (Conditional)
 
@@ -134,41 +156,37 @@ For each ticker with sentiment:
 MOST ANTICIPATED EARNINGS - Week of {DATE}
 ══════════════════════════════════════════════════════
 
-⚠️ Market Status: [OPEN/CLOSED - time info]
+⚠️ Market Status: [Pre-market/Open/After-hours/Weekend - time info]
 
-📅 EARNINGS CALENDAR
-┌──────────┬──────────┬─────────┬────────────┬──────────┐
-│ Date     │ Ticker   │ VRP     │ Liquidity  │ Score    │
-├──────────┼──────────┼─────────┼────────────┼──────────┤
-│ Mon 12/9 │ NVDA     │ 8.2x ⭐ │ EXCELLENT  │ 92       │
-│ Mon 12/9 │ AMD      │ 6.1x ⭐ │ EXCELLENT  │ 85       │
-│ Tue 12/10│ AVGO     │ 5.4x ✓  │ WARNING    │ 72       │
-│ ...      │ ...      │ ...     │ ...        │ ...      │
-└──────────┴──────────┴─────────┴────────────┴──────────┘
+🔝 4.0 SENTIMENT-ADJUSTED RESULTS (Full Table)
 
-Legend: ⭐ EXCELLENT (≥7x) | ✓ GOOD (≥4x) | ○ MARGINAL (≥1.5x)
+┌───┬────────┬────────────┬─────────┬───────────┬──────┬─────────────┬──────┬─────────────┬─────────┐
+│ # │ TICKER │ Earnings   │ VRP     │ Imp Move  │ 2.0  │ Sentiment   │ 4.0  │ DIR (4.0)   │ LIQ     │
+├───┼────────┼────────────┼─────────┼───────────┼──────┼─────────────┼──────┼─────────────┼─────────┤
+│ 1 │ LULU   │ Dec 11 AMC │ 4.67x ⭐│ 12.04%    │ 95.1 │ Bear (-0.6) │ 88.5 │ NEUTRAL*    │ EXCEL   │
+│ 2 │ ADBE   │ Dec 10 AMC │ 3.53x ✓ │ 8.01%     │ 88.2 │ Bull (+0.7) │ 98.8 │ BULLISH     │ WARN ⚠️ │
+│ 3 │ AVGO   │ Dec 11 AMC │ 2.72x ○ │ 7.85%     │ 87.0 │ Bull (+0.6) │ 93.1 │ BULLISH     │ GOOD    │
+│ 4 │ ORCL   │ Dec 10 AMC │ 3.87x ✓ │ 10.96%    │ 85.9 │ Bull (+0.4) │ 91.9 │ NEUTRAL     │ EXCEL   │
+└───┴────────┴────────────┴─────────┴───────────┴──────┴─────────────┴──────┴─────────────┴─────────┘
 
-🔝 TOP OPPORTUNITIES (Sentiment-Adjusted)
+Legend: VRP ⭐ EXCELLENT (≥4x) | ✓ GOOD (≥3x) | ○ MARGINAL (≥1.5x)
+        * = direction changed from 2.0 skew (sentiment conflict → hedge)
 
-│ # │ TICKER │ 2.0  │ Sentiment   │ 4.0  │ DIR (4.0)   │ LIQ     │
-├───┼────────┼──────┼─────────────┼──────┼─────────────┼─────────┤
-│ 1 │ NVDA   │ 92.0 │ Bull (+0.6) │ 98.4 │ BULLISH     │ EXCEL   │
-│ 2 │ ORCL   │ 74.0 │ Bull (+0.4) │ 79.2 │ BULLISH*    │ GOOD    │
-│ 3 │ LULU   │ 68.0 │ Bear (-0.2) │ 63.2 │ NEUTRAL*    │ WARN ⚠️ │
+📊 TOP PICK: {TICKER} ({Date} {BMO/AMC})
+   VRP: {X.X}x | Implied Move: {X.X}% | 4.0 Score: {X.X}
+   Sentiment: {1-line summary, max 30 words}
+   Direction: {2.0 Skew} → {4.0 Adjusted} ({rule applied})
 
-* = direction changed from 2.0 skew (sentiment override)
+⚠️ CONFLICTS (if any):
+   • {TICKER}: Skew={X} vs Sentiment={Y} → Neutral stance (hedge both sides)
 
-TOP PICK: NVDA (Dec 10 AMC)
-  VRP: 8.2x | Move: 8.5% | 4.0 Score: 98.4
-  Sentiment: {1-line summary, max 30 words}
-
-📊 CACHE STATUS
+📦 CACHE STATUS
    Hits: X (instant, free)
    Misses: Y (fetched fresh)
    Budget: Z/150 calls today
 
 💡 NEXT STEPS
-   Run `/analyze NVDA` for full strategy recommendations
+   Run `/analyze {TOP_TICKER}` for full strategy recommendations
 ══════════════════════════════════════════════════════
 ```
 

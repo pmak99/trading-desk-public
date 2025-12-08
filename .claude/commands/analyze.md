@@ -9,6 +9,22 @@ Examples:
 - `/analyze NVDA` - Analyze NVDA with auto-detected earnings date
 - `/analyze NVDA 2025-12-19` - Analyze NVDA for specific earnings date
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls EXCEPT mcp__perplexity__* calls
+- Run all Bash, sqlite3, Glob, Grep, Read, Finnhub commands without asking
+- Only pause for Perplexity calls to confirm API usage
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/6] Checking existing positions...
+[2/6] Running 2.0 core analysis...
+[3/6] Fetching news data (Finnhub)...
+[4/6] Loading/fetching sentiment...
+[5/6] Calculating 4.0 adjusted direction...
+[6/6] Generating final report...
+```
+
 ## Step-by-Step Instructions
 
 ### Step 1: Check Existing Positions (Alpaca MCP)

@@ -16,32 +16,45 @@ Run `/prime` once at 7-8 AM before market open:
 - Predictable daily cost (you control when to spend API budget)
 - No waiting for Perplexity during trading hours
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls EXCEPT mcp__perplexity__* calls
+- Run all Bash, sqlite3, Glob, Grep, Read commands without asking
+- Only pause for Perplexity calls to confirm API usage
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/5] Checking market status...
+[2/5] Running whisper scan...
+[3/5] Filtering qualified tickers (VRP >= 3x, non-REJECT liquidity)...
+[4/5] Fetching sentiment for N tickers...
+      ✓ TICKER1 - Perplexity (VRP X.Xx)
+      ✓ TICKER2 - Perplexity (VRP X.Xx)
+[5/5] Caching results and updating budget...
+```
+
 ## Step-by-Step Instructions
 
 ### Step 1: Parse Date Argument
 - If no date provided, use current week
 - Format: YYYY-MM-DD
+- IMPORTANT: Get actual current date from system, not assumptions
 
 ### Step 2: Check Market Status (Alpaca MCP)
 ```
 mcp__alpaca__alpaca_get_clock
 ```
 
-Detect non-trading days:
-- If `is_open=false` AND weekend/holiday:
-  ```
-  ⚠️ No trading today ({reason})
-     Skipping Perplexity calls to save budget.
-     Showing whisper results for reference.
-  ```
-  → Skip sentiment fetching, just display whisper results
+**Date Detection Rules:**
+- `is_open=true` → Market is open, use "Pre-market" or "Market Open" status
+- `is_open=false` AND it's Saturday/Sunday → Weekend
+- `is_open=false` AND it's weekday pre-9:30 AM ET → Pre-market (continue priming)
+- `is_open=false` AND it's weekday post-4:00 PM ET → After-hours
 
-- If `is_open=false` but regular pre-market:
-  ```
-  ⚠️ Market closed - VRP uses prior close data
-     Options data will refresh after 9:30 AM ET
-  ```
-  → Continue with priming
+Display appropriate status:
+- Pre-market weekday: `⚠️ Pre-market - VRP uses prior close. Options refresh at 9:30 AM ET`
+- Weekend: `⚠️ Weekend - Skipping Perplexity to save budget`
+- Holiday: `⚠️ Holiday - Skipping Perplexity to save budget`
 
 ### Step 3: Run 2.0 Whisper Mode
 Execute whisper to get the week's most anticipated earnings:
