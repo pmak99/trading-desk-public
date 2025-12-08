@@ -17,35 +17,40 @@ Examples:
 ## Progress Display
 Show progress updates as you work:
 ```
-[1/6] Checking existing positions...
-[2/6] Running 2.0 core analysis...
-[3/6] Fetching news data (Finnhub)...
-[4/6] Loading/fetching sentiment...
-[5/6] Calculating 4.0 adjusted direction...
-[6/6] Generating final report...
+[1/5] Detecting earnings date...
+[2/5] Running 2.0 core analysis...
+[3/5] Fetching news data (Finnhub)...
+[4/5] Loading/fetching sentiment...
+[5/5] Generating final report...
 ```
 
 ## Step-by-Step Instructions
 
-### Step 1: Check Existing Positions (Alpaca MCP)
-```
-mcp__alpaca__alpaca_list_positions
-```
+### Step 0: Parse Arguments and Auto-Detect Earnings Date
+Parse the arguments to extract ticker and optional date:
+- If format is `TICKER YYYY-MM-DD` → use provided date
+- If format is just `TICKER` → look up next earnings date from database
 
-Check if user already has exposure to this ticker:
-- Look for any position where the symbol starts with the ticker (e.g., "NVDA" matches "NVDA", "NVDA250117C00140000")
-- If found, display warning:
-  ```
-  ⚠️ EXISTING POSITION: You have {qty} {symbol} contracts
-     Current P&L: ${unrealized_pl}
-     Consider risk of over-concentration before adding more exposure.
-  ```
-
-### Step 2: Run 2.0 Core Analysis
-Execute the proven 2.0 analysis script:
+**Auto-detect earnings date and timing (if not provided):**
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh $ARGUMENTS
+sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/2.0/data/ivcrush.db \
+  "SELECT earnings_date, timing, julianday(earnings_date) - julianday('now') as days_until FROM earnings_calendar WHERE ticker='{TICKER}' AND earnings_date >= date('now') ORDER BY earnings_date ASC LIMIT 1;"
 ```
+Save `{EARNINGS_DATE}`, `{TIMING}` (BMO/AMC), and `{DAYS_UNTIL}` for later use.
+
+If no upcoming earnings found, display error and exit:
+```
+❌ No upcoming earnings found for {TICKER}
+   Run ./trade.sh sync to refresh calendar, or provide date manually:
+   /analyze {TICKER} YYYY-MM-DD
+```
+
+### Step 1: Run 2.0 Core Analysis
+Execute the proven 2.0 analysis script with ticker and earnings date:
+```bash
+cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh {TICKER} {EARNINGS_DATE}
+```
+(Use the date from Step 0 - either user-provided or auto-detected)
 
 This provides:
 - VRP ratio and tier (EXCELLENT ≥7x, GOOD ≥4x, MARGINAL ≥1.5x, SKIP <1.5x)
@@ -61,27 +66,23 @@ This provides:
    (Lesson from $26,930 loss on WDAY/ZS/SYM)
 ```
 
-### Step 3: Gather Free News Data (Finnhub MCP)
-Always fetch this regardless of VRP - it's free:
+### Step 2: Gather Free News Data (Finnhub MCP)
+Always fetch this regardless of VRP - it's free. **Run both calls in parallel:**
 
-**Recent News:**
 ```
-mcp__finnhub__finnhub_news_sentiment with operation="company_news" and symbol="{TICKER}"
-```
-
-**Earnings Surprises:**
-```
-mcp__finnhub__finnhub_stock_fundamentals with operation="earnings_surprises" and symbol="{TICKER}"
+mcp__finnhub__finnhub_news_sentiment with operation="get_company_news", symbol="{TICKER}", from_date="{7_DAYS_AGO}", to_date="{TODAY}", limit=5
+mcp__finnhub__finnhub_stock_ownership with operation="get_insider_transactions", symbol="{TICKER}", limit=10
 ```
 
-**Insider Trades:**
-```
-mcp__finnhub__finnhub_stock_ownership with operation="insider_transactions" and symbol="{TICKER}"
-```
+**Note:** The `limit` parameter reduces API response size to prevent context overflow.
 
-Display a summary of key findings from each.
+**Output format** - extract only:
+- **News:** 3-5 most relevant headlines (title + source only)
+- **Insider:** Summarize as "X buys, Y sells in last 90 days" with notable transactions
 
-### Step 4: AI Sentiment (Conditional - Only if VRP ≥ 3x AND Liquidity ≠ REJECT)
+Do NOT include full article summaries or all insider transactions in output.
+
+### Step 3: AI Sentiment (Conditional - Only if VRP ≥ 3x AND Liquidity ≠ REJECT)
 
 **Skip sentiment if:**
 - VRP < 3x (insufficient edge for discovery)
@@ -92,16 +93,16 @@ Display a summary of key findings from each.
 1. **Check sentiment cache first:**
    ```bash
    sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
-     "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='$TICKER' AND date='$(date +%Y-%m-%d)' ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
+     "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='{TICKER}' AND date='$(date +%Y-%m-%d)' AND cached_at > datetime('now', '-3 hours') ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
    ```
-   If found and < 3 hours old → use cached sentiment, note "(cached)"
+   If result returned → use cached sentiment, note "(cached from {source})"
 
 2. **If cache miss, check budget:**
    ```bash
    sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
      "SELECT calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
    ```
-   If calls ≥ 150 → skip to WebSearch fallback
+   If calls ≥ 40 → skip to WebSearch fallback (daily budget: 40 calls)
 
 3. **Try Perplexity (if budget OK):**
    ```
@@ -126,25 +127,15 @@ Display a summary of key findings from each.
    ℹ️ AI sentiment unavailable. Displaying raw news from Finnhub above.
    ```
 
-### Step 5: Sentiment-Adjusted Direction (4.0 Enhancement)
+### Step 4: Sentiment-Adjusted Direction (4.0 Enhancement)
 
-If sentiment was gathered, adjust the directional bias from 2.0's skew analysis:
+If sentiment was gathered, adjust the directional bias from 2.0's skew analysis.
 
-**Run the adjustment:**
-```python
-# From the 2.0 output, extract skew bias (e.g., "NEUTRAL", "BULLISH", "STRONG_BULLISH")
-# From sentiment, extract score (-1 to +1)
+**Extract from previous steps:**
+- From 2.0 output (Step 1): `Directional Bias: {NEUTRAL/BULLISH/BEARISH}`
+- From sentiment (Step 3): `Score: {-1 to +1}`
 
-import sys
-sys.path.insert(0, '$PROJECT_ROOT/4.0/src')
-from sentiment_direction import adjust_direction, format_adjustment
-
-# Example:
-adj = adjust_direction(skew_bias="NEUTRAL", sentiment_score=0.4)
-print(format_adjustment(adj))
-```
-
-**Simple 3-Rule System:**
+**Apply the 3-Rule System:**
 | Original Skew | Sentiment | Result | Rule |
 |---------------|-----------|--------|------|
 | NEUTRAL | Bullish (≥+0.2) | → BULLISH | Sentiment breaks tie |
@@ -153,34 +144,11 @@ print(format_adjustment(adj))
 | BEARISH | Bullish (≥+0.2) | → NEUTRAL | Conflict → hedge |
 | Any | Aligned/Neutral | → Keep original | Skew dominates |
 
-**Display in output:**
-```
-🎯 DIRECTION (4.0 Adjusted)
-   2.0 Skew: {original} → 4.0: {adjusted}
-   Rule: {tiebreak_bullish|conflict_hedge|skew_dominates}
-   Confidence: {X%}
-```
-
 **Strategy Impact:**
 - BULLISH → Favor bull put spreads over straddles
 - BEARISH → Favor bear call spreads over straddles
 - NEUTRAL → Straddles, iron condors (hedged)
 - Conflict (CHANGED to NEUTRAL) → Strongly prefer hedged strategies
-
-### Step 6: Store in Memory MCP (Optional)
-For high-conviction trades (VRP ≥ 7x), store analysis:
-```
-mcp__memory__create_entities with entities=[{
-  "name": "{TICKER}-{DATE}",
-  "entityType": "analysis",
-  "observations": [
-    "VRP: {ratio}x ({tier})",
-    "Implied Move: {pct}%",
-    "Liquidity: {tier}",
-    "Sentiment: {summary}"
-  ]
-}]
-```
 
 ## Output Format
 
@@ -188,8 +156,6 @@ mcp__memory__create_entities with entities=[{
 ══════════════════════════════════════════════════════
 ANALYSIS: {TICKER}
 ══════════════════════════════════════════════════════
-
-[If existing position: ⚠️ EXISTING POSITION warning]
 
 📅 EARNINGS INFO
    Date: {date} ({BMO/AMC})
