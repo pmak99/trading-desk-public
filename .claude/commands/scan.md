@@ -9,6 +9,20 @@ Examples:
 - `/scan 2025-12-09` - Scan all earnings on December 9th
 - `/scan 2025-12-15` - Scan all earnings on December 15th
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls EXCEPT mcp__perplexity__* calls
+- Run all Bash, sqlite3, Glob, Grep, Read commands without asking
+- Only pause for Perplexity calls to confirm API usage
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/4] Checking market status...
+[2/4] Running 2.0 scan for date...
+[3/4] Filtering VRP >= 3x tickers...
+[4/4] Fetching sentiment for top 3...
+```
+
 ## Step-by-Step Instructions
 
 ### Step 1: Parse Date Argument
@@ -50,21 +64,24 @@ From scan results, identify the top 5 tickers where:
 
 For EACH of the top 3 qualified tickers:
 
-**5a. Check sentiment cache:**
+**5a. Check sentiment cache (with 3-hour freshness):**
 ```bash
+# Sanitize ticker (alphanumeric only, uppercase)
+TICKER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
+
 sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
-  "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='$TICKER' AND date='$DATE' ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
+  "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='$TICKER' AND date='$DATE' AND cached_at > datetime('now', '-3 hours') ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
 ```
-If found and < 3 hours old → use cached
+If found → use cached
 
 **5b. If cache miss, use fallback chain:**
 
 1. **Check budget:**
    ```bash
    sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
-     "SELECT calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
+     "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
    ```
-   If >= 150 → skip to WebSearch
+   If >= 40 → skip to WebSearch (daily limit: 40 calls, monthly cap: $5)
 
 2. **Try Perplexity:**
    ```

@@ -24,6 +24,31 @@ Show progress updates as you work:
 [5/5] Generating final report...
 ```
 
+## Reference Tables
+
+### VRP Tiers
+| Tier | Threshold | Action |
+|------|-----------|--------|
+| EXCELLENT | ≥ 7.0x | Full size, high confidence |
+| GOOD | ≥ 4.0x | Full size |
+| MARGINAL | ≥ 1.5x | Reduced size |
+| SKIP | < 1.5x | No trade |
+
+### Liquidity Tiers
+| Tier | OI/Position | Spread | Action |
+|------|-------------|--------|--------|
+| EXCELLENT | ≥5x | ≤8% | Full size |
+| GOOD | 2-5x | 8-12% | Full size |
+| WARNING | 1-2x | 12-15% | Reduce 50% |
+| REJECT | <1x | >15% | 🚫 NO TRADE |
+
+*Final tier = worse of (OI tier, Spread tier)*
+
+### Budget Limits
+- Daily calls: 40 max
+- Monthly budget: $5.00
+- Cost per call: ~$0.005
+
 ## Step-by-Step Instructions
 
 ### Step 0: Parse Arguments and Auto-Detect Earnings Date
@@ -33,8 +58,11 @@ Parse the arguments to extract ticker and optional date:
 
 **Auto-detect earnings date and timing (if not provided):**
 ```bash
+# Sanitize ticker (alphanumeric only, uppercase)
+TICKER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
+
 sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/2.0/data/ivcrush.db \
-  "SELECT earnings_date, timing, julianday(earnings_date) - julianday('now') as days_until FROM earnings_calendar WHERE ticker='{TICKER}' AND earnings_date >= date('now') ORDER BY earnings_date ASC LIMIT 1;"
+  "SELECT earnings_date, timing, CAST(julianday(earnings_date) - julianday('now') AS INTEGER) as days_until FROM earnings_calendar WHERE ticker='$TICKER' AND earnings_date >= date('now') ORDER BY earnings_date ASC LIMIT 1;"
 ```
 Save `{EARNINGS_DATE}`, `{TIMING}` (BMO/AMC), and `{DAYS_UNTIL}` for later use.
 
@@ -48,9 +76,17 @@ If no upcoming earnings found, display error and exit:
 ### Step 1: Run 2.0 Core Analysis
 Execute the proven 2.0 analysis script with ticker and earnings date:
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh {TICKER} {EARNINGS_DATE}
+cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh $TICKER $EARNINGS_DATE
 ```
 (Use the date from Step 0 - either user-provided or auto-detected)
+
+**Error handling:** If the script fails (exit code non-zero or no output):
+```
+❌ 2.0 analysis failed for $TICKER
+   Run `/health` to check system status
+   Or try: cd 2.0 && ./trade.sh health
+```
+→ Exit early, do not continue to sentiment fetch
 
 This provides:
 - VRP ratio and tier (EXCELLENT ≥7x, GOOD ≥4x, MARGINAL ≥1.5x, SKIP <1.5x)
@@ -106,16 +142,16 @@ Only mention 1-2 notable transactions (largest by dollar value = |change| × tra
 1. **Check sentiment cache first:**
    ```bash
    sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
-     "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='{TICKER}' AND date='$(date +%Y-%m-%d)' AND cached_at > datetime('now', '-3 hours') ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
+     "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='$TICKER' AND date='$(date +%Y-%m-%d)' AND cached_at > datetime('now', '-3 hours') ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
    ```
    If result returned → use cached sentiment, note "(cached from {source})"
 
 2. **If cache miss, check budget:**
    ```bash
    sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
-     "SELECT calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
+     "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
    ```
-   If calls ≥ 40 → skip to WebSearch fallback (daily budget: 40 calls)
+   If calls ≥ 40 → skip to WebSearch fallback (daily limit: 40 calls, monthly cap: $5)
 
 3. **Try Perplexity (if budget OK):**
    ```
@@ -125,8 +161,12 @@ Only mention 1-2 notable transactions (largest by dollar value = |change| × tra
    Catalysts: [3 bullets, max 10 words each]
    Risks: [2 bullets, max 10 words each]"
    ```
-   - Cache result: `INSERT INTO sentiment_cache (ticker, date, source, sentiment, cached_at) VALUES ('{TICKER}', '{DATE}', 'perplexity', '{RESULT}', '{NOW}');`
-   - Record API call: `INSERT OR REPLACE INTO api_budget (date, calls, cost, last_updated) VALUES ('{DATE}', COALESCE((SELECT calls FROM api_budget WHERE date='{DATE}'), 0) + 1, COALESCE((SELECT cost FROM api_budget WHERE date='{DATE}'), 0) + 0.006, '{NOW}');`
+   - Cache result: `INSERT INTO sentiment_cache (ticker, date, source, sentiment, cached_at) VALUES ('$TICKER', '$DATE', 'perplexity', '$RESULT', datetime('now'));`
+   - Record API call (use UPDATE then INSERT for safety):
+     ```sql
+     UPDATE api_budget SET calls = calls + 1, cost = cost + 0.005, last_updated = datetime('now') WHERE date = '$DATE';
+     INSERT OR IGNORE INTO api_budget (date, calls, cost, last_updated) VALUES ('$DATE', 1, 0.005, datetime('now'));
+     ```
 
 4. **If Perplexity fails, try WebSearch:**
    ```

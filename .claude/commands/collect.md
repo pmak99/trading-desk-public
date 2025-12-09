@@ -9,6 +9,21 @@ Examples:
 - `/collect NVDA` - Collect sentiment for NVDA's next earnings
 - `/collect ORCL 2025-12-09` - Collect sentiment for ORCL earnings on Dec 9
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls EXCEPT mcp__perplexity__* calls
+- Run all Bash, sqlite3, WebSearch commands without asking
+- Only pause for Perplexity calls to confirm API usage
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/5] Parsing arguments...
+[2/5] Getting VRP context from 2.0...
+[3/5] Checking existing records...
+[4/5] Fetching sentiment via fallback chain...
+[5/5] Saving to sentiment history...
+```
+
 ## Purpose
 Build a permanent sentiment dataset for validating AI value-add:
 - Collects pre-earnings sentiment
@@ -37,6 +52,9 @@ Extract from output:
 
 ### Step 3: Check if Already Collected
 ```bash
+# Sanitize ticker (alphanumeric only, uppercase)
+TICKER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
+
 sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
   "SELECT collected_at, source, sentiment_direction FROM sentiment_history
    WHERE ticker='$TICKER' AND earnings_date='$DATE';"
