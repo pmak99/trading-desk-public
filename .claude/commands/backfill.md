@@ -10,6 +10,19 @@ Examples:
 - `/backfill --pending` - Backfill all pending outcomes (earnings already passed)
 - `/backfill --stats` - Show sentiment prediction accuracy statistics
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls
+- Run all Bash, sqlite3 commands without asking
+- This is a data maintenance command - execute autonomously
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/3] Verifying sentiment records exist...
+[2/3] Fetching actual outcomes from 2.0 database...
+[3/3] Updating sentiment_history with results...
+```
+
 ## Purpose
 Complete the sentiment collection loop:
 1. `/collect` or `/prime` captures pre-earnings sentiment
@@ -22,6 +35,9 @@ Complete the sentiment collection loop:
 
 **Step 1: Verify record exists**
 ```bash
+# Sanitize ticker (alphanumeric only, uppercase)
+TICKER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
+
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
   "SELECT ticker, sentiment_direction, vrp_ratio FROM sentiment_history
    WHERE ticker='$TICKER' AND earnings_date='$DATE';"
@@ -36,12 +52,15 @@ If not found:
 **Step 2: Get actual outcome from 2.0 database**
 ```bash
 sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
-  "SELECT intraday_move_pct, gap_move_pct,
-          CASE WHEN gap_move_pct >= 0 THEN 'UP' ELSE 'DOWN' END as direction
+  "SELECT close_move_pct, gap_move_pct,
+          CASE WHEN close_move_pct >= 0 THEN 'UP' ELSE 'DOWN' END as direction
    FROM historical_moves
    WHERE ticker='$TICKER' AND earnings_date='$DATE';"
 ```
-Note: `intraday_move_pct` is the actual move, `gap_move_pct` determines direction (UP if >= 0).
+**Field definitions:**
+- `close_move_pct` = Total earnings move (earnings_close - prev_close) / prev_close - **USE THIS for actual move**
+- `gap_move_pct` = Pre-market gap only (earnings_open - prev_close) / prev_close
+- `intraday_move_pct` = Intraday only (earnings_close - earnings_open) / earnings_open
 
 If no outcome data yet:
 ```

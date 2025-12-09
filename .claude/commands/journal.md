@@ -5,6 +5,19 @@ Parse Fidelity monthly statements and generate trading journal with P&L analysis
 ## Arguments
 None - automatically processes PDFs in the statements directory
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls
+- Run all Bash, python commands without asking
+- This is a utility command - execute autonomously
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/3] Running PDF parser on statements...
+[2/3] Generating journal CSV and JSON...
+[3/3] Calculating performance summary...
+```
+
 ## Step-by-Step Instructions
 
 ### Step 1: Run the Parser

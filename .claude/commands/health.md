@@ -2,6 +2,21 @@
 
 Verify all MCP connections and system dependencies before trading.
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls
+- Run all Bash, sqlite3, MCP commands without asking
+- This is a diagnostic command - execute autonomously
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/5] Checking market status (Alpaca)...
+[2/5] Testing MCP server connectivity...
+[3/5] Running 2.0 system health...
+[4/5] Checking Perplexity budget...
+[5/5] Checking sentiment cache stats...
+```
+
 ## Purpose
 Run `/health` before any trading session to:
 - Identify MCP failures BEFORE they break commands
@@ -54,7 +69,7 @@ This verifies:
 
 ### 4. Check Perplexity Budget
 Read the budget tracker database to show:
-- Calls today vs limit (150/day)
+- Calls today vs limit (40/day)
 - Cost today
 - Monthly spend vs $5 budget
 
@@ -88,9 +103,9 @@ MCP Servers:
   ✓/✗ Alpha Vantage  [Healthy/Error]
 
 Budget (Perplexity):
-  📊 Today: X/150 calls ($X.XX spent)
+  📊 Today: X/40 calls ($X.XX spent)
   📊 Month: X calls ($X.XX of $5.00)
-  [WARNING if > 80% daily usage]
+  [WARNING if > 80% daily usage (32+ calls)]
 
 Sentiment Cache:
   📦 Cached entries: X (perplexity: Y, websearch: Z)

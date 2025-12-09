@@ -82,9 +82,9 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
   "SELECT COALESCE((SELECT calls FROM api_budget WHERE date='$(date +%Y-%m-%d)'), 0) as calls;"
 ```
 
-If near budget limit (>120 calls), warn:
+If near budget limit (>35 calls), warn:
 ```
-⚠️ Budget warning: {calls}/150 calls used today
+⚠️ Budget warning: {calls}/40 calls used today
    Limiting priming to top {remaining} tickers
 ```
 
@@ -94,6 +94,9 @@ For EACH qualified ticker (in order of VRP score):
 
 **6a. Check if already cached:**
 ```bash
+# Sanitize ticker (alphanumeric only, uppercase)
+TICKER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
+
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
   "SELECT 1 FROM sentiment_cache WHERE ticker='$TICKER' AND date='$EARNINGS_DATE' AND cached_at > datetime('now', '-3 hours');"
 ```
@@ -101,7 +104,7 @@ If exists → skip, mark as "○ already cached"
 
 **6b. If cache miss, fetch via fallback chain:**
 
-1. **Try Perplexity (if budget OK, < 150 calls):**
+1. **Try Perplexity (if budget OK, < 40 calls):**
    ```
    mcp__perplexity__perplexity_ask with query="For {TICKER} earnings on {DATE}, respond ONLY in this format:
    Direction: [bullish/bearish/neutral]
@@ -149,13 +152,15 @@ This builds a permanent dataset for validating AI sentiment value-add.
 ```
 
 ### Step 7: Update Budget Tracker
-After all fetches, record total calls made:
+After all fetches, record total calls made (use UPDATE then INSERT for safety):
 ```bash
+# First try UPDATE (if row exists)
 sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
-  "INSERT OR REPLACE INTO api_budget (date, calls, cost, last_updated)
-   VALUES ('$DATE', (SELECT COALESCE(calls,0) FROM api_budget WHERE date='$DATE') + $NEW_CALLS,
-           (SELECT COALESCE(cost,0) FROM api_budget WHERE date='$DATE') + $NEW_COST,
-           datetime('now'));"
+  "UPDATE api_budget SET calls = calls + $NEW_CALLS, cost = cost + $NEW_COST, last_updated = datetime('now') WHERE date = '$DATE';"
+
+# If no row was updated, INSERT a new one
+sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
+  "INSERT OR IGNORE INTO api_budget (date, calls, cost, last_updated) VALUES ('$DATE', $NEW_CALLS, $NEW_COST, datetime('now'));"
 ```
 
 ## Output Format
@@ -186,7 +191,7 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
    │ Cache hits:     1 (skipped)    │
    │ Failures:       0              │
    │                                │
-   │ API calls today: 4/150         │
+   │ API calls today: 4/40          │
    │ Monthly budget: $4.95 left     │
    └────────────────────────────────┘
 

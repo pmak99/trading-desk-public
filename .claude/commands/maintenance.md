@@ -213,7 +213,7 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
 
 💰 BUDGET STATUS
    ┌────────────────────────────────────────────┐
-   │ Today:     4/150 calls ($0.02)            │
+   │ Today:     4/40 calls ($0.02)             │
    │ This week: 28 calls ($0.14)               │
    │ This month: 89 calls ($0.45 of $5.00)     │
    └────────────────────────────────────────────┘
