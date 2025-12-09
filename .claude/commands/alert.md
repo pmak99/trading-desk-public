@@ -5,6 +5,20 @@ Find today's high-VRP trading opportunities with sentiment analysis.
 ## Arguments
 None - automatically uses today's date
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls EXCEPT mcp__perplexity__* calls
+- Run all Bash, sqlite3, Glob, Grep, Read, MCP commands without asking
+- Only pause for Perplexity calls to confirm API usage
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/4] Checking market status...
+[2/4] Scanning today's earnings...
+[3/4] Filtering high-VRP alerts...
+[4/4] Fetching sentiment for qualified tickers...
+```
+
 ## Purpose
 Quick command to check if there are any tradeable opportunities TODAY.
 Run this after market open to see what's actionable.
@@ -60,14 +74,22 @@ If no alerts qualify:
 
 For EACH alert (max 3):
 
-**4a. Check sentiment cache:**
+**4a. Check sentiment cache (with 3-hour freshness):**
 ```bash
+# Sanitize ticker (alphanumeric only, uppercase)
+TICKER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
+
 sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
-  "SELECT sentiment, source FROM sentiment_cache WHERE ticker='$TICKER' AND date='$(date +%Y-%m-%d)' ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
+  "SELECT sentiment, source FROM sentiment_cache WHERE ticker='$TICKER' AND date='$(date +%Y-%m-%d)' AND cached_at > datetime('now', '-3 hours') ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
 ```
 
 **4b. If cache miss, use fallback chain:**
-1. Check budget (< 40 calls)
+1. Check budget:
+   ```bash
+   sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
+     "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
+   ```
+   If >= 40 → skip to WebSearch (daily limit: 40 calls, monthly cap: $5)
 2. Try Perplexity with query:
    ```
    "For {TICKER} earnings, respond ONLY in this format:

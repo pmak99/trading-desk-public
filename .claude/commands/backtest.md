@@ -9,6 +9,20 @@ Examples:
 - `/backtest` - Analyze all trades
 - `/backtest NVDA` - Analyze NVDA trades only
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls
+- Run all Bash, sqlite3, Read commands without asking
+- This is an analysis command - execute autonomously
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/4] Loading trade journal data...
+[2/4] Calculating performance metrics...
+[3/4] Analyzing by VRP/liquidity tier...
+[4/4] Generating AI insights...
+```
+
 ## Purpose
 Review trading performance to identify:
 - Win rate by VRP tier

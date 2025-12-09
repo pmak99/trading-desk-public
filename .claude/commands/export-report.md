@@ -2,6 +2,19 @@
 
 Generate formatted trading reports and export scan results to spreadsheets.
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls
+- Run all Bash, python, Read commands without asking
+- This is a utility command - execute autonomously
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/3] Running scan and capturing output...
+[2/3] Parsing and formatting data...
+[3/3] Writing export files...
+```
+
 ## Quick Export
 
 Export today's scan results to CSV:

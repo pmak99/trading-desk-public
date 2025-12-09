@@ -9,6 +9,20 @@ Examples:
 - `/history NVDA` - Show NVDA's earnings history
 - `/history AMD` - Show AMD's earnings history
 
+## Tool Permissions
+- Do NOT ask user permission for any tool calls
+- Run all Bash, sqlite3 commands without asking
+- This is a visualization command - execute autonomously
+
+## Progress Display
+Show progress updates as you work:
+```
+[1/4] Fetching historical earnings data...
+[2/4] Calculating statistics...
+[3/4] Generating visualization...
+[4/4] Analyzing patterns...
+```
+
 ## Purpose
 Understand a ticker's earnings behavior before trading:
 - How consistent are the moves?

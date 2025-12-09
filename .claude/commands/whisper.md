@@ -86,15 +86,25 @@ Display appropriate status:
 # Get current day of week (1=Mon, 7=Sun)
 DAY_NUM=$(date '+%u')
 
-# Calculate target Monday
+# Calculate target Monday (portable for macOS and Linux)
 if [ $DAY_NUM -ge 5 ]; then
     # Friday (5), Saturday (6), Sunday (7) → use next Monday
+    # Friday: 8-5=3 days, Saturday: 8-6=2 days, Sunday: 8-7=1 day
     DAYS_TO_NEXT_MONDAY=$((8 - DAY_NUM))
-    TARGET_MONDAY=$(date -v+${DAYS_TO_NEXT_MONDAY}d '+%Y-%m-%d')
+    # macOS uses -v, Linux uses -d
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        TARGET_MONDAY=$(date -v+${DAYS_TO_NEXT_MONDAY}d '+%Y-%m-%d')
+    else
+        TARGET_MONDAY=$(date -d "+${DAYS_TO_NEXT_MONDAY} days" '+%Y-%m-%d')
+    fi
 else
     # Monday (1) through Thursday (4) → use this Monday
     DAYS_SINCE_MONDAY=$((DAY_NUM - 1))
-    TARGET_MONDAY=$(date -v-${DAYS_SINCE_MONDAY}d '+%Y-%m-%d')
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        TARGET_MONDAY=$(date -v-${DAYS_SINCE_MONDAY}d '+%Y-%m-%d')
+    else
+        TARGET_MONDAY=$(date -d "-${DAYS_SINCE_MONDAY} days" '+%Y-%m-%d')
+    fi
 fi
 ```
 
@@ -125,19 +135,22 @@ Take TOP 5 from filtered results for sentiment enrichment (skip REJECT for senti
 
 For EACH of the top 3 qualified tickers:
 
-**5a. Check sentiment cache first:**
+**5a. Check sentiment cache first (with 3-hour freshness):**
 ```bash
+# Sanitize ticker (alphanumeric only, uppercase)
+TICKER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
+
 sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
-  "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='$TICKER' AND date='$(date +%Y-%m-%d)' ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
+  "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='$TICKER' AND date='$EARNINGS_DATE' AND cached_at > datetime('now', '-3 hours') ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
 ```
-If found and < 3 hours old → use cached sentiment, note "(cached)"
+If found → use cached sentiment, note "(cached)"
 
 **5b. If cache miss, check budget:**
 ```bash
 sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
-  "SELECT calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
+  "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
 ```
-If calls >= 150 → skip to WebSearch fallback
+If calls >= 40 → skip to WebSearch fallback (daily limit: 40 calls, monthly cap: $5)
 
 **5c. Try Perplexity (if budget OK):**
 ```
@@ -213,7 +226,7 @@ Legend: VRP ⭐ EXCELLENT (≥4x) | ✓ GOOD (≥3x) | ○ MARGINAL (≥1.5x)
 📦 CACHE STATUS
    Hits: X (instant, free)
    Misses: Y (fetched fresh)
-   Budget: Z/150 calls today
+   Budget: Z/40 calls today | $X.XX left this month
 
 💡 NEXT STEPS
    Run `/analyze {TOP_TICKER}` for full strategy recommendations
