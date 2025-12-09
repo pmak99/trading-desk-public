@@ -187,7 +187,7 @@ sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.d
    │ Failures:       0              │
    │                                │
    │ API calls today: 4/150         │
-   │ Budget remaining: $4.95        │
+   │ Monthly budget: $4.95 left     │
    └────────────────────────────────┘
 
 ✅ System primed! All commands will use cached sentiment.
