@@ -3,11 +3,15 @@
 Discover the week's most anticipated earnings with VRP analysis and AI sentiment - YOUR GO-TO FOR DISCOVERY.
 
 ## Arguments
-$ARGUMENTS (format: [DATE] - optional, defaults to current week's Monday)
+$ARGUMENTS (format: [DATE] - optional)
+
+**Default Week Logic:**
+- Monday-Thursday: Use current week
+- Friday-Sunday: Use next week (current week's earnings are mostly done)
 
 Examples:
-- `/whisper` - This week's most anticipated
-- `/whisper 2025-12-09` - Week starting from specific date
+- `/whisper` - Auto-selects current or next week based on day
+- `/whisper 2025-12-09` - Week containing that specific date
 
 ## Typical Workflow
 ```
@@ -52,8 +56,11 @@ Show progress updates as you work:
 ## Step-by-Step Instructions
 
 ### Step 1: Parse Date Argument
-- If no date provided, use current week's Monday
-- If date provided, use that as the week start
+- Get current date from system: `date '+%Y-%m-%d %A'`
+- **Default week logic (when no date argument provided):**
+  - If Monday-Thursday → use current week (scan Mon-Fri of this week)
+  - If Friday-Sunday → use next week (most current week earnings are done)
+- If date argument provided, use that date's week
 - IMPORTANT: Get actual current date from system, not assumptions
 
 ### Step 2: Check Market Status (Alpaca MCP)
@@ -73,9 +80,32 @@ Display appropriate status:
 - Weekend: `⚠️ Weekend - Using Friday's close data`
 
 ### Step 3: Run 2.0 Whisper Analysis
-Execute the proven 2.0 whisper mode:
+
+**Determine target week based on Step 1 logic:**
 ```bash
-cd $PROJECT_ROOT/2.0 && ./trade.sh whisper
+# Get current day of week (1=Mon, 7=Sun)
+DAY_NUM=$(date '+%u')
+
+# Calculate target Monday
+if [ $DAY_NUM -ge 5 ]; then
+    # Friday (5), Saturday (6), Sunday (7) → use next Monday
+    DAYS_TO_NEXT_MONDAY=$((8 - DAY_NUM))
+    TARGET_MONDAY=$(date -v+${DAYS_TO_NEXT_MONDAY}d '+%Y-%m-%d')
+else
+    # Monday (1) through Thursday (4) → use this Monday
+    DAYS_SINCE_MONDAY=$((DAY_NUM - 1))
+    TARGET_MONDAY=$(date -v-${DAYS_SINCE_MONDAY}d '+%Y-%m-%d')
+fi
+```
+
+**Execute whisper with calculated week:**
+```bash
+cd $PROJECT_ROOT/2.0 && ./trade.sh whisper $TARGET_MONDAY
+```
+
+Or if date argument was provided, use that date directly:
+```bash
+cd $PROJECT_ROOT/2.0 && ./trade.sh whisper $PROVIDED_DATE
 ```
 
 This provides:
