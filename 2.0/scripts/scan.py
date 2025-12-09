@@ -813,13 +813,36 @@ def get_next_friday(from_date: date) -> date:
     return from_date + timedelta(days=days_until_friday)
 
 
+def calculate_implied_move_expiration(earnings_date: date) -> date:
+    """
+    Calculate the expiration date for implied move calculation.
+
+    For IV crush analysis, we always use the FIRST expiration after earnings
+    to capture the pure implied volatility that will collapse post-earnings.
+
+    Args:
+        earnings_date: Date of earnings announcement
+
+    Returns:
+        First trading day after earnings (adjusted for weekends)
+
+    Note:
+        This differs from trading expiration (which may use Fridays for
+        liquidity). Implied move must use first post-earnings expiration
+        to accurately measure the volatility being priced in.
+    """
+    # Always use earnings_date + 1 day, adjusted to trading day
+    next_day = earnings_date + timedelta(days=1)
+    return adjust_to_trading_day(next_day)
+
+
 def calculate_expiration_date(
     earnings_date: date,
     timing: EarningsTiming,
     offset_days: Optional[int] = None
 ) -> date:
     """
-    Calculate expiration date based on earnings timing.
+    Calculate expiration date for TRADING purposes (liquidity, strategy).
 
     Args:
         earnings_date: Date of earnings announcement
@@ -836,6 +859,10 @@ def calculate_expiration_date(
 
     User enters positions at 3-4pm on earnings day (or day before for BMO),
     exits next trading day at 9:30-10:30am, using Friday weekly expirations.
+
+    Note:
+        For implied move calculation, use calculate_implied_move_expiration()
+        instead - it always uses first post-earnings expiration.
     """
     if offset_days is not None:
         target_date = earnings_date + timedelta(days=offset_days)
@@ -1025,15 +1052,29 @@ def analyze_ticker(
             logger.error(f"✗ Invalid expiration date: {validation_error}")
             return None
 
-        # Find nearest available expiration (may differ from calculated date)
+        # Calculate the implied move expiration (first post-earnings day)
+        # This is different from trading expiration to capture pure IV crush
+        implied_move_exp = calculate_implied_move_expiration(earnings_date)
+
+        # Find nearest available expiration for implied move calculation
+        nearest_im_exp_result = container.tradier.find_nearest_expiration(ticker, implied_move_exp)
+        if nearest_im_exp_result.is_err:
+            logger.warning(f"✗ Failed to find implied move expiration for {ticker}: {nearest_im_exp_result.error}")
+            return None
+
+        actual_im_expiration = nearest_im_exp_result.value
+        if actual_im_expiration != implied_move_exp:
+            logger.info(f"  Implied move expiration: {implied_move_exp} → {actual_im_expiration}")
+
+        # Find nearest available expiration for trading/liquidity
         nearest_exp_result = container.tradier.find_nearest_expiration(ticker, expiration_date)
         if nearest_exp_result.is_err:
-            logger.warning(f"✗ Failed to find expiration for {ticker}: {nearest_exp_result.error}")
+            logger.warning(f"✗ Failed to find trading expiration for {ticker}: {nearest_exp_result.error}")
             return None
 
         actual_expiration = nearest_exp_result.value
         if actual_expiration != expiration_date:
-            logger.info(f"  Adjusted expiration: {expiration_date} → {actual_expiration}")
+            logger.info(f"  Trading expiration: {expiration_date} → {actual_expiration}")
             expiration_date = actual_expiration
 
         # Get calculators
@@ -1041,9 +1082,9 @@ def analyze_ticker(
         vrp_calc = container.vrp_calculator
         prices_repo = container.prices_repository
 
-        # Step 1: Calculate implied move
+        # Step 1: Calculate implied move using first post-earnings expiration
         logger.info("\n📊 Calculating Implied Move...")
-        implied_result = implied_move_calc.calculate(ticker, expiration_date)
+        implied_result = implied_move_calc.calculate(ticker, actual_im_expiration)
 
         if implied_result.is_err:
             logger.warning(f"✗ Failed to calculate implied move: {implied_result.error}")
