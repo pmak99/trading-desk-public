@@ -467,7 +467,7 @@ from infrastructure.cache.hybrid_cache import HybridCache
 ### Phase 1: Infrastructure ✅ COMPLETE
 - [x] Create `4.0/src/` with 2.0 imports
 - [x] Create `sentiment_cache.py` (3-hour TTL cache)
-- [x] Create `budget_tracker.py` (150 calls/day limit)
+- [x] Create `budget_tracker.py` (40 calls/day limit)
 - [x] Create `sentiment_history.py` (permanent backtesting storage)
 
 ### Phase 2: P0 Commands ✅ COMPLETE
