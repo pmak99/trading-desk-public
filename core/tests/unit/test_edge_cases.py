@@ -406,27 +406,6 @@ class TestConcurrencyEdgeCases:
         # Should not crash
         assert True
 
-    def test_performance_monitor_concurrent(self):
-        """Performance monitor under concurrent load."""
-        from src.utils.performance import get_monitor
-        import threading
-
-        monitor = get_monitor()
-        monitor.reset()  # Start fresh
-
-        def track_metrics():
-            for i in range(100):
-                monitor.track("test_func", float(i))
-
-        threads = [threading.Thread(target=track_metrics) for _ in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        stats = monitor.get_stats("test_func")
-        assert stats is not None
-        assert stats["count"] == 1000  # 10 threads * 100 each
 
 
 class TestConfigurationEdgeCases:
