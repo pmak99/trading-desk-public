@@ -59,8 +59,10 @@ Display appropriate status:
 ### Step 3: Run 2.0 Whisper Mode
 Execute whisper to get the week's most anticipated earnings:
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh whisper
+cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh whisper $DATE
 ```
+
+**IMPORTANT:** Always pass the date argument (from Step 1) to whisper. Without it, whisper may default to the wrong week.
 
 This provides:
 - Most anticipated tickers from Earnings Whispers
