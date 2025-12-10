@@ -11,8 +11,15 @@ Examples:
 
 ## Tool Permissions
 - Do NOT ask user permission for any tool calls EXCEPT mcp__perplexity__* calls
-- Run all Bash, sqlite3, Glob, Grep, Read, Finnhub commands without asking
+- Run all Bash, sqlite3, Glob, Grep, Read commands without asking
 - Only pause for Perplexity calls to confirm API usage
+
+## ⛔ BANNED API CALLS
+**NEVER call these - they return massive responses (12k+ tokens):**
+- `finnhub_stock_ownership` - BANNED (insider transactions too large)
+- `finnhub_stock_fundamentals` - BANNED unless specifically requested
+
+**Only allowed Finnhub call:** `finnhub_news_sentiment` with operation="get_company_news"
 
 ## Progress Display
 Show progress updates as you work:
@@ -58,10 +65,11 @@ Parse the arguments to extract ticker and optional date:
 
 **Auto-detect earnings date and timing (if not provided):**
 ```bash
-# Sanitize ticker (alphanumeric only, uppercase)
+# Sanitize ticker (alphanumeric only, uppercase) - CRITICAL for SQL safety
 TICKER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
+# Use sanitized $TICKER in ALL subsequent queries
+sqlite3 2.0/data/ivcrush.db \
   "SELECT earnings_date, timing, CAST(julianday(earnings_date) - julianday('now') AS INTEGER) as days_until FROM earnings_calendar WHERE ticker='$TICKER' AND earnings_date >= date('now') ORDER BY earnings_date ASC LIMIT 1;"
 ```
 Save `{EARNINGS_DATE}`, `{TIMING}` (BMO/AMC), and `{DAYS_UNTIL}` for later use.
@@ -76,7 +84,7 @@ If no upcoming earnings found, display error and exit:
 ### Step 1: Run 2.0 Core Analysis
 Execute the proven 2.0 analysis script with ticker and earnings date:
 ```bash
-cd $PROJECT_ROOT/2.0 && ./trade.sh $TICKER $EARNINGS_DATE
+cd 2.0 && ./trade.sh $TICKER $EARNINGS_DATE
 ```
 (Use the date from Step 0 - either user-provided or auto-detected)
 
@@ -88,12 +96,24 @@ cd $PROJECT_ROOT/2.0 && ./trade.sh $TICKER $EARNINGS_DATE
 ```
 → Exit early, do not continue to sentiment fetch
 
+**Parse from output** (needed for Steps 3-4):
+- `{VRP_RATIO}` - the X.Xx multiplier
+- `{LIQUIDITY_TIER}` - EXCELLENT/GOOD/WARNING/REJECT
+- `{DIRECTIONAL_BIAS}` - NEUTRAL/BULLISH/BEARISH (from skew analysis)
+
+If any field cannot be parsed, use defaults: VRP=0, LIQUIDITY=REJECT, BIAS=NEUTRAL
+
 This provides:
 - VRP ratio and tier (EXCELLENT ≥7x, GOOD ≥4x, MARGINAL ≥1.5x, SKIP <1.5x)
 - Implied move vs historical mean
-- Liquidity tier (EXCELLENT/WARNING/REJECT)
+- Liquidity tier (EXCELLENT/GOOD/WARNING/REJECT)
 - Strategy recommendations with Greeks
 - Position sizing (Half-Kelly)
+
+**Liquidity tier handling:**
+- EXCELLENT/GOOD → Full position size, proceed normally
+- WARNING → Reduce size 50%, note in output
+- REJECT → Display warning below, skip sentiment (Step 3)
 
 **CRITICAL:** If Liquidity = REJECT, display prominent warning:
 ```
@@ -103,15 +123,16 @@ This provides:
 ```
 
 ### Step 2: Gather Free News Data (Finnhub MCP)
-Always fetch this regardless of VRP - it's free.
+Always fetch this regardless of VRP - it's free (rate limit: 60 calls/min).
 
-**IMPORTANT: Finnhub returns large responses. Only call news, NOT insider transactions.**
-
+⛔ **ONLY ONE FINNHUB CALL ALLOWED:**
 ```
 mcp__finnhub__finnhub_news_sentiment with operation="get_company_news", symbol="{TICKER}", from_date="{7_DAYS_AGO}", to_date="{TODAY}"
 ```
 
-**DO NOT CALL `finnhub_stock_ownership` for insider transactions** - it returns ~12k tokens and cannot be limited. Skip insider data entirely.
+⛔ **DO NOT CALL ANY OTHER FINNHUB TOOLS** - especially NOT:
+- `finnhub_stock_ownership` (returns 23k tokens)
+- `finnhub_stock_fundamentals` (returns 12k+ tokens)
 
 **Extract from news response (ignore all other fields):**
 
@@ -123,8 +144,6 @@ mcp__finnhub__finnhub_news_sentiment with operation="get_company_news", symbol="
    ... (up to 5 headlines max)
 ```
 
-**Insider Activity** - skip this section entirely (API returns too much data).
-
 ### Step 3: AI Sentiment (Conditional - Only if VRP ≥ 3x AND Liquidity ≠ REJECT)
 
 **Skip sentiment if:**
@@ -133,41 +152,51 @@ mcp__finnhub__finnhub_news_sentiment with operation="get_company_news", symbol="
 
 **If qualified, use fallback chain:**
 
-1. **Check sentiment cache first:**
+1. **Check sentiment cache first** (3-hour TTL):
    ```bash
-   sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
+   sqlite3 4.0/data/sentiment_cache.db \
      "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='$TICKER' AND date='$(date +%Y-%m-%d)' AND cached_at > datetime('now', '-3 hours') ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
    ```
    If result returned → use cached sentiment, note "(cached from {source})"
 
 2. **If cache miss, check budget:**
    ```bash
-   sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
+   sqlite3 4.0/data/sentiment_cache.db \
      "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
    ```
    If calls ≥ 40 → skip to WebSearch fallback (daily limit: 40 calls, monthly cap: $5)
 
 3. **Try Perplexity (if budget OK):**
    ```
-   mcp__perplexity__perplexity_ask with query="For {TICKER} earnings, respond ONLY in this format:
+   mcp__perplexity__perplexity_ask with query="For {TICKER} earnings on {EARNINGS_DATE}, respond ONLY in this format:
    Direction: [bullish/bearish/neutral]
    Score: [number -1 to +1]
    Catalysts: [3 bullets, max 10 words each]
    Risks: [2 bullets, max 10 words each]"
    ```
-   - Cache result: `INSERT INTO sentiment_cache (ticker, date, source, sentiment, cached_at) VALUES ('$TICKER', '$DATE', 'perplexity', '$RESULT', datetime('now'));`
-   - Record API call (use UPDATE then INSERT for safety):
+   - Cache result AND record API call with single upsert:
      ```sql
-     UPDATE api_budget SET calls = calls + 1, cost = cost + 0.005, last_updated = datetime('now') WHERE date = '$DATE';
-     INSERT OR IGNORE INTO api_budget (date, calls, cost, last_updated) VALUES ('$DATE', 1, 0.005, datetime('now'));
+     INSERT INTO sentiment_cache (ticker, date, source, sentiment, cached_at)
+     VALUES ('$TICKER', '$EARNINGS_DATE', 'perplexity', '$RESULT', datetime('now'));
+
+     INSERT INTO api_budget (date, calls, cost, last_updated)
+     VALUES ('$(date +%Y-%m-%d)', 1, 0.005, datetime('now'))
+     ON CONFLICT(date) DO UPDATE SET
+       calls = calls + 1,
+       cost = cost + 0.005,
+       last_updated = datetime('now');
      ```
 
 4. **If Perplexity fails, try WebSearch:**
    ```
-   WebSearch with query="{TICKER} earnings sentiment analyst rating {DATE}"
+   WebSearch with query="{TICKER} earnings sentiment analyst rating {EARNINGS_DATE}"
    ```
    - Summarize results into the same structured format above
-   - Cache with source="websearch"
+   - Cache with source="websearch":
+     ```sql
+     INSERT INTO sentiment_cache (ticker, date, source, sentiment, cached_at)
+     VALUES ('$TICKER', '$EARNINGS_DATE', 'websearch', '$RESULT', datetime('now'));
+     ```
 
 5. **If all fail, show graceful message:**
    ```
@@ -178,9 +207,9 @@ mcp__finnhub__finnhub_news_sentiment with operation="get_company_news", symbol="
 
 If sentiment was gathered, adjust the directional bias from 2.0's skew analysis.
 
-**Extract from previous steps:**
-- From 2.0 output (Step 1): `Directional Bias: {NEUTRAL/BULLISH/BEARISH}`
-- From sentiment (Step 3): `Score: {-1 to +1}`
+**Use values parsed in Step 1:**
+- `{DIRECTIONAL_BIAS}` from 2.0 output (NEUTRAL/BULLISH/BEARISH)
+- `{SENTIMENT_SCORE}` from Step 3 (-1 to +1)
 
 **Apply the 3-Rule System:**
 | Original Skew | Sentiment | Result | Rule |
@@ -252,6 +281,8 @@ ANALYSIS: {TICKER}
 ```
 
 ## Cost Control
-- Finnhub calls: Always (free, 60/min limit)
+- Finnhub news: Always (free, 60/min rate limit)
+- Sentiment cache: 3-hour TTL, checked before any API call
 - Perplexity: Only if VRP ≥ 3x AND Liquidity ≠ REJECT AND cache miss AND budget OK
-- Maximum 1 Perplexity call per /analyze
+- WebSearch: Free fallback if Perplexity fails or budget exceeded
+- Maximum 1 paid API call per /analyze
