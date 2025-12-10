@@ -82,7 +82,8 @@ VRP Ratio = Implied Move / Historical Mean Move
 | `2.0/src/application/metrics/vrp.py` | VRP calculation |
 | `2.0/src/domain/scoring/strategy_scorer.py` | Composite scoring |
 | `2.0/src/application/metrics/liquidity_scorer.py` | Liquidity analysis |
-| `2.0/data/ivcrush.db` | Historical moves database (4,926 records) |
+| `2.0/data/ivcrush.db` | SQLite database (historical_moves, trade_journal, etc.) |
+| `scripts/parse_fidelity_csv.py` | Fidelity CSV parser with VRP correlation |
 
 ## Strategy Types Generated
 
@@ -105,10 +106,39 @@ VRP Ratio = Implied Move / Historical Mean Move
 
 ## Database Schema
 
-Main table: `historical_moves`
+### historical_moves
+Historical post-earnings price movements for VRP calculation.
 - `ticker`, `earnings_date`, `close_before`, `close_after`
-- `actual_move_pct`, `direction` (UP/DOWN)
-- Used to calculate historical average moves per ticker
+- `gap_move_pct`, `intraday_move_pct`, `direction` (UP/DOWN)
+- 4,926 records, used to calculate historical average moves per ticker
+
+### trade_journal
+Actual executed trades imported from Fidelity CSV exports.
+- `symbol`, `acquired_date`, `sale_date`, `days_held`
+- `option_type` (PUT/CALL/NULL for stocks), `strike`, `expiration`
+- `quantity`, `cost_basis`, `proceeds`, `gain_loss`, `is_winner`
+- `term` (SHORT/LONG), `wash_sale_amount`
+- `earnings_date`, `actual_move` - linked to historical_moves when trade straddled earnings
+
+**Unique constraint:** `(symbol, acquired_date, sale_date, option_type, strike, cost_basis)`
+
+**Import command:** `python scripts/parse_fidelity_csv.py /path/to/export.csv`
+
+**Sample queries:**
+```sql
+-- Win rate by ticker for earnings trades
+SELECT symbol, COUNT(*) as trades,
+       ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
+       ROUND(SUM(gain_loss), 2) as total_pnl
+FROM trade_journal
+WHERE earnings_date IS NOT NULL
+GROUP BY symbol ORDER BY total_pnl DESC;
+
+-- Monthly P&L
+SELECT strftime('%Y-%m', sale_date) as month,
+       COUNT(*) as trades, ROUND(SUM(gain_loss), 2) as pnl
+FROM trade_journal GROUP BY month;
+```
 
 ## Environment Variables Required
 
@@ -155,7 +185,7 @@ DB_PATH=data/ivcrush.db  # Database location
 |---------|-----------|---------|
 | `/history` | `TICKER` | Visualize historical earnings moves with AI patterns |
 | `/backtest` | `[TICKER]` | Analyze trading performance with AI insights |
-| `/journal` | none | Parse Fidelity PDFs into trade journal |
+| `/journal` | `[csv\|pdf]` | Parse Fidelity exports into trade journal (CSV preferred) |
 | `/export-report` | none | Export scan results to CSV/Excel |
 
 ### Typical Daily Workflow
