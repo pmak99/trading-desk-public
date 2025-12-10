@@ -103,33 +103,27 @@ This provides:
 ```
 
 ### Step 2: Gather Free News Data (Finnhub MCP)
-Always fetch this regardless of VRP - it's free. **Run both calls in parallel:**
+Always fetch this regardless of VRP - it's free.
+
+**IMPORTANT: Finnhub returns large responses. Only call news, NOT insider transactions.**
 
 ```
-mcp__finnhub__finnhub_news_sentiment with operation="get_company_news", symbol="{TICKER}", from_date="{7_DAYS_AGO}", to_date="{TODAY}", limit=5
-mcp__finnhub__finnhub_stock_ownership with operation="get_insider_transactions", symbol="{TICKER}", limit=10
+mcp__finnhub__finnhub_news_sentiment with operation="get_company_news", symbol="{TICKER}", from_date="{7_DAYS_AGO}", to_date="{TODAY}"
 ```
 
-**Note:** The `limit` parameter reduces API response size to prevent context overflow.
+**DO NOT CALL `finnhub_stock_ownership` for insider transactions** - it returns ~12k tokens and cannot be limited. Skip insider data entirely.
 
-**Extract from responses (ignore other fields):**
+**Extract from news response (ignore all other fields):**
 
-**News** - use only `headline` and `source` fields:
+**News** - use ONLY first 5 items, extract only `headline` and `source`:
 ```
 📰 NEWS (last 7 days)
    • "{headline}" - {source}
    • "{headline}" - {source}
-   ... (up to 5 headlines)
+   ... (up to 5 headlines max)
 ```
 
-**Insider Transactions** - count by `transactionCode` (S=sell, P=buy, G=gift):
-```
-👔 INSIDER ACTIVITY
-   Sells: {count} transactions
-   Buys: {count} transactions
-   Notable: {name} {sold/bought} {change} shares @ ${transactionPrice}
-```
-Only mention 1-2 notable transactions (largest by dollar value = |change| × transactionPrice).
+**Insider Activity** - skip this section entirely (API returns too much data).
 
 ### Step 3: AI Sentiment (Conditional - Only if VRP ≥ 3x AND Liquidity ≠ REJECT)
 
@@ -228,8 +222,7 @@ ANALYSIS: {TICKER}
 📰 NEWS SUMMARY (Finnhub)
    • {Recent headline 1}
    • {Recent headline 2}
-   • Earnings history: {beat/miss pattern}
-   • Insider activity: {summary}
+   (up to 5 headlines)
 
 🧠 AI SENTIMENT {(cached/fresh/websearch)}
    Direction: {BULLISH/BEARISH/NEUTRAL} | Score: {-1 to +1}
