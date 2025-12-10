@@ -79,7 +79,7 @@ class Trade:
             acq = datetime.strptime(self.acquired_date, '%Y-%m-%d')
             sale = datetime.strptime(self.sale_date, '%Y-%m-%d')
             return (sale - acq).days
-        except:
+        except (ValueError, TypeError):
             return None
 
 
@@ -97,26 +97,55 @@ def find_column(headers: List[str], field_name: str) -> Optional[int]:
 
 def parse_money(value: str) -> float:
     """Parse money string like '$1,234.56' or '(1,234.56)' to float"""
-    if not value or value == '-' or value == '':
+    if not value or value.strip() in ('-', '', '--'):
         return 0.0
 
-    # Remove currency symbols and whitespace
-    clean = value.strip().replace('$', '').replace(',', '')
+    value = value.strip()
 
-    # Handle parentheses for negative
+    # Remove currency symbols and text prefixes
+    clean = re.sub(r'[A-Z]{2,4}\s*', '', value.upper())  # Remove USD, EUR, etc.
+    clean = clean.replace('$', '').replace('€', '').replace('£', '')
+    clean = clean.replace(' ', '')
+
+    # Handle parentheses for negative (check BEFORE removing commas)
+    is_negative = False
     if clean.startswith('(') and clean.endswith(')'):
-        clean = '-' + clean[1:-1]
+        is_negative = True
+        clean = clean[1:-1]
+    elif clean.startswith('-(') and clean.endswith(')'):
+        is_negative = True
+        clean = clean[2:-1]
+
+    # Detect European format (1.234,56) vs US format (1,234.56)
+    if ',' in clean and '.' in clean:
+        if clean.rfind(',') > clean.rfind('.'):
+            # European: 1.234,56
+            clean = clean.replace('.', '').replace(',', '.')
+        else:
+            # US: 1,234.56
+            clean = clean.replace(',', '')
+    elif ',' in clean:
+        # Only comma - could be European decimal OR US thousands
+        parts = clean.split(',')
+        if len(parts) == 2 and len(parts[1]) == 2:
+            clean = clean.replace(',', '.')
+        else:
+            clean = clean.replace(',', '')
 
     try:
-        return float(clean)
+        amount = float(clean)
+        return -abs(amount) if is_negative else amount
     except ValueError:
         return 0.0
 
 
 def parse_date(value: str) -> Optional[str]:
     """Parse date string to YYYY-MM-DD format"""
-    if not value or value == '-' or value == '':
+    if not value or value.strip() in ('-', '', '--'):
         return None
+
+    # Strip any time component first
+    value_clean = value.strip().split('T')[0].split(' ')[0]
 
     # Try common formats
     formats = [
@@ -125,11 +154,18 @@ def parse_date(value: str) -> Optional[str]:
         '%m-%d-%Y',
         '%m/%d/%y',
         '%Y/%m/%d',
+        '%d/%m/%Y',      # European format
+        '%Y%m%d',        # Compact format
+        '%m-%d-%y',      # Two-digit year with dashes
+        '%d-%m-%Y',      # European with dashes
     ]
 
     for fmt in formats:
         try:
-            return datetime.strptime(value.strip(), fmt).strftime('%Y-%m-%d')
+            dt = datetime.strptime(value_clean, fmt)
+            # Validate year is reasonable (between 2000-2100)
+            if 2000 <= dt.year <= 2100:
+                return dt.strftime('%Y-%m-%d')
         except ValueError:
             continue
 
@@ -159,12 +195,13 @@ def parse_option_description(description: str) -> Dict:
         return result  # Not an option
 
     # Extract underlying - usually in parentheses like "PUT (NVDA)"
-    match = re.search(r'(?:PUT|CALL)\s*\(([A-Z]{1,5})\)', desc_upper)
+    # Allow up to 6 chars and optional numbers for tickers like BRK.B -> BRKB
+    match = re.search(r'(?:PUT|CALL)\s*\(([A-Z][A-Z0-9]{0,5})\)', desc_upper)
     if match:
         result['underlying'] = match.group(1)
     else:
         # Try to find ticker at start
-        match = re.search(r'^([A-Z]{1,5})\s', desc_upper)
+        match = re.search(r'^([A-Z][A-Z0-9]{0,5})\s', desc_upper)
         if match:
             result['underlying'] = match.group(1)
 
@@ -193,137 +230,218 @@ def parse_option_description(description: str) -> Dict:
     return result
 
 
-def parse_fidelity_csv(filepath: str) -> List[Trade]:
-    """Parse Fidelity CSV export into Trade objects"""
-    trades = []
+def parse_occ_symbol(symbol: str) -> Dict:
+    """Parse OCC option symbol format like 'AAPL250117C00150000' or 'ACN250926P215'"""
+    result = {
+        'option_type': None,
+        'underlying': None,
+        'strike': None,
+        'expiration': None,
+    }
 
-    with open(filepath, 'r', encoding='utf-8-sig') as f:
-        # Skip any header lines that aren't the column headers
-        lines = f.readlines()
+    if not symbol:
+        return result
 
-    # Find the header row (first row with recognizable column names)
-    header_idx = 0
-    for i, line in enumerate(lines):
-        if any(col.lower() in line.lower() for col in ['symbol', 'description', 'proceeds']):
-            header_idx = i
-            break
+    # OCC format: TICKER{6-digit date YYMMDD}[P|C]{strike}
+    # Examples: "AAPL250117C00150000", "ACN250926P215(8061839XV)"
+    # Remove any CUSIP suffix in parentheses
+    symbol_clean = re.sub(r'\([^)]+\)$', '', symbol.strip())
 
-    # Parse as CSV starting from header
-    reader = csv.reader(lines[header_idx:])
-    headers = next(reader)
+    occ_match = re.match(r'^([A-Z][A-Z0-9]{0,5})(\d{6})([PC])(\d+)', symbol_clean)
+    if occ_match:
+        result['underlying'] = occ_match.group(1)
+        result['option_type'] = 'PUT' if occ_match.group(3) == 'P' else 'CALL'
 
-    # Find column indices
-    col_idx = {}
-    for field in COLUMN_MAPPINGS.keys():
-        idx = find_column(headers, field)
-        col_idx[field] = idx
-
-    print(f"      Column mapping: {[(k, v) for k, v in col_idx.items() if v is not None]}")
-
-    # Parse rows
-    for row in reader:
-        if not row or len(row) < 3:
-            continue
-
-        # Skip summary/total rows and wash sale adjustment rows
-        first_col = row[0].strip() if row else ''
-        if not first_col or first_col == '':
-            continue
-        if any(skip in str(row).lower() for skip in ['total', 'subtotal', 'disclaimer', 'wash sale']):
-            continue
-
-        def get_val(field: str) -> str:
-            idx = col_idx.get(field)
-            if idx is not None and idx < len(row):
-                return row[idx].strip()
-            return ''
-
-        symbol = get_val('symbol')
-        if not symbol:
-            continue
-
-        description = get_val('description')
-
-        # Parse option details from description
-        opt_details = parse_option_description(description)
-
-        # For options, use underlying as symbol (extract from CUSIP format like "ACN250926P215(8061839XV)")
-        if opt_details['underlying']:
-            symbol = opt_details['underlying']
-        else:
-            # Try to extract from symbol field format like "ACN250926P215(cusip)"
-            match = re.match(r'^([A-Z]{1,5})\d{6}[PC]', symbol)
-            if match:
-                symbol = match.group(1)
-                # Also try to get option type from symbol
-                if 'P' in symbol or re.search(r'\d{6}P', get_val('symbol')):
-                    opt_details['option_type'] = 'PUT'
-                elif 'C' in symbol or re.search(r'\d{6}C', get_val('symbol')):
-                    opt_details['option_type'] = 'CALL'
-
-        # Parse quantity
-        qty_str = get_val('quantity')
+        # Parse date from YYMMDD
+        date_str = occ_match.group(2)
         try:
-            quantity = abs(int(float(qty_str.replace(',', '')))) if qty_str else 0
-        except:
-            quantity = 0
+            year = '20' + date_str[:2]
+            month = date_str[2:4]
+            day = date_str[4:6]
+            result['expiration'] = f"{year}-{month}-{day}"
+        except (IndexError, ValueError):
+            pass
 
-        # Parse dates
-        acquired_date = parse_date(get_val('acquired_date'))
-        sale_date = parse_date(get_val('sale_date'))
-
-        if not sale_date:
-            continue  # Need at least a sale date
-
-        # Parse money fields
-        cost_basis = parse_money(get_val('cost_basis'))
-        proceeds = parse_money(get_val('proceeds'))
-
-        # Try short/long term specific columns first, then fall back to combined
-        short_term_gl = parse_money(get_val('short_term_gl'))
-        long_term_gl = parse_money(get_val('long_term_gl'))
-
-        if short_term_gl != 0 or long_term_gl != 0:
-            gain_loss = short_term_gl + long_term_gl
-            term = 'LONG' if long_term_gl != 0 else 'SHORT'
-        else:
-            gain_loss = parse_money(get_val('gain_loss'))
-            # Determine term from column or holding period
-            term_str = get_val('term').upper()
-            if 'LONG' in term_str:
-                term = 'LONG'
+        # Parse strike - OCC format has strike * 1000, but Fidelity sometimes uses direct
+        try:
+            strike_code = occ_match.group(4)
+            strike_val = float(strike_code)
+            # If strike > 10000, it's likely OCC format (multiply by 1000)
+            if strike_val > 10000:
+                result['strike'] = strike_val / 1000
             else:
-                term = 'SHORT'
+                result['strike'] = strike_val
+        except (ValueError, TypeError):
+            pass
 
-        wash_sale = parse_money(get_val('wash_sale'))
-
-        trade = Trade(
-            symbol=symbol,
-            description=description,
-            quantity=quantity,
-            acquired_date=acquired_date,
-            sale_date=sale_date,
-            cost_basis=cost_basis,
-            proceeds=proceeds,
-            gain_loss=gain_loss,
-            term=term,
-            wash_sale_amount=wash_sale,
-            option_type=opt_details['option_type'],
-            strike=opt_details['strike'],
-            expiration=opt_details['expiration'],
-            underlying=opt_details['underlying'],
-        )
-        trades.append(trade)
-
-    return trades
+    return result
 
 
-def load_historical_moves(db_path: str) -> Dict[str, List[Dict]]:
-    """Load historical moves from ivcrush database, grouped by ticker"""
+def parse_fidelity_csv(filepath: str) -> Tuple[List[Trade], List[Tuple]]:
+    """Parse Fidelity CSV export into Trade objects
+
+    Returns:
+        Tuple of (trades, skipped_rows) where skipped_rows contains
+        (row_num, reason, row_preview) for debugging
+    """
+    trades = []
+    skipped_rows = []
+
+    # Read file efficiently - peek at first 20 lines to find header
+    with open(filepath, 'r', encoding='utf-8-sig') as f:
+        peek_lines = []
+        for i, line in enumerate(f):
+            peek_lines.append(line)
+            if i >= 20:
+                break
+
+        # Find header index
+        header_idx = 0
+        for i, line in enumerate(peek_lines):
+            if any(col.lower() in line.lower() for col in ['symbol', 'description', 'proceeds']):
+                header_idx = i
+                break
+
+        # Reset and skip to header
+        f.seek(0)
+        for _ in range(header_idx):
+            next(f)
+
+        reader = csv.reader(f)
+        headers = next(reader)
+
+        # Find column indices
+        col_idx = {}
+        for field_name in COLUMN_MAPPINGS.keys():
+            idx = find_column(headers, field_name)
+            col_idx[field_name] = idx
+
+        print(f"      Column mapping: {[(k, v) for k, v in col_idx.items() if v is not None]}")
+
+        # Parse rows
+        row_num = header_idx + 1
+        for row in reader:
+            row_num += 1
+
+            if not row or len(row) < 3:
+                skipped_rows.append((row_num, 'Insufficient columns', None))
+                continue
+
+            # Skip summary/total rows and wash sale adjustment rows
+            first_col = row[0].strip() if row else ''
+            if not first_col:
+                skipped_rows.append((row_num, 'Empty first column', None))
+                continue
+
+            row_text = str(row).lower()
+            skip_terms = ['total', 'subtotal', 'disclaimer', 'wash sale']
+            if any(skip in row_text for skip in skip_terms):
+                matched_term = [s for s in skip_terms if s in row_text][0]
+                skipped_rows.append((row_num, f'Summary row ({matched_term})', None))
+                continue
+
+            def get_val(field: str) -> str:
+                idx = col_idx.get(field)
+                if idx is not None and idx < len(row):
+                    return row[idx].strip()
+                return ''
+
+            raw_symbol = get_val('symbol')
+            if not raw_symbol:
+                skipped_rows.append((row_num, 'No symbol found', row[:5] if len(row) >= 5 else row))
+                continue
+
+            description = get_val('description')
+
+            # Parse option details from description first
+            opt_details = parse_option_description(description)
+
+            # If description parsing didn't get underlying, try OCC symbol format
+            if not opt_details['underlying']:
+                occ_details = parse_occ_symbol(raw_symbol)
+                # Merge OCC details if found
+                if occ_details['underlying']:
+                    for key, val in occ_details.items():
+                        if val is not None and opt_details.get(key) is None:
+                            opt_details[key] = val
+
+            # Determine final symbol
+            if opt_details['underlying']:
+                symbol = opt_details['underlying']
+            else:
+                # Not an option, use raw symbol (strip any suffixes)
+                symbol = re.sub(r'\([^)]+\)$', '', raw_symbol).strip()
+                # Also strip any numeric suffixes for stocks
+                match = re.match(r'^([A-Z][A-Z0-9]{0,5})', symbol)
+                if match:
+                    symbol = match.group(1)
+
+            # Parse quantity
+            qty_str = get_val('quantity')
+            try:
+                qty_float = float(qty_str.replace(',', '').strip()) if qty_str else 0
+                quantity = abs(int(qty_float)) if qty_float == int(qty_float) else abs(qty_float)
+            except (ValueError, AttributeError):
+                quantity = 0
+
+            # Parse dates
+            acquired_date = parse_date(get_val('acquired_date'))
+            sale_date = parse_date(get_val('sale_date'))
+
+            if not sale_date:
+                skipped_rows.append((row_num, 'No sale date', row[:5] if len(row) >= 5 else row))
+                continue
+
+            # Parse money fields
+            cost_basis = parse_money(get_val('cost_basis'))
+            proceeds = parse_money(get_val('proceeds'))
+
+            # Try short/long term specific columns first, then fall back to combined
+            short_term_gl = parse_money(get_val('short_term_gl'))
+            long_term_gl = parse_money(get_val('long_term_gl'))
+
+            if short_term_gl != 0 or long_term_gl != 0:
+                gain_loss = short_term_gl + long_term_gl
+                term = 'LONG' if long_term_gl != 0 else 'SHORT'
+            else:
+                gain_loss = parse_money(get_val('gain_loss'))
+                term_str = get_val('term').upper()
+                term = 'LONG' if 'LONG' in term_str else 'SHORT'
+
+            wash_sale = parse_money(get_val('wash_sale'))
+
+            trade = Trade(
+                symbol=symbol,
+                description=description,
+                quantity=quantity,
+                acquired_date=acquired_date,
+                sale_date=sale_date,
+                cost_basis=cost_basis,
+                proceeds=proceeds,
+                gain_loss=gain_loss,
+                term=term,
+                wash_sale_amount=wash_sale,
+                option_type=opt_details['option_type'],
+                strike=opt_details['strike'],
+                expiration=opt_details['expiration'],
+                underlying=opt_details['underlying'],
+            )
+            trades.append(trade)
+
+    return trades, skipped_rows
+
+
+def load_historical_moves(db_path: str, min_date: str = '2020-01-01') -> Dict[str, List[Dict]]:
+    """Load historical moves from ivcrush database, grouped by ticker
+
+    Args:
+        db_path: Path to ivcrush.db
+        min_date: Only load earnings after this date (default 2020-01-01)
+    """
     moves_by_ticker = defaultdict(list)
 
     if not os.path.exists(db_path):
-        print(f"Warning: Database not found at {db_path}")
+        print(f"      Warning: Database not found at {db_path}")
         return moves_by_ticker
 
     conn = sqlite3.connect(db_path)
@@ -332,9 +450,9 @@ def load_historical_moves(db_path: str) -> Dict[str, List[Dict]]:
     cursor.execute("""
         SELECT ticker, earnings_date, gap_move_pct, intraday_move_pct
         FROM historical_moves
-        WHERE earnings_date >= '2024-01-01'
+        WHERE earnings_date >= ?
         ORDER BY ticker, earnings_date
-    """)
+    """, (min_date,))
 
     for row in cursor.fetchall():
         ticker, earnings_date, gap_move, intraday_move = row
@@ -350,32 +468,64 @@ def load_historical_moves(db_path: str) -> Dict[str, List[Dict]]:
 
 
 def find_nearest_earnings(trade: Trade, moves_by_ticker: Dict) -> Optional[Dict]:
-    """Find the earnings event closest to the trade's sale date"""
+    """Find the earnings event that this trade straddles (for IV crush strategy)
+
+    For IV crush: position opened BEFORE earnings, closed AFTER earnings.
+    This function validates that the trade window brackets an earnings date.
+    """
     ticker = trade.symbol
     if ticker not in moves_by_ticker:
         return None
 
-    sale_date = datetime.strptime(trade.sale_date, '%Y-%m-%d')
+    try:
+        sale_date = datetime.strptime(trade.sale_date, '%Y-%m-%d')
+        acquired_date = datetime.strptime(trade.acquired_date, '%Y-%m-%d') if trade.acquired_date else None
+    except (ValueError, TypeError):
+        return None
 
-    # Look for earnings within 7 days of sale
     best_match = None
-    min_diff = 8  # days
+    min_diff = float('inf')
 
     for move in moves_by_ticker[ticker]:
-        earnings = datetime.strptime(move['earnings_date'], '%Y-%m-%d')
-        diff = abs((sale_date - earnings).days)
+        try:
+            earnings = datetime.strptime(move['earnings_date'], '%Y-%m-%d')
+        except ValueError:
+            continue
 
-        # Trade should close on or shortly after earnings
-        if diff < min_diff and (sale_date >= earnings):
-            min_diff = diff
-            best_match = move
+        if acquired_date:
+            # CORRECT IV CRUSH LOGIC:
+            # - Position opened BEFORE earnings (1-7 days before)
+            # - Position closed AFTER earnings (0-7 days after)
+            days_before = (earnings - acquired_date).days
+            days_after = (sale_date - earnings).days
+
+            # Valid IV crush trade: opened 0-7 days before, closed 0-7 days after
+            if 0 <= days_before <= 7 and 0 <= days_after <= 7:
+                # Prefer closest match to sale date
+                diff = abs(days_after)
+                if diff < min_diff:
+                    min_diff = diff
+                    best_match = move
+        else:
+            # No acquired date - fall back to looser matching
+            # Sale should be 0-3 days after earnings
+            days_after = (sale_date - earnings).days
+            if 0 <= days_after <= 3:
+                if days_after < min_diff:
+                    min_diff = days_after
+                    best_match = move
 
     return best_match
 
 
-def correlate_with_vrp(trades: List[Trade], db_path: str) -> List[Trade]:
-    """Add VRP correlation data to trades"""
+def correlate_with_vrp(trades: List[Trade], db_path: str) -> Tuple[List[Trade], int]:
+    """Add VRP correlation data to trades
+
+    Returns:
+        Tuple of (trades, matched_count)
+    """
     moves_by_ticker = load_historical_moves(db_path)
+    matched_count = 0
 
     for trade in trades:
         if not trade.is_option:
@@ -385,11 +535,9 @@ def correlate_with_vrp(trades: List[Trade], db_path: str) -> List[Trade]:
         if match:
             trade.earnings_date = match['earnings_date']
             trade.actual_move = match['actual_move']
+            matched_count += 1
 
-            # Calculate if trade beat the implied move
-            # (Would need implied move data from sentiment_history or scan logs)
-
-    return trades
+    return trades, matched_count
 
 
 def calculate_statistics(trades: List[Trade]) -> Dict:
@@ -419,7 +567,10 @@ def calculate_statistics(trades: List[Trade]) -> Dict:
     # By month
     by_month = defaultdict(lambda: {'count': 0, 'pnl': 0, 'wins': 0})
     for t in trades:
-        month = t.sale_date[:7]
+        if t.sale_date and len(t.sale_date) >= 7:
+            month = t.sale_date[:7]
+        else:
+            month = 'UNKNOWN'
         by_month[month]['count'] += 1
         by_month[month]['pnl'] += t.gain_loss
         if t.is_winner:
@@ -441,7 +592,7 @@ def calculate_statistics(trades: List[Trade]) -> Dict:
         'total_trades': total,
         'winners': len(winners),
         'losers': len(losers),
-        'win_rate': round(100 * len(winners) / total, 1),
+        'win_rate': round(100 * len(winners) / total, 1) if total > 0 else 0,
         'total_pnl': round(total_pnl, 2),
         'winner_pnl': round(winner_pnl, 2),
         'loser_pnl': round(loser_pnl, 2),
@@ -450,12 +601,16 @@ def calculate_statistics(trades: List[Trade]) -> Dict:
         'profit_factor': round(abs(winner_pnl / loser_pnl), 2) if loser_pnl else 0,
         'options_count': len(options),
         'stocks_count': len(stocks),
-        'by_ticker': {k: {'count': v['count'], 'pnl': round(v['pnl'], 2),
-                         'win_rate': round(100 * v['wins'] / v['count'], 1)}
-                     for k, v in sorted(by_ticker.items(), key=lambda x: x[1]['pnl'], reverse=True)},
-        'by_month': {k: {'count': v['count'], 'pnl': round(v['pnl'], 2),
-                        'win_rate': round(100 * v['wins'] / v['count'], 1)}
-                    for k, v in sorted(by_month.items())},
+        'by_ticker': {k: {
+            'count': v['count'],
+            'pnl': round(v['pnl'], 2),
+            'win_rate': round(100 * v['wins'] / v['count'], 1) if v['count'] > 0 else 0
+        } for k, v in sorted(by_ticker.items(), key=lambda x: x[1]['pnl'], reverse=True)},
+        'by_month': {k: {
+            'count': v['count'],
+            'pnl': round(v['pnl'], 2),
+            'win_rate': round(100 * v['wins'] / v['count'], 1) if v['count'] > 0 else 0
+        } for k, v in sorted(by_month.items())},
         'by_option_type': dict(by_option_type),
         'earnings_correlated': len(earnings_trades),
         'wash_sales': {
@@ -501,20 +656,20 @@ def export_journal_csv(trades: List[Trade], filepath: str):
             })
 
 
-def print_summary(stats: Dict):
+def print_summary(stats: Dict, skipped_count: int = 0):
     """Print formatted summary"""
 
     print("\n" + "=" * 70)
     print("TRADING JOURNAL SUMMARY")
     print("=" * 70)
 
-    print(f"\n📊 OVERALL PERFORMANCE")
+    print(f"\n   OVERALL PERFORMANCE")
     print(f"   Total Trades:    {stats['total_trades']}")
     print(f"   Win Rate:        {stats['win_rate']}%")
     print(f"   Winners:         {stats['winners']}")
     print(f"   Losers:          {stats['losers']}")
 
-    print(f"\n💰 PROFIT & LOSS")
+    print(f"\n   PROFIT & LOSS")
     print(f"   Total P&L:       ${stats['total_pnl']:,.2f}")
     print(f"   From Winners:    ${stats['winner_pnl']:,.2f}")
     print(f"   From Losers:     ${stats['loser_pnl']:,.2f}")
@@ -522,45 +677,56 @@ def print_summary(stats: Dict):
     print(f"   Avg Loss:        ${stats['avg_loss']:,.2f}")
     print(f"   Profit Factor:   {stats['profit_factor']}")
 
-    print(f"\n📈 BY INSTRUMENT")
+    print(f"\n   BY INSTRUMENT")
     print(f"   Options:         {stats['options_count']}")
     print(f"   Stocks:          {stats['stocks_count']}")
 
     if stats['by_option_type']:
-        print(f"\n📋 BY OPTION TYPE")
+        print(f"\n   BY OPTION TYPE")
         for otype, data in stats['by_option_type'].items():
-            win_rate = 100 * data['wins'] / data['count'] if data['count'] else 0
+            win_rate = 100 * data['wins'] / data['count'] if data['count'] > 0 else 0
             print(f"   {otype:8} {data['count']:4} trades  {win_rate:5.1f}% win  ${data['pnl']:>12,.2f}")
 
-    print(f"\n🏆 TOP 5 TICKERS BY P&L")
+    print(f"\n   TOP 5 TICKERS BY P&L")
     for i, (ticker, data) in enumerate(list(stats['by_ticker'].items())[:5]):
         print(f"   {ticker:8} {data['count']:3} trades  {data['win_rate']:5.1f}% win  ${data['pnl']:>12,.2f}")
 
-    print(f"\n📅 MONTHLY P&L")
+    print(f"\n   MONTHLY P&L")
     ytd = 0
     for month, data in stats['by_month'].items():
         ytd += data['pnl']
         print(f"   {month}  {data['count']:3} trades  {data['win_rate']:5.1f}% win  ${data['pnl']:>10,.2f}  (YTD: ${ytd:>12,.2f})")
 
     if stats['earnings_correlated'] > 0:
-        print(f"\n🎯 EARNINGS CORRELATION")
+        print(f"\n   EARNINGS CORRELATION")
         print(f"   Trades matched to earnings: {stats['earnings_correlated']}")
 
     if stats['wash_sales']['count'] > 0:
-        print(f"\n⚠️  WASH SALES")
+        print(f"\n   WASH SALES")
         print(f"   Count:           {stats['wash_sales']['count']}")
         print(f"   Disallowed:      ${stats['wash_sales']['total']:,.2f}")
+
+    if skipped_count > 0:
+        print(f"\n   PARSING NOTES")
+        print(f"   Rows skipped:    {skipped_count}")
 
 
 def main():
     import argparse
 
+    # Get project root for portable paths
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent
+    home = Path.home()
+
     parser = argparse.ArgumentParser(description='Parse Fidelity CSV exports')
     parser.add_argument('csv_file', nargs='?', help='Path to Fidelity CSV export')
-    parser.add_argument('--db', default='$PROJECT_ROOT/2.0/data/ivcrush.db',
+    parser.add_argument('--db', default=str(project_root / '2.0' / 'data' / 'ivcrush.db'),
                        help='Path to ivcrush database for VRP correlation')
-    parser.add_argument('--output', default='$PROJECT_ROOT/docs/2025 Trades',
+    parser.add_argument('--output', default=str(project_root / 'docs' / '2025 Trades'),
                        help='Output directory')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                       help='Show skipped rows details')
 
     args = parser.parse_args()
 
@@ -568,28 +734,32 @@ def main():
     if args.csv_file:
         csv_path = args.csv_file
     else:
-        # Look for CSV in common locations
+        # Look for CSV in common locations, prefer most recent
         search_paths = [
-            '/Users/prashant/Downloads',
-            '/Users/prashant/Desktop',
-            args.output,
+            home / 'Downloads',
+            home / 'Desktop',
+            Path(args.output),
         ]
-        csv_path = None
+        csv_candidates = []
+
         for search_dir in search_paths:
-            if os.path.exists(search_dir):
-                for f in os.listdir(search_dir):
-                    if f.lower().endswith('.csv') and 'fidelity' in f.lower():
-                        csv_path = os.path.join(search_dir, f)
-                        break
-                    if f.lower().endswith('.csv') and 'gain' in f.lower():
-                        csv_path = os.path.join(search_dir, f)
-                        break
+            if search_dir.exists():
+                for f in search_dir.iterdir():
+                    if not f.suffix.lower() == '.csv':
+                        continue
+                    fname_lower = f.name.lower()
+                    if any(term in fname_lower for term in ['fidelity', 'gain', 'realized', 'portfolio', 'closed']):
+                        mtime = f.stat().st_mtime
+                        csv_candidates.append((mtime, str(f)))
+
+        # Pick most recent
+        csv_path = max(csv_candidates, key=lambda x: x[0])[1] if csv_candidates else None
 
     if not csv_path or not os.path.exists(csv_path):
-        print("❌ No Fidelity CSV file found.")
+        print("No Fidelity CSV file found.")
         print("\nTo use this parser:")
         print("1. Log into Fidelity.com")
-        print("2. Go to Accounts & Trade → Tax Information")
+        print("2. Go to Accounts & Trade -> Tax Information")
         print("3. Select 'Realized Gain/Loss' for your account")
         print("4. Click 'Download' or 'CSV' to export")
         print("5. Run: python parse_fidelity_csv.py /path/to/downloaded.csv")
@@ -598,17 +768,23 @@ def main():
     print("=" * 70)
     print("FIDELITY CSV JOURNAL PARSER")
     print("=" * 70)
-    print(f"\n📄 Input:  {csv_path}")
+    print(f"\nInput:  {csv_path}")
 
     # Parse CSV
     print("\n[1/4] Parsing Fidelity CSV...")
-    trades = parse_fidelity_csv(csv_path)
+    trades, skipped_rows = parse_fidelity_csv(csv_path)
     print(f"      Found {len(trades)} trades")
+
+    if skipped_rows and args.verbose:
+        print(f"      Skipped {len(skipped_rows)} rows:")
+        for num, reason, data in skipped_rows[:10]:
+            print(f"        Row {num}: {reason}")
+        if len(skipped_rows) > 10:
+            print(f"        ... and {len(skipped_rows) - 10} more")
 
     # Correlate with VRP
     print("\n[2/4] Correlating with earnings data...")
-    trades = correlate_with_vrp(trades, args.db)
-    correlated = len([t for t in trades if t.earnings_date])
+    trades, correlated = correlate_with_vrp(trades, args.db)
     print(f"      Matched {correlated} trades to earnings events")
 
     # Calculate stats
@@ -616,7 +792,7 @@ def main():
     stats = calculate_statistics(trades)
 
     # Print summary
-    print_summary(stats)
+    print_summary(stats, len(skipped_rows))
 
     # Export files
     print("\n[4/4] Exporting files...")
@@ -658,7 +834,7 @@ def main():
         }, f, indent=2)
     print(f"      JSON: {json_out}")
 
-    print("\n✅ Done!")
+    print("\nDone!")
 
 
 if __name__ == "__main__":
