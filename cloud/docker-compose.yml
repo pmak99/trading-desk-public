@@ -1,0 +1,29 @@
+# Trading Desk 5.0 - Local Development
+# Usage: docker compose up --build
+
+version: '3.8'
+
+services:
+  trading-desk:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # Secrets as JSON blob (or use .env file)
+      - SECRETS=${SECRETS}
+      # Or individual keys for local testing
+      - DB_PATH=/app/data/ivcrush.db
+    volumes:
+      # Mount local data directory for persistence
+      - ./data:/app/data
+      # Mount source for hot reloading (dev only)
+      - ./src:/app/src:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+# For production, use .env file with:
+# SECRETS={"TRADIER_API_KEY":"xxx","ALPHA_VANTAGE_KEY":"xxx","PERPLEXITY_API_KEY":"xxx","TELEGRAM_BOT_TOKEN":"xxx","TELEGRAM_CHAT_ID":"xxx"}

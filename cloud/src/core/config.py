@@ -58,21 +58,42 @@ class Settings:
         self._secrets: Optional[dict] = None
 
     def _load_secrets(self):
-        """Load secrets from env or Secret Manager."""
+        """Load secrets from env vars, SECRETS JSON blob, or Secret Manager.
+
+        Priority:
+        1. Individual env vars (for local development)
+        2. SECRETS JSON blob (for Docker/Cloud Run)
+        3. GCP Secret Manager (for production fallback)
+        """
         if self._secrets:
             return
 
+        # Priority 1: Check for individual env vars (local development)
+        individual_keys = {
+            'TRADIER_API_KEY': os.environ.get('TRADIER_API_KEY'),
+            'ALPHA_VANTAGE_KEY': os.environ.get('ALPHA_VANTAGE_KEY'),
+            'PERPLEXITY_API_KEY': os.environ.get('PERPLEXITY_API_KEY'),
+            'TELEGRAM_BOT_TOKEN': os.environ.get('TELEGRAM_BOT_TOKEN'),
+            'TELEGRAM_CHAT_ID': os.environ.get('TELEGRAM_CHAT_ID'),
+        }
+
+        # If any individual key is set, use individual env vars
+        if any(individual_keys.values()):
+            self._secrets = {k: v or '' for k, v in individual_keys.items()}
+            return
+
+        # Priority 2: SECRETS JSON blob
         secrets_json = os.environ.get('SECRETS')
         if secrets_json:
             self._secrets = json.loads(secrets_json)
             return
 
-        # Fallback to Secret Manager
+        # Priority 3: Fallback to Secret Manager (production)
         try:
             from google.cloud import secretmanager
             client = secretmanager.SecretManagerServiceClient()
-            project = os.environ.get('GOOGLE_CLOUD_PROJECT', 'ivcrush-prod')
-            name = f"projects/{project}/secrets/ivcrush-secrets/versions/latest"
+            project = os.environ.get('GOOGLE_CLOUD_PROJECT', 'your-gcp-project')
+            name = f"projects/{project}/secrets/trading-desk-secrets/versions/latest"
             response = client.access_secret_version(request={"name": name})
             self._secrets = json.loads(response.payload.data.decode("UTF-8"))
         except Exception:
@@ -105,7 +126,7 @@ class Settings:
 
     @property
     def gcs_bucket(self) -> str:
-        return os.environ.get('GCS_BUCKET', 'ivcrush-data')
+        return os.environ.get('GCS_BUCKET', 'your-gcs-bucket')
 
     @property
     def DB_PATH(self) -> str:
