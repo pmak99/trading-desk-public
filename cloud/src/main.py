@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from src.core.config import now_et, settings
 from src.core.logging import log, set_request_id
 from src.core.job_manager import JobManager
+from src.jobs import JobRunner
 
 app = FastAPI(
     title="IV Crush 5.0",
@@ -19,6 +20,8 @@ app = FastAPI(
 
 # Lazy initialization to avoid issues during test collection
 _job_manager = None
+_job_runner = None
+
 
 def get_job_manager() -> JobManager:
     """Get or create the job manager instance."""
@@ -26,6 +29,14 @@ def get_job_manager() -> JobManager:
     if _job_manager is None:
         _job_manager = JobManager(db_path=settings.DB_PATH)
     return _job_manager
+
+
+def get_job_runner() -> JobRunner:
+    """Get or create the job runner instance."""
+    global _job_runner
+    if _job_runner is None:
+        _job_runner = JobRunner()
+    return _job_runner
 
 
 @app.middleware("http")
@@ -70,11 +81,15 @@ async def dispatch():
 
     log("info", "Dispatching job", job=job)
 
-    # TODO: Actually run the job
-    # For now, just record success
-    manager.record_status(job, "success")
+    # Run the job
+    runner = get_job_runner()
+    result = await runner.run(job)
 
-    return {"status": "success", "job": job}
+    # Record status based on result
+    status = "success" if result.get("status") == "success" else "failed"
+    manager.record_status(job, status)
+
+    return {"status": status, "job": job, "result": result}
 
 
 @app.get("/api/health")
