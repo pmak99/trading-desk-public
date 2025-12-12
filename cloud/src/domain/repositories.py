@@ -150,23 +150,57 @@ class HistoricalMovesRepository:
                 results.append(d)
             return results
 
-    def get_average_move(self, ticker: str) -> Optional[float]:
+    def get_average_move(self, ticker: str, metric: str = "intraday") -> Optional[float]:
         """
         Get average absolute move for VRP calculation.
 
+        Args:
+            ticker: Stock symbol
+            metric: "intraday" (default, matches 2.0) or "gap"
+
         Returns:
-            Average absolute gap move percent, or None if no data
+            Average absolute move percent, or None if no data
         """
         ticker = validate_ticker(ticker)
         moves = self.get_moves(ticker)
         if not moves:
             return None
 
-        abs_moves = [abs(m["gap_move_pct"]) for m in moves if m.get("gap_move_pct")]
+        # Use intraday_move_pct by default (matches 2.0 behavior)
+        move_key = "intraday_move_pct" if metric == "intraday" else "gap_move_pct"
+        abs_moves = [abs(m[move_key]) for m in moves if m.get(move_key)]
         if not abs_moves:
             return None
 
         return sum(abs_moves) / len(abs_moves)
+
+    def get_next_earnings(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Get next upcoming earnings date for ticker from calendar.
+
+        Args:
+            ticker: Stock symbol
+
+        Returns:
+            Dict with earnings_date, timing (BMO/AMC), or None if not found
+        """
+        ticker = validate_ticker(ticker)
+
+        with self._pool.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT earnings_date, timing
+                FROM earnings_calendar
+                WHERE ticker = ? AND earnings_date >= date('now')
+                ORDER BY earnings_date ASC
+                LIMIT 1
+                """,
+                (ticker,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return {"earnings_date": row["earnings_date"], "timing": row["timing"]}
+            return None
 
     def count_moves(self, ticker: str) -> int:
         """Count historical moves for ticker."""

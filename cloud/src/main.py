@@ -299,6 +299,17 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
                 "message": f"Need at least 4 historical moves, found {historical_count or 0}. Use stock ticker symbol (e.g., NKE not NIKE).",
             }
 
+        # Determine earnings date - use provided date or look up from calendar
+        target_date = date
+        if not target_date:
+            earnings_info = repo.get_next_earnings(ticker)
+            if earnings_info:
+                target_date = earnings_info["earnings_date"]
+                log("info", "Found earnings date from calendar", ticker=ticker, date=target_date)
+            else:
+                target_date = today_et()
+                log("warn", "No earnings date in calendar, using today", ticker=ticker)
+
         # Get current price from Tradier (more reliable than Yahoo in cloud)
         tradier = get_tradier()
         quote = await tradier.get_quote(ticker)
@@ -316,9 +327,6 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
 
         # Get options chain for implied move
         expirations = await tradier.get_expirations(ticker)
-
-        # Find nearest expiration
-        target_date = date or today_et()
         nearest_exp = None
         for exp in expirations:
             if exp >= target_date:
@@ -353,8 +361,8 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
                     position_size=10,
                 )
 
-        # Calculate VRP - extract historical move percentages
-        historical_pcts = [abs(m["gap_move_pct"]) for m in moves if m.get("gap_move_pct")]
+        # Calculate VRP - extract historical move percentages (use intraday, matches 2.0)
+        historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
         historical_avg = sum(historical_pcts) / len(historical_pcts) if historical_pcts else 5.0
         implied_move_pct = implied_move_data["implied_move_pct"] if implied_move_data else historical_avg * 1.5
         vrp_data = calculate_vrp(
@@ -504,8 +512,8 @@ async def whisper(date: str = None, format: str = "json", _: bool = Depends(veri
                 if historical_count < 4:
                     continue
 
-                # Extract historical move percentages
-                historical_pcts = [abs(m["gap_move_pct"]) for m in moves if m.get("gap_move_pct")]
+                # Extract historical move percentages (use intraday, matches 2.0)
+                historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
                 if not historical_pcts:
                     continue
 
