@@ -16,6 +16,7 @@ from tenacity import (
 from src.core.logging import log
 
 BASE_URL = "https://api.telegram.org/bot"
+MAX_MESSAGE_LENGTH = 4096  # Telegram API limit
 
 
 class TelegramSender:
@@ -26,6 +27,14 @@ class TelegramSender:
         self.chat_id = chat_id
         self.base_url = f"{BASE_URL}{bot_token}"
 
+    def _truncate_message(self, text: str) -> str:
+        """Truncate message to Telegram's limit if needed."""
+        if len(text) <= MAX_MESSAGE_LENGTH:
+            return text
+        # Truncate with ellipsis, preserving room for indicator
+        truncated = text[:MAX_MESSAGE_LENGTH - 20]
+        return truncated + "\n\n[...truncated]"
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -34,6 +43,9 @@ class TelegramSender:
     async def _send(self, text: str, parse_mode: str = "HTML") -> bool:
         """Send message via Telegram API."""
         try:
+            # Truncate to Telegram's limit if needed
+            text = self._truncate_message(text)
+
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
                     f"{self.base_url}/sendMessage",

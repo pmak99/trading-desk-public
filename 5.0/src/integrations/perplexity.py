@@ -68,12 +68,14 @@ class PerplexityClient:
     def __init__(
         self,
         api_key: str,
+        db_path: str = "data/ivcrush.db",
         model: str = None,
         budget_tracker: Optional[BudgetTracker] = None
     ):
         self.api_key = api_key
+        self.db_path = db_path
         self.model = model or os.environ.get("PERPLEXITY_MODEL", self.DEFAULT_MODEL)
-        self.budget = budget_tracker or BudgetTracker()
+        self.budget = budget_tracker or BudgetTracker(db_path=db_path)
 
     @retry(
         stop=stop_after_attempt(3),

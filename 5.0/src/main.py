@@ -80,14 +80,14 @@ def get_budget_tracker() -> BudgetTracker:
 def get_tradier() -> TradierClient:
     global _tradier
     if _tradier is None:
-        _tradier = TradierClient(settings.TRADIER_API_KEY)
+        _tradier = TradierClient(settings.tradier_api_key)
     return _tradier
 
 
 def get_alphavantage() -> AlphaVantageClient:
     global _alphavantage
     if _alphavantage is None:
-        _alphavantage = AlphaVantageClient(settings.ALPHA_VANTAGE_KEY)
+        _alphavantage = AlphaVantageClient(settings.alpha_vantage_key)
     return _alphavantage
 
 
@@ -95,7 +95,7 @@ def get_perplexity() -> PerplexityClient:
     global _perplexity
     if _perplexity is None:
         _perplexity = PerplexityClient(
-            api_key=settings.PERPLEXITY_API_KEY,
+            api_key=settings.perplexity_api_key,
             db_path=settings.DB_PATH,
         )
     return _perplexity
@@ -105,8 +105,8 @@ def get_telegram() -> TelegramSender:
     global _telegram
     if _telegram is None:
         _telegram = TelegramSender(
-            bot_token=settings.TELEGRAM_BOT_TOKEN,
-            chat_id=settings.TELEGRAM_CHAT_ID,
+            bot_token=settings.telegram_bot_token,
+            chat_id=settings.telegram_chat_id,
         )
     return _telegram
 
@@ -159,30 +159,40 @@ async def dispatch():
     Dispatcher endpoint called by Cloud Scheduler every 15 min.
     Routes to correct job based on current time.
     """
-    manager = get_job_manager()
-    job = manager.get_current_job()
+    try:
+        manager = get_job_manager()
+        job = manager.get_current_job()
 
-    if not job:
-        log("info", "No job scheduled for current time")
-        return {"status": "no_job", "message": "No job scheduled"}
+        if not job:
+            log("info", "No job scheduled for current time")
+            return {"status": "no_job", "message": "No job scheduled"}
 
-    # Check dependencies
-    can_run, reason = manager.check_dependencies(job)
-    if not can_run:
-        log("warn", "Job dependencies not met", job=job, reason=reason)
-        return {"status": "skipped", "job": job, "reason": reason}
+        # Check dependencies
+        can_run, reason = manager.check_dependencies(job)
+        if not can_run:
+            log("warn", "Job dependencies not met", job=job, reason=reason)
+            return {"status": "skipped", "job": job, "reason": reason}
 
-    log("info", "Dispatching job", job=job)
+        log("info", "Dispatching job", job=job)
 
-    # Run the job
-    runner = get_job_runner()
-    result = await runner.run(job)
+        # Run the job with error handling
+        runner = get_job_runner()
+        try:
+            result = await runner.run(job)
+        except Exception as e:
+            log("error", "Job execution failed", job=job, error=str(e))
+            manager.record_status(job, "failed")
+            return {"status": "error", "job": job, "error": str(e)}
 
-    # Record status based on result
-    status = "success" if result.get("status") == "success" else "failed"
-    manager.record_status(job, status)
+        # Record status based on result
+        status = "success" if result.get("status") == "success" else "failed"
+        manager.record_status(job, status)
 
-    return {"status": status, "job": job, "result": result}
+        return {"status": status, "job": job, "result": result}
+
+    except Exception as e:
+        log("error", "Dispatch endpoint failed", error=str(e))
+        return {"status": "error", "error": str(e)}
 
 
 @app.get("/api/health")
@@ -223,10 +233,10 @@ async def analyze(ticker: str, date: str = None, format: str = "json"):
     try:
         # Get historical data
         repo = get_historical_repo()
-        historical_avg = repo.get_average_move(ticker)
-        historical_count = repo.get_move_count(ticker)
+        moves = repo.get_moves(ticker)
+        historical_count = len(moves)
 
-        if historical_avg is None or historical_count < 4:
+        if historical_count < 4:
             return {
                 "ticker": ticker,
                 "status": "insufficient_data",
@@ -283,12 +293,13 @@ async def analyze(ticker: str, date: str = None, format: str = "json"):
                     bid_ask_spread_pct=avg_spread,
                 )
 
-        # Calculate VRP
+        # Calculate VRP - extract historical move percentages
+        historical_pcts = [abs(m["gap_move_pct"]) for m in moves if m.get("gap_move_pct")]
+        historical_avg = sum(historical_pcts) / len(historical_pcts) if historical_pcts else 5.0
         implied_move_pct = implied_move_data["implied_move_pct"] if implied_move_data else historical_avg * 1.5
         vrp_data = calculate_vrp(
             implied_move_pct=implied_move_pct,
-            historical_mean=historical_avg,
-            historical_count=historical_count,
+            historical_moves=historical_pcts,
         )
 
         # Calculate score
@@ -305,12 +316,15 @@ async def analyze(ticker: str, date: str = None, format: str = "json"):
         cache = get_sentiment_cache()
 
         # Check cache first
-        cached = cache.get(ticker, target_date)
+        cached = cache.get_sentiment(ticker, target_date)
         if cached:
             sentiment_data = cached
         elif budget.can_call("perplexity"):
             perplexity = get_perplexity()
             sentiment_data = await perplexity.get_sentiment(ticker, target_date)
+            # Save to cache if successful
+            if sentiment_data and not sentiment_data.get("error"):
+                cache.save_sentiment(ticker, target_date, sentiment_data)
 
         # Apply sentiment modifier
         direction = "NEUTRAL"
@@ -424,11 +438,18 @@ async def whisper(date: str = None, format: str = "json"):
 
             try:
                 # Get historical data
-                historical_avg = repo.get_average_move(ticker)
-                historical_count = repo.get_move_count(ticker)
+                moves = repo.get_moves(ticker)
+                historical_count = len(moves)
 
-                if historical_avg is None or historical_count < 4:
+                if historical_count < 4:
                     continue
+
+                # Extract historical move percentages
+                historical_pcts = [abs(m["gap_move_pct"]) for m in moves if m.get("gap_move_pct")]
+                if not historical_pcts:
+                    continue
+
+                historical_avg = sum(historical_pcts) / len(historical_pcts)
 
                 # Get current price
                 price = await yahoo.get_current_price(ticker)
@@ -441,12 +462,11 @@ async def whisper(date: str = None, format: str = "json"):
                 # Calculate VRP
                 vrp_data = calculate_vrp(
                     implied_move_pct=implied_move_pct,
-                    historical_mean=historical_avg,
-                    historical_count=historical_count,
+                    historical_moves=historical_pcts,
                 )
 
-                # Skip if VRP below threshold
-                if vrp_data["vrp_ratio"] < 3.0:
+                # Skip if VRP calculation failed or below threshold
+                if vrp_data.get("error") or vrp_data.get("vrp_ratio", 0) < 3.0:
                     continue
 
                 # Calculate score (assume GOOD liquidity for screening)

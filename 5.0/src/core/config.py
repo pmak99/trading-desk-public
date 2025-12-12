@@ -84,6 +84,11 @@ class Settings:
         return self._secrets.get('TRADIER_API_KEY', '')
 
     @property
+    def alpha_vantage_key(self) -> str:
+        self._load_secrets()
+        return self._secrets.get('ALPHA_VANTAGE_KEY', '')
+
+    @property
     def perplexity_api_key(self) -> str:
         self._load_secrets()
         return self._secrets.get('PERPLEXITY_API_KEY', '')
