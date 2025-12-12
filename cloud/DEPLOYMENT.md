@@ -12,6 +12,45 @@ Complete walkthrough for deploying the autopilot system to GCP with Telegram not
 | **Telegram Bot** | `@trading_desk_mak_bot` |
 | **Scheduler** | `trading-desk-morning` (7 AM ET weekdays) |
 
+## Security
+
+All API endpoints are protected by API key authentication.
+
+| Endpoint | Auth Method | Access |
+|----------|-------------|--------|
+| `/` | None | Public health check |
+| `/api/*` | `X-API-Key` header | Protected |
+| `/dispatch` | `X-API-Key` header | Scheduler only |
+| `/telegram` | Webhook secret | Telegram only |
+
+### Using the API from Terminal
+
+```bash
+# Set your API key (from .env or Secret Manager)
+export API_KEY="your_api_key_here"
+
+# Health check (protected)
+curl -H "X-API-Key: $API_KEY" https://your-cloud-run-url.run.app/api/health
+
+# Analyze ticker
+curl -H "X-API-Key: $API_KEY" "https://your-cloud-run-url.run.app/api/analyze?ticker=AAPL"
+
+# Find opportunities
+curl -H "X-API-Key: $API_KEY" https://your-cloud-run-url.run.app/api/whisper
+```
+
+### Generate New Security Keys
+
+```bash
+# Generate API key (64 hex chars)
+openssl rand -hex 32
+
+# Generate Telegram webhook secret (32 hex chars)
+openssl rand -hex 16
+```
+
+---
+
 ## Prerequisites
 
 - Docker Desktop installed

@@ -132,14 +132,26 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
 
 ## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Health check |
-| `/api/health` | GET | System health + budget info |
-| `/api/analyze?ticker=XXX` | GET | Deep ticker analysis |
-| `/api/whisper` | GET | Find high-VRP opportunities |
-| `/dispatch` | POST | Scheduler dispatch (internal) |
-| `/telegram` | POST | Telegram webhook handler |
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/` | GET | None | Health check (public) |
+| `/api/health` | GET | API Key | System health + budget info |
+| `/api/analyze?ticker=XXX` | GET | API Key | Deep ticker analysis |
+| `/api/whisper` | GET | API Key | Find high-VRP opportunities |
+| `/dispatch` | POST | API Key | Scheduler dispatch (internal) |
+| `/telegram` | POST | Webhook Secret | Telegram webhook handler |
+
+### Authentication
+
+Protected endpoints require the `X-API-Key` header:
+
+```bash
+# Set your API key
+export API_KEY="your_api_key_from_env_file"
+
+# Call protected endpoint
+curl -H "X-API-Key: $API_KEY" "https://your-cloud-run-url.run.app/api/health"
+```
 
 ### Response Formats
 
@@ -147,10 +159,10 @@ Add `?format=cli` for terminal output, `?format=json` for raw data (default).
 
 ```bash
 # JSON (default)
-curl "http://localhost:8080/api/analyze?ticker=AAPL"
+curl -H "X-API-Key: $API_KEY" "https://your-cloud-run-url.run.app/api/analyze?ticker=AAPL"
 
 # CLI formatted
-curl "http://localhost:8080/api/analyze?ticker=AAPL&format=cli"
+curl -H "X-API-Key: $API_KEY" "https://your-cloud-run-url.run.app/api/analyze?ticker=AAPL&format=cli"
 ```
 
 ## Configuration
@@ -164,6 +176,10 @@ ALPHA_VANTAGE_KEY=xxx
 PERPLEXITY_API_KEY=xxx
 TELEGRAM_BOT_TOKEN=xxx
 TELEGRAM_CHAT_ID=xxx
+
+# Security (generate with: openssl rand -hex 32)
+API_KEY=xxx
+TELEGRAM_WEBHOOK_SECRET=xxx
 
 # Database
 DB_PATH=data/ivcrush.db
