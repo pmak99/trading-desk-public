@@ -8,7 +8,7 @@ Complete walkthrough for deploying the autopilot system to GCP with Telegram not
 |-----------|-------|
 | **Service URL** | https://your-cloud-run-url.run.app |
 | **GCP Project** | `your-gcp-project` |
-| **Region** | `us-central1` |
+| **Region** | `us-east1` |
 | **Telegram Bot** | `@trading_desk_mak_bot` |
 | **Scheduler** | `trading-desk-morning` (7 AM ET weekdays) |
 
