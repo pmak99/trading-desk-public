@@ -4,6 +4,7 @@ Alpha Vantage API client for earnings calendar.
 Primary source for upcoming earnings dates.
 """
 
+import asyncio
 import csv
 import io
 import httpx
@@ -13,11 +14,20 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
+    retry_if_result,
 )
 
 from src.core.logging import log
 
 BASE_URL = "https://www.alphavantage.co/query"
+
+
+def _is_rate_limited(response_text: str) -> bool:
+    """Check if response indicates rate limiting."""
+    if not response_text:
+        return False
+    # Alpha Vantage returns JSON error on rate limit
+    return "rate limit" in response_text.lower() or "api call frequency" in response_text.lower()
 
 
 class AlphaVantageClient:
@@ -27,8 +37,8 @@ class AlphaVantageClient:
         self.api_key = api_key
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=2, min=5, max=60),
         retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.TimeoutException)),
     )
     async def _request(
@@ -36,7 +46,7 @@ class AlphaVantageClient:
         function: str,
         params: Optional[Dict] = None
     ) -> str:
-        """Make request to Alpha Vantage API."""
+        """Make request to Alpha Vantage API with rate limit handling."""
         async with httpx.AsyncClient(timeout=30) as client:
             request_params = {
                 "function": function,
@@ -46,8 +56,31 @@ class AlphaVantageClient:
                 request_params.update(params)
 
             response = await client.get(BASE_URL, params=request_params)
+
+            # Handle 429 explicitly
+            if response.status_code == 429:
+                log("warn", "Alpha Vantage rate limited, waiting...")
+                await asyncio.sleep(60)  # Wait 60s on rate limit
+                raise httpx.HTTPStatusError(
+                    "Rate limited",
+                    request=response.request,
+                    response=response
+                )
+
             response.raise_for_status()
-            return response.text
+            text = response.text
+
+            # Check for soft rate limit in response body
+            if _is_rate_limited(text):
+                log("warn", "Alpha Vantage soft rate limit detected")
+                await asyncio.sleep(30)
+                raise httpx.HTTPStatusError(
+                    "Soft rate limit",
+                    request=response.request,
+                    response=response
+                )
+
+            return text
 
     def _parse_earnings_csv(self, csv_text: str) -> List[Dict[str, Any]]:
         """Parse CSV earnings calendar response."""

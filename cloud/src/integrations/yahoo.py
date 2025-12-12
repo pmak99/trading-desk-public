@@ -6,6 +6,7 @@ Uses yfinance library.
 """
 
 import asyncio
+import atexit
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 
@@ -19,9 +20,19 @@ class YahooFinanceClient:
 
     def __init__(self):
         self._executor = ThreadPoolExecutor(max_workers=4)
+        # Register cleanup on process exit
+        atexit.register(self.close)
+
+    def close(self):
+        """Shutdown thread pool executor."""
+        if self._executor:
+            self._executor.shutdown(wait=False)
+            self._executor = None
 
     async def _run_sync(self, func, *args, **kwargs):
         """Run sync yfinance function in thread pool."""
+        if not self._executor:
+            raise RuntimeError("YahooFinanceClient has been closed")
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             self._executor,
