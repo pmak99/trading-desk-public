@@ -39,10 +39,12 @@ def parse_sentiment_response(text: str) -> Dict[str, Any]:
     if dir_match:
         result["direction"] = dir_match.group(1).lower()
 
-    # Parse score
+    # Parse score with bounds validation
     score_match = re.search(r'Score:\s*([+-]?\d*\.?\d+)', text)
     if score_match:
-        result["score"] = float(score_match.group(1))
+        score = float(score_match.group(1))
+        # Clamp to valid range [-1, +1]
+        result["score"] = max(-1.0, min(1.0, score))
 
     # Parse catalysts/tailwinds
     cat_match = re.search(r'Catalysts?:\s*(.+?)(?=\n|Risks?:|$)', text, re.I | re.S)
@@ -94,6 +96,32 @@ class PerplexityClient:
             response.raise_for_status()
             return response.json()
 
+    def _estimate_cost(self, data: Dict[str, Any]) -> float:
+        """
+        Estimate cost from API response usage data.
+
+        Perplexity pricing (as of 2024):
+        - sonar-small: $0.20/M input, $0.20/M output
+        - sonar-medium: $0.60/M input, $0.60/M output
+        - sonar-pro: $3/M input, $15/M output
+
+        Falls back to $0.005 estimate if no usage data.
+        """
+        usage = data.get("usage", {})
+        if not usage:
+            return 0.005  # Default estimate
+
+        input_tokens = usage.get("prompt_tokens", 0)
+        output_tokens = usage.get("completion_tokens", 0)
+
+        # Use sonar-small pricing as default (most cost-effective)
+        # $0.20 per million = $0.0000002 per token
+        input_cost = input_tokens * 0.0000002
+        output_cost = output_tokens * 0.0000002
+
+        # Add small buffer for safety
+        return max(0.001, round(input_cost + output_cost, 6))
+
     async def get_sentiment(
         self,
         ticker: str,
@@ -109,8 +137,8 @@ class PerplexityClient:
         Returns:
             Parsed sentiment with direction, score, tailwinds, headwinds
         """
-        # Check budget before calling
-        if not self.budget.can_call("perplexity"):
+        # Atomic check-and-acquire with estimated cost
+        if not self.budget.try_acquire_call("perplexity", cost=0.005):
             log("warn", "Perplexity budget exceeded, returning default")
             return {
                 "direction": "neutral",
@@ -139,7 +167,8 @@ Risks: [1 bullet, max 10 words]"""
         result["ticker"] = ticker
         result["earnings_date"] = earnings_date
 
-        # Record the call after success
-        self.budget.record_call("perplexity", cost=0.005)  # ~$0.005 per call
+        # Parse actual cost from response (for reporting, call already counted)
+        actual_cost = self._estimate_cost(data)
+        result["api_cost"] = actual_cost
 
         return result

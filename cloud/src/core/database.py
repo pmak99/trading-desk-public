@@ -41,7 +41,7 @@ class DatabaseSync:
         blob = bucket.blob(self.blob_name)
 
         try:
-            blob.reload()  # Get current metadata
+            blob.reload(timeout=self.DOWNLOAD_TIMEOUT)  # Get current metadata
             self._generation = blob.generation
             blob.download_to_filename(
                 str(self.local_path),
@@ -82,7 +82,7 @@ class DatabaseSync:
                     timeout=self.UPLOAD_TIMEOUT
                 )
 
-            blob.reload()
+            blob.reload(timeout=self.UPLOAD_TIMEOUT)
             self._generation = blob.generation
             log("info", "Database uploaded", generation=self._generation)
             return True
@@ -111,21 +111,24 @@ class DatabaseContext:
         return self.conn
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.conn:
-            self.conn.close()
+        # Close connection AFTER all retry logic (fix for connection leak)
+        try:
+            if exc_type is None:
+                # Try upload with retries on conflict
+                for attempt in range(self.max_retries):
+                    if self.sync.upload():
+                        return  # Success
 
-        if exc_type is None:
-            # Try upload with retries on conflict
-            for attempt in range(self.max_retries):
-                if self.sync.upload():
-                    return  # Success
+                    # Conflict - download latest and notify caller
+                    log("warn", "GCS conflict, attempt retry", attempt=attempt + 1)
+                    self.sync.download()
 
-                # Conflict - download latest and notify caller
-                log("warn", "GCS conflict, attempt retry", attempt=attempt + 1)
-                self.sync.download()
-
-            # All retries failed
-            raise RuntimeError(
-                f"Database sync conflict after {self.max_retries} retries - "
-                "another instance is writing frequently"
-            )
+                # All retries failed
+                raise RuntimeError(
+                    f"Database sync conflict after {self.max_retries} retries - "
+                    "another instance is writing frequently"
+                )
+        finally:
+            # Always close connection, even if retries fail
+            if self.conn:
+                self.conn.close()
