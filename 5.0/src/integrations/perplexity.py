@@ -63,7 +63,9 @@ class PerplexityClient:
     """Async Perplexity API client."""
 
     # Default model - can be overridden via environment or constructor
-    DEFAULT_MODEL = "llama-3.1-sonar-small-128k-online"
+    # Note: llama-3.1-sonar-* models were discontinued Feb 22, 2025
+    # Current models: sonar, sonar-pro, sonar-reasoning, sonar-reasoning-pro
+    DEFAULT_MODEL = "sonar"
 
     def __init__(
         self,
@@ -118,24 +120,23 @@ class PerplexityClient:
         """
         Estimate cost from API response usage data.
 
-        Perplexity pricing (as of 2024):
-        - sonar-small: $0.20/M input, $0.20/M output
-        - sonar-medium: $0.60/M input, $0.60/M output
+        Perplexity pricing (as of 2025):
+        - sonar: $1/M input, $1/M output
         - sonar-pro: $3/M input, $15/M output
+        - sonar-reasoning: $1/M input, $5/M output
 
-        Falls back to $0.005 estimate if no usage data.
+        Falls back to $0.002 estimate if no usage data.
         """
         usage = data.get("usage", {})
         if not usage:
-            return 0.005  # Default estimate
+            return 0.002  # Default estimate for ~1k tokens
 
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
 
-        # Use sonar-small pricing as default (most cost-effective)
-        # $0.20 per million = $0.0000002 per token
-        input_cost = input_tokens * 0.0000002
-        output_cost = output_tokens * 0.0000002
+        # Use sonar pricing: $1 per million = $0.000001 per token
+        input_cost = input_tokens * 0.000001
+        output_cost = output_tokens * 0.000001
 
         # Add small buffer for safety
         return max(0.001, round(input_cost + output_cost, 6))
