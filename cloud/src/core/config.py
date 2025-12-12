@@ -75,6 +75,8 @@ class Settings:
             'PERPLEXITY_API_KEY': os.environ.get('PERPLEXITY_API_KEY'),
             'TELEGRAM_BOT_TOKEN': os.environ.get('TELEGRAM_BOT_TOKEN'),
             'TELEGRAM_CHAT_ID': os.environ.get('TELEGRAM_CHAT_ID'),
+            'API_KEY': os.environ.get('API_KEY'),
+            'TELEGRAM_WEBHOOK_SECRET': os.environ.get('TELEGRAM_WEBHOOK_SECRET'),
         }
 
         # If any individual key is set, use individual env vars
@@ -123,6 +125,16 @@ class Settings:
     def telegram_chat_id(self) -> str:
         self._load_secrets()
         return self._secrets.get('TELEGRAM_CHAT_ID', '')
+
+    @property
+    def api_key(self) -> str:
+        self._load_secrets()
+        return self._secrets.get('API_KEY', '')
+
+    @property
+    def telegram_webhook_secret(self) -> str:
+        self._load_secrets()
+        return self._secrets.get('TELEGRAM_WEBHOOK_SECRET', '')
 
     @property
     def gcs_bucket(self) -> str:
