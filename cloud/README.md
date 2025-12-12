@@ -130,6 +130,10 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
 | `/whisper` | Today's high-VRP opportunities |
 | `/analyze TICKER` | Deep analysis of specific ticker |
 
+**Ticker Aliases**: Common company names are automatically converted:
+- `NIKE` → `NKE`, `GOOGLE` → `GOOGL`, `FACEBOOK` → `META`
+- `AMAZON` → `AMZN`, `COSTCO` → `COST`, `WALMART` → `WMT`, etc.
+
 ## API Endpoints
 
 | Endpoint | Method | Auth | Description |
@@ -203,6 +207,8 @@ The system loads secrets in this order:
 ```
 VRP Ratio = Implied Move / Historical Mean Move
 ```
+
+**Historical Mean** uses **intraday moves** (open-to-close on earnings day), not gap moves, to match 2.0 methodology.
 
 | Tier | VRP Ratio | Action |
 |------|-----------|--------|
@@ -340,7 +346,8 @@ gcloud run deploy trading-desk --image gcr.io/your-gcp-project/trading-desk --re
 
 - **Daily limit**: 40 calls
 - **Monthly budget**: $5.00
-- Costs ~$0.12 per sentiment analysis
+- **Model**: `sonar` (as of Dec 2024)
+- Costs ~$0.002 per sentiment analysis ($1/M tokens)
 
 ### Monitoring
 
@@ -372,6 +379,7 @@ curl http://localhost:8080/api/health
 **"No historical data" error**
 - Ensure `data/ivcrush.db` exists with historical_moves data
 - Copy from 2.0: `cp ../2.0/data/ivcrush.db data/`
+- Use stock ticker symbol (e.g., `NKE` not `NIKE`) - common names are auto-converted
 
 **Telegram bot not responding**
 - Check webhook is set correctly
