@@ -5,6 +5,9 @@ uvicorn[standard]==0.27.0
 # HTTP client (async)
 httpx==0.26.0
 
+# Yahoo Finance (for prices/historical data)
+yfinance==0.2.36
+
 # Retry logic
 tenacity==8.2.3
 
