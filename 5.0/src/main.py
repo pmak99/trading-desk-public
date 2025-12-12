@@ -341,12 +341,12 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
                 implied_move_data = calculate_implied_move_from_chain(chain, price)
 
                 # Calculate liquidity from chain
-                total_oi = sum(opt.get("open_interest", 0) for opt in chain)
+                total_oi = sum(opt.get("open_interest") or 0 for opt in chain)
                 avg_spread = 0
                 spread_count = 0
                 for opt in chain:
-                    bid = opt.get("bid", 0)
-                    ask = opt.get("ask", 0)
+                    bid = opt.get("bid") or 0
+                    ask = opt.get("ask") or 0
                     if bid > 0 and ask > 0:
                         spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
                         avg_spread += spread_pct
