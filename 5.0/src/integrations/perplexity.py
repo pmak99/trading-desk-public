@@ -4,12 +4,14 @@ Perplexity API client for AI sentiment analysis.
 Replaces MCP perplexity integration with direct REST calls.
 """
 
+import os
 import re
 import httpx
 from typing import Dict, Any, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.logging import log
+from src.core.budget import BudgetTracker
 
 BASE_URL = "https://api.perplexity.ai"
 
@@ -58,8 +60,18 @@ def parse_sentiment_response(text: str) -> Dict[str, Any]:
 class PerplexityClient:
     """Async Perplexity API client."""
 
-    def __init__(self, api_key: str):
+    # Default model - can be overridden via environment or constructor
+    DEFAULT_MODEL = "llama-3.1-sonar-small-128k-online"
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = None,
+        budget_tracker: Optional[BudgetTracker] = None
+    ):
         self.api_key = api_key
+        self.model = model or os.environ.get("PERPLEXITY_MODEL", self.DEFAULT_MODEL)
+        self.budget = budget_tracker or BudgetTracker()
 
     @retry(
         stop=stop_after_attempt(3),
@@ -75,7 +87,7 @@ class PerplexityClient:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "llama-3.1-sonar-small-128k-online",
+                    "model": self.model,
                     "messages": messages,
                 }
             )
@@ -97,6 +109,19 @@ class PerplexityClient:
         Returns:
             Parsed sentiment with direction, score, tailwinds, headwinds
         """
+        # Check budget before calling
+        if not self.budget.can_call("perplexity"):
+            log("warn", "Perplexity budget exceeded, returning default")
+            return {
+                "direction": "neutral",
+                "score": 0.0,
+                "tailwinds": "",
+                "headwinds": "",
+                "error": "budget_exceeded",
+                "ticker": ticker,
+                "earnings_date": earnings_date,
+            }
+
         log("info", "Fetching sentiment", ticker=ticker, date=earnings_date)
 
         prompt = f"""For {ticker} earnings on {earnings_date}, respond ONLY in this format:
@@ -113,5 +138,8 @@ Risks: [1 bullet, max 10 words]"""
         result = parse_sentiment_response(content)
         result["ticker"] = ticker
         result["earnings_date"] = earnings_date
+
+        # Record the call after success
+        self.budget.record_call("perplexity", cost=0.005)  # ~$0.005 per call
 
         return result
