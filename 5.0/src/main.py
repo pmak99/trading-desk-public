@@ -3,14 +3,39 @@ IV Crush 5.0 - Autopilot
 FastAPI application entry point.
 """
 
+import re
 import uuid
+from datetime import timedelta
+from typing import Optional, List, Dict, Any
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 
-from src.core.config import now_et, settings
+from src.core.config import now_et, today_et, settings
 from src.core.logging import log, set_request_id
 from src.core.job_manager import JobManager
+from src.core.budget import BudgetTracker
 from src.jobs import JobRunner
+from src.domain import (
+    calculate_vrp,
+    classify_liquidity_tier,
+    calculate_score,
+    apply_sentiment_modifier,
+    generate_strategies,
+    calculate_position_size,
+    calculate_implied_move_from_chain,
+    HistoricalMovesRepository,
+    SentimentCacheRepository,
+)
+from src.integrations import (
+    TradierClient,
+    AlphaVantageClient,
+    PerplexityClient,
+    TelegramSender,
+    YahooFinanceClient,
+)
+from src.formatters.telegram import format_ticker_line, format_digest, format_alert
+from src.formatters.cli import format_digest_cli, format_analyze_cli
 
 app = FastAPI(
     title="IV Crush 5.0",
@@ -21,10 +46,17 @@ app = FastAPI(
 # Lazy initialization to avoid issues during test collection
 _job_manager = None
 _job_runner = None
+_budget_tracker = None
+_tradier = None
+_alphavantage = None
+_perplexity = None
+_telegram = None
+_yahoo = None
+_historical_repo = None
+_sentiment_cache = None
 
 
 def get_job_manager() -> JobManager:
-    """Get or create the job manager instance."""
     global _job_manager
     if _job_manager is None:
         _job_manager = JobManager(db_path=settings.DB_PATH)
@@ -32,11 +64,72 @@ def get_job_manager() -> JobManager:
 
 
 def get_job_runner() -> JobRunner:
-    """Get or create the job runner instance."""
     global _job_runner
     if _job_runner is None:
         _job_runner = JobRunner()
     return _job_runner
+
+
+def get_budget_tracker() -> BudgetTracker:
+    global _budget_tracker
+    if _budget_tracker is None:
+        _budget_tracker = BudgetTracker(db_path=settings.DB_PATH)
+    return _budget_tracker
+
+
+def get_tradier() -> TradierClient:
+    global _tradier
+    if _tradier is None:
+        _tradier = TradierClient(settings.TRADIER_API_KEY)
+    return _tradier
+
+
+def get_alphavantage() -> AlphaVantageClient:
+    global _alphavantage
+    if _alphavantage is None:
+        _alphavantage = AlphaVantageClient(settings.ALPHA_VANTAGE_KEY)
+    return _alphavantage
+
+
+def get_perplexity() -> PerplexityClient:
+    global _perplexity
+    if _perplexity is None:
+        _perplexity = PerplexityClient(
+            api_key=settings.PERPLEXITY_API_KEY,
+            db_path=settings.DB_PATH,
+        )
+    return _perplexity
+
+
+def get_telegram() -> TelegramSender:
+    global _telegram
+    if _telegram is None:
+        _telegram = TelegramSender(
+            bot_token=settings.TELEGRAM_BOT_TOKEN,
+            chat_id=settings.TELEGRAM_CHAT_ID,
+        )
+    return _telegram
+
+
+def get_yahoo() -> YahooFinanceClient:
+    global _yahoo
+    if _yahoo is None:
+        _yahoo = YahooFinanceClient()
+    return _yahoo
+
+
+def get_historical_repo() -> HistoricalMovesRepository:
+    global _historical_repo
+    if _historical_repo is None:
+        _historical_repo = HistoricalMovesRepository(settings.DB_PATH)
+    return _historical_repo
+
+
+def get_sentiment_cache() -> SentimentCacheRepository:
+    global _sentiment_cache
+    if _sentiment_cache is None:
+        _sentiment_cache = SentimentCacheRepository(settings.DB_PATH)
+    return _sentiment_cache
 
 
 @app.middleware("http")
@@ -94,53 +187,442 @@ async def dispatch():
 
 @app.get("/api/health")
 async def health(format: str = "json"):
-    """System health check."""
+    """System health check with budget info."""
+    budget = get_budget_tracker()
+    summary = budget.get_summary("perplexity")
+
     data = {
         "status": "healthy",
         "timestamp_et": now_et().isoformat(),
         "budget": {
-            "calls_today": 0,  # TODO: Get from DB
-            "remaining": settings.PERPLEXITY_MONTHLY_BUDGET,
-        }
+            "calls_today": summary["today_calls"],
+            "daily_limit": summary["daily_limit"],
+            "month_cost": summary["month_cost"],
+            "budget_remaining": summary["budget_remaining"],
+            "can_call": summary["can_call"],
+        },
+        "jobs": get_job_manager().get_day_summary(),
     }
     return data
 
 
 @app.get("/api/analyze")
 async def analyze(ticker: str, date: str = None, format: str = "json"):
-    """Deep analysis of single ticker."""
+    """
+    Deep analysis of single ticker.
+
+    Returns VRP, liquidity, sentiment, and strategy recommendations.
+    """
+    # Validate ticker
     ticker = ticker.upper().strip()
-    if not ticker.isalnum():
+    if not ticker.isalnum() or len(ticker) > 5:
         raise HTTPException(400, "Invalid ticker")
 
-    log("info", "Analyze request", ticker=ticker)
+    log("info", "Analyze request", ticker=ticker, date=date)
 
-    # TODO: Implement full analysis
-    return {
-        "ticker": ticker,
-        "status": "not_implemented",
-    }
+    try:
+        # Get historical data
+        repo = get_historical_repo()
+        historical_avg = repo.get_average_move(ticker)
+        historical_count = repo.get_move_count(ticker)
+
+        if historical_avg is None or historical_count < 4:
+            return {
+                "ticker": ticker,
+                "status": "insufficient_data",
+                "message": f"Need at least 4 historical moves, found {historical_count or 0}",
+            }
+
+        # Get current price
+        yahoo = get_yahoo()
+        price = await yahoo.get_current_price(ticker)
+        if not price:
+            return {
+                "ticker": ticker,
+                "status": "error",
+                "message": "Could not get current price",
+            }
+
+        # Get options chain for implied move
+        tradier = get_tradier()
+        expirations = await tradier.get_expirations(ticker)
+
+        # Find nearest expiration
+        target_date = date or today_et()
+        nearest_exp = None
+        for exp in expirations:
+            if exp >= target_date:
+                nearest_exp = exp
+                break
+
+        implied_move_data = None
+        liquidity_tier = "REJECT"
+        if nearest_exp:
+            chain = await tradier.get_options_chain(ticker, nearest_exp)
+            if chain:
+                implied_move_data = calculate_implied_move_from_chain(chain, price)
+
+                # Calculate liquidity from chain
+                total_oi = sum(opt.get("open_interest", 0) for opt in chain)
+                avg_spread = 0
+                spread_count = 0
+                for opt in chain:
+                    bid = opt.get("bid", 0)
+                    ask = opt.get("ask", 0)
+                    if bid > 0 and ask > 0:
+                        spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
+                        avg_spread += spread_pct
+                        spread_count += 1
+
+                if spread_count > 0:
+                    avg_spread /= spread_count
+
+                liquidity_tier = classify_liquidity_tier(
+                    open_interest=total_oi,
+                    position_size=10,
+                    bid_ask_spread_pct=avg_spread,
+                )
+
+        # Calculate VRP
+        implied_move_pct = implied_move_data["implied_move_pct"] if implied_move_data else historical_avg * 1.5
+        vrp_data = calculate_vrp(
+            implied_move_pct=implied_move_pct,
+            historical_mean=historical_avg,
+            historical_count=historical_count,
+        )
+
+        # Calculate score
+        score_data = calculate_score(
+            vrp_ratio=vrp_data["vrp_ratio"],
+            vrp_tier=vrp_data["tier"],
+            implied_move_pct=implied_move_pct,
+            liquidity_tier=liquidity_tier,
+        )
+
+        # Get sentiment if budget allows
+        sentiment_data = None
+        budget = get_budget_tracker()
+        cache = get_sentiment_cache()
+
+        # Check cache first
+        cached = cache.get(ticker, target_date)
+        if cached:
+            sentiment_data = cached
+        elif budget.can_call("perplexity"):
+            perplexity = get_perplexity()
+            sentiment_data = await perplexity.get_sentiment(ticker, target_date)
+
+        # Apply sentiment modifier
+        direction = "NEUTRAL"
+        final_score = score_data["total_score"]
+        if sentiment_data:
+            direction = sentiment_data.get("direction", "neutral").upper()
+            sentiment_score = sentiment_data.get("score", 0)
+            final_score = apply_sentiment_modifier(score_data["total_score"], sentiment_score)
+
+        # Generate strategies
+        strategies = generate_strategies(
+            ticker=ticker,
+            price=price,
+            implied_move_pct=implied_move_pct,
+            direction=direction,
+            liquidity_tier=liquidity_tier,
+            expiration=nearest_exp or "",
+        )
+
+        # Calculate position size for top strategy
+        position_size = 0
+        if strategies and liquidity_tier != "REJECT":
+            top_strategy = strategies[0]
+            position_size = calculate_position_size(
+                account_value=100000,  # Default account size
+                max_risk_per_contract=top_strategy.max_risk,
+                win_rate=0.574,  # Historical win rate
+                risk_reward=top_strategy.risk_reward,
+            )
+
+        result = {
+            "ticker": ticker,
+            "status": "success",
+            "price": price,
+            "earnings_date": target_date,
+            "expiration": nearest_exp,
+            "vrp": {
+                "ratio": vrp_data["vrp_ratio"],
+                "tier": vrp_data["tier"],
+                "implied_move_pct": implied_move_pct,
+                "historical_mean": historical_avg,
+                "historical_count": historical_count,
+            },
+            "liquidity_tier": liquidity_tier,
+            "score": {
+                "base": score_data["total_score"],
+                "final": final_score,
+                "components": score_data["components"],
+            },
+            "sentiment": sentiment_data,
+            "direction": direction,
+            "strategies": [
+                {
+                    "name": s.name,
+                    "description": s.description,
+                    "max_profit": s.max_profit,
+                    "max_risk": s.max_risk,
+                    "pop": s.pop,
+                    "breakeven": s.breakeven,
+                }
+                for s in strategies
+            ],
+            "position_size": position_size,
+        }
+
+        # Format for CLI if requested
+        if format == "cli":
+            return {"output": format_analyze_cli(result)}
+
+        return result
+
+    except Exception as e:
+        log("error", "Analyze failed", ticker=ticker, error=str(e))
+        raise HTTPException(500, f"Analysis failed: {str(e)}")
 
 
 @app.get("/api/whisper")
 async def whisper(date: str = None, format: str = "json"):
-    """Most anticipated earnings this week."""
-    log("info", "Whisper request")
+    """
+    Most anticipated earnings - find high-VRP opportunities.
 
-    # TODO: Implement whisper
-    return {
-        "status": "not_implemented",
-    }
+    Scans upcoming earnings and returns qualified tickers sorted by score.
+    """
+    log("info", "Whisper request", date=date)
+
+    try:
+        # Get earnings calendar
+        alphavantage = get_alphavantage()
+        earnings = await alphavantage.get_earnings_calendar()
+
+        # Filter to target dates
+        today = today_et()
+        target_dates = [today]
+        for i in range(1, 5):
+            future = (now_et() + timedelta(days=i)).strftime("%Y-%m-%d")
+            target_dates.append(future)
+
+        if date:
+            target_dates = [date]
+
+        upcoming = [e for e in earnings if e["report_date"] in target_dates]
+
+        # Analyze each ticker
+        repo = get_historical_repo()
+        yahoo = get_yahoo()
+        results = []
+
+        for e in upcoming[:30]:  # Limit to 30 tickers
+            ticker = e["symbol"]
+            earnings_date = e["report_date"]
+
+            try:
+                # Get historical data
+                historical_avg = repo.get_average_move(ticker)
+                historical_count = repo.get_move_count(ticker)
+
+                if historical_avg is None or historical_count < 4:
+                    continue
+
+                # Get current price
+                price = await yahoo.get_current_price(ticker)
+                if not price:
+                    continue
+
+                # Estimate implied move (1.5x historical as proxy without options data)
+                implied_move_pct = historical_avg * 1.5
+
+                # Calculate VRP
+                vrp_data = calculate_vrp(
+                    implied_move_pct=implied_move_pct,
+                    historical_mean=historical_avg,
+                    historical_count=historical_count,
+                )
+
+                # Skip if VRP below threshold
+                if vrp_data["vrp_ratio"] < 3.0:
+                    continue
+
+                # Calculate score (assume GOOD liquidity for screening)
+                score_data = calculate_score(
+                    vrp_ratio=vrp_data["vrp_ratio"],
+                    vrp_tier=vrp_data["tier"],
+                    implied_move_pct=implied_move_pct,
+                    liquidity_tier="GOOD",
+                )
+
+                results.append({
+                    "ticker": ticker,
+                    "name": e.get("name", ""),
+                    "earnings_date": earnings_date,
+                    "price": price,
+                    "vrp_ratio": vrp_data["vrp_ratio"],
+                    "vrp_tier": vrp_data["tier"],
+                    "implied_move_pct": round(implied_move_pct, 1),
+                    "historical_mean": round(historical_avg, 1),
+                    "score": score_data["total_score"],
+                })
+
+            except Exception as ex:
+                log("debug", "Skipping ticker", ticker=ticker, error=str(ex))
+                continue
+
+        # Sort by score descending
+        results.sort(key=lambda x: x["score"], reverse=True)
+
+        # Get budget info
+        budget = get_budget_tracker()
+        summary = budget.get_summary("perplexity")
+
+        response = {
+            "status": "success",
+            "target_dates": target_dates,
+            "qualified_count": len(results),
+            "tickers": results[:10],  # Top 10
+            "budget": {
+                "calls_today": summary["today_calls"],
+                "remaining": summary["budget_remaining"],
+            },
+        }
+
+        # Format for CLI if requested
+        if format == "cli":
+            ticker_data = [
+                {
+                    "ticker": t["ticker"],
+                    "vrp_ratio": t["vrp_ratio"],
+                    "score": t["score"],
+                    "direction": "NEUTRAL",
+                    "tailwinds": "",
+                    "headwinds": "",
+                    "strategy": f"VRP {t['vrp_tier']}",
+                }
+                for t in results[:10]
+            ]
+            cli_output = format_digest_cli(
+                target_dates[0],
+                ticker_data,
+                summary["today_calls"],
+                summary["budget_remaining"],
+            )
+            return {"output": cli_output}
+
+        return response
+
+    except Exception as e:
+        log("error", "Whisper failed", error=str(e))
+        raise HTTPException(500, f"Whisper failed: {str(e)}")
 
 
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
-    """Telegram bot webhook handler."""
+    """
+    Telegram bot webhook handler.
+
+    Supports commands:
+    - /health - System health check
+    - /whisper - Today's opportunities
+    - /analyze TICKER - Analyze specific ticker
+    """
     try:
         body = await request.json()
         log("info", "Telegram update", update_id=body.get("update_id"))
-        # TODO: Handle telegram commands
+
+        message = body.get("message", {})
+        text = message.get("text", "")
+        chat_id = message.get("chat", {}).get("id")
+
+        if not text or not chat_id:
+            return {"ok": True}
+
+        telegram = get_telegram()
+
+        # Parse command
+        if text.startswith("/health"):
+            budget = get_budget_tracker()
+            summary = budget.get_summary("perplexity")
+            response = (
+                f"🏥 <b>System Health</b>\n\n"
+                f"Status: ✅ Healthy\n"
+                f"Time: {now_et().strftime('%H:%M ET')}\n"
+                f"Budget: {summary['today_calls']}/{summary['daily_limit']} calls\n"
+                f"Remaining: ${summary['budget_remaining']:.2f}"
+            )
+            await telegram.send_message(response)
+
+        elif text.startswith("/whisper"):
+            # Get whisper data
+            result = await whisper(format="json")
+            if result.get("status") == "success" and result.get("tickers"):
+                ticker_data = [
+                    {
+                        "ticker": t["ticker"],
+                        "vrp_ratio": t["vrp_ratio"],
+                        "score": t["score"],
+                        "direction": "NEUTRAL",
+                        "tailwinds": t.get("name", "")[:20],
+                        "headwinds": "",
+                        "strategy": f"VRP {t['vrp_tier']}",
+                        "credit": 0,
+                    }
+                    for t in result["tickers"][:5]
+                ]
+                budget = result.get("budget", {})
+                digest = format_digest(
+                    result["target_dates"][0],
+                    ticker_data,
+                    budget.get("calls_today", 0),
+                    budget.get("remaining", 5.0),
+                )
+                await telegram.send_message(digest)
+            else:
+                await telegram.send_message("No high-VRP opportunities found today.")
+
+        elif text.startswith("/analyze"):
+            # Parse ticker from command
+            parts = text.split()
+            if len(parts) < 2:
+                await telegram.send_message("Usage: /analyze TICKER")
+            else:
+                ticker = parts[1].upper()
+                try:
+                    result = await analyze(ticker=ticker, format="json")
+                    if result.get("status") == "success":
+                        alert_data = {
+                            "ticker": ticker,
+                            "vrp_ratio": result["vrp"]["ratio"],
+                            "score": result["score"]["final"],
+                            "direction": result["direction"],
+                            "sentiment_score": result.get("sentiment", {}).get("score", 0),
+                            "tailwinds": "",
+                            "headwinds": "",
+                            "strategy": result["strategies"][0]["name"] if result["strategies"] else "No strategy",
+                            "credit": result["strategies"][0]["max_profit"] / 100 if result["strategies"] else 0,
+                            "max_risk": result["strategies"][0]["max_risk"] if result["strategies"] else 0,
+                            "pop": result["strategies"][0]["pop"] if result["strategies"] else 0,
+                        }
+                        await telegram.send_message(format_alert(alert_data))
+                    else:
+                        await telegram.send_message(f"Analysis failed: {result.get('message', 'Unknown error')}")
+                except Exception as e:
+                    await telegram.send_message(f"Error analyzing {ticker}: {str(e)}")
+
+        elif text.startswith("/"):
+            await telegram.send_message(
+                "Available commands:\n"
+                "/health - System status\n"
+                "/whisper - Today's opportunities\n"
+                "/analyze TICKER - Deep analysis"
+            )
+
         return {"ok": True}
+
     except Exception as e:
         log("error", "Telegram handler failed", error=str(e))
         return {"ok": True}
