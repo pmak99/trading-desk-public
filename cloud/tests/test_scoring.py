@@ -3,37 +3,41 @@ from src.domain.scoring import calculate_score, apply_sentiment_modifier
 
 def test_calculate_score_weights():
     """Score = VRP(55%) + Move(25%) + Liquidity(20%)."""
-    score = calculate_score(
+    result = calculate_score(
         vrp_ratio=4.0,       # VRP score normalized
         implied_move_pct=5.0,
         liquidity_tier="EXCELLENT"
     )
+    assert "total_score" in result
+    assert "components" in result
+    score = result["total_score"]
     assert 0 <= score <= 100
 
 def test_calculate_score_excellent_vrp():
     """EXCELLENT VRP should score high."""
-    score = calculate_score(
+    result = calculate_score(
         vrp_ratio=7.5,
         implied_move_pct=5.0,
         liquidity_tier="EXCELLENT"
     )
+    score = result["total_score"]
     assert score >= 80
 
 def test_calculate_score_reject_liquidity():
     """REJECT liquidity should score lower than EXCELLENT liquidity."""
-    reject_score = calculate_score(
+    reject_result = calculate_score(
         vrp_ratio=7.5,
         implied_move_pct=5.0,
         liquidity_tier="REJECT"
     )
-    excellent_score = calculate_score(
+    excellent_result = calculate_score(
         vrp_ratio=7.5,
         implied_move_pct=5.0,
         liquidity_tier="EXCELLENT"
     )
     # REJECT scores lower due to 20 vs 100 liquidity component
-    assert reject_score < excellent_score
-    assert reject_score < 90  # Penalized from perfect score
+    assert reject_result["total_score"] < excellent_result["total_score"]
+    assert reject_result["total_score"] < 90  # Penalized from perfect score
 
 def test_apply_sentiment_modifier_bullish():
     """Strong bullish adds +12%."""
