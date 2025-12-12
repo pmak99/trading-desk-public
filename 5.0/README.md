@@ -313,10 +313,10 @@ See **[DEPLOYMENT.md](DEPLOYMENT.md)** for complete instructions including:
 ```bash
 # Build and deploy to Cloud Run
 gcloud builds submit --tag gcr.io/trading-desk-prod/trading-desk
-gcloud run deploy trading-desk --image gcr.io/trading-desk-prod/trading-desk --region us-central1
+gcloud run deploy trading-desk --image gcr.io/trading-desk-prod/trading-desk --region us-east1
 ```
 
-**Live Service:** https://trading-desk-670614791512.us-central1.run.app
+**Live Service:** https://trading-desk-670614791512.us-east1.run.app
 
 ## Budget Management
 

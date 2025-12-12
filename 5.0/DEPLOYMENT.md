@@ -6,9 +6,9 @@ Complete walkthrough for deploying the autopilot system to GCP with Telegram not
 
 | Component | Value |
 |-----------|-------|
-| **Service URL** | https://trading-desk-670614791512.us-central1.run.app |
+| **Service URL** | https://trading-desk-670614791512.us-east1.run.app |
 | **GCP Project** | `trading-desk-prod` |
-| **Region** | `us-central1` |
+| **Region** | `us-east1` |
 | **Telegram Bot** | `@trading_desk_mak_bot` |
 | **Scheduler** | `trading-desk-morning` (7 AM ET weekdays) |
 
