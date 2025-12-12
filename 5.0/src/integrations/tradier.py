@@ -7,13 +7,6 @@ Replaces MCP tradier integration with direct REST calls.
 import asyncio
 import httpx
 from typing import Dict, List, Any, Optional
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-    RetryError,
-)
 
 from src.core.logging import log
 
@@ -45,31 +38,57 @@ class TradierClient:
             log("warn", "Tradier rate limit hit", retry_after=retry_after)
             raise TradierRateLimitError(retry_after)
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
-        retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.TimeoutException)),
-    )
     async def _request(
         self,
         endpoint: str,
         params: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """Make authenticated request to Tradier API with rate limit handling."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            url = f"{BASE_URL}/{endpoint}"
-            response = await client.get(url, headers=self.headers, params=params)
+        """Make authenticated request to Tradier API with retry handling."""
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    url = f"{BASE_URL}/{endpoint}"
+                    response = await client.get(url, headers=self.headers, params=params)
 
-            # Handle rate limit specially
-            if response.status_code == 429:
-                retry_after = int(response.headers.get("Retry-After", "60"))
-                log("warn", "Tradier rate limit, waiting", seconds=retry_after)
-                await asyncio.sleep(min(retry_after, 120))  # Cap at 2 min
-                # Retry the request
-                response = await client.get(url, headers=self.headers, params=params)
+                    # Handle rate limit specially
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("Retry-After", "60"))
+                        log("warn", "Tradier rate limit, waiting", seconds=retry_after)
+                        await asyncio.sleep(min(retry_after, 120))
+                        continue
 
-            response.raise_for_status()
-            return response.json()
+                    if response.status_code != 200:
+                        log("warn", "Tradier API error",
+                            endpoint=endpoint,
+                            status=response.status_code,
+                            response=response.text[:200] if response.text else "empty")
+                        if attempt < 2:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                        return {}
+
+                    # Handle empty responses gracefully
+                    if not response.content:
+                        log("warn", "Tradier returned empty response", endpoint=endpoint)
+                        return {}
+
+                    try:
+                        return response.json()
+                    except ValueError:
+                        log("error", "Tradier returned invalid JSON",
+                            endpoint=endpoint,
+                            status=response.status_code,
+                            content=response.text[:200] if response.text else "empty")
+                        return {}
+
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                log("warn", "Tradier request failed", endpoint=endpoint, error=str(e), attempt=attempt+1)
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return {}
+
+        return {}
 
     async def get_quote(self, symbol: str) -> Dict[str, Any]:
         """Get stock quote."""

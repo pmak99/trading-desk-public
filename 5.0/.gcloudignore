@@ -1,0 +1,12 @@
+# Cloud Build ignore file
+# Note: .db files are NOT ignored here (needed for historical_moves)
+
+__pycache__/
+*.pyc
+.env
+venv/
+.pytest_cache/
+.coverage
+.git/
+*.md
+tests/

@@ -2,17 +2,22 @@
 Yahoo Finance client for stock data.
 
 Free fallback for prices and historical data.
-Uses yfinance library.
+Uses yfinance library with retry handling for rate limits.
 """
 
 import asyncio
 import atexit
+import time
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 
 import yfinance as yf
 
 from src.core.logging import log
+
+# Rate limit protection
+_last_request_time = 0
+MIN_REQUEST_INTERVAL = 1.0  # 1 second between requests
 
 
 class YahooFinanceClient:
@@ -30,14 +35,41 @@ class YahooFinanceClient:
             self._executor = None
 
     async def _run_sync(self, func, *args, **kwargs):
-        """Run sync yfinance function in thread pool."""
+        """Run sync yfinance function in thread pool with rate limiting and retry."""
         if not self._executor:
             raise RuntimeError("YahooFinanceClient has been closed")
+
+        global _last_request_time
+
+        # Rate limit protection
+        now = time.time()
+        wait_time = MIN_REQUEST_INTERVAL - (now - _last_request_time)
+        if wait_time > 0:
+            await asyncio.sleep(wait_time)
+        _last_request_time = time.time()
+
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            self._executor,
-            lambda: func(*args, **kwargs)
-        )
+
+        # Retry logic for rate limits
+        for attempt in range(3):
+            try:
+                return await loop.run_in_executor(
+                    self._executor,
+                    lambda: func(*args, **kwargs)
+                )
+            except Exception as e:
+                error_str = str(e)
+                if "429" in error_str or "Too Many Requests" in error_str:
+                    wait = (attempt + 1) * 5  # 5, 10, 15 seconds
+                    log("warn", f"Yahoo rate limited, waiting {wait}s", attempt=attempt+1)
+                    await asyncio.sleep(wait)
+                    _last_request_time = time.time()
+                    continue
+                raise
+
+        # Final attempt failed
+        log("error", "Yahoo rate limit exceeded after retries")
+        return None
 
     async def get_stock_history(
         self,

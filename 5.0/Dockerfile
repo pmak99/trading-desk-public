@@ -19,8 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 
-# Create data directory for SQLite
-RUN mkdir -p /app/data
+# Copy data directory with historical moves database
+COPY data/ ./data/
 
 # Set Python path
 ENV PYTHONPATH=/app
