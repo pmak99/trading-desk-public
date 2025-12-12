@@ -3,6 +3,7 @@
 from .vrp import calculate_vrp, get_vrp_tier
 from .liquidity import classify_liquidity_tier
 from .scoring import calculate_score, apply_sentiment_modifier
+from .repositories import HistoricalMovesRepository, SentimentCacheRepository
 
 __all__ = [
     "calculate_vrp",
@@ -10,4 +11,6 @@ __all__ = [
     "classify_liquidity_tier",
     "calculate_score",
     "apply_sentiment_modifier",
+    "HistoricalMovesRepository",
+    "SentimentCacheRepository",
 ]
