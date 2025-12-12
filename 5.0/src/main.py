@@ -8,8 +8,10 @@ import uuid
 from datetime import timedelta
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends, Header
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
+import hmac
 
 from src.core.config import now_et, today_et, settings
 from src.core.logging import log, set_request_id
@@ -132,6 +134,35 @@ def get_sentiment_cache() -> SentimentCacheRepository:
     return _sentiment_cache
 
 
+# API Key security
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(api_key: str = Depends(api_key_header)):
+    """Verify API key for protected endpoints."""
+    expected_key = settings.api_key
+    if not expected_key:
+        # No API key configured - allow access (for development)
+        return True
+    if not api_key:
+        raise HTTPException(status_code=401, detail="Missing API key")
+    if not hmac.compare_digest(api_key, expected_key):
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    return True
+
+
+def verify_telegram_secret(request: Request) -> bool:
+    """Verify Telegram webhook secret token."""
+    expected_secret = settings.telegram_webhook_secret
+    if not expected_secret:
+        # No secret configured - allow access (for development)
+        return True
+    received_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not hmac.compare_digest(received_secret, expected_secret):
+        return False
+    return True
+
+
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     """Add request ID to all requests."""
@@ -154,7 +185,7 @@ async def root():
 
 
 @app.post("/dispatch")
-async def dispatch():
+async def dispatch(_: bool = Depends(verify_api_key)):
     """
     Dispatcher endpoint called by Cloud Scheduler every 15 min.
     Routes to correct job based on current time.
@@ -196,7 +227,7 @@ async def dispatch():
 
 
 @app.get("/api/health")
-async def health(format: str = "json"):
+async def health(format: str = "json", _: bool = Depends(verify_api_key)):
     """System health check with budget info."""
     budget = get_budget_tracker()
     summary = budget.get_summary("perplexity")
@@ -217,7 +248,7 @@ async def health(format: str = "json"):
 
 
 @app.get("/api/analyze")
-async def analyze(ticker: str, date: str = None, format: str = "json"):
+async def analyze(ticker: str, date: str = None, format: str = "json", _: bool = Depends(verify_api_key)):
     """
     Deep analysis of single ticker.
 
@@ -402,7 +433,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json"):
 
 
 @app.get("/api/whisper")
-async def whisper(date: str = None, format: str = "json"):
+async def whisper(date: str = None, format: str = "json", _: bool = Depends(verify_api_key)):
     """
     Most anticipated earnings - find high-VRP opportunities.
 
@@ -550,6 +581,11 @@ async def telegram_webhook(request: Request):
     - /whisper - Today's opportunities
     - /analyze TICKER - Analyze specific ticker
     """
+    # Verify Telegram secret token
+    if not verify_telegram_secret(request):
+        log("warn", "Invalid Telegram webhook secret")
+        raise HTTPException(status_code=403, detail="Invalid webhook secret")
+
     try:
         body = await request.json()
         log("info", "Telegram update", update_id=body.get("update_id"))
