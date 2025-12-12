@@ -131,7 +131,8 @@ class HistoricalMovesRepository:
             cursor = conn.execute(
                 """
                 SELECT ticker, earnings_date, gap_move_pct, intraday_move_pct,
-                       close_before, close_after, direction
+                       prev_close, earnings_close,
+                       CASE WHEN gap_move_pct >= 0 THEN 'UP' ELSE 'DOWN' END as direction
                 FROM historical_moves
                 WHERE ticker = ?
                 ORDER BY earnings_date DESC
@@ -140,7 +141,14 @@ class HistoricalMovesRepository:
                 (ticker, limit)
             )
             rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            # Map column names for compatibility
+            results = []
+            for row in rows:
+                d = dict(row)
+                d['close_before'] = d.pop('prev_close', None)
+                d['close_after'] = d.pop('earnings_close', None)
+                results.append(d)
+            return results
 
     def get_average_move(self, ticker: str) -> Optional[float]:
         """
@@ -190,21 +198,29 @@ class HistoricalMovesRepository:
 
         with self._pool.get_connection() as conn:
             try:
+                # Map to actual database schema columns
+                prev_close = move.get("prev_close") or move.get("close_before")
+                earnings_close = move.get("earnings_close") or move.get("close_after")
+
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO historical_moves
                     (ticker, earnings_date, gap_move_pct, intraday_move_pct,
-                     close_before, close_after, direction)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                     prev_close, earnings_open, earnings_high, earnings_low,
+                     earnings_close, close_move_pct)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         ticker,
                         earnings_date,
                         move.get("gap_move_pct"),
                         move.get("intraday_move_pct"),
-                        move.get("close_before"),
-                        move.get("close_after"),
-                        move.get("direction"),
+                        prev_close,
+                        move.get("earnings_open"),
+                        move.get("earnings_high"),
+                        move.get("earnings_low"),
+                        earnings_close,
+                        move.get("close_move_pct"),
                     )
                 )
                 conn.commit()

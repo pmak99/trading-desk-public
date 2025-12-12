@@ -4,11 +4,11 @@ Perplexity API client for AI sentiment analysis.
 Replaces MCP perplexity integration with direct REST calls.
 """
 
+import asyncio
 import os
 import re
 import httpx
 from typing import Dict, Any, Optional
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.logging import log
 from src.core.budget import BudgetTracker
@@ -77,26 +77,42 @@ class PerplexityClient:
         self.model = model or os.environ.get("PERPLEXITY_MODEL", self.DEFAULT_MODEL)
         self.budget = budget_tracker or BudgetTracker(db_path=db_path)
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10)
-    )
     async def _request(self, messages: list) -> Dict[str, Any]:
-        """Make request to Perplexity API."""
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                f"{BASE_URL}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "messages": messages,
-                }
-            )
-            response.raise_for_status()
-            return response.json()
+        """Make request to Perplexity API with retry handling."""
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=60) as client:
+                    response = await client.post(
+                        f"{BASE_URL}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self.model,
+                            "messages": messages,
+                        }
+                    )
+
+                    if response.status_code != 200:
+                        log("warn", "Perplexity API error",
+                            status=response.status_code,
+                            response=response.text[:200] if response.text else "empty")
+                        if attempt < 2:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                        return {"error": f"API error: {response.status_code}"}
+
+                    return response.json()
+
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                log("warn", "Perplexity request failed", error=str(e), attempt=attempt+1)
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return {"error": str(e)}
+
+        return {"error": "All retries failed"}
 
     def _estimate_cost(self, data: Dict[str, Any]) -> float:
         """
@@ -163,6 +179,20 @@ Risks: [1 bullet, max 10 words]"""
         messages = [{"role": "user", "content": prompt}]
 
         data = await self._request(messages)
+
+        # Handle error response
+        if "error" in data:
+            log("warn", "Sentiment fetch failed", ticker=ticker, error=data["error"])
+            return {
+                "direction": "neutral",
+                "score": 0.0,
+                "tailwinds": "",
+                "headwinds": "",
+                "error": data["error"],
+                "ticker": ticker,
+                "earnings_date": earnings_date,
+            }
+
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
         result = parse_sentiment_response(content)
