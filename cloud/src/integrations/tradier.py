@@ -4,17 +4,31 @@ Tradier API client for options data.
 Replaces MCP tradier integration with direct REST calls.
 """
 
+import asyncio
 import httpx
 from typing import Dict, List, Any, Optional
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    RetryError,
+)
 
 from src.core.logging import log
 
 BASE_URL = "https://api.tradier.com/v1"
 
 
+class TradierRateLimitError(Exception):
+    """Raised when Tradier returns 429 rate limit."""
+    def __init__(self, retry_after: int = 60):
+        self.retry_after = retry_after
+        super().__init__(f"Rate limited, retry after {retry_after}s")
+
+
 class TradierClient:
-    """Async Tradier API client."""
+    """Async Tradier API client with rate limit handling."""
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -23,19 +37,37 @@ class TradierClient:
             "Accept": "application/json",
         }
 
+    async def _handle_rate_limit(self, response: httpx.Response) -> None:
+        """Handle 429 rate limit response with retry-after."""
+        if response.status_code == 429:
+            # Parse Retry-After header (seconds to wait)
+            retry_after = int(response.headers.get("Retry-After", "60"))
+            log("warn", "Tradier rate limit hit", retry_after=retry_after)
+            raise TradierRateLimitError(retry_after)
+
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10)
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.TimeoutException)),
     )
     async def _request(
         self,
         endpoint: str,
         params: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """Make authenticated request to Tradier API."""
+        """Make authenticated request to Tradier API with rate limit handling."""
         async with httpx.AsyncClient(timeout=30) as client:
             url = f"{BASE_URL}/{endpoint}"
             response = await client.get(url, headers=self.headers, params=params)
+
+            # Handle rate limit specially
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", "60"))
+                log("warn", "Tradier rate limit, waiting", seconds=retry_after)
+                await asyncio.sleep(min(retry_after, 120))  # Cap at 2 min
+                # Retry the request
+                response = await client.get(url, headers=self.headers, params=params)
+
             response.raise_for_status()
             return response.json()
 

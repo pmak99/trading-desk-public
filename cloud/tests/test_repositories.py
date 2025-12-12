@@ -40,7 +40,7 @@ def db_path():
 def test_historical_moves_empty(db_path):
     """get_moves returns empty list for unknown ticker."""
     repo = HistoricalMovesRepository(db_path=db_path)
-    moves = repo.get_moves("UNKNOWN")
+    moves = repo.get_moves("UNKN")  # Valid 4-letter ticker
     assert moves == []
 
 
@@ -104,7 +104,7 @@ def test_historical_moves_count(db_path):
 def test_sentiment_cache_empty(db_path):
     """get_sentiment returns None for uncached ticker."""
     repo = SentimentCacheRepository(db_path=db_path)
-    result = repo.get_sentiment("UNKNOWN", "2025-01-15")
+    result = repo.get_sentiment("UNKN", "2025-01-15")  # Valid 4-letter ticker
     assert result is None
 
 
