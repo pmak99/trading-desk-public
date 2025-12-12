@@ -17,7 +17,15 @@ app = FastAPI(
     version="5.0.0"
 )
 
-job_manager = JobManager()
+# Lazy initialization to avoid issues during test collection
+_job_manager = None
+
+def get_job_manager() -> JobManager:
+    """Get or create the job manager instance."""
+    global _job_manager
+    if _job_manager is None:
+        _job_manager = JobManager(db_path=settings.DB_PATH)
+    return _job_manager
 
 
 @app.middleware("http")
@@ -47,14 +55,15 @@ async def dispatch():
     Dispatcher endpoint called by Cloud Scheduler every 15 min.
     Routes to correct job based on current time.
     """
-    job = job_manager.get_current_job()
+    manager = get_job_manager()
+    job = manager.get_current_job()
 
     if not job:
         log("info", "No job scheduled for current time")
         return {"status": "no_job", "message": "No job scheduled"}
 
     # Check dependencies
-    can_run, reason = job_manager.check_dependencies(job)
+    can_run, reason = manager.check_dependencies(job)
     if not can_run:
         log("warn", "Job dependencies not met", job=job, reason=reason)
         return {"status": "skipped", "job": job, "reason": reason}
@@ -63,7 +72,7 @@ async def dispatch():
 
     # TODO: Actually run the job
     # For now, just record success
-    job_manager.record_status(job, "success")
+    manager.record_status(job, "success")
 
     return {"status": "success", "job": job}
 

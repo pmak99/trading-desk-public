@@ -31,7 +31,8 @@ class BudgetTracker:
                     service TEXT NOT NULL,
                     calls INTEGER DEFAULT 0,
                     cost REAL DEFAULT 0.0,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(date, service)
                 )
             """)
             conn.execute("""
@@ -47,7 +48,7 @@ class BudgetTracker:
         service: str,
         cost: float = 0.0,
         date_str: Optional[str] = None
-    ):
+    ) -> bool:
         """
         Record an API call.
 
@@ -55,6 +56,9 @@ class BudgetTracker:
             service: Service name (e.g., "perplexity")
             cost: Cost of the call in dollars
             date_str: Date to record for (default: today)
+
+        Returns:
+            True if recorded successfully
         """
         if date_str is None:
             date_str = today_et()
@@ -63,29 +67,93 @@ class BudgetTracker:
 
         conn = sqlite3.connect(self.db_path)
         try:
-            # Check if row exists for today
-            cursor = conn.execute(
-                "SELECT id, calls, cost FROM api_budget WHERE date = ? AND service = ?",
-                (date_str, service)
-            )
-            row = cursor.fetchone()
-
-            if row:
-                # Update existing
-                conn.execute("""
-                    UPDATE api_budget
-                    SET calls = calls + 1, cost = cost + ?, updated_at = ?
-                    WHERE id = ?
-                """, (cost, timestamp, row[0]))
-            else:
-                # Insert new
-                conn.execute("""
-                    INSERT INTO api_budget (date, service, calls, cost, updated_at)
-                    VALUES (?, ?, 1, ?, ?)
-                """, (date_str, service, cost, timestamp))
+            # Use UPSERT for atomic insert-or-update
+            conn.execute("""
+                INSERT INTO api_budget (date, service, calls, cost, updated_at)
+                VALUES (?, ?, 1, ?, ?)
+                ON CONFLICT(date, service) DO UPDATE SET
+                    calls = calls + 1,
+                    cost = cost + excluded.cost,
+                    updated_at = excluded.updated_at
+            """, (date_str, service, cost, timestamp))
 
             conn.commit()
             log("debug", "API call recorded", service=service, cost=cost)
+            return True
+        except sqlite3.Error as e:
+            log("error", "Failed to record API call", error=str(e))
+            return False
+        finally:
+            conn.close()
+
+    def try_acquire_call(
+        self,
+        service: str = "perplexity",
+        cost: float = 0.005
+    ) -> bool:
+        """
+        Atomic check-and-increment: check limits and record call in one transaction.
+
+        This prevents race conditions where multiple requests check limits
+        simultaneously and all proceed.
+
+        Args:
+            service: Service name
+            cost: Estimated cost of the call
+
+        Returns:
+            True if call was acquired (within limits), False if limits exceeded
+        """
+        date_str = today_et()
+        month_prefix = date_str[:7]  # YYYY-MM
+        timestamp = now_et().isoformat()
+
+        conn = sqlite3.connect(self.db_path, isolation_level="EXCLUSIVE")
+        try:
+            # Get current stats in same transaction
+            cursor = conn.execute(
+                "SELECT calls, cost FROM api_budget WHERE date = ? AND service = ?",
+                (date_str, service)
+            )
+            row = cursor.fetchone()
+            daily_calls = row[0] if row else 0
+
+            # Check daily limit BEFORE incrementing
+            if daily_calls >= settings.PERPLEXITY_DAILY_LIMIT:
+                log("warn", "Daily API limit reached", service=service, calls=daily_calls)
+                return False
+
+            # Get monthly cost
+            cursor = conn.execute(
+                "SELECT SUM(cost) FROM api_budget WHERE date LIKE ? AND service = ?",
+                (f"{month_prefix}%", service)
+            )
+            row = cursor.fetchone()
+            monthly_cost = row[0] if row and row[0] else 0.0
+
+            # Check monthly budget BEFORE incrementing
+            if monthly_cost >= settings.PERPLEXITY_MONTHLY_BUDGET:
+                log("warn", "Monthly API budget exceeded", service=service, cost=monthly_cost)
+                return False
+
+            # All checks passed - atomically increment
+            conn.execute("""
+                INSERT INTO api_budget (date, service, calls, cost, updated_at)
+                VALUES (?, ?, 1, ?, ?)
+                ON CONFLICT(date, service) DO UPDATE SET
+                    calls = calls + 1,
+                    cost = cost + excluded.cost,
+                    updated_at = excluded.updated_at
+            """, (date_str, service, cost, timestamp))
+
+            conn.commit()
+            log("debug", "API call acquired", service=service, daily_calls=daily_calls + 1)
+            return True
+
+        except sqlite3.Error as e:
+            log("error", "Failed to acquire API call", error=str(e))
+            conn.rollback()
+            return False
         finally:
             conn.close()
 

@@ -5,6 +5,7 @@ Single dispatcher pattern: Cloud Scheduler calls /dispatch every 15 min,
 and this module routes to the correct job based on current time.
 """
 
+import sqlite3
 from typing import Optional, List, Dict
 
 from .config import now_et, today_et
@@ -73,14 +74,50 @@ def get_scheduled_job(
 
 
 class JobManager:
-    """Manages job dispatch and dependency checking."""
+    """Manages job dispatch and dependency checking with persistent storage."""
 
-    def __init__(self):
-        self._job_status: Dict[str, Dict[str, str]] = {}  # {date: {job: status}}
+    def __init__(self, db_path: str = "data/ivcrush.db"):
+        self.db_path = db_path
+        self._init_db()
+
+    def _init_db(self):
+        """Initialize job_status table."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS job_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,
+                    job_name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(date, job_name)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_job_status_date
+                ON job_status(date)
+            """)
+            conn.commit()
+        finally:
+            conn.close()
 
     def get_dependencies(self, job_name: str) -> List[str]:
         """Get list of jobs that must succeed before this job."""
         return JOB_DEPENDENCIES.get(job_name, [])
+
+    def _get_status(self, date: str, job_name: str) -> str:
+        """Get job status from database."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.execute(
+                "SELECT status FROM job_status WHERE date = ? AND job_name = ?",
+                (date, job_name)
+            )
+            row = cursor.fetchone()
+            return row[0] if row else "not_run"
+        finally:
+            conn.close()
 
     def check_dependencies(self, job_name: str) -> tuple[bool, str]:
         """
@@ -94,22 +131,49 @@ class JobManager:
             return True, ""
 
         today = today_et()
-        day_status = self._job_status.get(today, {})
 
         for dep in deps:
-            status = day_status.get(dep, "not_run")
+            status = self._get_status(today, dep)
             if status != "success":
                 return False, f"Dependency '{dep}' status: {status}"
 
         return True, ""
 
     def record_status(self, job_name: str, status: str):
-        """Record job completion status."""
+        """Record job completion status to persistent storage."""
         today = today_et()
-        if today not in self._job_status:
-            self._job_status[today] = {}
-        self._job_status[today][job_name] = status
-        log("info", "Job status recorded", job=job_name, status=status)
+        timestamp = now_et().isoformat()
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("""
+                INSERT INTO job_status (date, job_name, status, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(date, job_name) DO UPDATE SET
+                    status = excluded.status,
+                    updated_at = excluded.updated_at
+            """, (today, job_name, status, timestamp))
+            conn.commit()
+            log("info", "Job status recorded", job=job_name, status=status)
+        except sqlite3.Error as e:
+            log("error", "Failed to record job status", error=str(e), job=job_name)
+        finally:
+            conn.close()
+
+    def get_day_summary(self, date: Optional[str] = None) -> Dict[str, str]:
+        """Get all job statuses for a given day."""
+        if date is None:
+            date = today_et()
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cursor = conn.execute(
+                "SELECT job_name, status FROM job_status WHERE date = ?",
+                (date,)
+            )
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        finally:
+            conn.close()
 
     def get_current_job(self) -> Optional[str]:
         """

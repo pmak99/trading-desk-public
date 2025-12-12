@@ -102,5 +102,21 @@ class Settings:
     def gcs_bucket(self) -> str:
         return os.environ.get('GCS_BUCKET', 'ivcrush-data')
 
+    @property
+    def DB_PATH(self) -> str:
+        """Database path - uses temp file in tests, data dir in production."""
+        env_path = os.environ.get('DB_PATH')
+        if env_path:
+            return env_path
+
+        # Default to data/ivcrush.db, but ensure directory exists
+        default_path = 'data/ivcrush.db'
+        data_dir = os.path.dirname(default_path)
+        if data_dir and not os.path.exists(data_dir):
+            import tempfile
+            # Return temp path for test environments
+            return os.path.join(tempfile.gettempdir(), 'ivcrush_test.db')
+        return default_path
+
 
 settings = Settings()
