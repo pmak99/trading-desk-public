@@ -274,9 +274,14 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
                 "message": f"Need at least 4 historical moves, found {historical_count or 0}",
             }
 
-        # Get current price
-        yahoo = get_yahoo()
-        price = await yahoo.get_current_price(ticker)
+        # Get current price from Tradier (more reliable than Yahoo in cloud)
+        tradier = get_tradier()
+        quote = await tradier.get_quote(ticker)
+        price = quote.get("last") or quote.get("close") or quote.get("prevclose")
+        if not price:
+            # Fallback to Yahoo if Tradier fails
+            yahoo = get_yahoo()
+            price = await yahoo.get_current_price(ticker)
         if not price:
             return {
                 "ticker": ticker,
@@ -285,7 +290,6 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
             }
 
         # Get options chain for implied move
-        tradier = get_tradier()
         expirations = await tradier.get_expirations(ticker)
 
         # Find nearest expiration
@@ -319,9 +323,9 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
                     avg_spread /= spread_count
 
                 liquidity_tier = classify_liquidity_tier(
-                    open_interest=total_oi,
+                    oi=total_oi,
+                    spread_pct=avg_spread,
                     position_size=10,
-                    bid_ask_spread_pct=avg_spread,
                 )
 
         # Calculate VRP - extract historical move percentages
@@ -460,7 +464,7 @@ async def whisper(date: str = None, format: str = "json", _: bool = Depends(veri
 
         # Analyze each ticker
         repo = get_historical_repo()
-        yahoo = get_yahoo()
+        tradier = get_tradier()
         results = []
 
         for e in upcoming[:30]:  # Limit to 30 tickers
@@ -482,8 +486,9 @@ async def whisper(date: str = None, format: str = "json", _: bool = Depends(veri
 
                 historical_avg = sum(historical_pcts) / len(historical_pcts)
 
-                # Get current price
-                price = await yahoo.get_current_price(ticker)
+                # Get current price from Tradier
+                quote = await tradier.get_quote(ticker)
+                price = quote.get("last") or quote.get("close") or quote.get("prevclose")
                 if not price:
                     continue
 
