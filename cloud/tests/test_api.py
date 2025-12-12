@@ -11,7 +11,7 @@ def test_root_health(client):
     response = client.get("/")
     assert response.status_code == 200
     data = response.json()
-    assert data["service"] == "ivcrush"
+    assert data["service"] == "trading-desk"
     assert data["status"] == "healthy"
 
 def test_health_endpoint(client):

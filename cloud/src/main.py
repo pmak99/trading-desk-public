@@ -1,5 +1,5 @@
 """
-IV Crush 5.0 - Autopilot
+Trading Desk 5.0 - Autopilot
 FastAPI application entry point.
 """
 
@@ -38,7 +38,7 @@ from src.formatters.telegram import format_ticker_line, format_digest, format_al
 from src.formatters.cli import format_digest_cli, format_analyze_cli
 
 app = FastAPI(
-    title="IV Crush 5.0",
+    title="Trading Desk 5.0",
     description="Autopilot trading system",
     version="5.0.0"
 )
@@ -146,7 +146,7 @@ async def add_request_id(request: Request, call_next):
 async def root():
     """Health check endpoint."""
     return {
-        "service": "ivcrush",
+        "service": "trading-desk",
         "version": "5.0.0",
         "timestamp_et": now_et().isoformat(),
         "status": "healthy"
