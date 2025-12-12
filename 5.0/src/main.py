@@ -247,6 +247,28 @@ async def health(format: str = "json", _: bool = Depends(verify_api_key)):
     return data
 
 
+# Common company name → ticker symbol mappings
+TICKER_ALIASES = {
+    "NIKE": "NKE",
+    "GOOGLE": "GOOGL",
+    "FACEBOOK": "META",
+    "AMAZON": "AMZN",
+    "APPLE": "AAPL",
+    "MICROSOFT": "MSFT",
+    "TESLA": "TSLA",
+    "NETFLIX": "NFLX",
+    "NVIDIA": "NVDA",
+    "COSTCO": "COST",
+    "STARBUCKS": "SBUX",
+    "WALMART": "WMT",
+    "TARGET": "TGT",
+    "DISNEY": "DIS",
+    "BERKSHIRE": "BRK.B",
+    "JPMORGAN": "JPM",
+    "ALPHABET": "GOOGL",
+}
+
+
 @app.get("/api/analyze")
 async def analyze(ticker: str, date: str = None, format: str = "json", _: bool = Depends(verify_api_key)):
     """
@@ -254,10 +276,13 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
 
     Returns VRP, liquidity, sentiment, and strategy recommendations.
     """
-    # Validate ticker
+    # Validate and normalize ticker
     ticker = ticker.upper().strip()
-    if not ticker.isalnum() or len(ticker) > 5:
+    if not ticker.replace(".", "").isalnum() or len(ticker) > 10:
         raise HTTPException(400, "Invalid ticker")
+
+    # Convert common company names to ticker symbols
+    ticker = TICKER_ALIASES.get(ticker, ticker)
 
     log("info", "Analyze request", ticker=ticker, date=date)
 
@@ -271,7 +296,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
             return {
                 "ticker": ticker,
                 "status": "insufficient_data",
-                "message": f"Need at least 4 historical moves, found {historical_count or 0}",
+                "message": f"Need at least 4 historical moves, found {historical_count or 0}. Use stock ticker symbol (e.g., NKE not NIKE).",
             }
 
         # Get current price from Tradier (more reliable than Yahoo in cloud)
