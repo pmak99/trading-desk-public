@@ -4,15 +4,20 @@ Metrics collection and Grafana Cloud push.
 Uses Grafana Cloud Graphite JSON API for metrics ingestion.
 """
 
+import inspect
 import json
 import os
 import time
 import httpx
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, List
 from functools import wraps
 from contextlib import contextmanager
 
 from src.core.logging import log
+
+# Thread pool for non-blocking metrics push
+_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="metrics")
 
 
 # Grafana Cloud config
@@ -60,8 +65,8 @@ def record(name: str, value: float, tags: Optional[dict] = None) -> None:
         if tag_list:
             metric["tags"] = tag_list
 
-        # Push immediately (fire-and-forget)
-        _push_metric([metric])
+        # Push in background thread (non-blocking)
+        _executor.submit(_push_metric, [metric])
 
     except Exception as e:
         # Don't let metrics failures break the app
@@ -75,15 +80,13 @@ def _push_metric(metrics: List[dict]) -> None:
         return
 
     try:
-        # Use short timeout, fire-and-forget
+        # Use short timeout, runs in background thread
         with httpx.Client(timeout=2.0) as client:
             response = client.post(
                 GRAFANA_GRAPHITE_URL,
                 content=json.dumps(metrics),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {GRAFANA_USER}:{GRAFANA_API_KEY}",
-                },
+                auth=(GRAFANA_USER, GRAFANA_API_KEY),  # httpx handles Basic auth
+                headers={"Content-Type": "application/json"},
             )
             if response.status_code >= 400:
                 log("warn", "Metrics push failed",
@@ -123,28 +126,27 @@ def timed(name: str, tags: Optional[dict] = None):
             ...
     """
     def decorator(func):
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            start = time.time()
-            try:
-                return await func(*args, **kwargs)
-            finally:
-                duration_ms = (time.time() - start) * 1000
-                record(name, duration_ms, tags)
-
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            start = time.time()
-            try:
-                return func(*args, **kwargs)
-            finally:
-                duration_ms = (time.time() - start) * 1000
-                record(name, duration_ms, tags)
-
-        # Return appropriate wrapper based on function type
-        if hasattr(func, '__code__') and func.__code__.co_flags & 0x80:  # CO_COROUTINE
+        # Use inspect.iscoroutinefunction for reliable async detection
+        if inspect.iscoroutinefunction(func):
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                start = time.time()
+                try:
+                    return await func(*args, **kwargs)
+                finally:
+                    duration_ms = (time.time() - start) * 1000
+                    record(name, duration_ms, tags)
             return async_wrapper
-        return sync_wrapper
+        else:
+            @wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                start = time.time()
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    duration_ms = (time.time() - start) * 1000
+                    record(name, duration_ms, tags)
+            return sync_wrapper
     return decorator
 
 
