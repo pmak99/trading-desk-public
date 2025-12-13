@@ -192,18 +192,23 @@ async def dispatch(_: bool = Depends(verify_api_key)):
     Dispatcher endpoint called by Cloud Scheduler every 15 min.
     Routes to correct job based on current time.
     """
+    start_time = time.time()
     try:
         manager = get_job_manager()
         job = manager.get_current_job()
 
         if not job:
             log("info", "No job scheduled for current time")
+            duration_ms = (time.time() - start_time) * 1000
+            metrics.request_success("dispatch", duration_ms)
             return {"status": "no_job", "message": "No job scheduled"}
 
         # Check dependencies
         can_run, reason = manager.check_dependencies(job)
         if not can_run:
             log("warn", "Job dependencies not met", job=job, reason=reason)
+            duration_ms = (time.time() - start_time) * 1000
+            metrics.request_success("dispatch", duration_ms)
             return {"status": "skipped", "job": job, "reason": reason}
 
         log("info", "Dispatching job", job=job)
@@ -215,15 +220,25 @@ async def dispatch(_: bool = Depends(verify_api_key)):
         except Exception as e:
             log("error", "Job execution failed", job=job, error=str(e))
             manager.record_status(job, "failed")
+            duration_ms = (time.time() - start_time) * 1000
+            metrics.request_error("dispatch", duration_ms, "job_failed")
             return {"status": "error", "job": job, "error": str(e)}
 
         # Record status based on result
         status = "success" if result.get("status") == "success" else "failed"
         manager.record_status(job, status)
 
+        duration_ms = (time.time() - start_time) * 1000
+        if status == "success":
+            metrics.request_success("dispatch", duration_ms)
+        else:
+            metrics.request_error("dispatch", duration_ms, "job_result_failed")
+
         return {"status": status, "job": job, "result": result}
 
     except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_error("dispatch", duration_ms)
         log("error", "Dispatch endpoint failed", error=str(e))
         return {"status": "error", "error": str(e)}
 
