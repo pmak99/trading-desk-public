@@ -1,0 +1,191 @@
+"""
+Metrics collection and Grafana Cloud push.
+
+Uses Graphite protocol for simplicity - just HTTP POST with metric data.
+"""
+
+import os
+import time
+import httpx
+from typing import Optional
+from functools import wraps
+from contextlib import contextmanager
+
+from src.core.logging import log
+
+
+# Grafana Cloud config
+GRAFANA_GRAPHITE_URL = os.getenv("GRAFANA_GRAPHITE_URL", "")
+GRAFANA_USER = os.getenv("GRAFANA_USER", "")
+GRAFANA_API_KEY = os.getenv("GRAFANA_API_KEY", "")
+
+# Buffer for batch sending (optional, currently sends immediately)
+_metrics_buffer: list = []
+
+
+def _is_enabled() -> bool:
+    """Check if Grafana is configured."""
+    return bool(GRAFANA_GRAPHITE_URL and GRAFANA_USER and GRAFANA_API_KEY)
+
+
+def _format_tags(tags: dict) -> str:
+    """Format tags for Graphite tagged metrics format."""
+    if not tags:
+        return ""
+    return ";" + ";".join(f"{k}={v}" for k, v in tags.items() if v is not None)
+
+
+def record(name: str, value: float, tags: Optional[dict] = None) -> None:
+    """
+    Record a metric and push to Grafana Cloud.
+
+    Args:
+        name: Metric name (e.g., "ivcrush.request.duration")
+        value: Metric value
+        tags: Optional tags dict (e.g., {"endpoint": "analyze", "status": "success"})
+    """
+    if not _is_enabled():
+        return
+
+    try:
+        timestamp = int(time.time())
+        tag_str = _format_tags(tags or {})
+        metric_line = f"{name}{tag_str} {value} {timestamp}\n"
+
+        # Push immediately (fire-and-forget)
+        _push_metric(metric_line)
+
+    except Exception as e:
+        # Don't let metrics failures break the app
+        log("warn", "Metrics record failed", error=str(e), metric=name)
+
+
+def _push_metric(metric_line: str) -> None:
+    """Push metric to Grafana Cloud Graphite endpoint."""
+    if not _is_enabled():
+        return
+
+    try:
+        # Use short timeout, fire-and-forget
+        with httpx.Client(timeout=2.0) as client:
+            response = client.post(
+                GRAFANA_GRAPHITE_URL,
+                content=metric_line,
+                auth=(GRAFANA_USER, GRAFANA_API_KEY),
+                headers={"Content-Type": "text/plain"},
+            )
+            if response.status_code >= 400:
+                log("warn", "Metrics push failed",
+                    status=response.status_code,
+                    body=response.text[:100])
+    except Exception as e:
+        # Silently fail - metrics shouldn't break the app
+        log("debug", "Metrics push error", error=str(e))
+
+
+@contextmanager
+def timer(name: str, tags: Optional[dict] = None):
+    """
+    Context manager to time a block and record duration.
+
+    Usage:
+        with metrics.timer("ivcrush.request.duration", {"endpoint": "analyze"}):
+            do_work()
+    """
+    start = time.time()
+    try:
+        yield
+    finally:
+        duration_ms = (time.time() - start) * 1000
+        record(name, duration_ms, tags)
+
+
+def timed(name: str, tags: Optional[dict] = None):
+    """
+    Decorator to time a function and record duration.
+
+    Usage:
+        @metrics.timed("ivcrush.api.latency", {"provider": "tradier"})
+        async def get_quote(ticker):
+            ...
+    """
+    def decorator(func):
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            start = time.time()
+            try:
+                return await func(*args, **kwargs)
+            finally:
+                duration_ms = (time.time() - start) * 1000
+                record(name, duration_ms, tags)
+
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            start = time.time()
+            try:
+                return func(*args, **kwargs)
+            finally:
+                duration_ms = (time.time() - start) * 1000
+                record(name, duration_ms, tags)
+
+        # Return appropriate wrapper based on function type
+        if hasattr(func, '__code__') and func.__code__.co_flags & 0x80:  # CO_COROUTINE
+            return async_wrapper
+        return sync_wrapper
+    return decorator
+
+
+def count(name: str, tags: Optional[dict] = None, value: float = 1) -> None:
+    """Record a count metric (convenience wrapper)."""
+    record(name, value, tags)
+
+
+def gauge(name: str, value: float, tags: Optional[dict] = None) -> None:
+    """Record a gauge metric (convenience wrapper)."""
+    record(name, value, tags)
+
+
+# Pre-defined metric helpers
+def request_success(endpoint: str, duration_ms: float) -> None:
+    """Record successful request."""
+    record("ivcrush.request.duration", duration_ms, {"endpoint": endpoint})
+    count("ivcrush.request.status", {"endpoint": endpoint, "status": "success"})
+
+
+def request_error(endpoint: str, duration_ms: float, error_type: str = "error") -> None:
+    """Record failed request."""
+    record("ivcrush.request.duration", duration_ms, {"endpoint": endpoint})
+    count("ivcrush.request.status", {"endpoint": endpoint, "status": error_type})
+
+
+def vrp_analyzed(ticker: str, ratio: float, tier: str) -> None:
+    """Record VRP analysis."""
+    gauge("ivcrush.vrp.ratio", ratio, {"ticker": ticker})
+    count("ivcrush.vrp.tier", {"tier": tier})
+
+
+def liquidity_checked(tier: str) -> None:
+    """Record liquidity tier."""
+    count("ivcrush.liquidity.tier", {"tier": tier})
+
+
+def sentiment_fetched(ticker: str, score: float) -> None:
+    """Record sentiment analysis."""
+    gauge("ivcrush.sentiment.score", score, {"ticker": ticker})
+
+
+def api_call(provider: str, duration_ms: float, success: bool = True) -> None:
+    """Record external API call."""
+    count("ivcrush.api.calls", {"provider": provider, "status": "success" if success else "error"})
+    record("ivcrush.api.latency", duration_ms, {"provider": provider})
+
+
+def budget_update(remaining_calls: int, remaining_dollars: float) -> None:
+    """Record budget status."""
+    gauge("ivcrush.budget.calls_remaining", remaining_calls)
+    gauge("ivcrush.budget.dollars_remaining", remaining_dollars)
+
+
+def tickers_qualified(count_val: int) -> None:
+    """Record number of qualified tickers from a scan."""
+    gauge("ivcrush.tickers.qualified", count_val)
