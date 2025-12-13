@@ -10,22 +10,26 @@ from src.domain.repositories import HistoricalMovesRepository, SentimentCacheRep
 
 @pytest.fixture
 def db_path():
-    """Create temp database with schema."""
+    """Create temp database with schema matching production."""
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         path = f.name
 
-    # Create historical_moves table
+    # Create historical_moves table (matching production schema)
     conn = sqlite3.connect(path)
     conn.execute("""
         CREATE TABLE historical_moves (
-            ticker TEXT,
-            earnings_date TEXT,
-            gap_move_pct REAL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            earnings_date DATE NOT NULL,
+            prev_close REAL,
+            earnings_open REAL,
+            earnings_high REAL,
+            earnings_low REAL,
+            earnings_close REAL,
             intraday_move_pct REAL,
-            close_before REAL,
-            close_after REAL,
-            direction TEXT,
-            PRIMARY KEY (ticker, earnings_date)
+            gap_move_pct REAL,
+            close_move_pct REAL,
+            UNIQUE(ticker, earnings_date)
         )
     """)
     conn.commit()
@@ -71,17 +75,22 @@ def test_historical_moves_average(db_path):
     """get_average_move calculates average absolute move."""
     repo = HistoricalMovesRepository(db_path=db_path)
 
-    # Save multiple moves
+    # Save multiple moves with intraday_move_pct (default metric)
     for i, pct in enumerate([5.0, -3.0, 8.0, -2.0]):
         repo.save_move({
             "ticker": "AAPL",
             "earnings_date": f"2024-{i+1:02d}-15",
             "gap_move_pct": pct,
+            "intraday_move_pct": pct,  # Default metric uses intraday
         })
 
     avg = repo.get_average_move("AAPL")
     # (5 + 3 + 8 + 2) / 4 = 4.5
     assert avg == 4.5
+
+    # Also test gap metric explicitly
+    avg_gap = repo.get_average_move("AAPL", metric="gap")
+    assert avg_gap == 4.5
 
 
 def test_historical_moves_count(db_path):
