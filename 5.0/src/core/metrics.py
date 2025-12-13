@@ -71,6 +71,7 @@ def record(name: str, value: float, tags: Optional[dict] = None) -> None:
 def _push_metric(metrics: List[dict]) -> None:
     """Push metrics to Grafana Cloud Graphite endpoint."""
     if not _is_enabled():
+        log("debug", "Metrics disabled", url=bool(GRAFANA_GRAPHITE_URL), user=bool(GRAFANA_USER), key=bool(GRAFANA_API_KEY))
         return
 
     try:
@@ -88,6 +89,8 @@ def _push_metric(metrics: List[dict]) -> None:
                 log("warn", "Metrics push failed",
                     status=response.status_code,
                     body=response.text[:100])
+            else:
+                log("debug", "Metrics pushed", count=len(metrics))
     except Exception as e:
         # Silently fail - metrics shouldn't break the app
         log("debug", "Metrics push error", error=str(e))
