@@ -1,13 +1,14 @@
 """
 Metrics collection and Grafana Cloud push.
 
-Uses Graphite protocol for simplicity - just HTTP POST with metric data.
+Uses Grafana Cloud Graphite JSON API for metrics ingestion.
 """
 
+import json
 import os
 import time
 import httpx
-from typing import Optional
+from typing import Optional, List
 from functools import wraps
 from contextlib import contextmanager
 
@@ -19,8 +20,8 @@ GRAFANA_GRAPHITE_URL = os.getenv("GRAFANA_GRAPHITE_URL", "")
 GRAFANA_USER = os.getenv("GRAFANA_USER", "")
 GRAFANA_API_KEY = os.getenv("GRAFANA_API_KEY", "")
 
-# Buffer for batch sending (optional, currently sends immediately)
-_metrics_buffer: list = []
+# Default interval for metrics (10 seconds is typical)
+DEFAULT_INTERVAL = 10
 
 
 def _is_enabled() -> bool:
@@ -28,11 +29,11 @@ def _is_enabled() -> bool:
     return bool(GRAFANA_GRAPHITE_URL and GRAFANA_USER and GRAFANA_API_KEY)
 
 
-def _format_tags(tags: dict) -> str:
-    """Format tags for Graphite tagged metrics format."""
+def _format_tags(tags: dict) -> List[str]:
+    """Format tags as list of key=value strings for Graphite JSON API."""
     if not tags:
-        return ""
-    return ";" + ";".join(f"{k}={v}" for k, v in tags.items() if v is not None)
+        return []
+    return [f"{k}={v}" for k, v in tags.items() if v is not None]
 
 
 def record(name: str, value: float, tags: Optional[dict] = None) -> None:
@@ -48,20 +49,27 @@ def record(name: str, value: float, tags: Optional[dict] = None) -> None:
         return
 
     try:
-        timestamp = int(time.time())
-        tag_str = _format_tags(tags or {})
-        metric_line = f"{name}{tag_str} {value} {timestamp}\n"
+        metric = {
+            "name": name,
+            "interval": DEFAULT_INTERVAL,
+            "value": value,
+            "time": int(time.time()),
+        }
+
+        tag_list = _format_tags(tags or {})
+        if tag_list:
+            metric["tags"] = tag_list
 
         # Push immediately (fire-and-forget)
-        _push_metric(metric_line)
+        _push_metric([metric])
 
     except Exception as e:
         # Don't let metrics failures break the app
         log("warn", "Metrics record failed", error=str(e), metric=name)
 
 
-def _push_metric(metric_line: str) -> None:
-    """Push metric to Grafana Cloud Graphite endpoint."""
+def _push_metric(metrics: List[dict]) -> None:
+    """Push metrics to Grafana Cloud Graphite endpoint."""
     if not _is_enabled():
         return
 
@@ -70,9 +78,11 @@ def _push_metric(metric_line: str) -> None:
         with httpx.Client(timeout=2.0) as client:
             response = client.post(
                 GRAFANA_GRAPHITE_URL,
-                content=metric_line,
-                auth=(GRAFANA_USER, GRAFANA_API_KEY),
-                headers={"Content-Type": "text/plain"},
+                content=json.dumps(metrics),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {GRAFANA_USER}:{GRAFANA_API_KEY}",
+                },
             )
             if response.status_code >= 400:
                 log("warn", "Metrics push failed",
