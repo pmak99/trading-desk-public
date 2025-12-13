@@ -4,6 +4,7 @@ FastAPI application entry point.
 """
 
 import re
+import time
 import uuid
 from datetime import timedelta
 from typing import Optional, List, Dict, Any
@@ -17,6 +18,7 @@ from src.core.config import now_et, today_et, settings
 from src.core.logging import log, set_request_id
 from src.core.job_manager import JobManager
 from src.core.budget import BudgetTracker
+from src.core import metrics
 from src.jobs import JobRunner
 from src.domain import (
     calculate_vrp,
@@ -285,6 +287,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
     ticker = TICKER_ALIASES.get(ticker, ticker)
 
     log("info", "Analyze request", ticker=ticker, date=date)
+    start_time = time.time()
 
     try:
         # Get historical data
@@ -458,6 +461,14 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
             "position_size": position_size,
         }
 
+        # Record metrics
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_success("analyze", duration_ms)
+        metrics.vrp_analyzed(ticker, vrp_data["vrp_ratio"], vrp_data["tier"])
+        metrics.liquidity_checked(liquidity_tier)
+        if sentiment_data and sentiment_data.get("score"):
+            metrics.sentiment_fetched(ticker, sentiment_data["score"])
+
         # Format for CLI if requested
         if format == "cli":
             return {"output": format_analyze_cli(result)}
@@ -465,6 +476,8 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
         return result
 
     except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_error("analyze", duration_ms)
         log("error", "Analyze failed", ticker=ticker, error=str(e))
         raise HTTPException(500, f"Analysis failed: {str(e)}")
 
@@ -477,6 +490,7 @@ async def whisper(date: str = None, format: str = "json", _: bool = Depends(veri
     Scans upcoming earnings and returns qualified tickers sorted by score.
     """
     log("info", "Whisper request", date=date)
+    start_time = time.time()
 
     try:
         # Get earnings calendar
@@ -600,11 +614,26 @@ async def whisper(date: str = None, format: str = "json", _: bool = Depends(veri
                 summary["today_calls"],
                 summary["budget_remaining"],
             )
+            # Record metrics
+            duration_ms = (time.time() - start_time) * 1000
+            metrics.request_success("whisper", duration_ms)
+            metrics.tickers_qualified(len(results))
             return {"output": cli_output}
+
+        # Record metrics
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_success("whisper", duration_ms)
+        metrics.tickers_qualified(len(results))
+        metrics.budget_update(
+            remaining_calls=40 - summary["today_calls"],
+            remaining_dollars=summary["budget_remaining"]
+        )
 
         return response
 
     except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_error("whisper", duration_ms)
         log("error", "Whisper failed", error=str(e))
         raise HTTPException(500, f"Whisper failed: {str(e)}")
 
@@ -707,12 +736,20 @@ async def telegram_webhook(request: Request):
                 except Exception as e:
                     await telegram.send_message(f"Error analyzing {ticker}: {str(e)}")
 
+        elif text.startswith("/dashboard"):
+            grafana_url = settings.get("GRAFANA_DASHBOARD_URL", "")
+            if grafana_url:
+                await telegram.send_message(f"📊 <b>Dashboard</b>\n\n<a href=\"{grafana_url}\">Open Grafana Dashboard</a>")
+            else:
+                await telegram.send_message("Dashboard not configured. Set GRAFANA_DASHBOARD_URL in environment.")
+
         elif text.startswith("/"):
             await telegram.send_message(
                 "Available commands:\n"
                 "/health - System status\n"
                 "/whisper - Today's opportunities\n"
-                "/analyze TICKER - Deep analysis"
+                "/analyze TICKER - Deep analysis\n"
+                "/dashboard - Metrics dashboard"
             )
 
         return {"ok": True}
