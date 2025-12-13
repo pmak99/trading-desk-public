@@ -10,7 +10,7 @@
     {
       "datasource": {
         "type": "graphite",
-        "uid": "${DS_GRAFANACLOUD-TRADINGDESK-GRAPHITE}"
+        "uid": "grafanacloud-tradingdesk-graphite"
       },
       "fieldConfig": {
         "defaults": {
@@ -58,7 +58,7 @@
     {
       "datasource": {
         "type": "graphite",
-        "uid": "${DS_GRAFANACLOUD-TRADINGDESK-GRAPHITE}"
+        "uid": "grafanacloud-tradingdesk-graphite"
       },
       "fieldConfig": {
         "defaults": {
@@ -106,7 +106,7 @@
     {
       "datasource": {
         "type": "graphite",
-        "uid": "${DS_GRAFANACLOUD-TRADINGDESK-GRAPHITE}"
+        "uid": "grafanacloud-tradingdesk-graphite"
       },
       "fieldConfig": {
         "defaults": {
@@ -155,7 +155,7 @@
     {
       "datasource": {
         "type": "graphite",
-        "uid": "${DS_GRAFANACLOUD-TRADINGDESK-GRAPHITE}"
+        "uid": "grafanacloud-tradingdesk-graphite"
       },
       "fieldConfig": {
         "defaults": {
@@ -200,7 +200,7 @@
     {
       "datasource": {
         "type": "graphite",
-        "uid": "${DS_GRAFANACLOUD-TRADINGDESK-GRAPHITE}"
+        "uid": "grafanacloud-tradingdesk-graphite"
       },
       "fieldConfig": {
         "defaults": {
@@ -276,7 +276,7 @@
     {
       "datasource": {
         "type": "graphite",
-        "uid": "${DS_GRAFANACLOUD-TRADINGDESK-GRAPHITE}"
+        "uid": "grafanacloud-tradingdesk-graphite"
       },
       "fieldConfig": {
         "defaults": {
@@ -352,7 +352,7 @@
     {
       "datasource": {
         "type": "graphite",
-        "uid": "${DS_GRAFANACLOUD-TRADINGDESK-GRAPHITE}"
+        "uid": "grafanacloud-tradingdesk-graphite"
       },
       "fieldConfig": {
         "defaults": {
@@ -433,7 +433,7 @@
     {
       "datasource": {
         "type": "graphite",
-        "uid": "${DS_GRAFANACLOUD-TRADINGDESK-GRAPHITE}"
+        "uid": "grafanacloud-tradingdesk-graphite"
       },
       "fieldConfig": {
         "defaults": {
@@ -510,7 +510,7 @@
     {
       "datasource": {
         "type": "graphite",
-        "uid": "${DS_GRAFANACLOUD-TRADINGDESK-GRAPHITE}"
+        "uid": "grafanacloud-tradingdesk-graphite"
       },
       "fieldConfig": {
         "defaults": {
