@@ -9,6 +9,7 @@ Pre-built dashboards for monitoring the Trading Desk API and trading metrics.
 | **Operations** | `operations.json` | Request rate, error rate, latency by endpoint |
 | **Trading** | `trading.json` | VRP ratios, qualified tickers, sentiment, liquidity tiers |
 | **API & Budget** | `api.json` | External API calls by provider, budget tracking |
+| **Whisper & Scans** | `whisper.json` | Scan results, VRP/liquidity tier distributions, trends |
 
 ## Import Instructions
 

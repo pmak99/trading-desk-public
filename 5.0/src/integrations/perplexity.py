@@ -7,11 +7,13 @@ Replaces MCP perplexity integration with direct REST calls.
 import asyncio
 import os
 import re
+import time
 import httpx
 from typing import Dict, Any, Optional
 
 from src.core.logging import log
 from src.core.budget import BudgetTracker
+from src.core import metrics
 
 BASE_URL = "https://api.perplexity.ai"
 
@@ -81,6 +83,8 @@ class PerplexityClient:
 
     async def _request(self, messages: list) -> Dict[str, Any]:
         """Make request to Perplexity API with retry handling."""
+        start_time = time.time()
+
         for attempt in range(3):
             try:
                 async with httpx.AsyncClient(timeout=60) as client:
@@ -103,8 +107,12 @@ class PerplexityClient:
                         if attempt < 2:
                             await asyncio.sleep(2 ** attempt)
                             continue
+                        duration_ms = (time.time() - start_time) * 1000
+                        metrics.api_call("perplexity", duration_ms, success=False)
                         return {"error": f"API error: {response.status_code}"}
 
+                    duration_ms = (time.time() - start_time) * 1000
+                    metrics.api_call("perplexity", duration_ms, success=True)
                     return response.json()
 
             except (httpx.TimeoutException, httpx.ConnectError) as e:
@@ -112,8 +120,12 @@ class PerplexityClient:
                 if attempt < 2:
                     await asyncio.sleep(2 ** attempt)
                     continue
+                duration_ms = (time.time() - start_time) * 1000
+                metrics.api_call("perplexity", duration_ms, success=False)
                 return {"error": str(e)}
 
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.api_call("perplexity", duration_ms, success=False)
         return {"error": "All retries failed"}
 
     def _estimate_cost(self, data: Dict[str, Any]) -> float:

@@ -5,10 +5,12 @@ Replaces MCP tradier integration with direct REST calls.
 """
 
 import asyncio
+import time
 import httpx
 from typing import Dict, List, Any, Optional
 
 from src.core.logging import log
+from src.core import metrics
 
 BASE_URL = "https://api.tradier.com/v1"
 
@@ -44,6 +46,9 @@ class TradierClient:
         params: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """Make authenticated request to Tradier API with retry handling."""
+        start_time = time.time()
+        success = False
+
         for attempt in range(3):
             try:
                 async with httpx.AsyncClient(timeout=30) as client:
@@ -65,20 +70,29 @@ class TradierClient:
                         if attempt < 2:
                             await asyncio.sleep(2 ** attempt)
                             continue
+                        duration_ms = (time.time() - start_time) * 1000
+                        metrics.api_call("tradier", duration_ms, success=False)
                         return {}
 
                     # Handle empty responses gracefully
                     if not response.content:
                         log("warn", "Tradier returned empty response", endpoint=endpoint)
+                        duration_ms = (time.time() - start_time) * 1000
+                        metrics.api_call("tradier", duration_ms, success=False)
                         return {}
 
                     try:
-                        return response.json()
+                        result = response.json()
+                        duration_ms = (time.time() - start_time) * 1000
+                        metrics.api_call("tradier", duration_ms, success=True)
+                        return result
                     except ValueError:
                         log("error", "Tradier returned invalid JSON",
                             endpoint=endpoint,
                             status=response.status_code,
                             content=response.text[:200] if response.text else "empty")
+                        duration_ms = (time.time() - start_time) * 1000
+                        metrics.api_call("tradier", duration_ms, success=False)
                         return {}
 
             except (httpx.TimeoutException, httpx.ConnectError) as e:
@@ -86,8 +100,12 @@ class TradierClient:
                 if attempt < 2:
                     await asyncio.sleep(2 ** attempt)
                     continue
+                duration_ms = (time.time() - start_time) * 1000
+                metrics.api_call("tradier", duration_ms, success=False)
                 return {}
 
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.api_call("tradier", duration_ms, success=False)
         return {}
 
     async def get_quote(self, symbol: str) -> Dict[str, Any]:
