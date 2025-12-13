@@ -22,16 +22,16 @@
             "mode": "absolute",
             "steps": [
               { "color": "red", "value": null },
-              { "color": "yellow", "value": 3 },
-              { "color": "green", "value": 5 },
-              { "color": "blue", "value": 10 }
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 3 },
+              { "color": "blue", "value": 5 }
             ]
           },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
       "id": 1,
       "options": {
         "colorMode": "value",
@@ -52,7 +52,7 @@
           "target": "seriesByTag('name=ivcrush.tickers.qualified')"
         }
       ],
-      "title": "Qualified Tickers (Last Scan)",
+      "title": "Qualified Tickers",
       "type": "stat"
     },
     {
@@ -69,22 +69,25 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "blue", "value": null }
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1.5 },
+              { "color": "green", "value": 4 },
+              { "color": "blue", "value": 7 }
             ]
           },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
       "id": 2,
       "options": {
         "colorMode": "value",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["sum"],
+          "calcs": ["max"],
           "fields": "",
           "values": false
         },
@@ -94,10 +97,59 @@
       "targets": [
         {
           "refId": "A",
-          "target": "sumSeries(seriesByTag('name=ivcrush.vrp.tier', 'tier=EXCELLENT'))"
+          "target": "maxSeries(seriesByTag('name=ivcrush.vrp.ratio'))"
         }
       ],
-      "title": "EXCELLENT VRP Count",
+      "title": "Best VRP Ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "graphite",
+        "uid": "${DS_GRAFANACLOUD-TRADINGDESK-GRAPHITE}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": -0.2 },
+              { "color": "green", "value": 0.2 }
+            ]
+          },
+          "min": -1,
+          "max": 1,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["mean"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "refId": "A",
+          "target": "averageSeries(seriesByTag('name=ivcrush.sentiment.score'))"
+        }
+      ],
+      "title": "Avg Sentiment",
       "type": "stat"
     },
     {
@@ -121,8 +173,8 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
-      "id": 3,
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
@@ -139,10 +191,10 @@
       "targets": [
         {
           "refId": "A",
-          "target": "sumSeries(seriesByTag('name=ivcrush.vrp.tier', 'tier=GOOD'))"
+          "target": "sumSeries(seriesByTag('name=ivcrush.vrp.tier'))"
         }
       ],
-      "title": "GOOD VRP Count",
+      "title": "Tickers Analyzed",
       "type": "stat"
     },
     {
@@ -192,7 +244,7 @@
         ]
       },
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 6 },
-      "id": 4,
+      "id": 5,
       "options": {
         "legend": {
           "displayMode": "table",
@@ -268,7 +320,7 @@
         ]
       },
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 6 },
-      "id": 5,
+      "id": 6,
       "options": {
         "legend": {
           "displayMode": "table",
@@ -305,26 +357,47 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "continuous-GrYlRd"
+            "mode": "palette-classic"
           },
           "custom": {
-            "fillOpacity": 70,
+            "axisBorderShow": false,
+            "axisCenteredZero": true,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
             },
             "insertNulls": false,
-            "lineWidth": 0,
-            "spanNulls": false
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "red", "value": null },
-              { "color": "yellow", "value": 0 },
-              { "color": "green", "value": 0.3 }
+              { "color": "yellow", "value": -0.2 },
+              { "color": "green", "value": 0.2 }
             ]
           },
           "min": -1,
@@ -334,39 +407,17 @@
         "overrides": []
       },
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 6 },
-      "id": 6,
+      "id": 7,
       "options": {
-        "calculate": false,
-        "cellGap": 2,
-        "color": {
-          "exponent": 0.5,
-          "fill": "dark-orange",
-          "mode": "scheme",
-          "reverse": false,
-          "scale": "exponential",
-          "scheme": "RdYlGn",
-          "steps": 64
-        },
-        "exemplars": {
-          "color": "rgba(255,0,255,0.7)"
-        },
-        "filterValues": {
-          "le": 1e-9
-        },
         "legend": {
-          "show": true
-        },
-        "rowsFrame": {
-          "layout": "auto"
+          "calcs": ["lastNotNull"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
-          "showColorScale": false,
-          "yHistogram": false
-        },
-        "yAxis": {
-          "axisPlacement": "left",
-          "reverse": false
+          "mode": "multi",
+          "sort": "desc"
         }
       },
       "pluginVersion": "10.0.0",
@@ -376,8 +427,8 @@
           "target": "aliasByTags(seriesByTag('name=ivcrush.sentiment.score'), 'ticker')"
         }
       ],
-      "title": "Sentiment Heatmap",
-      "type": "status-history"
+      "title": "Sentiment by Ticker",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -433,7 +484,7 @@
         "overrides": []
       },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
-      "id": 7,
+      "id": 8,
       "options": {
         "legend": {
           "calcs": ["lastNotNull", "max"],
@@ -535,7 +586,7 @@
         ]
       },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
-      "id": 8,
+      "id": 9,
       "options": {
         "legend": {
           "calcs": ["sum"],
@@ -559,14 +610,14 @@
       "type": "timeseries"
     }
   ],
-  "refresh": "5m",
+  "refresh": "1m",
   "schemaVersion": 38,
   "tags": ["trading-desk", "whisper", "scan"],
   "templating": {
     "list": []
   },
   "time": {
-    "from": "now-7d",
+    "from": "now-24h",
     "to": "now"
   },
   "timepicker": {},
