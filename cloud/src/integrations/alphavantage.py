@@ -7,6 +7,7 @@ Primary source for upcoming earnings dates.
 import asyncio
 import csv
 import io
+import time
 import httpx
 from typing import Dict, List, Any, Optional
 from tenacity import (
@@ -18,6 +19,7 @@ from tenacity import (
 )
 
 from src.core.logging import log
+from src.core import metrics
 
 BASE_URL = "https://www.alphavantage.co/query"
 
@@ -120,8 +122,16 @@ class AlphaVantageClient:
         if symbol:
             params["symbol"] = symbol
 
-        csv_text = await self._request("EARNINGS_CALENDAR", params)
-        return self._parse_earnings_csv(csv_text)
+        start_time = time.time()
+        try:
+            csv_text = await self._request("EARNINGS_CALENDAR", params)
+            duration_ms = (time.time() - start_time) * 1000
+            metrics.api_call("alphavantage", duration_ms, success=True)
+            return self._parse_earnings_csv(csv_text)
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            metrics.api_call("alphavantage", duration_ms, success=False)
+            raise
 
     async def get_earnings_for_date(self, date: str) -> List[Dict[str, Any]]:
         """
