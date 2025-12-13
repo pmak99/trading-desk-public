@@ -129,6 +129,7 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
 | `/health` | System status and API budget |
 | `/whisper` | Today's high-VRP opportunities |
 | `/analyze TICKER` | Deep analysis of specific ticker |
+| `/dashboard` | Link to Grafana metrics dashboard |
 
 **Ticker Aliases**: Common company names are automatically converted:
 - `NIKE` → `NKE`, `GOOGLE` → `GOOGL`, `FACEBOOK` → `META`
@@ -358,6 +359,42 @@ curl http://localhost:8080/api/health
 # Via Telegram
 /health
 ```
+
+## Metrics & Dashboards
+
+Optional Grafana Cloud integration for visual monitoring.
+
+### Setup
+
+1. Sign up at [grafana.com](https://grafana.com) (free tier)
+2. Create a Grafana Cloud stack
+3. Get your Graphite endpoint URL and API key
+4. Add to `.env`:
+   ```bash
+   GRAFANA_GRAPHITE_URL=https://graphite-prod-xx-xxx.grafana.net/graphite/metrics
+   GRAFANA_USER=your_instance_id
+   GRAFANA_API_KEY=your_api_key
+   GRAFANA_DASHBOARD_URL=https://your-org.grafana.net/d/xxx/trading-desk
+   ```
+
+### Metrics Collected
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `ivcrush.request.duration` | timing | Endpoint latency |
+| `ivcrush.request.status` | count | Success/error by endpoint |
+| `ivcrush.vrp.ratio` | gauge | VRP ratio per ticker |
+| `ivcrush.vrp.tier` | count | Count by tier |
+| `ivcrush.api.calls` | count | External API calls |
+| `ivcrush.budget.remaining` | gauge | Perplexity budget |
+
+### Dashboards
+
+Create 4 dashboards in Grafana UI:
+1. **Operations** - Request rate, error rate, latency
+2. **Trading** - VRP distribution, qualified tickers
+3. **API** - Calls by provider, budget burn
+4. **Whisper** - Daily scan results
 
 ## Scheduled Jobs
 

@@ -348,36 +348,37 @@ Budget: 12/40 calls | $4.85 left
 
 ## Telemetry (Grafana Cloud)
 
+Uses Graphite protocol for simple HTTP POST metrics push to Grafana Cloud.
+
+### Implementation
+
+- **Module**: `src/core/metrics.py`
+- **Protocol**: Graphite (simple HTTP POST)
+- **Push**: Synchronous, fire-and-forget after each request
+
 ### Metrics Exported
 
-```python
-METRICS = {
-    # Job metrics
-    "ivcrush_job_duration_seconds": Histogram,
-    "ivcrush_job_status": Gauge,  # 1=success, 0=fail
-
-    # VRP metrics
-    "ivcrush_vrp_ratio": Gauge,
-    "ivcrush_tickers_scanned": Counter,
-    "ivcrush_tickers_qualified": Counter,
-
-    # API metrics
-    "ivcrush_api_calls_total": Counter,
-    "ivcrush_api_latency_seconds": Histogram,
-    "ivcrush_api_errors_total": Counter,
-
-    # Budget metrics
-    "ivcrush_perplexity_calls_today": Gauge,
-    "ivcrush_perplexity_budget_remaining": Gauge,
-}
-```
+| Metric | Type | Description |
+|--------|------|-------------|
+| `ivcrush.request.duration` | timing | Endpoint latency (ms) |
+| `ivcrush.request.status` | count | Success/error by endpoint |
+| `ivcrush.vrp.ratio` | gauge | VRP ratio per ticker |
+| `ivcrush.vrp.tier` | count | Count by VRP tier |
+| `ivcrush.liquidity.tier` | count | Count by liquidity tier |
+| `ivcrush.sentiment.score` | gauge | Sentiment score per ticker |
+| `ivcrush.api.calls` | count | External API calls by provider |
+| `ivcrush.api.latency` | timing | External API latency |
+| `ivcrush.budget.calls_remaining` | gauge | Perplexity calls remaining |
+| `ivcrush.budget.dollars_remaining` | gauge | Budget remaining |
+| `ivcrush.tickers.qualified` | gauge | Qualified tickers from scan |
 
 ### Dashboards
 
-1. **Operations Dashboard** - Job success/fail, latency, errors
-2. **Trading Dashboard** - VRP distribution, qualified tickers, win rate
-3. **API Dashboard** - Call counts, latency by provider, budget burn
-4. **Whisper Dashboard** - Weekly most anticipated, sentiment accuracy
+Create in Grafana Cloud UI:
+1. **Operations** - Request rate, error rate, P95 latency
+2. **Trading** - VRP distribution, qualified tickers, tier breakdown
+3. **API** - Calls by provider, latency, budget gauge
+4. **Whisper** - Daily scan results, top VRP tickers
 
 ## Code Reuse Strategy
 
@@ -744,11 +745,11 @@ uvicorn main:app --reload --port 8080
 3. Implement remaining commands
 4. Add Telegram bot
 
-### Phase 6: Telemetry
-1. Set up Grafana Cloud
-2. Implement metrics export
-3. Create dashboards
-4. Add alerting rules
+### Phase 6: Telemetry ✅
+1. ✅ Implement metrics module (`src/core/metrics.py`)
+2. ✅ Instrument endpoints with metrics
+3. ✅ Add `/dashboard` bot command
+4. Create dashboards in Grafana Cloud UI (manual step)
 
 ## Success Metrics
 
@@ -767,5 +768,8 @@ uvicorn main:app --reload --port 8080
 | `SECRETS` | JSON blob from Secret Manager | Yes |
 | `GCS_BUCKET` | Cloud Storage bucket name | Yes |
 | `TELEGRAM_CHAT_ID` | Your Telegram chat ID | Yes |
-| `GRAFANA_URL` | Grafana Cloud push URL | Yes |
+| `GRAFANA_GRAPHITE_URL` | Grafana Cloud Graphite endpoint | No |
+| `GRAFANA_USER` | Grafana Cloud instance ID | No |
+| `GRAFANA_API_KEY` | Grafana Cloud API key | No |
+| `GRAFANA_DASHBOARD_URL` | Link to main dashboard | No |
 | `LOG_LEVEL` | DEBUG, INFO, WARN, ERROR | No (default: INFO) |
