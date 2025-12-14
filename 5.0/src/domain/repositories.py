@@ -5,8 +5,10 @@ Simple repositories for historical moves and sentiment cache.
 Uses SQLite directly with connection pooling.
 """
 
+import atexit
 import re
 import sqlite3
+import threading
 from queue import Queue, Empty
 from contextlib import contextmanager
 from typing import Dict, Any, List, Optional
@@ -14,8 +16,8 @@ from datetime import date
 
 from src.core.logging import log
 
-# Input validation patterns
-TICKER_PATTERN = re.compile(r'^[A-Z]{1,5}$')
+# Input validation patterns - allow BRK.B, BF.A style tickers
+TICKER_PATTERN = re.compile(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$')
 DATE_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 
@@ -49,6 +51,7 @@ class ConnectionPool:
         self._pool: Queue = Queue(maxsize=max_connections)
         self._max = max_connections
         self._created = 0
+        self._lock = threading.Lock()  # Protect _created counter
 
     def _create_connection(self) -> sqlite3.Connection:
         """Create a new connection."""
@@ -65,19 +68,20 @@ class ConnectionPool:
             try:
                 conn = self._pool.get_nowait()
             except Empty:
-                # Create new if under limit
-                if self._created < self._max:
-                    conn = self._create_connection()
-                    self._created += 1
-                else:
-                    # Wait for one to be returned
+                # Create new if under limit (thread-safe check)
+                with self._lock:
+                    if self._created < self._max:
+                        conn = self._create_connection()
+                        self._created += 1
+                # If we didn't create one, wait for pool
+                if conn is None:
                     conn = self._pool.get(timeout=30)
             yield conn
         finally:
             if conn:
                 try:
                     self._pool.put_nowait(conn)
-                except:
+                except Exception:
                     # Pool full, close this one
                     conn.close()
 
@@ -101,6 +105,22 @@ def get_pool(db_path: str) -> ConnectionPool:
     if db_path not in _pools:
         _pools[db_path] = ConnectionPool(db_path)
     return _pools[db_path]
+
+
+def cleanup_all_pools():
+    """Close all connection pools. Called on process exit."""
+    for path, pool in list(_pools.items()):  # Use list() to avoid mutation during iteration
+        try:
+            pool.close_all()
+            log("debug", "Closed connection pool", db_path=path)
+        except (sqlite3.Error, OSError) as e:
+            # Only catch database and OS errors, not system exceptions
+            log("warn", "Failed to close pool", db_path=path, error=str(e))
+    _pools.clear()
+
+
+# Register cleanup handler for graceful shutdown
+atexit.register(cleanup_all_pools)
 
 
 class HistoricalMovesRepository:

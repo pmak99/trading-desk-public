@@ -28,12 +28,30 @@ class TelegramSender:
         self.base_url = f"{BASE_URL}{bot_token}"
 
     def _truncate_message(self, text: str) -> str:
-        """Truncate message to Telegram's limit if needed."""
+        """Truncate message to Telegram's limit, preserving header and footer."""
         if len(text) <= MAX_MESSAGE_LENGTH:
             return text
-        # Truncate with ellipsis, preserving room for indicator
-        truncated = text[:MAX_MESSAGE_LENGTH - 20]
-        return truncated + "\n\n[...truncated]"
+
+        # Smart truncation: preserve first 500 chars (header) and last 500 chars (footer)
+        # This ensures critical info at start and end isn't lost
+        # Account for truncation marker overhead (~50 chars: "\n\n[...XXXXX chars truncated...]\n\n")
+        marker_overhead = 50
+        header_size = 500
+        footer_size = 500
+
+        # Ensure truncated message fits within limit
+        available = MAX_MESSAGE_LENGTH - header_size - footer_size - marker_overhead
+        if available < 0:
+            # Extreme edge case: reduce header/footer sizes
+            header_size = (MAX_MESSAGE_LENGTH - marker_overhead) // 2
+            footer_size = header_size
+
+        truncated_len = len(text) - header_size - footer_size
+
+        header = text[:header_size]
+        footer = text[-footer_size:]
+
+        return f"{header}\n\n[...{truncated_len} chars truncated...]\n\n{footer}"
 
     @retry(
         stop=stop_after_attempt(3),

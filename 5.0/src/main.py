@@ -154,11 +154,17 @@ async def verify_api_key(api_key: str = Depends(api_key_header)):
 
 
 def verify_telegram_secret(request: Request) -> bool:
-    """Verify Telegram webhook secret token."""
+    """Verify Telegram webhook secret token. Fail-closed in production."""
     expected_secret = settings.telegram_webhook_secret
     if not expected_secret:
-        # No secret configured - allow access (for development)
-        return True
+        if settings.is_production:
+            # SECURITY: Fail closed in production - reject if secret not configured
+            log("error", "TELEGRAM_WEBHOOK_SECRET not configured in production - rejecting request")
+            return False
+        else:
+            # Allow in development (fail-open) for local testing
+            log("warn", "TELEGRAM_WEBHOOK_SECRET not configured - allowing in dev mode")
+            return True
     received_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
     if not hmac.compare_digest(received_secret, expected_secret):
         return False
@@ -177,10 +183,9 @@ async def add_request_id(request: Request, call_next):
 
 @app.get("/")
 async def root():
-    """Health check endpoint."""
+    """Health check endpoint (public, no sensitive info)."""
     return {
         "service": "trading-desk",
-        "version": "5.0.0",
         "timestamp_et": now_et().isoformat(),
         "status": "healthy"
     }
@@ -293,10 +298,14 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
 
     Returns VRP, liquidity, sentiment, and strategy recommendations.
     """
-    # Validate and normalize ticker
+    # Validate date parameter if provided
+    if date and not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+        raise HTTPException(400, "Invalid date format (expected YYYY-MM-DD)")
+
+    # Validate and normalize ticker - use same pattern as Telegram handler
     ticker = ticker.upper().strip()
-    if not ticker.replace(".", "").isalnum() or len(ticker) > 10:
-        raise HTTPException(400, "Invalid ticker")
+    if not re.match(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$', ticker):
+        raise HTTPException(400, "Invalid ticker format")
 
     # Convert common company names to ticker symbols
     ticker = TICKER_ALIASES.get(ticker, ticker)
@@ -431,11 +440,13 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
         )
 
         # Calculate position size for top strategy
+        # Account size from environment or default (configurable)
+        account_size = settings.account_size
         position_size = 0
         if strategies and liquidity_tier != "REJECT":
             top_strategy = strategies[0]
             position_size = calculate_position_size(
-                account_value=100000,  # Default account size
+                account_value=account_size,
                 max_risk_per_contract=top_strategy.max_risk,
                 win_rate=0.574,  # Historical win rate
                 risk_reward=top_strategy.risk_reward,
@@ -497,6 +508,9 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
         raise HTTPException(500, f"Analysis failed: {str(e)}")
 
 
+# Scan timeout for whisper endpoint to avoid Cloud Run timeout
+MAX_SCAN_TIME_SECONDS = 60
+
 @app.get("/api/whisper")
 async def whisper(date: str = None, format: str = "json", _: bool = Depends(verify_api_key)):
     """
@@ -528,8 +542,13 @@ async def whisper(date: str = None, format: str = "json", _: bool = Depends(veri
         repo = get_historical_repo()
         tradier = get_tradier()
         results = []
+        scan_start = time.time()
 
         for e in upcoming[:30]:  # Limit to 30 tickers
+            # Check scan timeout to avoid Cloud Run request timeout
+            if time.time() - scan_start > MAX_SCAN_TIME_SECONDS:
+                log("warn", "Scan timeout, returning partial results", tickers_scanned=len(results))
+                break
             ticker = e["symbol"]
             earnings_date = e["report_date"]
 
@@ -729,6 +748,10 @@ async def telegram_webhook(request: Request):
                 await telegram.send_message("Usage: /analyze TICKER")
             else:
                 ticker = parts[1].upper()
+                # Defense in depth: validate ticker format before processing
+                if not re.match(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$', ticker):
+                    await telegram.send_message(f"Invalid ticker format: {ticker}")
+                    return {"ok": True}
                 try:
                     result = await analyze(ticker=ticker, format="json")
                     if result.get("status") == "success":

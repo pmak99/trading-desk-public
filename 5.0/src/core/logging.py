@@ -32,6 +32,13 @@ def get_request_id() -> str:
     return rid
 
 
+# Secret patterns to filter from logs. Uses suffix matching to catch secrets
+# while allowing legitimate fields like 'api_key_valid', 'token_count'.
+# The pattern checks if the key ENDS with these suffixes.
+SECRET_SUFFIXES = ['_key', 'api_key', '_token', 'token', '_secret', '_password']
+SECRET_EXACT = ['authorization', 'credentials', 'password', 'secret']
+
+
 def log(level: str, message: str, **context: Any):
     """
     Log a structured JSON message.
@@ -41,13 +48,20 @@ def log(level: str, message: str, **context: Any):
         message: Human-readable message
         **context: Additional key-value pairs
     """
-    # Filter out secrets
+    # Filter out secrets using suffix and exact matching
+    def is_secret_key(key: str) -> bool:
+        k = key.lower()
+        # Check suffix matches (e.g., api_key, bot_token)
+        if any(k.endswith(suffix) for suffix in SECRET_SUFFIXES):
+            return True
+        # Check exact matches
+        if k in SECRET_EXACT:
+            return True
+        return False
+
     safe_context = {
         k: v for k, v in context.items()
-        if v is not None
-        and 'key' not in k.lower()
-        and 'token' not in k.lower()
-        and 'secret' not in k.lower()
+        if v is not None and not is_secret_key(k)
     }
 
     entry = {

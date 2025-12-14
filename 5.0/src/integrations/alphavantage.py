@@ -39,8 +39,8 @@ class AlphaVantageClient:
         self.api_key = api_key
 
     @retry(
-        stop=stop_after_attempt(5),
-        wait=wait_exponential(multiplier=2, min=5, max=60),
+        stop=stop_after_attempt(2),  # Reduced from 5 to avoid burning rate limit
+        wait=wait_exponential(multiplier=15, min=30, max=120),  # Longer waits for rate limits
         retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.TimeoutException)),
     )
     async def _request(

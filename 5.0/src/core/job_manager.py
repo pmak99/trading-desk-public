@@ -47,6 +47,39 @@ JOB_DEPENDENCIES: Dict[str, List[str]] = {
 }
 
 
+def _validate_no_cycles():
+    """Validate that job dependencies form a DAG (no circular dependencies)."""
+    def find_cycle(job: str, visited: set, rec_stack: set, path: list) -> list:
+        """Return cycle path if found, empty list otherwise."""
+        visited.add(job)
+        rec_stack.add(job)
+        path.append(job)
+
+        for dep in JOB_DEPENDENCIES.get(job, []):
+            if dep not in visited:
+                cycle = find_cycle(dep, visited, rec_stack, path)
+                if cycle:
+                    return cycle
+            elif dep in rec_stack:
+                # Found cycle - return path from dep to current
+                cycle_start = path.index(dep)
+                return path[cycle_start:] + [dep]
+
+        path.pop()
+        rec_stack.remove(job)
+        return []
+
+    for job in JOB_DEPENDENCIES:
+        cycle = find_cycle(job, set(), set(), [])
+        if cycle:
+            cycle_path = " -> ".join(cycle)
+            raise ValueError(f"Circular dependency detected: {cycle_path}")
+
+
+# Validate at import time
+_validate_no_cycles()
+
+
 def get_scheduled_job(
     time_str: str,
     is_weekend: bool,
@@ -140,7 +173,11 @@ class JobManager:
         return True, ""
 
     def record_status(self, job_name: str, status: str):
-        """Record job completion status to persistent storage."""
+        """Record job completion status to persistent storage.
+
+        Raises:
+            sqlite3.Error: On database errors (don't swallow - caller should handle)
+        """
         today = today_et()
         timestamp = now_et().isoformat()
 
@@ -157,6 +194,7 @@ class JobManager:
             log("info", "Job status recorded", job=job_name, status=status)
         except sqlite3.Error as e:
             log("error", "Failed to record job status", error=str(e), job=job_name)
+            raise  # Don't swallow database errors - caller should know
         finally:
             conn.close()
 
