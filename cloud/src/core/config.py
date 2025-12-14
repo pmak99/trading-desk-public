@@ -157,6 +157,43 @@ class Settings:
         return os.environ.get('GCS_BUCKET', 'your-gcs-bucket')
 
     @property
+    def grafana_graphite_url(self) -> str:
+        """Grafana Cloud Graphite metrics endpoint."""
+        # Check env var first (for local dev), then secrets
+        env_val = os.environ.get('GRAFANA_GRAPHITE_URL')
+        if env_val:
+            return env_val
+        self._load_secrets()
+        return self._secrets.get('GRAFANA_GRAPHITE_URL', '') if self._secrets else ''
+
+    @property
+    def grafana_user(self) -> str:
+        """Grafana Cloud instance ID."""
+        env_val = os.environ.get('GRAFANA_USER')
+        if env_val:
+            return env_val
+        self._load_secrets()
+        return self._secrets.get('GRAFANA_USER', '') if self._secrets else ''
+
+    @property
+    def grafana_api_key(self) -> str:
+        """Grafana Cloud API key."""
+        env_val = os.environ.get('GRAFANA_API_KEY')
+        if env_val:
+            return env_val
+        self._load_secrets()
+        return self._secrets.get('GRAFANA_API_KEY', '') if self._secrets else ''
+
+    @property
+    def grafana_dashboard_url(self) -> str:
+        """Grafana dashboard URL for notifications."""
+        env_val = os.environ.get('GRAFANA_DASHBOARD_URL')
+        if env_val:
+            return env_val
+        self._load_secrets()
+        return self._secrets.get('GRAFANA_DASHBOARD_URL', '') if self._secrets else ''
+
+    @property
     def DB_PATH(self) -> str:
         """Database path - uses temp file in tests, data dir in production."""
         env_path = os.environ.get('DB_PATH')
