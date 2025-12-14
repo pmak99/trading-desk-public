@@ -39,10 +39,21 @@ from src.core.logging import log
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="metrics")
 
 
-# Grafana Cloud config
-GRAFANA_GRAPHITE_URL = os.getenv("GRAFANA_GRAPHITE_URL", "")
-GRAFANA_USER = os.getenv("GRAFANA_USER", "")
-GRAFANA_API_KEY = os.getenv("GRAFANA_API_KEY", "")
+# Grafana Cloud config - lazy loaded from settings to support secrets
+_grafana_config = None
+
+
+def _get_grafana_config():
+    """Lazy load Grafana config from settings (supports secrets)."""
+    global _grafana_config
+    if _grafana_config is None:
+        from src.core.config import settings
+        _grafana_config = {
+            "url": settings.grafana_graphite_url,
+            "user": settings.grafana_user,
+            "key": settings.grafana_api_key,
+        }
+    return _grafana_config
 
 # Default interval for metrics in seconds.
 # Grafana Cloud Graphite requires an interval field. 10 seconds is the
@@ -55,10 +66,11 @@ def _is_enabled() -> bool:
     """
     Check if Grafana Cloud is configured.
 
-    Returns True only when all three environment variables are set:
-    GRAFANA_GRAPHITE_URL, GRAFANA_USER, and GRAFANA_API_KEY.
+    Returns True only when all three config values are set:
+    grafana_graphite_url, grafana_user, and grafana_api_key.
     """
-    return bool(GRAFANA_GRAPHITE_URL and GRAFANA_USER and GRAFANA_API_KEY)
+    config = _get_grafana_config()
+    return bool(config["url"] and config["user"] and config["key"])
 
 
 def _format_tags(tags: dict) -> List[str]:
@@ -117,7 +129,7 @@ def _push_metric(metrics: List[dict]) -> None:
     Push metrics to Grafana Cloud Graphite endpoint.
 
     Called from ThreadPoolExecutor to avoid blocking async event loop.
-    Uses Basic auth with GRAFANA_USER:GRAFANA_API_KEY credentials.
+    Uses Basic auth with grafana_user:grafana_api_key credentials.
 
     Args:
         metrics: List of metric dicts with name, interval, value, time, and optional tags
@@ -125,17 +137,18 @@ def _push_metric(metrics: List[dict]) -> None:
     Note:
         Failures are logged but never raised - metrics should not break the app.
     """
-    if not _is_enabled():
-        log("debug", "Metrics disabled", url=bool(GRAFANA_GRAPHITE_URL), user=bool(GRAFANA_USER), key=bool(GRAFANA_API_KEY))
+    config = _get_grafana_config()
+    if not (config["url"] and config["user"] and config["key"]):
+        log("debug", "Metrics disabled", url=bool(config["url"]), user=bool(config["user"]), key=bool(config["key"]))
         return
 
     try:
         # Use short timeout, runs in background thread
         with httpx.Client(timeout=2.0) as client:
             response = client.post(
-                GRAFANA_GRAPHITE_URL,
+                config["url"],
                 content=json.dumps(metrics),
-                auth=(GRAFANA_USER, GRAFANA_API_KEY),  # httpx handles Basic auth
+                auth=(config["user"], config["key"]),  # httpx handles Basic auth
                 headers={"Content-Type": "application/json"},
             )
             if response.status_code >= 400:

@@ -6,47 +6,54 @@ import asyncio
 from unittest.mock import patch, MagicMock
 
 
+# Helper to create mock config
+def mock_grafana_config(url="", user="", key=""):
+    """Create a mock grafana config dict."""
+    return {"url": url, "user": user, "key": key}
+
+
 class TestIsEnabled:
     """Tests for _is_enabled() configuration check."""
 
     def test_enabled_when_all_configured(self):
         """Returns True when all Grafana vars are set."""
-        with patch.dict("os.environ", {
-            "GRAFANA_GRAPHITE_URL": "https://graphite.example.com/metrics",
-            "GRAFANA_USER": "12345",
-            "GRAFANA_API_KEY": "glc_xxx",
-        }):
-            # Reimport to pick up new env vars
-            from src.core import metrics
-            # Force reload of module-level constants
-            metrics.GRAFANA_GRAPHITE_URL = "https://graphite.example.com/metrics"
-            metrics.GRAFANA_USER = "12345"
-            metrics.GRAFANA_API_KEY = "glc_xxx"
+        from src.core import metrics
+        with patch.object(metrics, "_get_grafana_config", return_value=mock_grafana_config(
+            url="https://graphite.example.com/metrics",
+            user="12345",
+            key="glc_xxx"
+        )):
             assert metrics._is_enabled() is True
 
     def test_disabled_when_url_missing(self):
         """Returns False when URL is missing."""
         from src.core import metrics
-        metrics.GRAFANA_GRAPHITE_URL = ""
-        metrics.GRAFANA_USER = "12345"
-        metrics.GRAFANA_API_KEY = "glc_xxx"
-        assert metrics._is_enabled() is False
+        with patch.object(metrics, "_get_grafana_config", return_value=mock_grafana_config(
+            url="",
+            user="12345",
+            key="glc_xxx"
+        )):
+            assert metrics._is_enabled() is False
 
     def test_disabled_when_user_missing(self):
         """Returns False when user is missing."""
         from src.core import metrics
-        metrics.GRAFANA_GRAPHITE_URL = "https://graphite.example.com/metrics"
-        metrics.GRAFANA_USER = ""
-        metrics.GRAFANA_API_KEY = "glc_xxx"
-        assert metrics._is_enabled() is False
+        with patch.object(metrics, "_get_grafana_config", return_value=mock_grafana_config(
+            url="https://graphite.example.com/metrics",
+            user="",
+            key="glc_xxx"
+        )):
+            assert metrics._is_enabled() is False
 
     def test_disabled_when_key_missing(self):
         """Returns False when API key is missing."""
         from src.core import metrics
-        metrics.GRAFANA_GRAPHITE_URL = "https://graphite.example.com/metrics"
-        metrics.GRAFANA_USER = "12345"
-        metrics.GRAFANA_API_KEY = ""
-        assert metrics._is_enabled() is False
+        with patch.object(metrics, "_get_grafana_config", return_value=mock_grafana_config(
+            url="https://graphite.example.com/metrics",
+            user="12345",
+            key=""
+        )):
+            assert metrics._is_enabled() is False
 
 
 class TestFormatTags:
@@ -85,32 +92,32 @@ class TestRecord:
     def test_noop_when_disabled(self):
         """Does nothing when Grafana not configured."""
         from src.core import metrics
-        metrics.GRAFANA_GRAPHITE_URL = ""
-
-        with patch.object(metrics._executor, "submit") as mock_submit:
-            metrics.record("test.metric", 100.0)
-            mock_submit.assert_not_called()
+        with patch.object(metrics, "_get_grafana_config", return_value=mock_grafana_config()):
+            with patch.object(metrics._executor, "submit") as mock_submit:
+                metrics.record("test.metric", 100.0)
+                mock_submit.assert_not_called()
 
     def test_submits_to_executor_when_enabled(self):
         """Submits metric to thread pool when configured."""
         from src.core import metrics
-        metrics.GRAFANA_GRAPHITE_URL = "https://graphite.example.com/metrics"
-        metrics.GRAFANA_USER = "12345"
-        metrics.GRAFANA_API_KEY = "glc_xxx"
-
-        with patch.object(metrics._executor, "submit") as mock_submit:
-            metrics.record("test.metric", 42.0, {"tag": "value"})
-            mock_submit.assert_called_once()
-            # Verify metric structure
-            call_args = mock_submit.call_args[0]
-            assert call_args[0] == metrics._push_metric
-            metric_list = call_args[1]
-            assert len(metric_list) == 1
-            metric = metric_list[0]
-            assert metric["name"] == "test.metric"
-            assert metric["value"] == 42.0
-            assert "tags" in metric
-            assert "tag=value" in metric["tags"]
+        with patch.object(metrics, "_get_grafana_config", return_value=mock_grafana_config(
+            url="https://graphite.example.com/metrics",
+            user="12345",
+            key="glc_xxx"
+        )):
+            with patch.object(metrics._executor, "submit") as mock_submit:
+                metrics.record("test.metric", 42.0, {"tag": "value"})
+                mock_submit.assert_called_once()
+                # Verify metric structure
+                call_args = mock_submit.call_args[0]
+                assert call_args[0] == metrics._push_metric
+                metric_list = call_args[1]
+                assert len(metric_list) == 1
+                metric = metric_list[0]
+                assert metric["name"] == "test.metric"
+                assert metric["value"] == 42.0
+                assert "tags" in metric
+                assert "tag=value" in metric["tags"]
 
 
 class TestTimer:
@@ -119,9 +126,6 @@ class TestTimer:
     def test_records_duration(self):
         """Records elapsed time in milliseconds."""
         from src.core import metrics
-        metrics.GRAFANA_GRAPHITE_URL = "https://graphite.example.com/metrics"
-        metrics.GRAFANA_USER = "12345"
-        metrics.GRAFANA_API_KEY = "glc_xxx"
 
         with patch.object(metrics, "record") as mock_record:
             with metrics.timer("test.duration", {"op": "test"}):
@@ -141,9 +145,6 @@ class TestTimedDecorator:
     def test_sync_function(self):
         """Times synchronous function."""
         from src.core import metrics
-        metrics.GRAFANA_GRAPHITE_URL = "https://graphite.example.com/metrics"
-        metrics.GRAFANA_USER = "12345"
-        metrics.GRAFANA_API_KEY = "glc_xxx"
 
         with patch.object(metrics, "record") as mock_record:
             @metrics.timed("sync.duration")
@@ -159,9 +160,6 @@ class TestTimedDecorator:
     def test_async_function(self):
         """Times asynchronous function."""
         from src.core import metrics
-        metrics.GRAFANA_GRAPHITE_URL = "https://graphite.example.com/metrics"
-        metrics.GRAFANA_USER = "12345"
-        metrics.GRAFANA_API_KEY = "glc_xxx"
 
         with patch.object(metrics, "record") as mock_record:
             @metrics.timed("async.duration")
@@ -275,58 +273,62 @@ class TestPushMetric:
     def test_noop_when_disabled(self):
         """Does nothing when Grafana not configured."""
         from src.core import metrics
-        metrics.GRAFANA_GRAPHITE_URL = ""
-
-        with patch("httpx.Client") as mock_client:
-            metrics._push_metric([{"name": "test", "value": 1}])
-            mock_client.assert_not_called()
+        with patch.object(metrics, "_get_grafana_config", return_value=mock_grafana_config()):
+            with patch("httpx.Client") as mock_client:
+                metrics._push_metric([{"name": "test", "value": 1}])
+                mock_client.assert_not_called()
 
     def test_posts_json_with_basic_auth(self):
         """Posts JSON payload with Basic auth."""
         from src.core import metrics
-        metrics.GRAFANA_GRAPHITE_URL = "https://graphite.example.com/metrics"
-        metrics.GRAFANA_USER = "12345"
-        metrics.GRAFANA_API_KEY = "glc_xxx"
 
         mock_response = MagicMock()
         mock_response.status_code = 200
 
-        with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
+        with patch.object(metrics, "_get_grafana_config", return_value=mock_grafana_config(
+            url="https://graphite.example.com/metrics",
+            user="12345",
+            key="glc_xxx"
+        )):
+            with patch("httpx.Client") as mock_client_class:
+                mock_client = MagicMock()
+                mock_client.__enter__ = MagicMock(return_value=mock_client)
+                mock_client.__exit__ = MagicMock(return_value=False)
+                mock_client.post.return_value = mock_response
+                mock_client_class.return_value = mock_client
 
-            test_metric = [{"name": "test.metric", "value": 42}]
-            metrics._push_metric(test_metric)
+                test_metric = [{"name": "test.metric", "value": 42}]
+                metrics._push_metric(test_metric)
 
-            mock_client.post.assert_called_once()
-            call_kwargs = mock_client.post.call_args[1]
-            assert call_kwargs["auth"] == ("12345", "glc_xxx")
-            assert call_kwargs["headers"]["Content-Type"] == "application/json"
+                mock_client.post.assert_called_once()
+                call_kwargs = mock_client.post.call_args[1]
+                assert call_kwargs["auth"] == ("12345", "glc_xxx")
+                assert call_kwargs["headers"]["Content-Type"] == "application/json"
 
     def test_logs_warning_on_http_error(self):
         """Logs warning when HTTP request fails."""
         from src.core import metrics
-        metrics.GRAFANA_GRAPHITE_URL = "https://graphite.example.com/metrics"
-        metrics.GRAFANA_USER = "12345"
-        metrics.GRAFANA_API_KEY = "glc_xxx"
+        from src.core.logging import log
 
         mock_response = MagicMock()
         mock_response.status_code = 401
         mock_response.text = "Unauthorized"
 
-        with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
+        with patch.object(metrics, "_get_grafana_config", return_value=mock_grafana_config(
+            url="https://graphite.example.com/metrics",
+            user="12345",
+            key="glc_xxx"
+        )):
+            with patch("httpx.Client") as mock_client_class:
+                mock_client = MagicMock()
+                mock_client.__enter__ = MagicMock(return_value=mock_client)
+                mock_client.__exit__ = MagicMock(return_value=False)
+                mock_client.post.return_value = mock_response
+                mock_client_class.return_value = mock_client
 
-            with patch.object(metrics, "log") as mock_log:
-                metrics._push_metric([{"name": "test", "value": 1}])
-                mock_log.assert_called()
-                # Check that warning was logged
-                log_calls = [c for c in mock_log.call_args_list if c[0][0] == "warn"]
-                assert len(log_calls) > 0
+                with patch("src.core.metrics.log") as mock_log:
+                    metrics._push_metric([{"name": "test", "value": 1}])
+                    mock_log.assert_called()
+                    # Check that warning was logged
+                    log_calls = [c for c in mock_log.call_args_list if c[0][0] == "warn"]
+                    assert len(log_calls) > 0
