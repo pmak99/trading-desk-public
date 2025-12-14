@@ -41,7 +41,8 @@ class DatabaseSync:
         blob = bucket.blob(self.blob_name)
 
         try:
-            blob.reload(timeout=self.DOWNLOAD_TIMEOUT)  # Get current metadata
+            # Get current metadata with timeout to avoid hanging on network issues
+            blob.reload(timeout=self.DOWNLOAD_TIMEOUT)
             self._generation = blob.generation
             blob.download_to_filename(
                 str(self.local_path),

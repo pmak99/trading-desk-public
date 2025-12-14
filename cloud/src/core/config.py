@@ -137,6 +137,22 @@ class Settings:
         return self._secrets.get('TELEGRAM_WEBHOOK_SECRET', '')
 
     @property
+    def account_size(self) -> int:
+        """Get account size from secrets or environment (default 100k)."""
+        self._load_secrets()
+        size_str = self._secrets.get('ACCOUNT_SIZE', '100000') if self._secrets else '100000'
+        try:
+            return int(size_str)
+        except (ValueError, TypeError):
+            return 100000
+
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production environment."""
+        env = os.environ.get('ENV', os.environ.get('ENVIRONMENT', 'development'))
+        return env.lower() in ('production', 'prod')
+
+    @property
     def gcs_bucket(self) -> str:
         return os.environ.get('GCS_BUCKET', 'your-gcs-bucket')
 

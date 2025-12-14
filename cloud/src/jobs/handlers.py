@@ -39,20 +39,20 @@ class JobRunner:
     @property
     def tradier(self) -> TradierClient:
         if self._tradier is None:
-            self._tradier = TradierClient(settings.TRADIER_API_KEY)
+            self._tradier = TradierClient(settings.tradier_api_key)  # Use property accessor
         return self._tradier
 
     @property
     def alphavantage(self) -> AlphaVantageClient:
         if self._alphavantage is None:
-            self._alphavantage = AlphaVantageClient(settings.ALPHA_VANTAGE_KEY)
+            self._alphavantage = AlphaVantageClient(settings.alpha_vantage_key)  # Use property accessor
         return self._alphavantage
 
     @property
     def perplexity(self) -> PerplexityClient:
         if self._perplexity is None:
             self._perplexity = PerplexityClient(
-                api_key=settings.PERPLEXITY_API_KEY,
+                api_key=settings.perplexity_api_key,  # Use property accessor
                 db_path=settings.DB_PATH,
             )
         return self._perplexity
@@ -61,8 +61,8 @@ class JobRunner:
     def telegram(self) -> TelegramSender:
         if self._telegram is None:
             self._telegram = TelegramSender(
-                bot_token=settings.TELEGRAM_BOT_TOKEN,
-                chat_id=settings.TELEGRAM_CHAT_ID,
+                bot_token=settings.telegram_bot_token,  # Use property accessor
+                chat_id=settings.telegram_chat_id,  # Use property accessor
             )
         return self._telegram
 

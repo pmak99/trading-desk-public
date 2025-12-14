@@ -145,8 +145,8 @@ def _push_metric(metrics: List[dict]) -> None:
             else:
                 log("debug", "Metrics pushed", count=len(metrics))
     except Exception as e:
-        # Silently fail - metrics shouldn't break the app
-        log("debug", "Metrics push error", error=str(e))
+        # Log at warn level so we can see metrics failures in production
+        log("warn", "Metrics push error", error=str(e))
 
 
 @contextmanager

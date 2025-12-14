@@ -108,54 +108,73 @@ class BudgetTracker:
         month_prefix = date_str[:7]  # YYYY-MM
         timestamp = now_et().isoformat()
 
-        conn = sqlite3.connect(self.db_path, isolation_level="EXCLUSIVE")
-        try:
-            # Get current stats in same transaction
-            cursor = conn.execute(
-                "SELECT calls, cost FROM api_budget WHERE date = ? AND service = ?",
-                (date_str, service)
-            )
-            row = cursor.fetchone()
-            daily_calls = row[0] if row else 0
+        # Use DEFERRED (default) with IMMEDIATE upgrade for write - better for GCS multi-instance
+        max_retries = 3
+        for attempt in range(max_retries):
+            conn = sqlite3.connect(self.db_path, timeout=30)
+            try:
+                # Begin immediate transaction (write lock)
+                conn.execute("BEGIN IMMEDIATE")
 
-            # Check daily limit BEFORE incrementing
-            if daily_calls >= settings.PERPLEXITY_DAILY_LIMIT:
-                log("warn", "Daily API limit reached", service=service, calls=daily_calls)
+                # Get current stats in same transaction
+                cursor = conn.execute(
+                    "SELECT calls, cost FROM api_budget WHERE date = ? AND service = ?",
+                    (date_str, service)
+                )
+                row = cursor.fetchone()
+                daily_calls = row[0] if row else 0
+
+                # Check daily limit BEFORE incrementing
+                if daily_calls >= settings.PERPLEXITY_DAILY_LIMIT:
+                    log("warn", "Daily API limit reached", service=service, calls=daily_calls)
+                    conn.rollback()
+                    return False
+
+                # Get monthly cost
+                cursor = conn.execute(
+                    "SELECT SUM(cost) FROM api_budget WHERE date LIKE ? AND service = ?",
+                    (f"{month_prefix}%", service)
+                )
+                row = cursor.fetchone()
+                monthly_cost = row[0] if row and row[0] else 0.0
+
+                # Check monthly budget BEFORE incrementing
+                if monthly_cost >= settings.PERPLEXITY_MONTHLY_BUDGET:
+                    log("warn", "Monthly API budget exceeded", service=service, cost=monthly_cost)
+                    conn.rollback()
+                    return False
+
+                # All checks passed - atomically increment
+                conn.execute("""
+                    INSERT INTO api_budget (date, service, calls, cost, updated_at)
+                    VALUES (?, ?, 1, ?, ?)
+                    ON CONFLICT(date, service) DO UPDATE SET
+                        calls = calls + 1,
+                        cost = cost + excluded.cost,
+                        updated_at = excluded.updated_at
+                """, (date_str, service, cost, timestamp))
+
+                conn.commit()
+                log("debug", "API call acquired", service=service, daily_calls=daily_calls + 1)
+                return True
+
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e).lower() and attempt < max_retries - 1:
+                    log("warn", "Database locked, retrying", attempt=attempt + 1)
+                    conn.rollback()
+                    import time
+                    time.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                    continue
+                log("error", "Failed to acquire API call", error=str(e))
+                conn.rollback()
                 return False
-
-            # Get monthly cost
-            cursor = conn.execute(
-                "SELECT SUM(cost) FROM api_budget WHERE date LIKE ? AND service = ?",
-                (f"{month_prefix}%", service)
-            )
-            row = cursor.fetchone()
-            monthly_cost = row[0] if row and row[0] else 0.0
-
-            # Check monthly budget BEFORE incrementing
-            if monthly_cost >= settings.PERPLEXITY_MONTHLY_BUDGET:
-                log("warn", "Monthly API budget exceeded", service=service, cost=monthly_cost)
+            except sqlite3.Error as e:
+                log("error", "Failed to acquire API call", error=str(e))
+                conn.rollback()
                 return False
-
-            # All checks passed - atomically increment
-            conn.execute("""
-                INSERT INTO api_budget (date, service, calls, cost, updated_at)
-                VALUES (?, ?, 1, ?, ?)
-                ON CONFLICT(date, service) DO UPDATE SET
-                    calls = calls + 1,
-                    cost = cost + excluded.cost,
-                    updated_at = excluded.updated_at
-            """, (date_str, service, cost, timestamp))
-
-            conn.commit()
-            log("debug", "API call acquired", service=service, daily_calls=daily_calls + 1)
-            return True
-
-        except sqlite3.Error as e:
-            log("error", "Failed to acquire API call", error=str(e))
-            conn.rollback()
-            return False
-        finally:
-            conn.close()
+            finally:
+                conn.close()
+        return False
 
     def get_daily_stats(self, service: str, date_str: Optional[str] = None) -> Dict[str, Any]:
         """Get daily usage stats for a service."""
