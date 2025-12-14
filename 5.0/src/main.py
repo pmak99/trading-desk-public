@@ -775,7 +775,7 @@ async def telegram_webhook(request: Request):
                     await telegram.send_message(f"Error analyzing {ticker}: {str(e)}")
 
         elif text.startswith("/dashboard"):
-            grafana_url = settings.get("GRAFANA_DASHBOARD_URL", "")
+            grafana_url = settings.grafana_dashboard_url
             if grafana_url:
                 await telegram.send_message(f"📊 <b>Dashboard</b>\n\n<a href=\"{grafana_url}\">Open Grafana Dashboard</a>")
             else:
