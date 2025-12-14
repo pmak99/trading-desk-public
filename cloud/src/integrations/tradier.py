@@ -9,7 +9,7 @@ import time
 import httpx
 from typing import Dict, List, Any, Optional
 
-from src.core.logging import log
+from src.core.logging import log, get_request_id
 from src.core import metrics
 
 BASE_URL = "https://api.tradier.com/v1"
@@ -53,7 +53,9 @@ class TradierClient:
             try:
                 async with httpx.AsyncClient(timeout=30) as client:
                     url = f"{BASE_URL}/{endpoint}"
-                    response = await client.get(url, headers=self.headers, params=params)
+                    # Include request ID for distributed tracing
+                    headers = {**self.headers, "X-Request-ID": get_request_id()}
+                    response = await client.get(url, headers=headers, params=params)
 
                     # Handle rate limit specially
                     if response.status_code == 429:

@@ -11,7 +11,7 @@ import time
 import httpx
 from typing import Dict, Any, Optional
 
-from src.core.logging import log
+from src.core.logging import log, get_request_id
 from src.core.budget import BudgetTracker
 from src.core import metrics
 
@@ -93,6 +93,7 @@ class PerplexityClient:
                         headers={
                             "Authorization": f"Bearer {self.api_key}",
                             "Content-Type": "application/json",
+                            "X-Request-ID": get_request_id(),  # Distributed tracing
                         },
                         json={
                             "model": self.model,
@@ -128,27 +129,35 @@ class PerplexityClient:
         metrics.api_call("perplexity", duration_ms, success=False)
         return {"error": "All retries failed"}
 
+    # Model-specific pricing (per token) as of 2025
+    PRICING = {
+        "sonar": {"input": 0.000001, "output": 0.000001},           # $1/M input, $1/M output
+        "sonar-pro": {"input": 0.000003, "output": 0.000015},       # $3/M input, $15/M output
+        "sonar-reasoning": {"input": 0.000001, "output": 0.000005}, # $1/M input, $5/M output
+        "sonar-reasoning-pro": {"input": 0.000002, "output": 0.000008},  # Estimated
+    }
+
     def _estimate_cost(self, data: Dict[str, Any]) -> float:
         """
         Estimate cost from API response usage data.
 
-        Perplexity pricing (as of 2025):
-        - sonar: $1/M input, $1/M output
-        - sonar-pro: $3/M input, $15/M output
-        - sonar-reasoning: $1/M input, $5/M output
-
-        Falls back to $0.002 estimate if no usage data.
+        Uses model-specific pricing for accurate cost tracking.
+        Falls back to conservative estimate (sonar-pro pricing) if no usage data.
         """
         usage = data.get("usage", {})
+
+        # Get pricing for current model, default to most expensive (sonar-pro) for safety
+        pricing = self.PRICING.get(self.model, self.PRICING["sonar-pro"])
+
         if not usage:
-            return 0.002  # Default estimate for ~1k tokens
+            # Accurate estimate based on prompt structure: ~50 input, ~150 output tokens
+            return max(0.001, pricing["input"] * 50 + pricing["output"] * 150)
 
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
 
-        # Use sonar pricing: $1 per million = $0.000001 per token
-        input_cost = input_tokens * 0.000001
-        output_cost = output_tokens * 0.000001
+        input_cost = input_tokens * pricing["input"]
+        output_cost = output_tokens * pricing["output"]
 
         # Add small buffer for safety
         return max(0.001, round(input_cost + output_cost, 6))
