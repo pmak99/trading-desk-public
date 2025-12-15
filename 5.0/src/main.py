@@ -3,9 +3,11 @@ Trading Desk 5.0 - Autopilot
 FastAPI application entry point.
 """
 
+import asyncio
 import re
 import time
 import uuid
+import sqlite3
 from datetime import timedelta
 from typing import Optional, List, Dict, Any
 
@@ -191,16 +193,45 @@ async def root():
     }
 
 
+def _safe_record_status(manager: JobManager, job: str, status: str) -> bool:
+    """
+    Safely record job status, handling database errors gracefully.
+
+    Returns:
+        True if status was recorded successfully, False if database error occurred
+    """
+    try:
+        manager.record_status(job, status)
+        return True
+    except sqlite3.Error as db_err:
+        log("error", "Failed to record job status",
+            job=job, status=status, error=str(db_err))
+        metrics.count("ivcrush.job_status.failed", {"job": job, "error": "sqlite3"})
+        return False
+
+
 @app.post("/dispatch")
-async def dispatch(_: bool = Depends(verify_api_key)):
+async def dispatch(
+    force: str | None = None,
+    _: bool = Depends(verify_api_key)
+):
     """
     Dispatcher endpoint called by Cloud Scheduler every 15 min.
     Routes to correct job based on current time.
+
+    Args:
+        force: Optional job name to force-run (bypasses time-based scheduling)
     """
     start_time = time.time()
     try:
         manager = get_job_manager()
-        job = manager.get_current_job()
+
+        # Force-run specific job if requested (for testing)
+        if force:
+            job = force
+            log("info", "Force-running job", job=job)
+        else:
+            job = manager.get_current_job()
 
         if not job:
             log("info", "No job scheduled for current time")
@@ -224,14 +255,17 @@ async def dispatch(_: bool = Depends(verify_api_key)):
             result = await runner.run(job)
         except Exception as e:
             log("error", "Job execution failed", job=job, error=str(e))
-            manager.record_status(job, "failed")
+            status_recorded = _safe_record_status(manager, job, "failed")
             duration_ms = (time.time() - start_time) * 1000
             metrics.request_error("dispatch", duration_ms, "job_failed")
-            return {"status": "error", "job": job, "error": str(e)}
+            response = {"status": "error", "job": job, "error": str(e)}
+            if not status_recorded:
+                response["status_recording"] = "failed"
+            return response
 
         # Record status based on result
         status = "success" if result.get("status") == "success" else "failed"
-        manager.record_status(job, status)
+        status_recorded = _safe_record_status(manager, job, status)
 
         duration_ms = (time.time() - start_time) * 1000
         if status == "success":
@@ -239,7 +273,10 @@ async def dispatch(_: bool = Depends(verify_api_key)):
         else:
             metrics.request_error("dispatch", duration_ms, "job_result_failed")
 
-        return {"status": status, "job": job, "result": result}
+        response = {"status": status, "job": job, "result": result}
+        if not status_recorded:
+            response["status_recording"] = "failed"
+        return response
 
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
@@ -511,6 +548,84 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
 # Scan timeout for whisper endpoint to avoid Cloud Run timeout
 MAX_SCAN_TIME_SECONDS = 60
 
+
+async def _scan_tickers_for_whisper(
+    upcoming: List[Dict],
+    repo,
+    tradier
+) -> List[Dict[str, Any]]:
+    """
+    Scan tickers for VRP opportunities.
+
+    Extracted for asyncio.wait_for timeout support.
+    """
+    results = []
+
+    for e in upcoming[:30]:  # Limit to 30 tickers
+        ticker = e["symbol"]
+        earnings_date = e["report_date"]
+
+        try:
+            # Get historical data
+            moves = repo.get_moves(ticker)
+            historical_count = len(moves)
+
+            if historical_count < 4:
+                continue
+
+            # Extract historical move percentages (use intraday, matches 2.0)
+            historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
+            if not historical_pcts:
+                continue
+
+            historical_avg = sum(historical_pcts) / len(historical_pcts)
+
+            # Get current price from Tradier
+            quote = await tradier.get_quote(ticker)
+            price = quote.get("last") or quote.get("close") or quote.get("prevclose")
+            if not price:
+                continue
+
+            # Estimate implied move (1.5x historical as proxy without options data)
+            implied_move_pct = historical_avg * 1.5
+
+            # Calculate VRP
+            vrp_data = calculate_vrp(
+                implied_move_pct=implied_move_pct,
+                historical_moves=historical_pcts,
+            )
+
+            # Skip if VRP calculation failed or below threshold
+            if vrp_data.get("error") or vrp_data.get("vrp_ratio", 0) < 3.0:
+                continue
+
+            # Calculate score (assume GOOD liquidity for screening)
+            score_data = calculate_score(
+                vrp_ratio=vrp_data["vrp_ratio"],
+                vrp_tier=vrp_data["tier"],
+                implied_move_pct=implied_move_pct,
+                liquidity_tier="GOOD",
+            )
+
+            results.append({
+                "ticker": ticker,
+                "name": e.get("name", ""),
+                "earnings_date": earnings_date,
+                "price": price,
+                "vrp_ratio": vrp_data["vrp_ratio"],
+                "vrp_tier": vrp_data["tier"],
+                "implied_move_pct": round(implied_move_pct, 1),
+                "historical_mean": round(historical_avg, 1),
+                "score": score_data["total_score"],
+            })
+
+        except Exception as ex:
+            log("debug", "Skipping ticker", ticker=ticker, error=str(ex))
+            continue
+
+    return results
+
+
 @app.get("/api/whisper")
 async def whisper(date: str = None, format: str = "json", _: bool = Depends(verify_api_key)):
     """
@@ -538,77 +653,20 @@ async def whisper(date: str = None, format: str = "json", _: bool = Depends(veri
 
         upcoming = [e for e in earnings if e["report_date"] in target_dates]
 
-        # Analyze each ticker
+        # Analyze each ticker with timeout protection
         repo = get_historical_repo()
         tradier = get_tradier()
-        results = []
-        scan_start = time.time()
 
-        for e in upcoming[:30]:  # Limit to 30 tickers
-            # Check scan timeout to avoid Cloud Run request timeout
-            if time.time() - scan_start > MAX_SCAN_TIME_SECONDS:
-                log("warn", "Scan timeout, returning partial results", tickers_scanned=len(results))
-                break
-            ticker = e["symbol"]
-            earnings_date = e["report_date"]
-
-            try:
-                # Get historical data
-                moves = repo.get_moves(ticker)
-                historical_count = len(moves)
-
-                if historical_count < 4:
-                    continue
-
-                # Extract historical move percentages (use intraday, matches 2.0)
-                historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
-                if not historical_pcts:
-                    continue
-
-                historical_avg = sum(historical_pcts) / len(historical_pcts)
-
-                # Get current price from Tradier
-                quote = await tradier.get_quote(ticker)
-                price = quote.get("last") or quote.get("close") or quote.get("prevclose")
-                if not price:
-                    continue
-
-                # Estimate implied move (1.5x historical as proxy without options data)
-                implied_move_pct = historical_avg * 1.5
-
-                # Calculate VRP
-                vrp_data = calculate_vrp(
-                    implied_move_pct=implied_move_pct,
-                    historical_moves=historical_pcts,
-                )
-
-                # Skip if VRP calculation failed or below threshold
-                if vrp_data.get("error") or vrp_data.get("vrp_ratio", 0) < 3.0:
-                    continue
-
-                # Calculate score (assume GOOD liquidity for screening)
-                score_data = calculate_score(
-                    vrp_ratio=vrp_data["vrp_ratio"],
-                    vrp_tier=vrp_data["tier"],
-                    implied_move_pct=implied_move_pct,
-                    liquidity_tier="GOOD",
-                )
-
-                results.append({
-                    "ticker": ticker,
-                    "name": e.get("name", ""),
-                    "earnings_date": earnings_date,
-                    "price": price,
-                    "vrp_ratio": vrp_data["vrp_ratio"],
-                    "vrp_tier": vrp_data["tier"],
-                    "implied_move_pct": round(implied_move_pct, 1),
-                    "historical_mean": round(historical_avg, 1),
-                    "score": score_data["total_score"],
-                })
-
-            except Exception as ex:
-                log("debug", "Skipping ticker", ticker=ticker, error=str(ex))
-                continue
+        try:
+            results = await asyncio.wait_for(
+                _scan_tickers_for_whisper(upcoming, repo, tradier),
+                timeout=MAX_SCAN_TIME_SECONDS
+            )
+        except asyncio.TimeoutError:
+            log("warn", "Whisper scan timed out", timeout_seconds=MAX_SCAN_TIME_SECONDS)
+            metrics.count("ivcrush.whisper.timeout", {"reason": "scan_timeout"})
+            # Return empty results on timeout - better than hanging
+            results = []
 
         # Sort by score descending
         results.sort(key=lambda x: x["score"], reverse=True)

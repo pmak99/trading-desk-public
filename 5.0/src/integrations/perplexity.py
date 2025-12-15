@@ -12,7 +12,7 @@ import httpx
 from typing import Dict, Any, Optional
 
 from src.core.logging import log, get_request_id
-from src.core.budget import BudgetTracker
+from src.core.budget import BudgetTracker, BudgetExhausted
 from src.core import metrics
 
 BASE_URL = "https://api.perplexity.ai"
@@ -179,16 +179,11 @@ class PerplexityClient:
         """
         # Atomic check-and-acquire with estimated cost
         if not self.budget.try_acquire_call("perplexity", cost=0.005):
-            log("warn", "Perplexity budget exceeded, returning default")
-            return {
-                "direction": "neutral",
-                "score": 0.0,
-                "tailwinds": "",
-                "headwinds": "",
-                "error": "budget_exceeded",
-                "ticker": ticker,
-                "earnings_date": earnings_date,
-            }
+            log("warn", "Perplexity budget exceeded", ticker=ticker)
+            raise BudgetExhausted(
+                service="perplexity",
+                reason=f"Budget exhausted before fetching sentiment for {ticker}"
+            )
 
         log("info", "Fetching sentiment", ticker=ticker, date=earnings_date)
 

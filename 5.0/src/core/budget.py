@@ -13,6 +13,15 @@ from .config import today_et, now_et, settings
 from .logging import log
 
 
+class BudgetExhausted(Exception):
+    """Raised when API budget (daily calls or monthly spend) is exhausted."""
+
+    def __init__(self, service: str, reason: str):
+        self.service = service
+        self.reason = reason
+        super().__init__(f"Budget exhausted for {service}: {reason}")
+
+
 class BudgetTracker:
     """Track API usage against daily/monthly limits."""
 
