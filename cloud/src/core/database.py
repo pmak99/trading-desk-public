@@ -16,6 +16,11 @@ from pathlib import Path
 from .logging import log
 
 
+class DatabaseCorruptedError(Exception):
+    """Raised when database integrity check fails."""
+    pass
+
+
 class DatabaseSync:
     """Sync SQLite to/from GCS with generation-based locking."""
 
@@ -48,12 +53,37 @@ class DatabaseSync:
                 str(self.local_path),
                 timeout=self.DOWNLOAD_TIMEOUT
             )
+
+            # Validate database integrity after download
+            self._validate_integrity()
+
             log("info", "Database downloaded", generation=self._generation)
+        except DatabaseCorruptedError:
+            # Re-raise corruption errors - don't swallow them
+            raise
         except Exception as e:
             log("warn", "No existing database, starting fresh", error=str(e))
             self._generation = None
 
         return str(self.local_path)
+
+    def _validate_integrity(self) -> None:
+        """
+        Validate downloaded database integrity.
+
+        Raises:
+            DatabaseCorruptedError: If integrity check fails
+        """
+        conn = sqlite3.connect(str(self.local_path))
+        try:
+            cursor = conn.execute("PRAGMA integrity_check")
+            result = cursor.fetchone()[0]
+            if result != "ok":
+                raise DatabaseCorruptedError(
+                    f"Database integrity check failed: {result}"
+                )
+        finally:
+            conn.close()
 
     def upload(self) -> bool:
         """

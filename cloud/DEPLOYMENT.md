@@ -433,6 +433,78 @@ curl -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
 
 ---
 
+## Database Migrations
+
+The SQLite database schema is defined in repository `_init_db()` methods:
+- `src/core/job_manager.py` - `job_status` table
+- `src/core/budget.py` - `api_budget` table
+- `src/repositories/historical_moves.py` - `historical_moves` table
+- `src/repositories/sentiment_cache.py` - `sentiment_cache` table
+
+### Migration Strategy
+
+Since SQLite is serverless and synced via GCS, we use a **manual migration approach**:
+
+1. **Additive changes** (new columns with defaults, new tables):
+   - Add to `_init_db()` method
+   - Deploy - new schema auto-created on first write
+   - No downtime
+
+2. **Breaking changes** (column renames, type changes):
+   ```bash
+   # 1. Download current database
+   gsutil cp gs://your-gcs-bucket/ivcrush.db /tmp/ivcrush_backup.db
+
+   # 2. Apply migration manually
+   sqlite3 /tmp/ivcrush_backup.db "ALTER TABLE job_status ADD COLUMN retry_count INTEGER DEFAULT 0;"
+
+   # 3. Verify integrity
+   sqlite3 /tmp/ivcrush_backup.db "PRAGMA integrity_check;"
+
+   # 4. Upload migrated database (during low-traffic window)
+   gsutil cp /tmp/ivcrush_backup.db gs://your-gcs-bucket/ivcrush.db
+
+   # 5. Deploy code with new schema
+   gcloud builds submit && gcloud run deploy trading-desk ...
+   ```
+
+3. **Rollback procedure**:
+   ```bash
+   # List backup versions
+   gsutil ls -la gs://your-gcs-bucket/ivcrush.db
+
+   # Restore specific version
+   gsutil cp gs://your-gcs-bucket/ivcrush.db#<generation> gs://your-gcs-bucket/ivcrush.db
+   ```
+
+### Example: Adding a Column
+
+```python
+# In _init_db() method:
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS job_status (
+        ...
+        retry_count INTEGER DEFAULT 0  -- NEW: Track retry attempts
+    )
+""")
+
+# For existing tables, add migration:
+try:
+    conn.execute("ALTER TABLE job_status ADD COLUMN retry_count INTEGER DEFAULT 0")
+except sqlite3.OperationalError:
+    pass  # Column already exists
+```
+
+### Best Practices
+
+- **Always backup** before schema changes
+- **Test locally** with production data copy
+- **Deploy during low-traffic** windows (weekends)
+- **Monitor Cloud Run logs** after migration for errors
+- **Keep migrations additive** when possible (avoid breaking changes)
+
+---
+
 ## Quick Reference
 
 ```bash

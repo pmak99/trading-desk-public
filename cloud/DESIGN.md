@@ -91,30 +91,30 @@ Cloud Scheduler: */15 * * * * → POST /dispatch
 
 **Weekdays (Mon-Fri):**
 
-| Time | Job | Description |
-|------|-----|-------------|
-| 5:30 AM | `pre-market-prep` | Fetch earnings calendar, calculate VRP for today's tickers |
-| 6:30 AM | `sentiment-scan` | Call Perplexity for qualified tickers (VRP >= 3x) |
-| 7:30 AM | `morning-digest` | Send Telegram digest: ranked tickers, strategies |
-| 10:00 AM | `market-open-refresh` | Refresh VRP with live options data |
-| 2:30 PM | `pre-trade-refresh` | Final VRP refresh before trade window |
-| 4:30 PM | `after-hours-check` | Check for after-market earnings surprises |
-| 7:00 PM | `outcome-recorder` | Record actual moves for tickers that reported |
-| 8:00 PM | `evening-summary` | Daily P&L tracking, sentiment accuracy |
+| Time | Job | Status | Description |
+|------|-----|--------|-------------|
+| 5:30 AM | `pre-market-prep` | ✅ | Fetch earnings calendar, calculate VRP for today's tickers, rate-limited API calls |
+| 6:30 AM | `sentiment-scan` | ✅ | Pre-cache AI sentiment for high-VRP tickers (≥3x), respects budget limits |
+| 7:30 AM | `morning-digest` | ✅ | Send Telegram digest with top 10 ranked opportunities |
+| 10:00 AM | `market-open-refresh` | ✅ | Refresh prices, alert on significant pre-market moves (>50% of historical avg) |
+| 2:30 PM | `pre-trade-refresh` | ✅ | Final VRP validation, send actionable alert with top 5 AMC earnings |
+| 4:30 PM | `after-hours-check` | ✅ | Monitor after-hours prices, alert on moves >1% with historical context |
+| 7:00 PM | `outcome-recorder` | ✅ | Record same-day earnings moves to historical_moves table |
+| 8:00 PM | `evening-summary` | ✅ | Daily summary notification |
 
 **Saturday:**
 
-| Time | Job | Description |
-|------|-----|-------------|
-| 4:00 AM | `weekly-backfill` | Run `/backfill --pending` for all outcomes |
+| Time | Job | Status | Description |
+|------|-----|--------|-------------|
+| 4:00 AM | `weekly-backfill` | ✅ | Backfill historical moves for past 7 days earnings, duplicate detection |
 
 **Sunday:**
 
-| Time | Job | Description |
-|------|-----|-------------|
-| 3:00 AM | `weekly-backup` | Upload database snapshots |
-| 3:30 AM | `weekly-cleanup` | Prune old cache entries, vacuum DBs |
-| 4:00 AM | `calendar-sync` | Refresh earnings calendar for next week |
+| Time | Job | Status | Description |
+|------|-----|--------|-------------|
+| 3:00 AM | `weekly-backup` | ✅ | Integrity check then upload database to GCS with timestamp |
+| 3:30 AM | `weekly-cleanup` | ✅ | Clear expired sentiment cache entries |
+| 4:00 AM | `calendar-sync` | ✅ | Refresh 3-month earnings calendar from Alpha Vantage |
 
 ### Job Dependencies
 
@@ -133,6 +133,37 @@ JOB_DEPENDENCIES = {
 ```
 
 If a dependency failed, the job logs an error and skips execution.
+
+### Job Configuration Constants
+
+All jobs use configurable limits defined in `src/jobs/handlers.py`:
+
+```python
+# Processing limits
+MAX_PRE_MARKET_TICKERS = 30   # Max tickers to evaluate in pre-market prep
+MAX_PRIME_CANDIDATES = 40     # Max candidates to consider for priming
+MAX_PRIME_CALLS = 15          # Max Perplexity API calls during prime
+MAX_DIGEST_CANDIDATES = 40    # Max candidates to consider for digest
+MAX_BACKFILL_TICKERS = 60     # Max tickers to backfill in weekly job
+
+# Rate limiting
+RATE_LIMIT_DELAY = 0.5        # Seconds between API call batches
+RATE_LIMIT_BATCH_SIZE = 5     # API calls before adding delay
+
+# VRP estimation
+VRP_IMPLIED_MOVE_MULTIPLIER = 1.5  # Conservative estimate for pre-market screening
+```
+
+### Job Error Handling
+
+All jobs follow consistent error handling patterns:
+
+1. **Rate limiting**: `asyncio.sleep()` between API call batches
+2. **Failed ticker tracking**: Jobs track `failed_tickers` list for debugging
+3. **Empty API validation**: Check for empty responses before processing
+4. **Telegram error handling**: Capture and log Telegram send failures separately
+5. **Metrics recording**: Duration and counts recorded for all jobs
+6. **Duplicate detection**: Backfill jobs skip already-recorded earnings
 
 ## On-Demand Commands
 
@@ -733,11 +764,19 @@ uvicorn main:app --reload --port 8080
 3. Implement Yahoo Finance client
 4. Add integration tests
 
-### Phase 4: Jobs
-1. Implement pre-market-prep
-2. Implement sentiment-scan
-3. Implement morning-digest
-4. Add remaining jobs
+### Phase 4: Jobs ✅
+1. ✅ Implement pre-market-prep
+2. ✅ Implement sentiment-scan
+3. ✅ Implement morning-digest
+4. ✅ Implement market-open-refresh
+5. ✅ Implement pre-trade-refresh
+6. ✅ Implement after-hours-check
+7. ✅ Implement outcome-recorder
+8. ✅ Implement evening-summary
+9. ✅ Implement weekly-backfill
+10. ✅ Implement weekly-backup
+11. ✅ Implement weekly-cleanup
+12. ✅ Implement calendar-sync
 
 ### Phase 5: Commands
 1. Implement /analyze
