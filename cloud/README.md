@@ -398,16 +398,37 @@ Create 4 dashboards in Grafana UI:
 
 ## Scheduled Jobs
 
+All 12 scheduled jobs are fully implemented with rate limiting, error tracking, and metrics.
+
+### Weekday Jobs (Mon-Fri)
+
 | Time (ET) | Job | Description |
 |-----------|-----|-------------|
-| 5:30 AM | pre-market-prep | Fetch earnings, calculate VRP |
-| 6:30 AM | sentiment-scan | AI sentiment for qualified tickers |
-| 7:30 AM | morning-digest | Send Telegram digest |
-| 10:00 AM | market-open-refresh | Refresh with live options |
-| 2:30 PM | pre-trade-refresh | Final VRP refresh |
-| 4:30 PM | after-hours-check | Check earnings surprises |
-| 7:00 PM | outcome-recorder | Record actual moves |
-| 8:00 PM | evening-summary | Daily P&L summary |
+| 5:30 AM | `pre-market-prep` | Fetch earnings calendar, calculate VRP for upcoming tickers |
+| 6:30 AM | `sentiment-scan` | Pre-cache AI sentiment for high-VRP tickers (≥3x) |
+| 7:30 AM | `morning-digest` | Send Telegram digest with top 10 ranked opportunities |
+| 10:00 AM | `market-open-refresh` | Refresh prices, alert on significant pre-market moves |
+| 2:30 PM | `pre-trade-refresh` | Final VRP validation, actionable alert for AMC earnings |
+| 4:30 PM | `after-hours-check` | Monitor after-hours prices, alert on moves >1% |
+| 7:00 PM | `outcome-recorder` | Record same-day earnings moves to database |
+| 8:00 PM | `evening-summary` | Daily summary notification |
+
+### Weekend Jobs
+
+| Day | Time (ET) | Job | Description |
+|-----|-----------|-----|-------------|
+| Sat | 4:00 AM | `weekly-backfill` | Backfill historical moves for past 7 days |
+| Sun | 3:00 AM | `weekly-backup` | Integrity check + upload database to GCS |
+| Sun | 3:30 AM | `weekly-cleanup` | Clear expired sentiment cache entries |
+| Sun | 4:00 AM | `calendar-sync` | Refresh 3-month earnings calendar |
+
+### Job Features
+
+- **Rate limiting**: 0.5s delay every 5 API calls
+- **Error tracking**: Failed tickers tracked for debugging
+- **Duplicate detection**: Backfill skips already-recorded earnings
+- **Metrics**: Duration and counts recorded for all jobs
+- **Telegram alerts**: Error handling for notification failures
 
 ## Troubleshooting
 
