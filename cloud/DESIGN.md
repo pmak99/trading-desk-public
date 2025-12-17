@@ -149,10 +149,30 @@ MAX_BACKFILL_TICKERS = 60     # Max tickers to backfill in weekly job
 # Rate limiting
 RATE_LIMIT_DELAY = 0.5        # Seconds between API call batches
 RATE_LIMIT_BATCH_SIZE = 5     # API calls before adding delay
-
-# VRP estimation
-VRP_IMPLIED_MOVE_MULTIPLIER = 1.5  # Conservative estimate for pre-market screening
+TRADIER_CALLS_PER_TICKER = 3  # Quote + expirations + chain per ticker
 ```
+
+### Implied Move Calculation
+
+All job handlers use **real options data** from Tradier for VRP calculation:
+
+```python
+# src/domain/implied_move.py - shared helpers
+async def fetch_real_implied_move(tradier, ticker, earnings_date, price=None):
+    """Fetch ATM straddle from Tradier for accurate implied move."""
+    # 1. Get stock price (if not provided)
+    # 2. Get expirations, find nearest after earnings
+    # 3. Fetch options chain
+    # 4. Calculate implied move from ATM straddle
+
+def get_implied_move_with_fallback(real_result, historical_avg):
+    """Extract real data or fall back to 1.5x estimate."""
+    if real_result["used_real_data"]:
+        return real_result["implied_move_pct"], True
+    return historical_avg * 1.5, False  # Fallback only if Tradier unavailable
+```
+
+**Rate Limiting Note**: Each ticker requires 3 Tradier API calls (quote, expirations, chain). Rate limiting accounts for this with `TRADIER_CALLS_PER_TICKER = 3`.
 
 ### Job Error Handling
 
@@ -648,6 +668,7 @@ LIQUIDITY_RANK = {"EXCELLENT": 0, "GOOD": 1, "WARNING": 2, "REJECT": 3}
 │   ├── __init__.py
 │   ├── vrp.py                # VRP calculation
 │   ├── liquidity.py          # Liquidity scoring
+│   ├── implied_move.py       # Implied move from ATM straddle (shared helpers)
 │   ├── strategies.py         # Strategy generation
 │   ├── position_sizing.py    # Half-Kelly
 │   └── scoring.py            # Composite score
