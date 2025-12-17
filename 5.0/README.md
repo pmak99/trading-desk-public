@@ -284,6 +284,7 @@ VRP Ratio = Implied Move / Historical Mean Move
 │   ├── domain/              # Business logic
 │   │   ├── vrp.py           # VRP calculation
 │   │   ├── liquidity.py     # Liquidity tiers
+│   │   ├── implied_move.py  # Implied move from ATM straddle
 │   │   ├── scoring.py       # Composite scoring
 │   │   └── strategies.py    # Strategy generation
 │   ├── integrations/        # API clients
@@ -424,7 +425,8 @@ All 12 scheduled jobs are fully implemented with rate limiting, error tracking, 
 
 ### Job Features
 
-- **Rate limiting**: 0.5s delay every 5 API calls
+- **Real implied moves**: ATM straddle pricing from Tradier (3 API calls per ticker)
+- **Rate limiting**: 0.5s delay every 5 API calls (accounts for 3x calls per ticker)
 - **Error tracking**: Failed tickers tracked for debugging
 - **Duplicate detection**: Backfill skips already-recorded earnings
 - **Metrics**: Duration and counts recorded for all jobs

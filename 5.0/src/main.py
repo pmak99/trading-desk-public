@@ -29,9 +29,13 @@ from src.domain import (
     apply_sentiment_modifier,
     generate_strategies,
     calculate_position_size,
-    calculate_implied_move_from_chain,
     HistoricalMovesRepository,
     SentimentCacheRepository,
+)
+from src.domain.implied_move import (
+    calculate_implied_move_from_chain,
+    fetch_real_implied_move,
+    get_implied_move_with_fallback,
 )
 from src.integrations import (
     TradierClient,
@@ -557,6 +561,10 @@ async def _scan_tickers_for_whisper(
     """
     Scan tickers for VRP opportunities.
 
+    Uses REAL implied move from Tradier options chains (ATM straddle pricing)
+    to calculate accurate VRP ratios. Falls back to estimate only if options
+    data unavailable.
+
     Extracted for asyncio.wait_for timeout support.
     """
     results = []
@@ -580,14 +588,19 @@ async def _scan_tickers_for_whisper(
 
             historical_avg = sum(historical_pcts) / len(historical_pcts)
 
-            # Get current price from Tradier
-            quote = await tradier.get_quote(ticker)
-            price = quote.get("last") or quote.get("close") or quote.get("prevclose")
-            if not price:
+            # Fetch real implied move from Tradier options chain
+            im_result = await fetch_real_implied_move(
+                tradier, ticker, earnings_date
+            )
+
+            # Skip if we couldn't get a price
+            if im_result.get("error") == "No price available":
                 continue
 
-            # Estimate implied move (1.5x historical as proxy without options data)
-            implied_move_pct = historical_avg * 1.5
+            implied_move_pct, _ = get_implied_move_with_fallback(
+                im_result, historical_avg
+            )
+            price = im_result.get("price")
 
             # Calculate VRP
             vrp_data = calculate_vrp(
@@ -617,6 +630,7 @@ async def _scan_tickers_for_whisper(
                 "implied_move_pct": round(implied_move_pct, 1),
                 "historical_mean": round(historical_avg, 1),
                 "score": score_data["total_score"],
+                "real_data": used_real_data,
             })
 
         except Exception as ex:

@@ -56,7 +56,8 @@ VRP Ratio = Implied Move / Historical Mean Move
 
 ## Directory Structure
 
-- `2.0/` - **CURRENT PRODUCTION** system (core VRP/strategy math)
+- `5.0/` - **CLOUD AUTOPILOT** - 24/7 Cloud Run service with real implied moves from Tradier
+- `2.0/` - **CORE MATH** - VRP/strategy calculations (used by 5.0)
 - `4.0/` - AI sentiment layer (Perplexity, caching, budget tracking)
 - `3.0/` - ML enhancement project (in development)
 - `1.0/` - Deprecated original system

@@ -3,11 +3,13 @@ Job handlers for scheduled tasks.
 
 Each job is an async function that performs a specific operation.
 
-VRP Estimation Note:
-    The 1.5x multiplier used in VRP calculations (implied_move_pct = historical_avg * 1.5)
-    is a conservative estimate for pre-market screening. This approximates typical IV expansion
-    before earnings. For actual trading decisions, real options data from Tradier should be
-    used to calculate the true implied move from at-the-money straddle prices.
+Implied Move Calculation:
+    All job handlers use real options data from Tradier to calculate implied moves.
+    The fetch_real_implied_move() helper fetches ATM straddle prices for accurate
+    VRP calculation. Only if Tradier data is unavailable (no price, no expiration,
+    empty chain), we fall back to historical_avg * 1.5 as a conservative estimate.
+
+    See src/domain/implied_move.py for the shared helper functions.
 """
 
 import asyncio
@@ -35,6 +37,11 @@ from src.domain import (
     HistoricalMovesRepository,
     SentimentCacheRepository,
 )
+from src.domain.implied_move import (
+    fetch_real_implied_move,
+    get_implied_move_with_fallback,
+    IMPLIED_MOVE_FALLBACK_MULTIPLIER,
+)
 from src.formatters.telegram import format_digest
 
 
@@ -53,9 +60,8 @@ RATE_LIMIT_BATCH_SIZE = 5  # API calls before adding delay
 PRE_MARKET_ALERT_THRESHOLD = 0.5  # Alert if pre-market move > 50% of historical avg
 AFTER_HOURS_ALERT_THRESHOLD = 1.0  # Only track after-hours moves > 1%
 
-# VRP estimation multiplier for pre-market screening
-# See module docstring for explanation
-VRP_IMPLIED_MOVE_MULTIPLIER = 1.5
+# API calls per ticker when fetching real implied move (quote + expirations + chain)
+TRADIER_CALLS_PER_TICKER = 3
 
 
 def _parse_price_history(closes: dict) -> List[tuple]:
@@ -259,10 +265,9 @@ class JobRunner:
         Sentiment scan / Prime (06:30 ET).
         Pre-cache AI sentiment for high-VRP tickers.
 
-        Note: Uses VRP_IMPLIED_MOVE_MULTIPLIER (1.5x) as a conservative estimate.
-        For screening purposes only - actual trades should use real options data.
-        GOOD liquidity is assumed during screening; actual liquidity is verified
-        before trade execution via Tradier options chain data.
+        Uses REAL implied move from Tradier options chains (ATM straddle pricing)
+        to calculate accurate VRP ratios for selecting which tickers to prime.
+        Falls back to estimate only if options data unavailable.
         """
         start_time = asyncio.get_event_loop().time()
         today = today_et()
@@ -295,6 +300,8 @@ class JobRunner:
 
         candidates = []
         failed_tickers = []
+        api_calls = 0
+        real_implied_count = 0
 
         for e in upcoming[:MAX_PRIME_CANDIDATES]:
             ticker = e["symbol"]
@@ -315,7 +322,21 @@ class JobRunner:
                     continue
 
                 historical_avg = sum(historical_pcts) / len(historical_pcts)
-                implied_move_pct = historical_avg * VRP_IMPLIED_MOVE_MULTIPLIER
+
+                # Rate limiting for Tradier API calls (3 calls per ticker)
+                api_calls += TRADIER_CALLS_PER_TICKER
+                if api_calls % (RATE_LIMIT_BATCH_SIZE * TRADIER_CALLS_PER_TICKER) == 0:
+                    await asyncio.sleep(RATE_LIMIT_DELAY)
+
+                # Fetch real implied move from Tradier options chain
+                im_result = await fetch_real_implied_move(
+                    self.tradier, ticker, earnings_date
+                )
+                implied_move_pct, used_real = get_implied_move_with_fallback(
+                    im_result, historical_avg
+                )
+                if used_real:
+                    real_implied_count += 1
 
                 vrp_data = calculate_vrp(
                     implied_move_pct=implied_move_pct,
@@ -333,6 +354,9 @@ class JobRunner:
                 failed_tickers.append(ticker)
                 log("warn", "Failed to evaluate ticker for prime",
                     ticker=ticker, error=str(ex), job="sentiment_scan")
+
+        log("info", "Sentiment scan VRP analysis complete",
+            real_implied_count=real_implied_count, total_evaluated=api_calls)
 
         # Sort by VRP and prime top candidates
         candidates.sort(key=lambda x: x["vrp_ratio"], reverse=True)
@@ -397,6 +421,10 @@ class JobRunner:
         Morning digest / Whisper (07:30 ET).
         Send summary of top VRP opportunities via Telegram.
 
+        Uses REAL implied move from Tradier options chains (ATM straddle pricing)
+        to calculate accurate VRP ratios. Falls back to estimate only if options
+        data unavailable.
+
         Note: GOOD liquidity is assumed during screening. Actual liquidity
         must be verified via Tradier before placing any trades.
         """
@@ -438,6 +466,8 @@ class JobRunner:
 
         opportunities: List[Dict[str, Any]] = []
         failed_tickers = []
+        api_calls = 0  # Track API calls for rate limiting
+        real_implied_count = 0  # Track how many tickers got real options data
 
         for e in upcoming[:MAX_DIGEST_CANDIDATES]:
             ticker = e["symbol"]
@@ -454,13 +484,28 @@ class JobRunner:
                     continue
 
                 historical_avg = sum(historical_pcts) / len(historical_pcts)
-                implied_move_pct = historical_avg * VRP_IMPLIED_MOVE_MULTIPLIER
+
+                # Rate limiting for Tradier API calls (3 calls per ticker)
+                api_calls += TRADIER_CALLS_PER_TICKER
+                if api_calls % (RATE_LIMIT_BATCH_SIZE * TRADIER_CALLS_PER_TICKER) == 0:
+                    await asyncio.sleep(RATE_LIMIT_DELAY)
+
+                # Fetch real implied move from Tradier options chain
+                im_result = await fetch_real_implied_move(
+                    self.tradier, ticker, earnings_date
+                )
+                implied_move_pct, used_real = get_implied_move_with_fallback(
+                    im_result, historical_avg
+                )
+                if used_real:
+                    real_implied_count += 1
 
                 vrp_data = calculate_vrp(
                     implied_move_pct=implied_move_pct,
                     historical_moves=historical_pcts,
                 )
 
+                # Apply VRP discovery threshold
                 if vrp_data.get("vrp_ratio", 0) < settings.VRP_DISCOVERY:
                     continue
 
@@ -494,12 +539,16 @@ class JobRunner:
                     "tailwinds": tailwinds,
                     "headwinds": headwinds,
                     "strategy": f"VRP {vrp_data['tier']}",
+                    "real_data": used_real_data,  # Track if we used real options data
                 })
 
             except Exception as ex:
                 failed_tickers.append(ticker)
                 log("warn", "Failed to evaluate ticker for digest",
                     ticker=ticker, error=str(ex), job="morning_digest")
+
+        log("info", "Digest analysis complete",
+            real_implied_count=real_implied_count, total_candidates=len(upcoming[:MAX_DIGEST_CANDIDATES]))
 
         # Sort by score descending
         opportunities.sort(key=lambda x: x["score"], reverse=True)
@@ -703,7 +752,14 @@ class JobRunner:
                     continue
 
                 historical_avg = sum(historical_pcts) / len(historical_pcts)
-                implied_move_pct = historical_avg * VRP_IMPLIED_MOVE_MULTIPLIER
+
+                # Fetch real implied move from Tradier options chain
+                im_result = await fetch_real_implied_move(
+                    self.tradier, ticker, today
+                )
+                implied_move_pct, _ = get_implied_move_with_fallback(
+                    im_result, historical_avg
+                )
 
                 vrp_data = calculate_vrp(
                     implied_move_pct=implied_move_pct,
