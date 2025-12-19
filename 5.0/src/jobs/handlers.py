@@ -226,13 +226,14 @@ class JobRunner:
                 if historical is None:
                     continue
 
-                # Rate limiting for Yahoo API calls
+                # Rate limiting for Tradier API calls
                 api_calls += 1
                 if api_calls % RATE_LIMIT_BATCH_SIZE == 0:
                     await asyncio.sleep(RATE_LIMIT_DELAY)
 
-                # Get current price for implied move calc
-                price = await self.yahoo.get_current_price(ticker)
+                # Get current price from Tradier (more reliable than Yahoo after hours)
+                quote = await self.tradier.get_quote(ticker)
+                price = quote.get("last") or quote.get("close") or quote.get("prevclose") if quote else None
                 if not price:
                     log("debug", "No price data for ticker", ticker=ticker)
                     continue
@@ -636,8 +637,9 @@ class JobRunner:
                 if api_calls % RATE_LIMIT_BATCH_SIZE == 0:
                     await asyncio.sleep(RATE_LIMIT_DELAY)
 
-                # Get current price
-                price = await self.yahoo.get_current_price(ticker)
+                # Get current price from Tradier (more reliable than Yahoo)
+                quote = await self.tradier.get_quote(ticker)
+                price = quote.get("last") or quote.get("close") or quote.get("prevclose") if quote else None
                 if not price:
                     log("debug", "No current price for market refresh", ticker=ticker)
                     continue
@@ -769,8 +771,8 @@ class JobRunner:
                 if vrp_data.get("vrp_ratio", 0) < settings.VRP_DISCOVERY:
                     continue
 
-                # Get current price for context
-                price = await self.yahoo.get_current_price(ticker)
+                # Get current price for context (use price from implied move result)
+                price = im_result.get("price")
 
                 # Get cached sentiment
                 sentiment = cache.get_sentiment(ticker, today)
@@ -867,8 +869,9 @@ class JobRunner:
                 if api_calls % RATE_LIMIT_BATCH_SIZE == 0:
                     await asyncio.sleep(RATE_LIMIT_DELAY)
 
-                # Get current after-hours quote
-                price = await self.yahoo.get_current_price(ticker)
+                # Get current after-hours quote from Tradier (more reliable than Yahoo)
+                quote = await self.tradier.get_quote(ticker)
+                price = quote.get("last") or quote.get("close") or quote.get("prevclose") if quote else None
                 if not price:
                     log("debug", "No after-hours price available", ticker=ticker)
                     continue
