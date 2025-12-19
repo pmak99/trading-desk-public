@@ -597,7 +597,7 @@ async def _scan_tickers_for_whisper(
             if im_result.get("error") == "No price available":
                 continue
 
-            implied_move_pct, _ = get_implied_move_with_fallback(
+            implied_move_pct, used_real_data = get_implied_move_with_fallback(
                 im_result, historical_avg
             )
             price = im_result.get("price")
