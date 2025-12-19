@@ -262,9 +262,9 @@ VRP Ratio = Implied Move / Historical Mean Move
 ┌─────────────────────────────────────────────────────────────────┐
 │                      External Services                           │
 ├─────────────────────────────────────────────────────────────────┤
-│  Tradier       │  Options chains, Greeks, IV                    │
+│  Tradier       │  Options chains, Greeks, IV, current prices    │
 │  Alpha Vantage │  Earnings calendar                             │
-│  Yahoo Finance │  Stock prices, historical data                 │
+│  Yahoo Finance │  Historical price data only                    │
 │  Perplexity    │  AI sentiment analysis                         │
 │  Telegram      │  Notifications, commands                       │
 └─────────────────────────────────────────────────────────────────┘

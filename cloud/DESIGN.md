@@ -56,10 +56,10 @@
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         External Services                            │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Tradier API      │  Options Greeks, IV, chains                      │
+│  Tradier API      │  Options Greeks, IV, chains, current prices     │
 │  Perplexity API   │  AI sentiment analysis                          │
 │  Alpha Vantage    │  Earnings calendar                              │
-│  Yahoo Finance    │  Stock prices, historical data                  │
+│  Yahoo Finance    │  Historical price data only                     │
 │  Telegram Bot     │  Notifications, commands                        │
 │  Grafana Cloud    │  Metrics, dashboards                            │
 └─────────────────────────────────────────────────────────────────────┘
@@ -445,10 +445,10 @@ From `2.0/src/`:
 ### REWRITE (New implementations)
 
 All API integrations rewritten as direct REST calls (not MCP):
-- `integrations/tradier.py` - Options chains, Greeks
+- `integrations/tradier.py` - Options chains, Greeks, current prices
 - `integrations/perplexity.py` - Sentiment analysis
 - `integrations/alphavantage.py` - Earnings calendar
-- `integrations/yahoo.py` - Prices, historical data
+- `integrations/yahoo.py` - Historical price data only
 - `integrations/telegram.py` - Bot API
 
 ### NEW (From scratch)
