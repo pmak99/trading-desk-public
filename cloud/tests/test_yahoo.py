@@ -13,14 +13,17 @@ def client():
 async def test_get_stock_history(client):
     """Fetch stock price history."""
     mock_ticker = MagicMock()
-    mock_ticker.history.return_value = MagicMock()
-    mock_ticker.history.return_value.to_dict.return_value = {
+    mock_df = MagicMock()
+    mock_df.empty = False  # Indicate non-empty DataFrame
+    mock_df.to_dict.return_value = {
         "Close": {0: 150.0, 1: 152.0, 2: 149.0}
     }
+    mock_ticker.history.return_value = mock_df
 
     with patch("yfinance.Ticker", return_value=mock_ticker):
         result = await client.get_stock_history("AAPL", period="5d")
 
+    assert result is not None
     assert "Close" in result
     assert len(result["Close"]) == 3
 
