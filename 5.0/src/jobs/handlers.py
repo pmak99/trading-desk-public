@@ -539,7 +539,7 @@ class JobRunner:
                     "tailwinds": tailwinds,
                     "headwinds": headwinds,
                     "strategy": f"VRP {vrp_data['tier']}",
-                    "real_data": used_real_data,  # Track if we used real options data
+                    "real_data": used_real,  # Track if we used real options data
                 })
 
             except Exception as ex:
