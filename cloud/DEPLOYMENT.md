@@ -387,6 +387,105 @@ gcloud logs read --service=trading-desk --limit=50 --severity=ERROR
 - [Cloud Scheduler](https://console.cloud.google.com/cloudscheduler)
 - [Secret Manager](https://console.cloud.google.com/security/secret-manager)
 - [Cloud Build](https://console.cloud.google.com/cloud-build/builds)
+- [Monitoring Dashboard](https://console.cloud.google.com/monitoring)
+
+---
+
+## Step 9: Set Up Alerting (Recommended)
+
+Get notified via Telegram when the service goes down.
+
+### 9.1 Enable Monitoring API
+
+```bash
+gcloud services enable monitoring.googleapis.com
+```
+
+### 9.2 Deploy Terraform Infrastructure
+
+```bash
+cd "$PROJECT_ROOT/5.0/terraform"
+
+# Copy and configure variables
+cp terraform.tfvars.example terraform.tfvars
+
+# Get your API key from Secret Manager
+API_KEY=$(gcloud secrets versions access latest --secret=trading-desk-secrets | python3 -c "import sys,json; print(json.load(sys.stdin).get('API_KEY',''))")
+echo "api_key = \"$API_KEY\"" >> terraform.tfvars
+
+# Initialize and apply
+terraform init
+terraform plan
+terraform apply
+```
+
+### 9.3 Verify Alerting
+
+```bash
+# Check uptime check is running
+gcloud monitoring uptime-check-configs list
+
+# Check alert policies
+gcloud monitoring policies list
+```
+
+### 9.4 Test Alert Pipeline
+
+Send a test alert:
+
+```bash
+SERVICE_URL="https://your-cloud-run-url.run.app"
+API_KEY="your_api_key"
+
+curl -X POST "$SERVICE_URL/alerts/ingest" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "incident": {
+      "incident_id": "test-123",
+      "policy_name": "Test Alert",
+      "state": "open",
+      "started_at": "2025-01-01T12:00:00Z",
+      "summary": "This is a test alert",
+      "url": "https://console.cloud.google.com/monitoring"
+    }
+  }'
+```
+
+You should receive a Telegram message within seconds.
+
+### What Gets Monitored
+
+| Alert | Trigger | Notification |
+|-------|---------|--------------|
+| **Service Down** | Health check fails for 2+ minutes | Telegram |
+| **High Error Rate** | 5xx errors exceed 10% for 5 minutes | Telegram |
+| **Container Crashes** | Container instances drop unexpectedly | Telegram |
+
+### Alert Message Format
+
+When an alert triggers, you'll receive:
+
+```
+🚨 ALERT TRIGGERED
+
+Policy: Trading Desk - Service Unavailable
+Summary: Uptime check failing
+Started: 2025-01-15T10:30:00Z
+
+View in GCP Console
+
+#ivcrush #alert #monitoring
+```
+
+When resolved:
+
+```
+✅ ALERT RESOLVED
+
+Policy: Trading Desk - Service Unavailable
+...
+```
 
 ---
 

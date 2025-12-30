@@ -1,0 +1,14 @@
+# Copy this file to terraform.tfvars and fill in values
+# DO NOT commit terraform.tfvars to version control (contains secrets)
+
+project_id  = "your-gcp-project"
+region      = "us-east1"
+service_url = "https://your-cloud-run-url.run.app"
+
+# API key from your .env or Secret Manager
+# Generate with: openssl rand -hex 32
+api_key = "your_api_key_here"
+
+# Optional: Adjust check frequency
+uptime_check_period      = 60  # Check every 60 seconds
+alert_threshold_duration = 120 # Alert after 2 minutes of downtime
