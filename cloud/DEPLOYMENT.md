@@ -16,12 +16,18 @@ Complete walkthrough for deploying the autopilot system to GCP with Telegram not
 
 All API endpoints are protected by API key authentication.
 
-| Endpoint | Auth Method | Access |
-|----------|-------------|--------|
+| Endpoint | Auth Method | Description |
+|----------|-------------|-------------|
 | `/` | None | Public health check |
-| `/api/*` | `X-API-Key` header | Protected |
-| `/dispatch` | `X-API-Key` header | Scheduler only |
-| `/telegram` | Webhook secret | Telegram only |
+| `/api/health` | `X-API-Key` | System health with budget |
+| `/api/budget` | `X-API-Key` | Detailed budget status |
+| `/api/analyze` | `X-API-Key` | Deep ticker analysis |
+| `/api/whisper` | `X-API-Key` | Find opportunities |
+| `/api/scan` | `X-API-Key` | Scan date for earnings |
+| `/prime` | `X-API-Key` | Pre-cache sentiment |
+| `/dispatch` | `X-API-Key` | Scheduler (time-based jobs) |
+| `/alerts/ingest` | Bearer/Basic | GCP Monitoring webhooks |
+| `/telegram` | Webhook secret | Telegram bot webhooks |
 
 ### Using the API from Terminal
 
@@ -37,6 +43,15 @@ curl -H "X-API-Key: $API_KEY" "https://your-cloud-run-url.run.app/api/analyze?ti
 
 # Find opportunities
 curl -H "X-API-Key: $API_KEY" https://your-cloud-run-url.run.app/api/whisper
+
+# Scan specific date for earnings
+curl -H "X-API-Key: $API_KEY" "https://your-cloud-run-url.run.app/api/scan?date=2026-01-15"
+
+# Pre-cache sentiment for upcoming earnings
+curl -X POST -H "X-API-Key: $API_KEY" https://your-cloud-run-url.run.app/prime
+
+# Get detailed budget status
+curl -H "X-API-Key: $API_KEY" https://your-cloud-run-url.run.app/api/budget
 ```
 
 ### Generate New Security Keys
@@ -120,17 +135,26 @@ docker run -p 8080:8080 --env-file .env -v $(pwd)/data:/app/data trading-desk:lo
 ### 2.3 Test Endpoints
 
 ```bash
-# Health check
+# Health check (public)
 curl http://localhost:8080/
 
 # API health with budget info
 curl http://localhost:8080/api/health
+
+# Detailed budget status
+curl http://localhost:8080/api/budget
 
 # Analyze a ticker
 curl "http://localhost:8080/api/analyze?ticker=AAPL"
 
 # Whisper (find opportunities)
 curl http://localhost:8080/api/whisper
+
+# Scan specific date
+curl "http://localhost:8080/api/scan?date=2026-01-15"
+
+# Pre-cache sentiment
+curl -X POST http://localhost:8080/prime
 ```
 
 ### 2.4 Using Docker Compose

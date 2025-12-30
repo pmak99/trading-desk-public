@@ -254,16 +254,72 @@ Risks: [1-2 bullets, max 10 words each]
 - **Math for trading** (how to trade it)
 - Never let sentiment override VRP/liquidity rules
 
+## 5.0 Cloud API Endpoints
+
+Base URL: `https://your-cloud-run-url.run.app`
+
+All endpoints require `X-API-Key` header except `/` (public health check).
+
+### Discovery & Analysis
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/analyze?ticker=AAPL` | GET | Deep analysis - VRP, liquidity, sentiment, strategies |
+| `/api/whisper` | GET | Most anticipated earnings (next 5 days) |
+| `/api/scan?date=2026-01-15` | GET | Scan all earnings for specific date |
+
+### System Operations
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Public health check (no auth) |
+| `/api/health` | GET | Detailed health with budget and job status |
+| `/api/budget` | GET | Detailed API budget with 7-day spending history |
+| `/prime` | POST | Pre-cache sentiment for upcoming earnings |
+| `/dispatch` | POST | Scheduler endpoint (runs time-based jobs) |
+| `/dispatch?force=JOB` | POST | Force-run specific job |
+
+### Telegram
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/telegram` | POST | Telegram bot webhook (secret token auth) |
+
+### Alerting
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/alerts/ingest` | POST | GCP Monitoring webhook receiver |
+
+### Example API Calls
+
+```bash
+# Set API key
+API_KEY=$(gcloud secrets versions access latest --secret=trading-desk-secrets | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('API_KEY',''))")
+
+# Analyze ticker
+curl -s "https://your-cloud-run-url.run.app/api/analyze?ticker=NVDA" -H "X-API-Key: $API_KEY"
+
+# Scan date
+curl -s "https://your-cloud-run-url.run.app/api/scan?date=2026-01-15" -H "X-API-Key: $API_KEY"
+
+# Pre-cache sentiment
+curl -s -X POST "https://your-cloud-run-url.run.app/prime" -H "X-API-Key: $API_KEY"
+
+# Budget status
+curl -s "https://your-cloud-run-url.run.app/api/budget" -H "X-API-Key: $API_KEY"
+```
+
 ## Testing
 
 ```bash
-# 2.0 tests (452 pass)
+# 2.0 tests (496 pass)
 cd 2.0 && ./venv/bin/python -m pytest tests/ -v
 
 # 4.0 tests (184 pass)
 cd 4.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 
-# 5.0 tests
+# 5.0 tests (166 pass)
 cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 ```
 
@@ -283,7 +339,7 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 - No schema versioning/migrations
 - Stale earnings cache if sync fails (mitigated by 6-day TTL)
 
-### 4.0 - AI Sentiment Layer (Grade: A-)
+### 4.0 - AI Sentiment Layer (Grade: A)
 
 **Architecture Strengths:**
 - "Import 2.0, Don't Copy" pattern via sys.path injection
@@ -291,26 +347,28 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 - Budget tracking: 40 calls/day, $5/month
 - 184 tests with edge cases
 - Zero external dependencies (pure stdlib)
+- Consistent confidence calculation via `_calculate_confidence()`
 
-**Known Issues:**
-- Timezone handling: naive datetime edge cases in cache expiry
-- No input validation on direction strings in `record_outcome()`
-- Inconsistent confidence calculation across rules
+**Issues Fixed (December 2025):**
+- ✅ Timezone handling in cache expiry
+- ✅ Direction string validation in `record_outcome()`
+- ✅ Confidence calculation unified across all rules
 
-### 5.0 - Cloud Autopilot (17 issues identified)
+### 5.0 - Cloud Autopilot (All issues resolved ✅)
 
 **Architecture Strengths:**
 - Elegant single-dispatcher job routing
 - Proper Eastern Time handling
 - Job dependency DAG with cycle detection
 - Structured JSON logging with request IDs
+- FastAPI lifespan pattern for proper resource management
+- Centralized ticker validation
 
-**Priority Issues to Address:**
-1. **HIGH:** Database sync race condition in optimistic locking retry
-2. **HIGH:** Verify terraform state not in git (currently OK in .gitignore)
-3. **MEDIUM:** Telegram webhook secret fails open in dev mode
-4. **MEDIUM:** Global mutable singletons (thread-unsafe)
-5. **MEDIUM:** Empty earnings calendar returns success status
-6. **MEDIUM:** JSON secrets parsing lacks error handling
-
-**Full details:** See exploration agents' reports in conversation history.
+**Issues Fixed (December 2025):**
+1. ✅ Database sync race condition - proper generation-based conflict detection
+2. ✅ Terraform state in .gitignore
+3. ✅ Telegram webhook secret fails closed (security)
+4. ✅ Global singletons → FastAPI lifespan with AppState dataclass
+5. ✅ Empty earnings calendar returns proper status
+6. ✅ JSON secrets parsing has error handling
+7. ✅ Added missing endpoints: `/prime`, `/api/budget`, `/api/scan`
