@@ -380,6 +380,385 @@ async def health(format: str = "json", _: bool = Depends(verify_api_key)):
     return data
 
 
+@app.get("/api/budget")
+async def budget_status(_: bool = Depends(verify_api_key)):
+    """
+    Detailed API budget status.
+
+    Returns current usage, daily/monthly limits, and historical spending.
+    """
+    budget = get_budget_tracker()
+    summary = budget.get_summary("perplexity")
+
+    # Get recent spending history from database
+    try:
+        conn = sqlite3.connect(settings.DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT date, SUM(cost) as daily_cost, COUNT(*) as calls
+            FROM api_budget
+            WHERE date >= date('now', '-7 days')
+            GROUP BY date
+            ORDER BY date DESC
+        """)
+        recent_spending = [
+            {"date": row[0], "cost": row[1], "calls": row[2]}
+            for row in cursor.fetchall()
+        ]
+        conn.close()
+    except Exception:
+        recent_spending = []
+
+    return {
+        "status": "success",
+        "timestamp_et": now_et().isoformat(),
+        "perplexity": {
+            "calls_today": summary["today_calls"],
+            "daily_limit": summary["daily_limit"],
+            "can_call": summary["can_call"],
+            "month_cost": summary["month_cost"],
+            "monthly_budget": 5.00,
+            "budget_remaining": summary["budget_remaining"],
+            "budget_utilization_pct": round((5.00 - summary["budget_remaining"]) / 5.00 * 100, 1),
+        },
+        "recent_spending": recent_spending,
+    }
+
+
+@app.post("/prime")
+async def prime(date: str = None, _: bool = Depends(verify_api_key)):
+    """
+    Pre-cache sentiment for upcoming earnings.
+
+    Fetches and caches sentiment data for all high-VRP tickers with earnings
+    in the target date range. Run this 7-8 AM before market open to ensure
+    predictable API costs and instant /whisper responses.
+
+    Args:
+        date: Optional specific date (YYYY-MM-DD). Defaults to next 5 days.
+    """
+    log("info", "Prime request", date=date)
+    start_time = time.time()
+
+    try:
+        # Get earnings calendar
+        alphavantage = get_alphavantage()
+        earnings = await alphavantage.get_earnings_calendar()
+
+        # Filter to target dates
+        today = today_et()
+        target_dates = [today]
+        for i in range(1, 5):
+            future = (now_et() + timedelta(days=i)).strftime("%Y-%m-%d")
+            target_dates.append(future)
+
+        if date:
+            target_dates = [date]
+
+        upcoming = [e for e in earnings if e["report_date"] in target_dates]
+
+        # Get dependencies
+        repo = get_historical_repo()
+        tradier = get_tradier()
+        budget = get_budget_tracker()
+        cache = get_sentiment_cache()
+        perplexity = get_perplexity()
+
+        primed_count = 0
+        skipped_count = 0
+        cached_count = 0
+        failed_tickers = []
+
+        for e in upcoming[:30]:  # Limit to 30 tickers
+            ticker = e["symbol"]
+            earnings_date = e["report_date"]
+
+            try:
+                # Check if already cached
+                cached = cache.get_sentiment(ticker, earnings_date)
+                if cached:
+                    cached_count += 1
+                    continue
+
+                # Check historical data requirement
+                moves = repo.get_moves(ticker)
+                if len(moves) < 4:
+                    skipped_count += 1
+                    continue
+
+                # Check VRP threshold (only prime high-VRP tickers)
+                historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
+                if not historical_pcts:
+                    skipped_count += 1
+                    continue
+
+                historical_avg = sum(historical_pcts) / len(historical_pcts)
+
+                # Get implied move for VRP check
+                im_result = await fetch_real_implied_move(tradier, ticker, earnings_date)
+                implied_move_pct, _ = get_implied_move_with_fallback(im_result, historical_avg)
+
+                vrp_data = calculate_vrp(
+                    implied_move_pct=implied_move_pct,
+                    historical_moves=historical_pcts,
+                )
+
+                # Only prime tickers with VRP >= 3.0
+                if vrp_data.get("vrp_ratio", 0) < 3.0:
+                    skipped_count += 1
+                    continue
+
+                # Check budget before calling
+                if not budget.can_call("perplexity"):
+                    log("warn", "Budget exhausted during prime", primed=primed_count)
+                    break
+
+                # Fetch and cache sentiment
+                sentiment_data = await perplexity.get_sentiment(ticker, earnings_date)
+                if sentiment_data and not sentiment_data.get("error"):
+                    cache.save_sentiment(ticker, earnings_date, sentiment_data)
+                    primed_count += 1
+                    log("info", "Primed sentiment", ticker=ticker, date=earnings_date)
+                else:
+                    failed_tickers.append(ticker)
+
+            except Exception as ex:
+                log("debug", "Prime failed for ticker", ticker=ticker, error=str(ex))
+                failed_tickers.append(ticker)
+                continue
+
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_success("prime", duration_ms)
+
+        return {
+            "status": "success",
+            "target_dates": target_dates,
+            "primed": primed_count,
+            "already_cached": cached_count,
+            "skipped": skipped_count,
+            "failed": failed_tickers if failed_tickers else None,
+            "budget": {
+                "calls_today": budget.get_summary("perplexity")["today_calls"],
+                "remaining": budget.get_summary("perplexity")["budget_remaining"],
+            },
+        }
+
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_error("prime", duration_ms)
+        log("error", "Prime failed", error=str(e))
+        raise HTTPException(500, f"Prime failed: {str(e)}")
+
+
+@app.get("/api/scan")
+async def scan(date: str, format: str = "json", _: bool = Depends(verify_api_key)):
+    """
+    Scan all earnings for a specific date.
+
+    Returns all tickers with earnings on the given date, sorted by VRP score.
+    Includes VRP analysis, liquidity tier, and basic metrics.
+
+    Args:
+        date: Target date in YYYY-MM-DD format (required)
+        format: Output format - "json" or "cli"
+    """
+    # Validate date format
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+        raise HTTPException(400, "Invalid date format (expected YYYY-MM-DD)")
+
+    log("info", "Scan request", date=date)
+    start_time = time.time()
+
+    try:
+        # Get earnings calendar
+        alphavantage = get_alphavantage()
+        earnings = await alphavantage.get_earnings_calendar()
+
+        # Filter to target date
+        target_earnings = [e for e in earnings if e["report_date"] == date]
+
+        if not target_earnings:
+            return {
+                "status": "success",
+                "date": date,
+                "message": "No earnings found for this date",
+                "total_found": 0,
+                "qualified": [],
+                "filtered": [],
+                "errors": [],
+            }
+
+        # Get dependencies
+        repo = get_historical_repo()
+        tradier = get_tradier()
+
+        qualified = []
+        filtered = []
+        errors = []
+
+        for e in target_earnings[:50]:  # Limit to 50 tickers
+            ticker = e["symbol"]
+            earnings_date = e["report_date"]
+
+            try:
+                # Check historical data requirement
+                moves = repo.get_moves(ticker)
+                historical_count = len(moves)
+
+                if historical_count < 4:
+                    filtered.append({
+                        "ticker": ticker,
+                        "reason": f"Insufficient history ({historical_count} quarters)",
+                    })
+                    continue
+
+                # Extract historical move percentages
+                historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
+                if not historical_pcts:
+                    filtered.append({
+                        "ticker": ticker,
+                        "reason": "No valid historical moves",
+                    })
+                    continue
+
+                historical_avg = sum(historical_pcts) / len(historical_pcts)
+
+                # Fetch real implied move
+                im_result = await fetch_real_implied_move(tradier, ticker, earnings_date)
+
+                # Skip if we couldn't get a price
+                if im_result.get("error") == "No price available":
+                    filtered.append({
+                        "ticker": ticker,
+                        "reason": "No price available",
+                    })
+                    continue
+
+                implied_move_pct, used_real_data = get_implied_move_with_fallback(
+                    im_result, historical_avg
+                )
+                price = im_result.get("price")
+
+                # Calculate VRP
+                vrp_data = calculate_vrp(
+                    implied_move_pct=implied_move_pct,
+                    historical_moves=historical_pcts,
+                )
+
+                if vrp_data.get("error"):
+                    filtered.append({
+                        "ticker": ticker,
+                        "reason": f"VRP calculation failed: {vrp_data.get('error')}",
+                    })
+                    continue
+
+                vrp_ratio = vrp_data.get("vrp_ratio", 0)
+                vrp_tier = vrp_data.get("tier", "SKIP")
+
+                # Get liquidity tier from options chain
+                liquidity_tier = "UNKNOWN"
+                if im_result.get("chain"):
+                    chain = im_result["chain"]
+                    total_oi = sum(opt.get("open_interest") or 0 for opt in chain)
+                    avg_spread = 0
+                    spread_count = 0
+                    for opt in chain:
+                        bid = opt.get("bid") or 0
+                        ask = opt.get("ask") or 0
+                        if bid > 0 and ask > 0:
+                            spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
+                            avg_spread += spread_pct
+                            spread_count += 1
+
+                    if spread_count > 0:
+                        avg_spread /= spread_count
+
+                    liquidity_tier = classify_liquidity_tier(
+                        oi=total_oi,
+                        spread_pct=avg_spread,
+                        position_size=10,
+                    )
+
+                # Calculate score
+                score_data = calculate_score(
+                    vrp_ratio=vrp_ratio,
+                    vrp_tier=vrp_tier,
+                    implied_move_pct=implied_move_pct,
+                    liquidity_tier=liquidity_tier if liquidity_tier != "UNKNOWN" else "WARNING",
+                )
+
+                # Determine if qualified (VRP >= 3.0)
+                if vrp_ratio >= 3.0:
+                    qualified.append({
+                        "ticker": ticker,
+                        "name": e.get("name", ""),
+                        "price": price,
+                        "vrp_ratio": round(vrp_ratio, 2),
+                        "vrp_tier": vrp_tier,
+                        "implied_move_pct": round(implied_move_pct, 1),
+                        "historical_mean": round(historical_avg, 1),
+                        "historical_count": historical_count,
+                        "liquidity_tier": liquidity_tier,
+                        "score": round(score_data["total_score"], 1),
+                        "real_data": used_real_data,
+                    })
+                else:
+                    filtered.append({
+                        "ticker": ticker,
+                        "reason": f"Low VRP ({vrp_ratio:.2f}x < 3.0x)",
+                        "vrp_ratio": round(vrp_ratio, 2),
+                    })
+
+            except Exception as ex:
+                log("debug", "Scan failed for ticker", ticker=ticker, error=str(ex))
+                errors.append({
+                    "ticker": ticker,
+                    "error": str(ex)[:100],
+                })
+                continue
+
+        # Sort qualified by score descending
+        qualified.sort(key=lambda x: x["score"], reverse=True)
+
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_success("scan", duration_ms)
+        metrics.tickers_qualified(len(qualified))
+
+        result = {
+            "status": "success",
+            "date": date,
+            "total_found": len(target_earnings),
+            "qualified_count": len(qualified),
+            "filtered_count": len(filtered),
+            "error_count": len(errors),
+            "qualified": qualified,
+            "filtered": filtered[:10],  # Limit filtered output
+            "errors": errors[:5] if errors else None,
+        }
+
+        # Format for CLI if requested
+        if format == "cli":
+            lines = [f"📅 Scan Results for {date}", "=" * 40]
+            lines.append(f"Found: {len(target_earnings)} | Qualified: {len(qualified)} | Filtered: {len(filtered)}")
+            lines.append("")
+            if qualified:
+                lines.append("🎯 QUALIFIED OPPORTUNITIES:")
+                for t in qualified[:10]:
+                    tier_emoji = "🟢" if t["liquidity_tier"] in ["EXCELLENT", "GOOD"] else "🟡" if t["liquidity_tier"] == "WARNING" else "🔴"
+                    lines.append(f"  {tier_emoji} {t['ticker']}: VRP {t['vrp_ratio']}x ({t['vrp_tier']}) | Score {t['score']} | {t['liquidity_tier']}")
+            else:
+                lines.append("❌ No qualified opportunities found")
+            return {"output": "\n".join(lines)}
+
+        return result
+
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_error("scan", duration_ms)
+        log("error", "Scan failed", date=date, error=str(e))
+        raise HTTPException(500, f"Scan failed: {str(e)}")
+
+
 @app.post("/alerts/ingest")
 async def alerts_ingest(
     request: Request,

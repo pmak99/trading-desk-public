@@ -87,8 +87,19 @@ class Settings:
         # Priority 2: SECRETS JSON blob
         secrets_json = os.environ.get('SECRETS')
         if secrets_json:
-            self._secrets = json.loads(secrets_json)
-            return
+            try:
+                self._secrets = json.loads(secrets_json)
+                return
+            except json.JSONDecodeError as e:
+                # Log error but continue to Secret Manager fallback
+                # Import log here to avoid circular import
+                try:
+                    from .logging import log
+                    log("error", "Invalid SECRETS JSON, falling back to Secret Manager",
+                        error=str(e))
+                except ImportError:
+                    print(f"WARNING: Invalid SECRETS JSON: {e}")
+                # Fall through to Secret Manager
 
         # Priority 3: Fallback to Secret Manager (production)
         try:
