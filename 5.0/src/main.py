@@ -8,6 +8,8 @@ import re
 import time
 import uuid
 import sqlite3
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Optional, List, Dict, Any
 
@@ -31,6 +33,10 @@ from src.domain import (
     calculate_position_size,
     HistoricalMovesRepository,
     SentimentCacheRepository,
+    normalize_ticker,
+    validate_ticker,
+    InvalidTickerError,
+    TICKER_ALIASES,
 )
 from src.domain.implied_move import (
     calculate_implied_move_from_chain,
@@ -47,99 +53,157 @@ from src.integrations import (
 from src.formatters.telegram import format_ticker_line, format_digest, format_alert
 from src.formatters.cli import format_digest_cli, format_analyze_cli
 
+
+@dataclass
+class AppState:
+    """
+    Application state container for proper lifecycle management.
+
+    Uses FastAPI's lifespan context manager for:
+    - Clean startup initialization
+    - Proper shutdown cleanup
+    - No global state leakage between tests
+    """
+    job_manager: Optional[JobManager] = None
+    job_runner: Optional[JobRunner] = None
+    budget_tracker: Optional[BudgetTracker] = None
+    tradier: Optional[TradierClient] = None
+    alphavantage: Optional[AlphaVantageClient] = None
+    perplexity: Optional[PerplexityClient] = None
+    telegram: Optional[TelegramSender] = None
+    yahoo: Optional[YahooFinanceClient] = None
+    historical_repo: Optional[HistoricalMovesRepository] = None
+    sentiment_cache: Optional[SentimentCacheRepository] = None
+
+
+# Global state reference - set during lifespan, used by getters
+# This allows tests to override state without modifying the app
+_app_state: Optional[AppState] = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan context manager for proper resource management.
+
+    Startup: Initialize all clients and repositories
+    Shutdown: Clean up resources (close connections, etc.)
+    """
+    global _app_state
+
+    log("info", "Starting Trading Desk 5.0")
+
+    # Initialize all components
+    state = AppState(
+        job_manager=JobManager(db_path=settings.DB_PATH),
+        job_runner=JobRunner(),
+        budget_tracker=BudgetTracker(db_path=settings.DB_PATH),
+        tradier=TradierClient(settings.tradier_api_key),
+        alphavantage=AlphaVantageClient(settings.alpha_vantage_key),
+        perplexity=PerplexityClient(
+            api_key=settings.perplexity_api_key,
+            db_path=settings.DB_PATH,
+        ),
+        telegram=TelegramSender(
+            bot_token=settings.telegram_bot_token,
+            chat_id=settings.telegram_chat_id,
+        ),
+        yahoo=YahooFinanceClient(),
+        historical_repo=HistoricalMovesRepository(settings.DB_PATH),
+        sentiment_cache=SentimentCacheRepository(settings.DB_PATH),
+    )
+
+    # Store in app.state for access via request.app.state
+    app.state.services = state
+    _app_state = state
+
+    log("info", "All services initialized")
+
+    yield  # Application runs here
+
+    # Cleanup on shutdown
+    log("info", "Shutting down Trading Desk 5.0")
+    _app_state = None
+
+
 app = FastAPI(
     title="Trading Desk 5.0",
     description="Autopilot trading system",
-    version="5.0.0"
+    version="5.0.0",
+    lifespan=lifespan,
 )
 
-# Lazy initialization to avoid issues during test collection
-_job_manager = None
-_job_runner = None
-_budget_tracker = None
-_tradier = None
-_alphavantage = None
-_perplexity = None
-_telegram = None
-_yahoo = None
-_historical_repo = None
-_sentiment_cache = None
+
+def _get_state() -> AppState:
+    """Get current app state, with fallback for tests."""
+    global _app_state
+    if _app_state is None:
+        # Lazy initialization for tests that don't use lifespan
+        _app_state = AppState(
+            job_manager=JobManager(db_path=settings.DB_PATH),
+            job_runner=JobRunner(),
+            budget_tracker=BudgetTracker(db_path=settings.DB_PATH),
+            tradier=TradierClient(settings.tradier_api_key),
+            alphavantage=AlphaVantageClient(settings.alpha_vantage_key),
+            perplexity=PerplexityClient(
+                api_key=settings.perplexity_api_key,
+                db_path=settings.DB_PATH,
+            ),
+            telegram=TelegramSender(
+                bot_token=settings.telegram_bot_token,
+                chat_id=settings.telegram_chat_id,
+            ),
+            yahoo=YahooFinanceClient(),
+            historical_repo=HistoricalMovesRepository(settings.DB_PATH),
+            sentiment_cache=SentimentCacheRepository(settings.DB_PATH),
+        )
+    return _app_state
 
 
 def get_job_manager() -> JobManager:
-    global _job_manager
-    if _job_manager is None:
-        _job_manager = JobManager(db_path=settings.DB_PATH)
-    return _job_manager
+    return _get_state().job_manager
 
 
 def get_job_runner() -> JobRunner:
-    global _job_runner
-    if _job_runner is None:
-        _job_runner = JobRunner()
-    return _job_runner
+    return _get_state().job_runner
 
 
 def get_budget_tracker() -> BudgetTracker:
-    global _budget_tracker
-    if _budget_tracker is None:
-        _budget_tracker = BudgetTracker(db_path=settings.DB_PATH)
-    return _budget_tracker
+    return _get_state().budget_tracker
 
 
 def get_tradier() -> TradierClient:
-    global _tradier
-    if _tradier is None:
-        _tradier = TradierClient(settings.tradier_api_key)
-    return _tradier
+    return _get_state().tradier
 
 
 def get_alphavantage() -> AlphaVantageClient:
-    global _alphavantage
-    if _alphavantage is None:
-        _alphavantage = AlphaVantageClient(settings.alpha_vantage_key)
-    return _alphavantage
+    return _get_state().alphavantage
 
 
 def get_perplexity() -> PerplexityClient:
-    global _perplexity
-    if _perplexity is None:
-        _perplexity = PerplexityClient(
-            api_key=settings.perplexity_api_key,
-            db_path=settings.DB_PATH,
-        )
-    return _perplexity
+    return _get_state().perplexity
 
 
 def get_telegram() -> TelegramSender:
-    global _telegram
-    if _telegram is None:
-        _telegram = TelegramSender(
-            bot_token=settings.telegram_bot_token,
-            chat_id=settings.telegram_chat_id,
-        )
-    return _telegram
+    return _get_state().telegram
 
 
 def get_yahoo() -> YahooFinanceClient:
-    global _yahoo
-    if _yahoo is None:
-        _yahoo = YahooFinanceClient()
-    return _yahoo
+    return _get_state().yahoo
 
 
 def get_historical_repo() -> HistoricalMovesRepository:
-    global _historical_repo
-    if _historical_repo is None:
-        _historical_repo = HistoricalMovesRepository(settings.DB_PATH)
-    return _historical_repo
+    return _get_state().historical_repo
 
 
 def get_sentiment_cache() -> SentimentCacheRepository:
-    global _sentiment_cache
-    if _sentiment_cache is None:
-        _sentiment_cache = SentimentCacheRepository(settings.DB_PATH)
-    return _sentiment_cache
+    return _get_state().sentiment_cache
+
+
+def reset_app_state():
+    """Reset app state - useful for tests."""
+    global _app_state
+    _app_state = None
 
 
 # API Key security
@@ -160,19 +224,25 @@ async def verify_api_key(api_key: str = Depends(api_key_header)):
 
 
 def verify_telegram_secret(request: Request) -> bool:
-    """Verify Telegram webhook secret token. Fail-closed in production."""
+    """
+    Verify Telegram webhook secret token.
+
+    SECURITY: Always fail closed - never accept unverified webhooks.
+    This prevents webhook spoofing attacks where an attacker could send
+    fake Telegram messages to trigger actions.
+    """
     expected_secret = settings.telegram_webhook_secret
     if not expected_secret:
-        if settings.is_production:
-            # SECURITY: Fail closed in production - reject if secret not configured
-            log("error", "TELEGRAM_WEBHOOK_SECRET not configured in production - rejecting request")
-            return False
-        else:
-            # Allow in development (fail-open) for local testing
-            log("warn", "TELEGRAM_WEBHOOK_SECRET not configured - allowing in dev mode")
-            return True
+        # SECURITY: Always fail closed, even in development
+        # To test locally, set TELEGRAM_WEBHOOK_SECRET env var
+        log("error", "TELEGRAM_WEBHOOK_SECRET not configured - rejecting webhook")
+        return False
     received_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not received_secret:
+        log("warn", "Missing X-Telegram-Bot-Api-Secret-Token header")
+        return False
     if not hmac.compare_digest(received_secret, expected_secret):
+        log("warn", "Invalid Telegram webhook secret token")
         return False
     return True
 
@@ -310,26 +380,105 @@ async def health(format: str = "json", _: bool = Depends(verify_api_key)):
     return data
 
 
-# Common company name → ticker symbol mappings
-TICKER_ALIASES = {
-    "NIKE": "NKE",
-    "GOOGLE": "GOOGL",
-    "FACEBOOK": "META",
-    "AMAZON": "AMZN",
-    "APPLE": "AAPL",
-    "MICROSOFT": "MSFT",
-    "TESLA": "TSLA",
-    "NETFLIX": "NFLX",
-    "NVIDIA": "NVDA",
-    "COSTCO": "COST",
-    "STARBUCKS": "SBUX",
-    "WALMART": "WMT",
-    "TARGET": "TGT",
-    "DISNEY": "DIS",
-    "BERKSHIRE": "BRK.B",
-    "JPMORGAN": "JPM",
-    "ALPHABET": "GOOGL",
-}
+@app.post("/alerts/ingest")
+async def alerts_ingest(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Webhook endpoint for GCP Monitoring alerts.
+
+    Receives alerts from GCP Monitoring notification channels and forwards
+    them to Telegram. Supports both Bearer token and Basic auth.
+
+    GCP Monitoring sends webhooks with:
+    - Header: Authorization: Basic <base64(username:password)> or Bearer <token>
+    - Body: JSON with incident details
+    """
+    import base64
+    start_time = time.time()
+
+    # Verify auth (GCP Monitoring uses Basic auth for webhook_basicauth)
+    expected_key = settings.api_key
+    if expected_key:
+        if not authorization:
+            log("warn", "Alert webhook missing auth header")
+            raise HTTPException(status_code=401, detail="Missing authorization")
+
+        # Support both Basic and Bearer auth
+        if authorization.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(authorization[6:]).decode("utf-8")
+                # Format: username:password
+                _, password = decoded.split(":", 1)
+                if not hmac.compare_digest(password, expected_key):
+                    log("warn", "Alert webhook invalid password")
+                    raise HTTPException(status_code=403, detail="Invalid credentials")
+            except Exception as e:
+                log("warn", "Alert webhook Basic auth decode failed", error=str(e))
+                raise HTTPException(status_code=401, detail="Invalid authorization format")
+        elif authorization.startswith("Bearer "):
+            token = authorization[7:]
+            if not hmac.compare_digest(token, expected_key):
+                log("warn", "Alert webhook invalid token")
+                raise HTTPException(status_code=403, detail="Invalid token")
+        else:
+            log("warn", "Alert webhook invalid auth format")
+            raise HTTPException(status_code=401, detail="Invalid authorization format")
+
+    try:
+        body = await request.json()
+        log("info", "Alert webhook received", incident_id=body.get("incident", {}).get("incident_id"))
+
+        # Parse GCP Monitoring alert payload
+        incident = body.get("incident", {})
+        condition = incident.get("condition", {})
+        policy = incident.get("policy_name", "Unknown Policy")
+        state = incident.get("state", "unknown")
+        started_at = incident.get("started_at", "")
+        summary = incident.get("summary", "No summary available")
+        url = incident.get("url", "")
+
+        # Format message for Telegram
+        if state == "open":
+            emoji = "🚨"
+            status_text = "ALERT TRIGGERED"
+        elif state == "closed":
+            emoji = "✅"
+            status_text = "ALERT RESOLVED"
+        else:
+            emoji = "⚠️"
+            status_text = state.upper()
+
+        message = f"""{emoji} <b>{status_text}</b>
+
+<b>Policy:</b> {policy}
+<b>Summary:</b> {summary}
+<b>Started:</b> {started_at}
+
+<a href="{url}">View in GCP Console</a>
+
+#ivcrush #alert #monitoring"""
+
+        # Send to Telegram
+        telegram = get_telegram()
+        sent = await telegram.send_message(message)
+
+        duration_ms = (time.time() - start_time) * 1000
+        if sent:
+            log("info", "Alert forwarded to Telegram", state=state, policy=policy)
+            metrics.request_success("alerts_ingest", duration_ms)
+            return {"status": "forwarded", "telegram_sent": True}
+        else:
+            log("warn", "Failed to send alert to Telegram", state=state)
+            metrics.request_error("alerts_ingest", duration_ms, "telegram_failed")
+            return {"status": "failed", "telegram_sent": False}
+
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_error("alerts_ingest", duration_ms)
+        log("error", "Alert ingest failed", error=str(e))
+        raise HTTPException(500, f"Alert processing failed: {str(e)}")
 
 
 @app.get("/api/analyze")
@@ -343,13 +492,11 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
     if date and not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
         raise HTTPException(400, "Invalid date format (expected YYYY-MM-DD)")
 
-    # Validate and normalize ticker - use same pattern as Telegram handler
-    ticker = ticker.upper().strip()
-    if not re.match(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$', ticker):
-        raise HTTPException(400, "Invalid ticker format")
-
-    # Convert common company names to ticker symbols
-    ticker = TICKER_ALIASES.get(ticker, ticker)
+    # Validate and normalize ticker using centralized validation
+    try:
+        ticker = normalize_ticker(ticker)
+    except InvalidTickerError as e:
+        raise HTTPException(400, str(e))
 
     log("info", "Analyze request", ticker=ticker, date=date)
     start_time = time.time()
@@ -819,10 +966,12 @@ async def telegram_webhook(request: Request):
             if len(parts) < 2:
                 await telegram.send_message("Usage: /analyze TICKER")
             else:
-                ticker = parts[1].upper()
-                # Defense in depth: validate ticker format before processing
-                if not re.match(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$', ticker):
-                    await telegram.send_message(f"Invalid ticker format: {ticker}")
+                raw_ticker = parts[1]
+                # Validate and normalize using centralized validation
+                try:
+                    ticker = normalize_ticker(raw_ticker)
+                except InvalidTickerError as e:
+                    await telegram.send_message(str(e))
                     return {"ok": True}
                 try:
                     result = await analyze(ticker=ticker, format="json")

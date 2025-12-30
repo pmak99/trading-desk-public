@@ -171,6 +171,8 @@ class BudgetTracker:
                 if "locked" in str(e).lower() and attempt < max_retries - 1:
                     log("warn", "Database locked, retrying", attempt=attempt + 1)
                     conn.rollback()
+                    # Note: This is a sync function, so we use time.sleep
+                    # For async callers, consider using try_acquire_call_async instead
                     import time
                     time.sleep(0.5 * (attempt + 1))  # Exponential backoff
                     continue
@@ -219,6 +221,90 @@ class BudgetTracker:
             return row[0] if row and row[0] else 0.0
         finally:
             conn.close()
+
+    async def try_acquire_call_async(
+        self,
+        service: str = "perplexity",
+        cost: float = 0.005
+    ) -> bool:
+        """
+        Async version of try_acquire_call.
+
+        Use this from async code to avoid blocking the event loop.
+        Uses asyncio.sleep for backoff instead of time.sleep.
+
+        Args:
+            service: Service name
+            cost: Estimated cost of the call
+
+        Returns:
+            True if call was acquired (within limits), False if limits exceeded
+        """
+        import asyncio
+
+        date_str = today_et()
+        month_prefix = date_str[:7]  # YYYY-MM
+        timestamp = now_et().isoformat()
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            conn = sqlite3.connect(self.db_path, timeout=30)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+
+                cursor = conn.execute(
+                    "SELECT calls, cost FROM api_budget WHERE date = ? AND service = ?",
+                    (date_str, service)
+                )
+                row = cursor.fetchone()
+                daily_calls = row[0] if row else 0
+
+                if daily_calls >= settings.PERPLEXITY_DAILY_LIMIT:
+                    log("warn", "Daily API limit reached", service=service, calls=daily_calls)
+                    conn.rollback()
+                    return False
+
+                cursor = conn.execute(
+                    "SELECT SUM(cost) FROM api_budget WHERE date LIKE ? AND service = ?",
+                    (f"{month_prefix}%", service)
+                )
+                row = cursor.fetchone()
+                monthly_cost = row[0] if row and row[0] else 0.0
+
+                if monthly_cost >= settings.PERPLEXITY_MONTHLY_BUDGET:
+                    log("warn", "Monthly API budget exceeded", service=service, cost=monthly_cost)
+                    conn.rollback()
+                    return False
+
+                conn.execute("""
+                    INSERT INTO api_budget (date, service, calls, cost, updated_at)
+                    VALUES (?, ?, 1, ?, ?)
+                    ON CONFLICT(date, service) DO UPDATE SET
+                        calls = calls + 1,
+                        cost = cost + excluded.cost,
+                        updated_at = excluded.updated_at
+                """, (date_str, service, cost, timestamp))
+
+                conn.commit()
+                log("debug", "API call acquired", service=service, daily_calls=daily_calls + 1)
+                return True
+
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e).lower() and attempt < max_retries - 1:
+                    log("warn", "Database locked, retrying async", attempt=attempt + 1)
+                    conn.rollback()
+                    await asyncio.sleep(0.5 * (attempt + 1))  # Non-blocking backoff
+                    continue
+                log("error", "Failed to acquire API call", error=str(e))
+                conn.rollback()
+                return False
+            except sqlite3.Error as e:
+                log("error", "Failed to acquire API call", error=str(e))
+                conn.rollback()
+                return False
+            finally:
+                conn.close()
+        return False
 
     def can_call(self, service: str = "perplexity") -> bool:
         """

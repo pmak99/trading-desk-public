@@ -177,8 +177,8 @@ class PerplexityClient:
         Returns:
             Parsed sentiment with direction, score, tailwinds, headwinds
         """
-        # Atomic check-and-acquire with estimated cost
-        if not self.budget.try_acquire_call("perplexity", cost=0.005):
+        # Atomic check-and-acquire with estimated cost (use async version to avoid blocking)
+        if not await self.budget.try_acquire_call_async("perplexity", cost=0.005):
             log("warn", "Perplexity budget exceeded", ticker=ticker)
             raise BudgetExhausted(
                 service="perplexity",

@@ -197,7 +197,7 @@ class JobRunner:
         if not earnings:
             log("warn", "Empty earnings calendar from Alpha Vantage")
             metrics.count("ivcrush.job.api_empty", {"job": "pre_market_prep", "api": "alphavantage"})
-            return {"status": "success", "tickers_found": 0, "earnings_dates": [], "note": "Empty calendar"}
+            return {"status": "warning", "tickers_found": 0, "earnings_dates": [], "note": "Empty calendar from API"}
 
         # Filter to upcoming earnings
         target_dates = [today]
@@ -280,7 +280,7 @@ class JobRunner:
         if not earnings:
             log("warn", "Empty earnings calendar from Alpha Vantage", job="sentiment_scan")
             metrics.count("ivcrush.job.api_empty", {"job": "sentiment_scan", "api": "alphavantage"})
-            return {"status": "success", "candidates": 0, "primed": 0, "note": "Empty calendar"}
+            return {"status": "warning", "candidates": 0, "primed": 0, "note": "Empty calendar from API"}
 
         target_dates = [today]
         for i in range(1, 4):
@@ -446,7 +446,7 @@ class JobRunner:
                 )
             except Exception as tg_err:
                 log("error", "Failed to send Telegram notification", error=str(tg_err))
-            return {"status": "success", "opportunities": 0, "sent": False, "note": "Empty calendar"}
+            return {"status": "warning", "opportunities": 0, "sent": False, "note": "Empty calendar from API"}
 
         target_dates = [today]
         for i in range(1, 4):
@@ -613,7 +613,7 @@ class JobRunner:
         if not earnings:
             log("warn", "Empty earnings calendar", job="market_open_refresh")
             metrics.count("ivcrush.job.api_empty", {"job": "market_open_refresh", "api": "alphavantage"})
-            return {"status": "success", "refreshed": 0, "note": "Empty calendar"}
+            return {"status": "warning", "refreshed": 0, "note": "Empty calendar from API"}
 
         # Filter to today's earnings only
         todays_earnings = [e for e in earnings if e["report_date"] == today]
@@ -720,7 +720,7 @@ class JobRunner:
         if not earnings:
             log("warn", "Empty earnings calendar", job="pre_trade_refresh")
             metrics.count("ivcrush.job.api_empty", {"job": "pre_trade_refresh", "api": "alphavantage"})
-            return {"status": "success", "candidates": 0, "note": "Empty calendar"}
+            return {"status": "warning", "candidates": 0, "note": "Empty calendar from API"}
 
         # Filter to today's AMC earnings (tradeable now)
         todays_earnings = [e for e in earnings if e["report_date"] == today]
@@ -845,7 +845,7 @@ class JobRunner:
         if not earnings:
             log("warn", "Empty earnings calendar", job="after_hours_check")
             metrics.count("ivcrush.job.api_empty", {"job": "after_hours_check", "api": "alphavantage"})
-            return {"status": "success", "checked": 0, "note": "Empty calendar"}
+            return {"status": "warning", "checked": 0, "note": "Empty calendar from API"}
 
         # Filter to today's earnings
         todays_earnings = [e for e in earnings if e["report_date"] == today]
@@ -996,7 +996,7 @@ class JobRunner:
         if not earnings:
             log("warn", "Empty earnings calendar", job="outcome_recorder")
             metrics.count("ivcrush.job.api_empty", {"job": "outcome_recorder", "api": "alphavantage"})
-            return {"status": "success", "recorded": 0, "note": "Empty calendar"}
+            return {"status": "warning", "recorded": 0, "note": "Empty calendar from API"}
 
         # Filter to today's earnings
         todays_earnings = [e for e in earnings if e["report_date"] == today]
@@ -1142,7 +1142,7 @@ class JobRunner:
         if not earnings:
             log("warn", "Empty earnings calendar from Alpha Vantage", job="weekly_backfill")
             metrics.count("ivcrush.job.api_empty", {"job": "weekly_backfill", "api": "alphavantage"})
-            return {"status": "success", "backfilled": 0, "note": "Empty calendar"}
+            return {"status": "warning", "backfilled": 0, "note": "Empty calendar from API"}
 
         today = now_et()
 
@@ -1380,7 +1380,7 @@ class JobRunner:
             if not earnings:
                 log("warn", "Empty earnings calendar from Alpha Vantage", job="calendar_sync")
                 metrics.count("ivcrush.job.api_empty", {"job": "calendar_sync", "api": "alphavantage"})
-                return {"status": "success", "synced": 0, "note": "Empty calendar"}
+                return {"status": "warning", "synced": 0, "note": "Empty calendar from API"}
 
             # Record metrics
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000

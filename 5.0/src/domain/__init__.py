@@ -11,6 +11,14 @@ from .implied_move import (
     find_atm_straddle,
     calculate_implied_move_from_chain,
 )
+from .ticker import (
+    validate_ticker,
+    normalize_ticker,
+    safe_normalize_ticker,
+    resolve_alias,
+    InvalidTickerError,
+    TICKER_ALIASES,
+)
 
 __all__ = [
     "calculate_vrp",
@@ -27,4 +35,11 @@ __all__ = [
     "calculate_implied_move",
     "find_atm_straddle",
     "calculate_implied_move_from_chain",
+    # Ticker validation
+    "validate_ticker",
+    "normalize_ticker",
+    "safe_normalize_ticker",
+    "resolve_alias",
+    "InvalidTickerError",
+    "TICKER_ALIASES",
 ]

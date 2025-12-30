@@ -10,6 +10,7 @@ from google.api_core.exceptions import PreconditionFailed
 import sqlite3
 import tempfile
 import shutil
+import uuid
 from typing import Optional, List
 from pathlib import Path
 
@@ -18,6 +19,11 @@ from .logging import log
 
 class DatabaseCorruptedError(Exception):
     """Raised when database integrity check fails."""
+    pass
+
+
+class DatabaseSyncConflictError(Exception):
+    """Raised when database sync conflict cannot be resolved."""
     pass
 
 
@@ -31,7 +37,9 @@ class DatabaseSync:
     def __init__(self, bucket_name: str, blob_name: str = "ivcrush.db"):
         self.bucket_name = bucket_name
         self.blob_name = blob_name
-        self.local_path = Path(tempfile.gettempdir()) / "ivcrush.db"
+        # Use instance-unique temp file to prevent multi-instance conflicts
+        instance_id = str(uuid.uuid4())[:8]
+        self.local_path = Path(tempfile.gettempdir()) / f"ivcrush_{instance_id}.db"
         self._generation: Optional[int] = None
         self._client = storage.Client()
 
@@ -128,16 +136,28 @@ class DatabaseSync:
 
 
 class DatabaseContext:
-    """Context manager for database operations with auto-sync."""
+    """
+    Context manager for database operations with auto-sync.
+
+    IMPORTANT: This context manager handles read-modify-write patterns with GCS.
+    On conflict, it raises DatabaseSyncConflictError rather than silently losing
+    changes. The caller should handle conflicts by re-reading and re-applying
+    their changes.
+
+    Thread Safety:
+        Uses instance-unique temp files (see DatabaseSync.__init__).
+        Assumes external synchronization for multi-threaded access.
+    """
 
     def __init__(self, sync: DatabaseSync, max_retries: int = 3):
         self.sync = sync
         self.conn: Optional[sqlite3.Connection] = None
         self.max_retries = max_retries
-        self._changes_sql: List[str] = []  # Track changes for retry
+        self._initial_generation: Optional[int] = None
 
     def __enter__(self) -> sqlite3.Connection:
         self.sync.download()
+        self._initial_generation = self.sync._generation
         self.conn = self.sync.get_connection()
         return self.conn
 
@@ -150,16 +170,45 @@ class DatabaseContext:
                     if self.sync.upload():
                         return  # Success
 
-                    # Conflict - download latest and notify caller
-                    log("warn", "GCS conflict, attempt retry", attempt=attempt + 1)
-                    self.sync.download()
+                    # Conflict detected - another instance wrote first
+                    old_generation = self.sync._generation
+                    log("warn", "GCS conflict detected",
+                        attempt=attempt + 1,
+                        expected_generation=old_generation)
 
-                # All retries failed
-                raise RuntimeError(
-                    f"Database sync conflict after {self.max_retries} retries - "
-                    "another instance is writing frequently"
+                    # Download to get new generation for potential retry
+                    self.sync.download()
+                    new_generation = self.sync._generation
+
+                    # Verify generation actually changed (sanity check)
+                    if new_generation == old_generation:
+                        log("error", "Generation unchanged after conflict - possible corruption",
+                            generation=new_generation)
+                        raise DatabaseSyncConflictError(
+                            f"Database conflict but generation unchanged ({new_generation}). "
+                            "Possible database corruption or GCS issue."
+                        )
+
+                    # After download, our local changes are LOST because the file
+                    # was replaced. We cannot simply retry upload - the caller must
+                    # re-read and re-apply their changes. Raise immediately.
+                    raise DatabaseSyncConflictError(
+                        f"Database sync conflict after {attempt + 1} attempt(s). "
+                        f"Generation changed from {old_generation} to {new_generation}. "
+                        "Caller should re-read data and retry operation."
+                    )
+
+                # Should not reach here, but handle edge case
+                raise DatabaseSyncConflictError(
+                    f"Database sync failed after {self.max_retries} retries"
                 )
         finally:
             # Always close connection, even if retries fail
             if self.conn:
                 self.conn.close()
+            # Clean up temp file to avoid disk space leaks
+            if self.sync.local_path.exists():
+                try:
+                    self.sync.local_path.unlink()
+                except OSError:
+                    pass  # Best effort cleanup
