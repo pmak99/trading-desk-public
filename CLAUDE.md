@@ -56,11 +56,14 @@ VRP Ratio = Implied Move / Historical Mean Move
 
 ## Directory Structure
 
+**Active Versions:**
 - `5.0/` - **CLOUD AUTOPILOT** - 24/7 Cloud Run service with real implied moves from Tradier
-- `2.0/` - **CORE MATH** - VRP/strategy calculations (used by 5.0)
+- `2.0/` - **CORE MATH** - VRP/strategy calculations (used by 4.0 and 5.0)
 - `4.0/` - AI sentiment layer (Perplexity, caching, budget tracking)
-- `3.0/` - ML enhancement project (in development)
-- `1.0/` - Deprecated original system
+
+**Archived (see `archive/README.md`):**
+- `archive/1.0-original-system/` - Deprecated original system (superseded by 2.0)
+- `archive/3.0-ml-enhancement/` - ML research project (Phase 2 complete, direction prediction inconclusive)
 
 ## Common Commands
 
@@ -254,9 +257,60 @@ Risks: [1-2 bullets, max 10 words each]
 ## Testing
 
 ```bash
-# 2.0 tests (521 pass)
+# 2.0 tests (452 pass)
 cd 2.0 && ./venv/bin/python -m pytest tests/ -v
 
 # 4.0 tests (184 pass)
 cd 4.0 && ../2.0/venv/bin/python -m pytest tests/ -v
+
+# 5.0 tests
+cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 ```
+
+## Code Review Summary (December 2025)
+
+### 2.0 - Core Math Engine (Grade: 7.9/10)
+
+**Architecture Strengths:**
+- Clean DDD with domain/application/infrastructure layers
+- Dependency injection via `src/container.py` (lazy-loaded singletons)
+- Result[T, Error] pattern forces explicit error handling
+- 452 unit tests, 40% coverage
+- Post-loss improvements embedded (liquidity scoring after significant WDAY/ZS/SYM loss)
+
+**Known Issues:**
+- Float precision in DB (REAL vs Decimal) - low impact for percentages
+- No schema versioning/migrations
+- Stale earnings cache if sync fails (mitigated by 6-day TTL)
+
+### 4.0 - AI Sentiment Layer (Grade: A-)
+
+**Architecture Strengths:**
+- "Import 2.0, Don't Copy" pattern via sys.path injection
+- 3-rule directional adjustment (simple, covers 99% cases)
+- Budget tracking: 40 calls/day, $5/month
+- 184 tests with edge cases
+- Zero external dependencies (pure stdlib)
+
+**Known Issues:**
+- Timezone handling: naive datetime edge cases in cache expiry
+- No input validation on direction strings in `record_outcome()`
+- Inconsistent confidence calculation across rules
+
+### 5.0 - Cloud Autopilot (17 issues identified)
+
+**Architecture Strengths:**
+- Elegant single-dispatcher job routing
+- Proper Eastern Time handling
+- Job dependency DAG with cycle detection
+- Structured JSON logging with request IDs
+
+**Priority Issues to Address:**
+1. **HIGH:** Database sync race condition in optimistic locking retry
+2. **HIGH:** Verify terraform state not in git (currently OK in .gitignore)
+3. **MEDIUM:** Telegram webhook secret fails open in dev mode
+4. **MEDIUM:** Global mutable singletons (thread-unsafe)
+5. **MEDIUM:** Empty earnings calendar returns success status
+6. **MEDIUM:** JSON secrets parsing lacks error handling
+
+**Full details:** See exploration agents' reports in conversation history.
