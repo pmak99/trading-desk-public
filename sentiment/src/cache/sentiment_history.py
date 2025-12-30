@@ -96,6 +96,8 @@ class SentimentHistory:
     """
 
     VALID_SOURCES = {"perplexity", "websearch", "finnhub", "manual"}
+    VALID_DIRECTIONS = {"UP", "DOWN"}  # Valid actual_direction values
+    VALID_TRADE_OUTCOMES = {"WIN", "LOSS", "SKIP"}  # Valid trade_outcome values
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize history with optional custom database path."""
@@ -214,9 +216,29 @@ class SentimentHistory:
 
         Returns:
             True if record was updated, False if no matching sentiment found
+
+        Raises:
+            ValueError: If actual_direction or trade_outcome is invalid
         """
         ticker = ticker.upper()
         actual_direction = actual_direction.upper()
+
+        # Validate actual_direction
+        if actual_direction not in self.VALID_DIRECTIONS:
+            raise ValueError(
+                f"Invalid actual_direction '{actual_direction}'. "
+                f"Must be one of: {self.VALID_DIRECTIONS}"
+            )
+
+        # Validate trade_outcome if provided
+        if trade_outcome is not None:
+            trade_outcome = trade_outcome.upper()
+            if trade_outcome not in self.VALID_TRADE_OUTCOMES:
+                raise ValueError(
+                    f"Invalid trade_outcome '{trade_outcome}'. "
+                    f"Must be one of: {self.VALID_TRADE_OUTCOMES}"
+                )
+
         now = datetime.now(timezone.utc).isoformat()
 
         with sqlite3.connect(self.db_path, check_same_thread=False) as conn:

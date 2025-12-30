@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 from google.api_core.exceptions import PreconditionFailed
 
-from src.core.database import DatabaseSync, DatabaseContext
+from src.core.database import DatabaseSync, DatabaseContext, DatabaseSyncConflictError
 
 
 @pytest.fixture
@@ -108,8 +108,13 @@ def test_database_context_success(mock_gcs):
         db_path.unlink(missing_ok=True)
 
 
-def test_database_context_retries_on_conflict(mock_gcs):
-    """DatabaseContext retries upload on conflict."""
+def test_database_context_raises_on_conflict(mock_gcs):
+    """DatabaseContext raises DatabaseSyncConflictError on upload conflict.
+
+    IMPORTANT: This is the correct behavior. The old retry logic was unsafe
+    because after downloading on conflict, local changes are LOST. The caller
+    must handle the conflict by re-reading data and re-applying changes.
+    """
     sync = DatabaseSync(bucket_name="test-bucket")
 
     # Create a real temp database
@@ -118,24 +123,29 @@ def test_database_context_retries_on_conflict(mock_gcs):
 
     sync.local_path = db_path
 
-    # First upload fails, second succeeds
-    mock_gcs['blob'].upload_from_filename.side_effect = [
-        PreconditionFailed("conflict"),
-        None  # Success
-    ]
+    # Upload fails due to conflict
+    mock_gcs['blob'].upload_from_filename.side_effect = PreconditionFailed("conflict")
+
+    # Mock generation to change between download calls (simulating another instance wrote)
+    # First download: 12345, after conflict re-download: 99999
+    generation_values = [12345, 99999]
+    generation_iter = iter(generation_values)
+    type(mock_gcs['blob']).generation = PropertyMock(side_effect=lambda: next(generation_iter, 99999))
 
     try:
-        with DatabaseContext(sync) as conn:
-            conn.execute("SELECT 1")
-
-        # Should have retried
-        assert mock_gcs['blob'].upload_from_filename.call_count == 2
+        with pytest.raises(DatabaseSyncConflictError, match="Generation changed"):
+            with DatabaseContext(sync) as conn:
+                conn.execute("SELECT 1")
     finally:
         db_path.unlink(missing_ok=True)
 
 
-def test_database_context_exhausts_retries(mock_gcs):
-    """DatabaseContext raises after max retries."""
+def test_database_context_conflict_includes_generations(mock_gcs):
+    """DatabaseContext conflict error includes generation info for debugging.
+
+    When a conflict occurs, the error message should include both the old
+    and new generation numbers to help with debugging and auditing.
+    """
     sync = DatabaseSync(bucket_name="test-bucket")
 
     # Create a real temp database
@@ -144,12 +154,21 @@ def test_database_context_exhausts_retries(mock_gcs):
 
     sync.local_path = db_path
 
-    # All uploads fail
+    # Upload fails due to conflict
     mock_gcs['blob'].upload_from_filename.side_effect = PreconditionFailed("conflict")
 
+    # Mock generation to change between download calls (simulating another instance wrote)
+    # First download: 12345, after conflict re-download: 99999
+    generation_values = [12345, 99999]
+    generation_iter = iter(generation_values)
+    type(mock_gcs['blob']).generation = PropertyMock(side_effect=lambda: next(generation_iter, 99999))
+
     try:
-        with pytest.raises(RuntimeError, match="sync conflict"):
+        with pytest.raises(DatabaseSyncConflictError) as exc_info:
             with DatabaseContext(sync, max_retries=3) as conn:
                 conn.execute("SELECT 1")
+
+        # Error should mention both generation numbers
+        assert "12345" in str(exc_info.value) and "99999" in str(exc_info.value)
     finally:
         db_path.unlink(missing_ok=True)

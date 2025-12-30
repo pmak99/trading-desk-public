@@ -200,7 +200,8 @@ class TestConfidenceScoring:
     def test_weak_sentiment_low_confidence(self):
         """Weak sentiment should have low confidence."""
         adj = adjust_direction("NEUTRAL", 0.1)
-        assert adj.confidence == 0.5  # both_neutral rule
+        # both_neutral rule: base 0.3 + small boost from weak signal
+        assert 0.3 <= adj.confidence <= 0.4
 
 
 class TestChangedProperty:

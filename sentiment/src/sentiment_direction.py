@@ -78,6 +78,61 @@ def normalize_skew_bias(skew_bias: str) -> str:
         return "neutral"
 
 
+def _calculate_confidence(
+    sentiment_score: float,
+    rule: str,
+    sent_dir: str,
+    original: str,
+) -> float:
+    """
+    Calculate confidence score consistently across all rules.
+
+    Confidence reflects how sure we are about the adjustment decision.
+
+    Args:
+        sentiment_score: Raw sentiment score (-1 to +1)
+        rule: Which rule was applied
+        sent_dir: Sentiment direction (bullish/bearish/neutral)
+        original: Normalized original skew bias
+
+    Returns:
+        Confidence score between 0.0 and 1.0
+    """
+    # Base confidence from sentiment strength (0 to 1, max at |0.6|)
+    sentiment_strength = min(1.0, abs(sentiment_score) / 0.6)
+
+    if rule == "both_neutral":
+        # Both skew and sentiment are neutral - low confidence in any direction
+        # Base 0.3 + small boost from any weak sentiment signal
+        return 0.3 + (sentiment_strength * 0.2)
+
+    if rule in ("tiebreak_bullish", "tiebreak_bearish"):
+        # Sentiment breaking a neutral tie - confidence scales with sentiment strength
+        return sentiment_strength
+
+    if rule == "conflict_hedge":
+        # Conflicting signals - confidence in hedging scales with sentiment strength
+        return sentiment_strength
+
+    if rule == "skew_dominates":
+        # Skew dominates - base 0.6 + boost if sentiment aligns
+        is_bullish_skew = original in ("bullish", "strong_bullish")
+        is_bearish_skew = original in ("bearish", "strong_bearish")
+        sentiment_aligns = (
+            (is_bullish_skew and sent_dir == "bullish") or
+            (is_bearish_skew and sent_dir == "bearish")
+        )
+        if sentiment_aligns:
+            # Aligned sentiment boosts confidence
+            return min(1.0, 0.6 + (sentiment_strength * 0.4))
+        else:
+            # Neutral sentiment - moderate base confidence
+            return 0.6
+
+    # Fallback (shouldn't reach here)
+    return 0.5
+
+
 def adjust_direction(
     skew_bias: str,
     sentiment_score: float,
@@ -111,35 +166,25 @@ def adjust_direction(
         else:
             sent_dir = "neutral"
 
-    # Calculate confidence based on sentiment strength
-    confidence = min(1.0, abs(sentiment_score) / 0.6)  # Max confidence at |0.6|
-
     # RULE 1: Neutral skew → sentiment breaks tie
     if original == "neutral":
         if sent_dir == "bullish":
-            return DirectionAdjustment(
-                original_bias=skew_bias,
-                sentiment_score=sentiment_score,
-                adjusted_bias=AdjustedBias.BULLISH,
-                rule_applied="tiebreak_bullish",
-                confidence=confidence,
-            )
+            rule = "tiebreak_bullish"
+            adjusted = AdjustedBias.BULLISH
         elif sent_dir == "bearish":
-            return DirectionAdjustment(
-                original_bias=skew_bias,
-                sentiment_score=sentiment_score,
-                adjusted_bias=AdjustedBias.BEARISH,
-                rule_applied="tiebreak_bearish",
-                confidence=confidence,
-            )
+            rule = "tiebreak_bearish"
+            adjusted = AdjustedBias.BEARISH
         else:
-            return DirectionAdjustment(
-                original_bias=skew_bias,
-                sentiment_score=sentiment_score,
-                adjusted_bias=AdjustedBias.NEUTRAL,
-                rule_applied="both_neutral",
-                confidence=0.5,  # Low confidence when no signal
-            )
+            rule = "both_neutral"
+            adjusted = AdjustedBias.NEUTRAL
+
+        return DirectionAdjustment(
+            original_bias=skew_bias,
+            sentiment_score=sentiment_score,
+            adjusted_bias=adjusted,
+            rule_applied=rule,
+            confidence=_calculate_confidence(sentiment_score, rule, sent_dir, original),
+        )
 
     # RULE 2: Conflict → go neutral (hedge)
     is_bullish_skew = original in ("bullish", "strong_bullish")
@@ -147,16 +192,16 @@ def adjust_direction(
 
     if (is_bullish_skew and sent_dir == "bearish") or \
        (is_bearish_skew and sent_dir == "bullish"):
+        rule = "conflict_hedge"
         return DirectionAdjustment(
             original_bias=skew_bias,
             sentiment_score=sentiment_score,
             adjusted_bias=AdjustedBias.NEUTRAL,
-            rule_applied="conflict_hedge",
-            confidence=confidence,  # Higher sentiment = more confident in conflict
+            rule_applied=rule,
+            confidence=_calculate_confidence(sentiment_score, rule, sent_dir, original),
         )
 
     # RULE 3: Otherwise keep skew bias
-    # Map original to AdjustedBias
     bias_map = {
         "strong_bullish": AdjustedBias.STRONG_BULLISH,
         "bullish": AdjustedBias.BULLISH,
@@ -165,12 +210,13 @@ def adjust_direction(
         "strong_bearish": AdjustedBias.STRONG_BEARISH,
     }
 
+    rule = "skew_dominates"
     return DirectionAdjustment(
         original_bias=skew_bias,
         sentiment_score=sentiment_score,
         adjusted_bias=bias_map.get(original, AdjustedBias.NEUTRAL),
-        rule_applied="skew_dominates",
-        confidence=0.7,  # Moderate confidence when aligned or no conflict
+        rule_applied=rule,
+        confidence=_calculate_confidence(sentiment_score, rule, sent_dir, original),
     )
 
 
