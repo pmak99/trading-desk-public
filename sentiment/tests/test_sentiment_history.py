@@ -423,6 +423,45 @@ class TestRecordOutcome:
         record = temp_history.get("NVDA", "2025-12-09")
         assert record.actual_direction == "UP"
 
+    def test_record_outcome_invalid_direction_raises(self, temp_history):
+        """Should raise ValueError for invalid actual_direction."""
+        temp_history.record_sentiment(
+            ticker="NVDA",
+            earnings_date="2025-12-09",
+            source="perplexity",
+            sentiment_text="Bullish",
+            sentiment_direction=SentimentDirection.BULLISH
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            temp_history.record_outcome(
+                ticker="NVDA",
+                earnings_date="2025-12-09",
+                actual_move_pct=5.2,
+                actual_direction="SIDEWAYS"
+            )
+        assert "Invalid actual_direction" in str(excinfo.value)
+
+    def test_record_outcome_invalid_trade_outcome_raises(self, temp_history):
+        """Should raise ValueError for invalid trade_outcome."""
+        temp_history.record_sentiment(
+            ticker="NVDA",
+            earnings_date="2025-12-09",
+            source="perplexity",
+            sentiment_text="Bullish",
+            sentiment_direction=SentimentDirection.BULLISH
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            temp_history.record_outcome(
+                ticker="NVDA",
+                earnings_date="2025-12-09",
+                actual_move_pct=5.2,
+                actual_direction="UP",
+                trade_outcome="INVALID"
+            )
+        assert "Invalid trade_outcome" in str(excinfo.value)
+
 
 class TestGetMethods:
     """Tests for get methods."""

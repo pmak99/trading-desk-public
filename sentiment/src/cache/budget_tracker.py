@@ -241,8 +241,11 @@ def check_budget() -> Tuple[bool, str]:
     return True, f"Budget OK: {info.calls_remaining} calls remaining today."
 
 
-def record_perplexity_call(cost: float = 0.01) -> None:
-    """Quick helper to record a Perplexity API call."""
+def record_perplexity_call(cost: float = 0.006) -> None:
+    """Quick helper to record a Perplexity API call.
+
+    Default cost matches COST_PER_CALL_ESTIMATE in BudgetTracker.
+    """
     tracker = BudgetTracker()
     tracker.record_call(cost)
 

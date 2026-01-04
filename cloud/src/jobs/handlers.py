@@ -557,7 +557,7 @@ class JobRunner:
         # Get budget info
         budget_summary = budget.get_summary("perplexity")
 
-        # Format and send digest
+        # Format and send digest (only if there are opportunities)
         log("info", "Sending digest", opportunities=len(opportunities))
 
         sent = False
@@ -572,9 +572,8 @@ class JobRunner:
                 )
                 sent = await self.telegram.send_message(digest_msg)
             else:
-                sent = await self.telegram.send_message(
-                    f"📋 <b>IV Crush Digest: {today}</b>\n\nNo high-VRP opportunities found today."
-                )
+                # Skip sending when no opportunities - don't spam with empty alerts
+                log("info", "Skipping digest - no opportunities", job="morning_digest")
         except Exception as tg_err:
             telegram_error = str(tg_err)
             log("error", "Failed to send Telegram digest",
@@ -1099,25 +1098,56 @@ class JobRunner:
     async def _evening_summary(self) -> Dict[str, Any]:
         """
         Evening summary (20:00 ET).
-        Send end-of-day summary.
+        Send end-of-day summary only if there were earnings today.
         """
         start_time = asyncio.get_event_loop().time()
         today = today_et()
 
+        # Check if there were any earnings today worth summarizing
+        earnings = await self.alphavantage.get_earnings_calendar()
+        todays_earnings = [e for e in (earnings or []) if e["report_date"] == today]
+
         sent = False
         telegram_error = None
-        try:
-            sent = await self.telegram.send_message(f"📊 IV Crush daily summary for {today}")
-        except Exception as tg_err:
-            telegram_error = str(tg_err)
-            log("error", "Failed to send evening summary",
-                error=telegram_error, job="evening_summary")
+
+        if not todays_earnings:
+            # No earnings today - skip sending empty summary
+            log("info", "Skipping evening summary - no earnings today", job="evening_summary")
+        else:
+            try:
+                # Get outcome stats from today's recordings
+                repo = HistoricalMovesRepository(settings.DB_PATH)
+                recorded_moves = []
+                for e in todays_earnings[:10]:
+                    moves = repo.get_moves(e["symbol"])
+                    today_move = next((m for m in moves if m.get("earnings_date") == today), None)
+                    if today_move:
+                        recorded_moves.append({
+                            "ticker": e["symbol"],
+                            "move": today_move.get("intraday_move_pct", 0),
+                        })
+
+                if recorded_moves:
+                    msg_lines = [f"📊 <b>IV Crush Summary: {today}</b>\n"]
+                    msg_lines.append(f"Tracked {len(todays_earnings)} earnings today:\n")
+                    for m in sorted(recorded_moves, key=lambda x: abs(x["move"]), reverse=True)[:5]:
+                        direction = "📈" if m["move"] > 0 else "📉"
+                        move_str = f"+{m['move']:.1f}%" if m["move"] > 0 else f"{m['move']:.1f}%"
+                        msg_lines.append(f"{direction} <b>{m['ticker']}</b>: {move_str}")
+                    sent = await self.telegram.send_message("\n".join(msg_lines))
+                else:
+                    # Had earnings but no recorded outcomes yet - skip
+                    log("info", "Skipping evening summary - no outcomes recorded yet", job="evening_summary")
+            except Exception as tg_err:
+                telegram_error = str(tg_err)
+                log("error", "Failed to send evening summary",
+                    error=telegram_error, job="evening_summary")
 
         # Record metrics
         duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
         metrics.record("ivcrush.job.duration", duration_ms, {"job": "evening_summary"})
 
-        result = {"status": "success", "sent": sent}
+        result = {"status": "success", "sent": sent, "earnings_today": len(todays_earnings)}
         if telegram_error:
             result["telegram_error"] = telegram_error
         return result

@@ -128,6 +128,10 @@ def calculate_implied_move_from_chain(
     call_mid = (call.get("bid", 0) + call.get("ask", 0)) / 2
     put_mid = (put.get("bid", 0) + put.get("ask", 0)) / 2
 
+    # Validate mid prices are positive (prevents invalid 0% implied move)
+    if call_mid <= 0 or put_mid <= 0:
+        return None  # Trigger fallback to estimate
+
     # Get IVs if available
     call_iv = call.get("greeks", {}).get("mid_iv") or call.get("greeks", {}).get("iv")
     put_iv = put.get("greeks", {}).get("mid_iv") or put.get("greeks", {}).get("iv")
