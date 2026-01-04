@@ -109,7 +109,9 @@ class Settings:
             name = f"projects/{project}/secrets/trading-desk-secrets/versions/latest"
             response = client.access_secret_version(request={"name": name})
             self._secrets = json.loads(response.payload.data.decode("UTF-8"))
-        except Exception:
+        except Exception as e:
+            # Log the exception type for debugging (don't log full message which may contain secrets)
+            print(f"WARNING: Secret Manager unavailable ({type(e).__name__}), using empty secrets")
             self._secrets = {}
 
     @property

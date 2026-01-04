@@ -345,7 +345,7 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 - "Import 2.0, Don't Copy" pattern via sys.path injection
 - 3-rule directional adjustment (simple, covers 99% cases)
 - Budget tracking: 40 calls/day, $5/month
-- 184 tests with edge cases
+- 186 tests with edge cases
 - Zero external dependencies (pure stdlib)
 - Consistent confidence calculation via `_calculate_confidence()`
 
@@ -353,6 +353,11 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 - ✅ Timezone handling in cache expiry
 - ✅ Direction string validation in `record_outcome()`
 - ✅ Confidence calculation unified across all rules
+
+**Issues Fixed (January 2026):**
+- ✅ Budget tracker default cost mismatch (0.01→0.006 to match COST_PER_CALL_ESTIMATE)
+- ✅ Added validation tests for invalid direction/trade_outcome
+- ✅ Removed unused empty MCP module
 
 ### 5.0 - Cloud Autopilot (All issues resolved ✅)
 
@@ -372,3 +377,9 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 5. ✅ Empty earnings calendar returns proper status
 6. ✅ JSON secrets parsing has error handling
 7. ✅ Added missing endpoints: `/prime`, `/api/budget`, `/api/scan`
+
+**Issues Fixed (January 2026):**
+8. ✅ Midnight hour overflow in job dispatcher (23:55 + 7min → 24:02 bug)
+9. ✅ Zero mid-price validation in implied move calculation (prevents 0% implied move)
+10. ✅ Secret Manager exception logging (shows error type for debugging)
+11. ✅ Empty alert suppression (morning digest, evening summary only send with data)

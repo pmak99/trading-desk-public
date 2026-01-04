@@ -320,14 +320,14 @@ class TestConvenienceFunctions:
             assert "WebSearch fallback" in message
 
     def test_record_perplexity_call_default_cost(self):
-        """record_perplexity_call should use default cost."""
+        """record_perplexity_call should use default cost matching COST_PER_CALL_ESTIMATE."""
         with patch('cache.budget_tracker.BudgetTracker') as MockTracker:
             mock_instance = MockTracker.return_value
 
             record_perplexity_call()
 
-            # Function passes cost as positional arg
-            mock_instance.record_call.assert_called_once_with(0.01)
+            # Default matches COST_PER_CALL_ESTIMATE ($0.006 for sonar model)
+            mock_instance.record_call.assert_called_once_with(0.006)
 
     def test_record_perplexity_call_custom_cost(self):
         """record_perplexity_call should accept custom cost."""
