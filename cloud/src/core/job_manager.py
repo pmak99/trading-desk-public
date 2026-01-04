@@ -233,7 +233,7 @@ class JobManager:
         minute = now.minute
         for offset in [-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7]:
             check_minute = (minute + offset) % 60
-            check_hour = now.hour + ((minute + offset) // 60)
+            check_hour = (now.hour + ((minute + offset) // 60)) % 24  # Handle midnight overflow
             check_time = f"{check_hour:02d}:{check_minute:02d}"
             job = get_scheduled_job(check_time, is_weekend, day_of_week)
             if job:
