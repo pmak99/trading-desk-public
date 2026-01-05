@@ -4,7 +4,7 @@
 
 Production quantitative options trading system focused on **IV Crush** strategy - selling options before earnings when implied volatility is elevated, profiting from volatility collapse after announcements.
 
-**Live Performance (2025):** 57.4% win rate, $261k YTD profit, 1.19 profit factor
+**Live Performance (2025):** 57.4% win rate, $155k YTD profit, 1.19 profit factor
 
 ## Primary Strategy: Volatility Risk Premium (VRP)
 
@@ -47,6 +47,37 @@ VRP Ratio = Implied Move / Historical Mean Move
 4. **Half-Kelly sizing** (0.25 fraction) for position sizing
 5. **Always check liquidity score first** before evaluating VRP
 6. **GOOD tier is tradeable** at full size (2-5x OI, 8-12% spread)
+7. **Respect TRR position limits** - learned from $127k December loss on MU/AVGO
+
+## Tail Risk Ratio (TRR)
+
+Measures how extreme a ticker's worst historical move is compared to its average. Added after December 2025 when 200-contract MU position caused significant single-trade loss.
+
+```
+TRR = Max Historical Move / Average Historical Move
+```
+
+**TRR Thresholds:**
+
+| Level | TRR | Max Contracts | Max Notional | Action |
+|-------|-----|---------------|--------------|--------|
+| **HIGH** | > 2.5x | 50 | $25,000 | Reduce size 50% |
+| NORMAL | 1.5-2.5x | 100 | $50,000 | Standard sizing |
+| LOW | < 1.5x | 100 | $50,000 | Standard sizing |
+
+**Notable HIGH TRR Tickers:**
+- MU (3.05x) - max move 11.21% vs avg 3.68%
+- DRI (6.96x) - extreme tail risk
+- GME (5.44x) - meme stock volatility
+- NKE (4.89x) - earnings surprises
+
+**API Response:** `/api/analyze` includes `tail_risk` and `position_limits` fields:
+```json
+{
+  "tail_risk": {"ratio": 3.05, "level": "HIGH", "max_move": 11.21},
+  "position_limits": {"max_contracts": 50, "max_notional": 25000}
+}
+```
 
 ## API Priority Order
 
