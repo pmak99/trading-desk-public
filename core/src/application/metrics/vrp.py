@@ -230,6 +230,22 @@ class VRPCalculator:
         std = np.std(historical_pcts)
         mad = np.median(np.abs(np.array(historical_pcts) - median))
 
+        # Calculate tail risk metrics
+        max_move = max(historical_pcts)
+        min_move = min(historical_pcts)
+        tail_risk_ratio = max_move / mean if mean > 0 else 0
+
+        # TRR thresholds for position sizing
+        # > 2.5: HIGH TAIL RISK (reduce size 50%)
+        # 1.5-2.5: NORMAL (standard sizing)
+        # < 1.5: LOW TAIL RISK (can increase slightly)
+        if tail_risk_ratio > 2.5:
+            tail_risk_level = 'HIGH'
+        elif tail_risk_ratio >= 1.5:
+            tail_risk_level = 'NORMAL'
+        else:
+            tail_risk_level = 'LOW'
+
         consistency = {
             'mean': mean,
             'median': median,
@@ -238,6 +254,11 @@ class VRPCalculator:
             'mad_pct': (mad / median * 100) if median > 0 else 0,
             'cv': (std / mean) if mean > 0 else 0,  # Coefficient of variation
             'sample_size': len(historical_moves),
+            # Tail risk metrics (NEW)
+            'max_move': max_move,
+            'min_move': min_move,
+            'tail_risk_ratio': tail_risk_ratio,
+            'tail_risk_level': tail_risk_level,
         }
 
         return Ok((vrp_result.value, consistency))

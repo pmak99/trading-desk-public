@@ -886,6 +886,9 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
         moves = repo.get_moves(ticker)
         historical_count = len(moves)
 
+        # Get position limits (TRR data) from precomputed table
+        position_limits = repo.get_position_limits(ticker)
+
         if historical_count < 4:
             return {
                 "ticker": ticker,
@@ -963,6 +966,35 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
             implied_move_pct=implied_move_pct,
             historical_moves=historical_pcts,
         )
+
+        # Calculate tail risk from historical data (fallback if not in position_limits table)
+        if historical_pcts:
+            max_move = max(historical_pcts)
+            tail_risk_ratio = max_move / historical_avg if historical_avg > 0 else 0
+            if tail_risk_ratio > 2.5:
+                tail_risk_level = "HIGH"
+            elif tail_risk_ratio >= 1.5:
+                tail_risk_level = "NORMAL"
+            else:
+                tail_risk_level = "LOW"
+        else:
+            max_move = 0
+            tail_risk_ratio = 0
+            tail_risk_level = "UNKNOWN"
+
+        # Use precomputed position_limits if available, otherwise calculate on the fly
+        if not position_limits and historical_pcts:
+            position_limits = {
+                "ticker": ticker,
+                "tail_risk_ratio": round(tail_risk_ratio, 2),
+                "tail_risk_level": tail_risk_level,
+                "avg_move": round(historical_avg, 2),
+                "max_move": round(max_move, 2),
+                "num_quarters": len(historical_pcts),
+                # Default limits for HIGH tail risk
+                "max_contracts": 50 if tail_risk_level == "HIGH" else 100,
+                "max_notional": 25000 if tail_risk_level == "HIGH" else 50000,
+            }
 
         # Calculate score
         score_data = calculate_score(
@@ -1052,6 +1084,12 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
                 for s in strategies
             ],
             "position_size": position_size,
+            "position_limits": position_limits,
+            "tail_risk": {
+                "ratio": round(tail_risk_ratio, 2),
+                "level": tail_risk_level,
+                "max_move": round(max_move, 2),
+            },
         }
 
         # Record metrics

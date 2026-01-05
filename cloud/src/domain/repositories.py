@@ -288,6 +288,47 @@ class HistoricalMovesRepository:
                 log("error", "Failed to save move", error=str(e), ticker=ticker)
                 raise  # Re-raise for caller to handle
 
+    def get_position_limits(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Get position limits and tail risk data for ticker.
+
+        Returns:
+            Dict with tail_risk_ratio, tail_risk_level, max_contracts, max_notional,
+            or None if not found or table doesn't exist
+        """
+        ticker = validate_ticker(ticker)
+
+        with self._pool.get_connection() as conn:
+            try:
+                cursor = conn.execute(
+                    """
+                    SELECT ticker, tail_risk_ratio, tail_risk_level,
+                           max_contracts, max_notional, avg_move, max_move, num_quarters
+                    FROM position_limits
+                    WHERE ticker = ?
+                    """,
+                    (ticker,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "ticker": row["ticker"],
+                        "tail_risk_ratio": row["tail_risk_ratio"],
+                        "tail_risk_level": row["tail_risk_level"],
+                        "max_contracts": row["max_contracts"],
+                        "max_notional": row["max_notional"],
+                        "avg_move": row["avg_move"],
+                        "max_move": row["max_move"],
+                        "num_quarters": row["num_quarters"],
+                    }
+                return None
+            except sqlite3.OperationalError as e:
+                # Table might not exist yet - gracefully return None
+                if "no such table" in str(e):
+                    log("debug", "position_limits table not found", ticker=ticker)
+                    return None
+                raise
+
 
 class SentimentCacheRepository:
     """Repository for cached AI sentiment data."""
