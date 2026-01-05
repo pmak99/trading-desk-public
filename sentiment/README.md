@@ -175,13 +175,11 @@ Evening   /backfill --pending  # Record outcomes for backtesting
 │       ├── sentiment_cache.py    # 3-hour TTL cache
 │       ├── budget_tracker.py     # API budget tracking (40/day)
 │       └── sentiment_history.py  # Permanent backtesting data
-├── tests/                        # Unit tests (184 tests)
-│   ├── test_budget_tracker.py
-│   ├── test_sentiment_cache.py
-│   ├── test_sentiment_direction.py
-│   └── test_sentiment_history.py
-└── docs/
-    └── ARCHITECTURE.md       # Detailed architecture docs
+└── tests/                        # Unit tests (186 tests)
+    ├── test_budget_tracker.py
+    ├── test_sentiment_cache.py
+    ├── test_sentiment_direction.py
+    └── test_sentiment_history.py
 ```
 
 ## MCP Servers Used
@@ -212,6 +210,5 @@ Key test files:
 
 ## Related Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) - Detailed design docs
 - [CLAUDE.md](../CLAUDE.md) - Project-wide instructions
 - [2.0 README](../2.0/README.md) - Core trading system

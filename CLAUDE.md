@@ -347,10 +347,10 @@ curl -s "https://your-cloud-run-url.run.app/api/budget" -H "X-API-Key: $API_KEY"
 # 2.0 tests (496 pass)
 cd 2.0 && ./venv/bin/python -m pytest tests/ -v
 
-# 4.0 tests (184 pass)
+# 4.0 tests (186 pass)
 cd 4.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 
-# 5.0 tests (166 pass)
+# 5.0 tests (170 pass)
 cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 ```
 
@@ -389,6 +389,7 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 - ✅ Budget tracker default cost mismatch (0.01→0.006 to match COST_PER_CALL_ESTIMATE)
 - ✅ Added validation tests for invalid direction/trade_outcome
 - ✅ Removed unused empty MCP module
+- ✅ Fixed README broken link to non-existent docs/ARCHITECTURE.md
 
 ### 5.0 - Cloud Autopilot (All issues resolved ✅)
 
@@ -414,3 +415,9 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 9. ✅ Zero mid-price validation in implied move calculation (prevents 0% implied move)
 10. ✅ Secret Manager exception logging (shows error type for debugging)
 11. ✅ Empty alert suppression (morning digest, evening summary only send with data)
+12. ✅ Budget cost consistency (0.005→0.006 to match 4.0's COST_PER_CALL_ESTIMATE)
+13. ✅ Removed empty scripts/ directory and fixed Dockerfile COPY instruction
+
+**Stale Artifacts Removed (January 2026):**
+- `2.0/ivcrush.egg-info/`, `2.0/src/ivcrush.egg-info/`, `2.0/src/iv_crush_2.egg-info/` - stale build artifacts
+- `scripts/parse_trade_statements.py`, `scripts/parse_trade_statements_v2.py` - superseded by v3
