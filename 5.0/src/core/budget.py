@@ -98,7 +98,7 @@ class BudgetTracker:
     def try_acquire_call(
         self,
         service: str = "perplexity",
-        cost: float = 0.005
+        cost: float = 0.006
     ) -> bool:
         """
         Atomic check-and-increment: check limits and record call in one transaction.
@@ -225,7 +225,7 @@ class BudgetTracker:
     async def try_acquire_call_async(
         self,
         service: str = "perplexity",
-        cost: float = 0.005
+        cost: float = 0.006
     ) -> bool:
         """
         Async version of try_acquire_call.

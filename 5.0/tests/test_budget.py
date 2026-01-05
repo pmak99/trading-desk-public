@@ -16,10 +16,10 @@ def tracker():
 
 def test_record_api_call(tracker):
     """record_call increments daily count."""
-    tracker.record_call("perplexity", cost=0.005)
+    tracker.record_call("perplexity", cost=0.006)
     stats = tracker.get_daily_stats("perplexity")
     assert stats["calls"] == 1
-    assert stats["cost"] == 0.005
+    assert stats["cost"] == 0.006
 
 def test_daily_limit_check(tracker):
     """can_call returns False when daily limit exceeded."""
