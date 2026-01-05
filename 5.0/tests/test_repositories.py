@@ -189,3 +189,101 @@ def test_sentiment_cache_clear_all(db_path):
 
     assert repo.get_sentiment("A", "2025-01-15") is None
     assert repo.get_sentiment("B", "2025-01-15") is None
+
+
+# Position Limits Tests (TRR Feature)
+
+@pytest.fixture
+def db_with_position_limits():
+    """Create temp database with position_limits table."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+
+    conn = sqlite3.connect(path)
+    # Create required tables
+    conn.execute("""
+        CREATE TABLE historical_moves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            earnings_date DATE NOT NULL,
+            prev_close REAL,
+            earnings_open REAL,
+            earnings_high REAL,
+            earnings_low REAL,
+            earnings_close REAL,
+            intraday_move_pct REAL,
+            gap_move_pct REAL,
+            close_move_pct REAL,
+            UNIQUE(ticker, earnings_date)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE position_limits (
+            ticker TEXT PRIMARY KEY,
+            tail_risk_ratio REAL,
+            tail_risk_level TEXT,
+            max_contracts INTEGER,
+            max_notional INTEGER,
+            avg_move REAL,
+            max_move REAL,
+            num_quarters INTEGER
+        )
+    """)
+    # Insert test data - MU as HIGH tail risk
+    conn.execute("""
+        INSERT INTO position_limits VALUES
+        ('MU', 3.05, 'HIGH', 50, 25000, 3.68, 11.21, 12),
+        ('AAPL', 1.45, 'LOW', 100, 50000, 4.5, 6.5, 12),
+        ('NVDA', 2.1, 'NORMAL', 100, 50000, 5.0, 10.5, 12)
+    """)
+    conn.commit()
+    conn.close()
+
+    yield path
+    os.unlink(path)
+
+
+def test_get_position_limits_found(db_with_position_limits):
+    """get_position_limits returns data for known ticker."""
+    repo = HistoricalMovesRepository(db_path=db_with_position_limits)
+
+    limits = repo.get_position_limits("MU")
+
+    assert limits is not None
+    assert limits["ticker"] == "MU"
+    assert limits["tail_risk_ratio"] == 3.05
+    assert limits["tail_risk_level"] == "HIGH"
+    assert limits["max_contracts"] == 50
+    assert limits["max_notional"] == 25000
+
+
+def test_get_position_limits_not_found(db_with_position_limits):
+    """get_position_limits returns None for unknown ticker."""
+    repo = HistoricalMovesRepository(db_path=db_with_position_limits)
+
+    limits = repo.get_position_limits("UNKN")
+
+    assert limits is None
+
+
+def test_get_position_limits_missing_table(db_path):
+    """get_position_limits gracefully handles missing table."""
+    # db_path fixture doesn't have position_limits table
+    repo = HistoricalMovesRepository(db_path=db_path)
+
+    # Should return None, not raise exception
+    limits = repo.get_position_limits("MU")
+
+    assert limits is None
+
+
+def test_get_position_limits_validates_ticker(db_with_position_limits):
+    """get_position_limits validates ticker format."""
+    repo = HistoricalMovesRepository(db_path=db_with_position_limits)
+
+    # Invalid ticker should raise ValueError
+    with pytest.raises(ValueError):
+        repo.get_position_limits("invalid_ticker!")
+
+    with pytest.raises(ValueError):
+        repo.get_position_limits("TOOLONG")
