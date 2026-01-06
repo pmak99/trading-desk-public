@@ -106,7 +106,7 @@ class TelegramSender:
         emoji = "🎯" if score >= 80 else "📊" if score >= 70 else "📈"
 
         return f"""
-{emoji} <b>IV Crush Alert: {ticker}</b>
+{emoji} <b>Trading Desk Alert: {ticker}</b>
 
 <b>Score:</b> {score}/100
 <b>VRP:</b> {vrp:.1f}x
@@ -150,7 +150,7 @@ class TelegramSender:
         tickers: List[Dict[str, Any]],
     ) -> str:
         """Format daily digest message."""
-        header = f"📋 <b>IV Crush Digest: {date}</b>\n\n"
+        header = f"📋 <b>Trading Desk Digest: {date}</b>\n\n"
 
         if not tickers:
             return header + "No high-VRP opportunities today."
@@ -194,7 +194,7 @@ class TelegramSender:
         Returns:
             True if sent successfully
         """
-        text = f"⚠️ <b>IV Crush Error</b>\n\n{error_msg}"
+        text = f"⚠️ <b>Trading Desk Error</b>\n\n{error_msg}"
         if context:
             text += f"\n\n<i>Context: {context}</i>"
 

@@ -861,11 +861,14 @@ async def alerts_ingest(
 
 
 @app.get("/api/analyze")
-async def analyze(ticker: str, date: str = None, format: str = "json", _: bool = Depends(verify_api_key)):
+async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bool = False, _: bool = Depends(verify_api_key)):
     """
     Deep analysis of single ticker.
 
     Returns VRP, liquidity, sentiment, and strategy recommendations.
+
+    Args:
+        fresh: If True, skip sentiment cache and fetch fresh data
     """
     # Validate date parameter if provided
     if date and not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
@@ -1009,11 +1012,13 @@ async def analyze(ticker: str, date: str = None, format: str = "json", _: bool =
         budget = get_budget_tracker()
         cache = get_sentiment_cache()
 
-        # Check cache first
-        cached = cache.get_sentiment(ticker, target_date)
-        if cached:
-            sentiment_data = cached
-        elif budget.can_call("perplexity"):
+        # Check cache first (unless fresh=True)
+        if not fresh:
+            cached = cache.get_sentiment(ticker, target_date)
+            if cached:
+                sentiment_data = cached
+
+        if not sentiment_data and budget.can_call("perplexity"):
             perplexity = get_perplexity()
             sentiment_data = await perplexity.get_sentiment(ticker, target_date)
             # Save to cache if successful
@@ -1205,11 +1210,15 @@ async def _scan_tickers_for_whisper(
 
 
 @app.get("/api/whisper")
-async def whisper(date: str = None, format: str = "json", _: bool = Depends(verify_api_key)):
+async def whisper(date: str = None, format: str = "json", fresh: bool = False, _: bool = Depends(verify_api_key)):
     """
     Most anticipated earnings - find high-VRP opportunities.
 
     Scans upcoming earnings and returns qualified tickers sorted by score.
+    VRP data is always fetched fresh from Tradier options chains.
+
+    Args:
+        fresh: Reserved for consistency (VRP already fetched fresh each call)
     """
     log("info", "Whisper request", date=date)
     start_time = time.time()
@@ -1350,8 +1359,8 @@ async def telegram_webhook(request: Request):
             await telegram.send_message(response)
 
         elif text.startswith("/whisper"):
-            # Get whisper data
-            result = await whisper(format="json")
+            # Get whisper data (always fresh)
+            result = await whisper(format="json", fresh=True)
             if result.get("status") == "success" and result.get("tickers"):
                 ticker_data = [
                     {
@@ -1391,7 +1400,7 @@ async def telegram_webhook(request: Request):
                     await telegram.send_message(str(e))
                     return {"ok": True}
                 try:
-                    result = await analyze(ticker=ticker, format="json")
+                    result = await analyze(ticker=ticker, format="json", fresh=True)
                     if result.get("status") == "success":
                         alert_data = {
                             "ticker": ticker,
