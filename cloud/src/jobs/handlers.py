@@ -442,7 +442,7 @@ class JobRunner:
             # Still send a notification about the empty calendar
             try:
                 await self.telegram.send_message(
-                    f"📋 <b>IV Crush Digest: {today}</b>\n\n⚠️ Earnings calendar unavailable."
+                    f"📋 <b>Trading Desk Digest: {today}</b>\n\n⚠️ Earnings calendar unavailable."
                 )
             except Exception as tg_err:
                 log("error", "Failed to send Telegram notification", error=str(tg_err))
@@ -1128,7 +1128,7 @@ class JobRunner:
                         })
 
                 if recorded_moves:
-                    msg_lines = [f"📊 <b>IV Crush Summary: {today}</b>\n"]
+                    msg_lines = [f"📊 <b>Trading Desk Summary: {today}</b>\n"]
                     msg_lines.append(f"Tracked {len(todays_earnings)} earnings today:\n")
                     for m in sorted(recorded_moves, key=lambda x: abs(x["move"]), reverse=True)[:5]:
                         direction = "📈" if m["move"] > 0 else "📉"
