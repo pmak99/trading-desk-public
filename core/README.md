@@ -34,6 +34,8 @@ DB_PATH=data/ivcrush.db
 | `./trade.sh sync [--dry-run]` | Sync earnings calendar |
 | `./trade.sh health` | System health check |
 
+**Freshness Validation:** When analyzing tickers with earnings ≤7 days away, the system validates cached dates against Alpha Vantage if the cache is >24h old. This catches date changes automatically.
+
 ## VRP Thresholds
 
 The core edge comes from VRP - the ratio of implied move to historical average:

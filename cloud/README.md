@@ -146,6 +146,8 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
 | `/dispatch` | POST | API Key | Scheduler dispatch (internal) |
 | `/telegram` | POST | Webhook Secret | Telegram webhook handler |
 
+**Freshness Validation:** The `/api/analyze` endpoint validates earnings dates against Alpha Vantage when earnings are ≤7 days away. This catches date changes between scheduled syncs (e.g., company moves earnings from Wed to Tue).
+
 ### Authentication
 
 Protected endpoints require the `X-API-Key` header:

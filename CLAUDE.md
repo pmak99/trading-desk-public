@@ -368,7 +368,9 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 **Known Issues:**
 - Float precision in DB (REAL vs Decimal) - low impact for percentages
 - No schema versioning/migrations
-- Stale earnings cache if sync fails (mitigated by 6-day TTL)
+
+**Issues Fixed (January 2026):**
+- ✅ Stale earnings cache - freshness validation against Alpha Vantage when earnings ≤7 days and cache >24h old
 
 ### 4.0 - AI Sentiment Layer (Grade: A)
 
@@ -417,6 +419,7 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 11. ✅ Empty alert suppression (morning digest, evening summary only send with data)
 12. ✅ Budget cost consistency (0.005→0.006 to match 4.0's COST_PER_CALL_ESTIMATE)
 13. ✅ Removed empty scripts/ directory and fixed Dockerfile COPY instruction
+14. ✅ Earnings date freshness validation in analyze endpoint (validates against Alpha Vantage when ≤7 days out)
 
 **Stale Artifacts Removed (January 2026):**
 - `2.0/ivcrush.egg-info/`, `2.0/src/ivcrush.egg-info/`, `2.0/src/iv_crush_2.egg-info/` - stale build artifacts
