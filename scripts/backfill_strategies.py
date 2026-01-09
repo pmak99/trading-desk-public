@@ -40,22 +40,25 @@ class LegRecord:
 
 def load_unlinked_legs(db_path: str) -> List[Dict[str, Any]]:
     """Load all trade_journal entries without a strategy_id."""
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT id, symbol, acquired_date, sale_date, days_held, option_type,
-               strike, expiration, quantity, cost_basis, proceeds, gain_loss,
-               is_winner, term, earnings_date, actual_move
-        FROM trade_journal
-        WHERE strategy_id IS NULL
-        ORDER BY symbol, sale_date, expiration
-    """)
+        cursor.execute("""
+            SELECT id, symbol, acquired_date, sale_date, days_held, option_type,
+                   strike, expiration, quantity, cost_basis, proceeds, gain_loss,
+                   is_winner, term, earnings_date, actual_move
+            FROM trade_journal
+            WHERE strategy_id IS NULL
+            ORDER BY symbol, sale_date, expiration
+        """)
 
-    rows = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    return rows
+        rows = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return rows
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to load unlinked legs from {db_path}: {e}") from e
 
 
 def create_strategy(
@@ -72,38 +75,110 @@ def create_strategy(
     earnings_date: Optional[str] = None,
     actual_move: Optional[float] = None,
 ) -> int:
-    """Create a strategy record and return its ID."""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    """
+    Create a strategy record and return its ID.
 
-    cursor.execute("""
-        INSERT INTO strategies
-        (symbol, strategy_type, acquired_date, sale_date, days_held, expiration,
-         quantity, gain_loss, is_winner, earnings_date, actual_move)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        symbol, strategy_type, acquired_date, sale_date, days_held, expiration,
-        quantity, gain_loss, is_winner, earnings_date, actual_move
-    ))
+    Note: This function opens its own connection. For transactional operations,
+    use create_strategy_with_conn() instead.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
 
-    strategy_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return strategy_id
+        cursor.execute("""
+            INSERT INTO strategies
+            (symbol, strategy_type, acquired_date, sale_date, days_held, expiration,
+             quantity, gain_loss, is_winner, earnings_date, actual_move)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            symbol, strategy_type, acquired_date, sale_date, days_held, expiration,
+            quantity, gain_loss, is_winner, earnings_date, actual_move
+        ))
+
+        strategy_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return strategy_id
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to create strategy for {symbol}: {e}") from e
+
+
+def create_strategy_with_conn(
+    conn: sqlite3.Connection,
+    symbol: str,
+    strategy_type: str,
+    acquired_date: str,
+    sale_date: str,
+    days_held: Optional[int],
+    expiration: Optional[str],
+    quantity: Optional[int],
+    gain_loss: float,
+    is_winner: bool,
+    earnings_date: Optional[str] = None,
+    actual_move: Optional[float] = None,
+) -> int:
+    """
+    Create a strategy record using an existing connection and return its ID.
+    Does not commit - caller is responsible for transaction management.
+    """
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO strategies
+            (symbol, strategy_type, acquired_date, sale_date, days_held, expiration,
+             quantity, gain_loss, is_winner, earnings_date, actual_move)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            symbol, strategy_type, acquired_date, sale_date, days_held, expiration,
+            quantity, gain_loss, is_winner, earnings_date, actual_move
+        ))
+
+        return cursor.lastrowid
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to create strategy for {symbol}: {e}") from e
 
 
 def link_legs_to_strategy(db_path: str, leg_ids: List[int], strategy_id: int):
-    """Link trade_journal legs to a strategy."""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    """
+    Link trade_journal legs to a strategy.
 
-    cursor.executemany(
-        "UPDATE trade_journal SET strategy_id = ? WHERE id = ?",
-        [(strategy_id, leg_id) for leg_id in leg_ids]
-    )
+    Note: This function opens its own connection. For transactional operations,
+    use link_legs_to_strategy_with_conn() instead.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
 
-    conn.commit()
-    conn.close()
+        cursor.executemany(
+            "UPDATE trade_journal SET strategy_id = ? WHERE id = ?",
+            [(strategy_id, leg_id) for leg_id in leg_ids]
+        )
+
+        conn.commit()
+        conn.close()
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to link legs {leg_ids} to strategy {strategy_id}: {e}") from e
+
+
+def link_legs_to_strategy_with_conn(
+    conn: sqlite3.Connection,
+    leg_ids: List[int],
+    strategy_id: int
+):
+    """
+    Link trade_journal legs to a strategy using an existing connection.
+    Does not commit - caller is responsible for transaction management.
+    """
+    try:
+        cursor = conn.cursor()
+
+        cursor.executemany(
+            "UPDATE trade_journal SET strategy_id = ? WHERE id = ?",
+            [(strategy_id, leg_id) for leg_id in leg_ids]
+        )
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to link legs {leg_ids} to strategy {strategy_id}: {e}") from e
 
 
 def run_backfill(db_path: str, dry_run: bool = False) -> Dict[str, Any]:
@@ -177,28 +252,49 @@ def run_backfill(db_path: str, dry_run: bool = False) -> Dict[str, Any]:
         # Calculate days_held
         days_held = first_leg.days_held
 
-        # Create strategy
-        strategy_id = create_strategy(
-            db_path,
-            symbol=group.symbol,
-            strategy_type=group.strategy_type,
-            acquired_date=group.acquired_date,
-            sale_date=group.sale_date,
-            days_held=days_held,
-            expiration=group.expiration,
-            quantity=quantity,
-            gain_loss=group.combined_pnl,
-            is_winner=group.is_winner,
-            earnings_date=first_leg.earnings_date,
-            actual_move=first_leg.actual_move,
-        )
+        # Create strategy and link legs in a single transaction
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                # Create strategy (does not commit)
+                strategy_id = create_strategy_with_conn(
+                    conn,
+                    symbol=group.symbol,
+                    strategy_type=group.strategy_type,
+                    acquired_date=group.acquired_date,
+                    sale_date=group.sale_date,
+                    days_held=days_held,
+                    expiration=group.expiration,
+                    quantity=quantity,
+                    gain_loss=group.combined_pnl,
+                    is_winner=group.is_winner,
+                    earnings_date=first_leg.earnings_date,
+                    actual_move=first_leg.actual_move,
+                )
 
-        # Link legs
-        leg_ids = [leg.id for leg in group.legs]
-        link_legs_to_strategy(db_path, leg_ids, strategy_id)
+                # Link legs (does not commit)
+                leg_ids = [leg.id for leg in group.legs]
+                link_legs_to_strategy_with_conn(conn, leg_ids, strategy_id)
 
-        strategies_created += 1
-        legs_linked += len(group.legs)
+                # Commit the entire transaction
+                conn.commit()
+
+                strategies_created += 1
+                legs_linked += len(group.legs)
+
+            except Exception as e:
+                # Rollback on any error
+                conn.rollback()
+                raise RuntimeError(
+                    f"Failed to backfill strategy for {group.symbol} "
+                    f"(legs: {[leg.id for leg in group.legs]}): {e}"
+                ) from e
+            finally:
+                conn.close()
+
+        except RuntimeError:
+            # Re-raise RuntimeError to propagate to caller
+            raise
 
     return {
         'strategies_created': strategies_created,
