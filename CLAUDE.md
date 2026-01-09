@@ -104,6 +104,7 @@ TRR = Max Historical Move / Average Historical Move
 ./trade.sh scan YYYY-MM-DD        # Scan all earnings for date
 ./trade.sh whisper                # Most anticipated earnings
 ./trade.sh sync                   # Refresh earnings calendar
+./trade.sh sync-cloud             # Sync DB with cloud + backup to GDrive
 ./trade.sh health                 # System health check
 ```
 
@@ -138,6 +139,28 @@ TRR = Max Historical Move / Average Historical Move
 5. Check POP (probability of profit) - target 60%+
 6. Validate theta decay is positive
 7. Consider position sizing via Half-Kelly
+
+## Database Sync & Backup
+
+**Architecture:** 2.0 local and 5.0 cloud have independent SQLite databases that are synced bidirectionally.
+
+| Database | Location | Backup |
+|----------|----------|--------|
+| 2.0 Local | `2.0/data/ivcrush.db` | Google Drive (on sync-cloud) |
+| 5.0 Cloud | `gs://your-gcs-bucket/ivcrush.db` | GCS backups (weekly Sun 3AM) |
+
+**Sync Strategy:**
+- `historical_moves`: Union (UNIQUE ticker+date prevents dupes)
+- `earnings_calendar`: Newest `updated_at` wins
+- `trade_journal`: Union (UNIQUE constraint prevents dupes)
+
+**Sync Command:** `./trade.sh sync-cloud` from 2.0/ directory
+- Downloads cloud DB from GCS
+- Merges tables bidirectionally
+- Uploads synced DB to GCS
+- Backs up local DB to Google Drive
+
+**Script:** `scripts/sync_databases.py`
 
 ## Database Schema
 
