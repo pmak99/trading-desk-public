@@ -198,6 +198,40 @@ SELECT strftime('%Y-%m', sale_date) as month,
 FROM trade_journal GROUP BY month;
 ```
 
+#### Strategy Grouping and Orphan Legs
+
+The `trade_journal` table links individual option legs to multi-leg strategies via the `strategy_id` foreign key referencing the `strategies` table.
+
+**Current Coverage:**
+- 1-leg strategies (naked calls/puts): Automatically grouped
+- 2-leg strategies (spreads): Automatically grouped
+- 4-leg strategies (iron condors): Automatically grouped
+- **3+ leg strategies**: Require manual review (Task 7, deferred)
+
+**Orphan Legs (Expected Behavior):**
+
+As of January 2026, 262 trade journal legs (49.9% of total trades) have `strategy_id IS NULL`. These are **not defects** but 3+ leg strategies awaiting implementation of Task 7 (manual strategy assignment UI).
+
+**Query orphan legs:**
+```sql
+-- Count orphan legs
+SELECT COUNT(*) FROM trade_journal WHERE strategy_id IS NULL;
+
+-- View orphan legs by ticker
+SELECT symbol, COUNT(*) as orphan_legs
+FROM trade_journal
+WHERE strategy_id IS NULL
+GROUP BY symbol ORDER BY orphan_legs DESC;
+```
+
+The `strategies` table tracks:
+- `id` - Unique strategy identifier
+- `strategy_type` - Type (e.g., BULL_CALL_SPREAD, IRON_CONDOR)
+- `ticker` - Underlying symbol
+- `entry_date`, `exit_date` - Strategy lifecycle dates
+- `total_pnl` - Aggregate P&L across all legs
+- `is_winner` - Whether strategy was profitable overall
+
 ## Environment Variables Required
 
 ```bash
