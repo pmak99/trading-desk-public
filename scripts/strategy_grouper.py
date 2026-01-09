@@ -7,6 +7,7 @@ based on matching criteria: symbol, dates, and expiration.
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import List, Optional, Dict, Any, Protocol
 from collections import defaultdict
@@ -14,9 +15,8 @@ from collections import defaultdict
 
 class Confidence(Enum):
     """Confidence level for auto-detected groupings."""
-    HIGH = "high"      # All criteria match, standard leg count
-    MEDIUM = "medium"  # Most criteria match, might need review
-    LOW = "low"        # Only some criteria match, needs review
+    HIGH = "high"  # All criteria match, standard leg count, valid dates
+    LOW = "low"    # Unknown leg count or invalid dates, needs review
 
 
 class TradeLeg(Protocol):
@@ -90,6 +90,26 @@ def classify_strategy_type(leg_count: int) -> Optional[str]:
         return None  # 3, 5+ legs need manual review
 
 
+def _validate_dates(acquired_date: str, sale_date: str) -> bool:
+    """
+    Validate that acquired_date is before sale_date.
+
+    Args:
+        acquired_date: Date string in YYYY-MM-DD format
+        sale_date: Date string in YYYY-MM-DD format
+
+    Returns:
+        True if dates are valid (acquired < sale), False otherwise
+    """
+    try:
+        acquired = datetime.strptime(acquired_date, "%Y-%m-%d")
+        sale = datetime.strptime(sale_date, "%Y-%m-%d")
+        return acquired < sale
+    except (ValueError, TypeError):
+        # Invalid date format
+        return False
+
+
 def _make_grouping_key(leg: Any) -> tuple:
     """Create grouping key from leg attributes."""
     return (
@@ -131,12 +151,20 @@ def group_legs_into_strategies(legs: List[Any]) -> List[StrategyGroup]:
         leg_count = len(group_legs)
         strategy_type = classify_strategy_type(leg_count)
 
-        if strategy_type is not None:
-            # Known strategy type
+        # Validate dates
+        first_leg = group_legs[0]
+        dates_valid = _validate_dates(first_leg.acquired_date, first_leg.sale_date)
+
+        if not dates_valid:
+            # Invalid dates (acquired >= sale)
+            confidence = Confidence.LOW
+            needs_review = True
+        elif strategy_type is not None:
+            # Known strategy type with valid dates
             confidence = Confidence.HIGH
             needs_review = False
         else:
-            # Unknown leg count (3, 5+)
+            # Unknown leg count (3, 5+) but valid dates
             confidence = Confidence.LOW
             needs_review = True
 
