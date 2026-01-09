@@ -906,6 +906,24 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
             if earnings_info:
                 target_date = earnings_info["earnings_date"]
                 log("info", "Found earnings date from calendar", ticker=ticker, date=target_date)
+
+                # Freshness validation: if earnings within 7 days, validate against Alpha Vantage
+                try:
+                    from datetime import datetime
+                    db_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+                    today = datetime.strptime(today_et(), "%Y-%m-%d").date()
+                    days_until = (db_date - today).days
+
+                    if 0 <= days_until <= 7:
+                        alphavantage = get_alphavantage()
+                        av_earnings = await alphavantage.get_earnings_calendar(symbol=ticker)
+                        if av_earnings:
+                            av_date = av_earnings[0].get("report_date")
+                            if av_date and av_date != target_date:
+                                log("warn", "Earnings date changed", ticker=ticker, db_date=target_date, api_date=av_date)
+                                target_date = av_date
+                except Exception as e:
+                    log("debug", "Earnings validation failed, using cached date", ticker=ticker, error=str(e))
             else:
                 target_date = today_et()
                 log("warn", "No earnings date in calendar, using today", ticker=ticker)
