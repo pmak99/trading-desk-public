@@ -980,7 +980,7 @@ def fetch_earnings_for_ticker(
             cursor = conn.cursor()
             cursor.execute(
                 '''
-                SELECT earnings_date, timing
+                SELECT earnings_date, timing, updated_at, last_validated_at
                 FROM earnings_calendar
                 WHERE ticker = ? AND earnings_date >= date('now')
                 ORDER BY earnings_date ASC
@@ -991,8 +991,64 @@ def fetch_earnings_for_ticker(
             row = cursor.fetchone()
             if row:
                 from src.domain.enums import EarningsTiming
+                from datetime import datetime
                 earnings_date = date.fromisoformat(row[0])
                 timing = EarningsTiming(row[1])
+                updated_at = datetime.fromisoformat(row[2]) if row[2] else None
+                last_validated_at = datetime.fromisoformat(row[3]) if row[3] else None
+
+                # Freshness validation: if earnings within 7 days and not recently validated,
+                # check Alpha Vantage to catch date changes
+                days_until_earnings = (earnings_date - date.today()).days
+                # Use last_validated_at if available, otherwise fall back to updated_at
+                last_checked = last_validated_at or updated_at
+                hours_since_check = (datetime.now() - last_checked).total_seconds() / 3600 if last_checked else 999
+
+                if days_until_earnings <= 7 and hours_since_check > 24:
+                    logger.info(f"{ticker}: Validating stale cache ({hours_since_check:.0f}h old, earnings in {days_until_earnings}d)")
+                    alpha_vantage = container.alphavantage
+                    av_result = alpha_vantage.get_earnings_calendar(symbol=ticker, horizon="3month")
+
+                    if av_result.is_ok and av_result.value:
+                        _, av_date, av_timing = av_result.value[0]
+                        if av_date != earnings_date:
+                            logger.warning(f"{ticker}: Date changed! DB={earnings_date} → API={av_date}")
+                            # Delete old entry and insert new one to avoid PRIMARY KEY violation
+                            try:
+                                cursor.execute(
+                                    'DELETE FROM earnings_calendar WHERE ticker = ? AND earnings_date = ?',
+                                    (ticker, earnings_date.isoformat())
+                                )
+                                cursor.execute(
+                                    '''
+                                    INSERT OR REPLACE INTO earnings_calendar
+                                    (ticker, earnings_date, timing, updated_at, last_validated_at)
+                                    VALUES (?, ?, ?, datetime('now'), datetime('now'))
+                                    ''',
+                                    (ticker, av_date.isoformat(), av_timing.value)
+                                )
+                                conn.commit()
+                            except sqlite3.IntegrityError as e:
+                                logger.warning(f"{ticker}: DB update failed ({e}), using API date anyway")
+                            logger.info(f"{ticker}: Earnings on {av_date} ({av_timing.value}) [from API - corrected]")
+                            return (av_date, av_timing)
+                        else:
+                            # Date confirmed, update last_validated_at
+                            cursor.execute(
+                                '''
+                                UPDATE earnings_calendar
+                                SET last_validated_at = datetime('now')
+                                WHERE ticker = ? AND earnings_date = ?
+                                ''',
+                                (ticker, earnings_date.isoformat())
+                            )
+                            conn.commit()
+                            logger.info(f"{ticker}: Earnings on {earnings_date} ({timing.value}) [from DB - validated]")
+                            return (earnings_date, timing)
+                    else:
+                        # API validation failed, log warning and use cached date
+                        logger.warning(f"{ticker}: API validation failed, using potentially stale cache date {earnings_date}")
+
                 logger.info(f"{ticker}: Earnings on {earnings_date} ({timing.value}) [from DB]")
                 return (earnings_date, timing)
     except Exception as e:
