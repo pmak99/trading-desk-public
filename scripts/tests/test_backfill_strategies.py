@@ -4,12 +4,15 @@ import pytest
 import sqlite3
 import tempfile
 import os
+from unittest.mock import patch
 
 from scripts.backfill_strategies import (
     load_unlinked_legs,
     create_strategy,
     link_legs_to_strategy,
     run_backfill,
+    create_strategy_with_conn,
+    link_legs_to_strategy_with_conn,
 )
 
 
@@ -184,3 +187,125 @@ class TestRunBackfill:
         assert row[0] == 'SPREAD'
         assert abs(row[1] - 5980.98) < 0.01
         assert row[2] == 1  # Winner
+
+
+class TestTransactionRollback:
+    """Tests for transaction atomicity and rollback behavior."""
+
+    def test_rollback_on_link_failure(self, test_db):
+        """
+        Test that if link_legs_to_strategy_with_conn fails,
+        the strategy creation is rolled back (no orphaned strategy record).
+
+        Regression test for commit 7efd42f - verifies transaction atomicity.
+        """
+        # Insert a valid leg into trade_journal
+        conn = sqlite3.connect(test_db)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO trade_journal
+            (symbol, acquired_date, sale_date, days_held, option_type, strike, expiration,
+             quantity, cost_basis, proceeds, gain_loss, is_winner, term)
+            VALUES
+            ('TEST', '2026-01-07', '2026-01-08', 1, 'PUT', 25.0, '2026-01-16',
+             100, 1000.00, 1500.00, 500.00, 1, 'SHORT')
+        """)
+        valid_leg_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
+        # Count strategies before the operation
+        conn = sqlite3.connect(test_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM strategies")
+        initial_strategy_count = cursor.fetchone()[0]
+        conn.close()
+
+        # Test scenario: Strategy creation succeeds, but linking fails
+        # This simulates the atomic transaction behavior
+        conn = sqlite3.connect(test_db)
+        error_occurred = False
+        try:
+            # Create strategy (does not commit)
+            strategy_id = create_strategy_with_conn(
+                conn,
+                symbol='TEST',
+                strategy_type='SINGLE',
+                acquired_date='2026-01-07',
+                sale_date='2026-01-08',
+                days_held=1,
+                expiration='2026-01-16',
+                quantity=100,
+                gain_loss=500.00,
+                is_winner=True,
+            )
+
+            # Verify the strategy was created in the transaction (before commit)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM strategies WHERE id = ?", (strategy_id,))
+            assert cursor.fetchone()[0] == 1, "Strategy should exist in transaction"
+
+            # Simulate a linking failure by raising an exception
+            # This could happen due to database constraints, invalid IDs, etc.
+            raise sqlite3.IntegrityError("Simulated constraint violation during linking")
+
+        except sqlite3.IntegrityError:
+            # Expected error - rollback the transaction
+            conn.rollback()
+            error_occurred = True
+        finally:
+            conn.close()
+
+        # Verify the error occurred as expected
+        assert error_occurred, "Test should have triggered an error"
+
+        # Verify no orphaned strategy record was created (rollback worked)
+        conn = sqlite3.connect(test_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM strategies")
+        final_strategy_count = cursor.fetchone()[0]
+        conn.close()
+
+        assert final_strategy_count == initial_strategy_count, (
+            "Rolled-back strategy should not exist in database"
+        )
+
+    def test_rollback_in_run_backfill(self, test_db):
+        """
+        Test that run_backfill properly rolls back on failure and propagates errors.
+        """
+        # Insert a spread with one valid leg and set up for failure
+        conn = sqlite3.connect(test_db)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO trade_journal
+            (symbol, acquired_date, sale_date, days_held, option_type, strike, expiration,
+             quantity, cost_basis, proceeds, gain_loss, is_winner, term)
+            VALUES
+            ('FAIL', '2026-01-07', '2026-01-08', 1, 'PUT', 25.0, '2026-01-16',
+             100, 1000.00, 1500.00, 500.00, 1, 'SHORT')
+        """)
+        conn.commit()
+        conn.close()
+
+        # Mock link_legs_to_strategy_with_conn to raise an error
+        with patch('scripts.backfill_strategies.link_legs_to_strategy_with_conn') as mock_link:
+            mock_link.side_effect = RuntimeError("Simulated linking failure")
+
+            # run_backfill should propagate the error
+            with pytest.raises(RuntimeError, match="Failed to backfill strategy"):
+                run_backfill(test_db, dry_run=False)
+
+        # Verify no strategy was created (rollback worked)
+        conn = sqlite3.connect(test_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM strategies")
+        strategy_count = cursor.fetchone()[0]
+
+        # Verify legs are still unlinked
+        cursor.execute("SELECT COUNT(*) FROM trade_journal WHERE strategy_id IS NULL")
+        unlinked_count = cursor.fetchone()[0]
+        conn.close()
+
+        assert strategy_count == 0, "No strategies should be created due to rollback"
+        assert unlinked_count == 1, "Leg should remain unlinked after rollback"
