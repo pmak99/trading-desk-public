@@ -324,6 +324,7 @@ ${BOLD}USAGE${NC}
     $0 scan YYYY-MM-DD               Scan all earnings for date
     $0 whisper [YYYY-MM-DD]          Most anticipated earnings
     $0 sync [--dry-run]              Sync earnings calendar
+    $0 sync-cloud                    Sync DB with cloud + backup to GDrive
     $0 health                        System health check
 
 ${BOLD}EXAMPLES${NC}
@@ -565,6 +566,12 @@ case "${1:-}" in
         # Parse sync arguments
         shift  # Remove 'sync' from args
         sync_earnings_calendar "$@"
+        ;;
+
+    sync-cloud)
+        # Sync local DB with 5.0 cloud (GCS) and backup to Google Drive
+        echo -e "${BLUE}${BOLD}Syncing with cloud database...${NC}"
+        python3 "../scripts/sync_databases.py"
         ;;
 
     scan)
