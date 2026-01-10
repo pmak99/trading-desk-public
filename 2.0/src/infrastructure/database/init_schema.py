@@ -47,11 +47,14 @@ def init_database(db_path: Path) -> None:
     cursor = conn.cursor()
 
     try:
+        # CRITICAL: Enable foreign key constraints (disabled by default in SQLite)
+        cursor.execute('PRAGMA foreign_keys=ON')
+
         # Enable WAL mode for better concurrency and performance
         cursor.execute('PRAGMA journal_mode=WAL')
         cursor.execute('PRAGMA synchronous=NORMAL')  # Safe with WAL
         cursor.execute('PRAGMA busy_timeout=5000')   # 5 second timeout on locks
-        logger.info("Database configured: WAL mode enabled, busy_timeout=5s")
+        logger.info("Database configured: foreign_keys=ON, WAL mode enabled, busy_timeout=5s")
 
         # Table 1: Earnings Calendar
         cursor.execute('''
@@ -289,6 +292,9 @@ def _ensure_wal_mode(db_path: Path) -> None:
         conn = sqlite3.connect(str(db_path), timeout=30)
         cursor = conn.cursor()
 
+        # CRITICAL: Enable foreign key constraints
+        cursor.execute('PRAGMA foreign_keys=ON')
+
         # Check current journal mode
         current_mode = cursor.execute('PRAGMA journal_mode').fetchone()[0]
 
@@ -298,13 +304,44 @@ def _ensure_wal_mode(db_path: Path) -> None:
             cursor.execute('PRAGMA synchronous=NORMAL')
             cursor.execute('PRAGMA busy_timeout=5000')
             conn.commit()
-            logger.info(f"✓ WAL mode enabled for existing database: {db_path}")
+            logger.info(f"✓ Foreign keys ON, WAL mode enabled for existing database: {db_path}")
         else:
-            logger.debug(f"Database already using WAL mode: {db_path}")
+            logger.debug(f"Database already using WAL mode (foreign_keys=ON): {db_path}")
 
         conn.close()
     except sqlite3.Error as e:
         logger.error(f"Failed to ensure WAL mode: {e}")
+
+
+def optimize_database(db_path: Path) -> None:
+    """
+    Run ANALYZE to update query optimizer statistics.
+
+    Should be run periodically (weekly) to keep query planner statistics current.
+    Critical for optimal JOIN and index performance as data grows.
+
+    Args:
+        db_path: Path to SQLite database
+    """
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30)
+        conn.execute('PRAGMA foreign_keys=ON')
+        cursor = conn.cursor()
+
+        logger.info(f"Running ANALYZE on {db_path.name}...")
+
+        # Collect statistics for all tables
+        cursor.execute('ANALYZE')
+        conn.commit()
+
+        # Report statistics
+        cursor.execute("SELECT COUNT(*) FROM sqlite_stat1")
+        stat_count = cursor.fetchone()[0]
+        logger.info(f"✓ Database statistics updated ({stat_count} stat entries)")
+
+        conn.close()
+    except sqlite3.Error as e:
+        logger.error(f"Failed to analyze database: {e}")
 
 
 if __name__ == "__main__":

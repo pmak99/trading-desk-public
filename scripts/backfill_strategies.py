@@ -42,6 +42,7 @@ def load_unlinked_legs(db_path: str) -> List[Dict[str, Any]]:
     """Load all trade_journal entries without a strategy_id."""
     try:
         conn = sqlite3.connect(db_path)
+        conn.execute('PRAGMA foreign_keys=ON')
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
@@ -83,6 +84,7 @@ def create_strategy(
     """
     try:
         conn = sqlite3.connect(db_path)
+        conn.execute('PRAGMA foreign_keys=ON')
         cursor = conn.cursor()
 
         cursor.execute("""
@@ -148,6 +150,7 @@ def link_legs_to_strategy(db_path: str, leg_ids: List[int], strategy_id: int):
     """
     try:
         conn = sqlite3.connect(db_path)
+        conn.execute('PRAGMA foreign_keys=ON')
         cursor = conn.cursor()
 
         cursor.executemany(
@@ -255,6 +258,8 @@ def run_backfill(db_path: str, dry_run: bool = False) -> Dict[str, Any]:
         # Create strategy and link legs in a single transaction
         try:
             conn = sqlite3.connect(db_path)
+            # CRITICAL: Enable foreign key constraints
+            conn.execute('PRAGMA foreign_keys=ON')
             try:
                 # Create strategy (does not commit)
                 strategy_id = create_strategy_with_conn(
