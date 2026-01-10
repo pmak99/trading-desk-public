@@ -56,6 +56,8 @@ class ConnectionPool:
     def _create_connection(self) -> sqlite3.Connection:
         """Create a new connection."""
         conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        # CRITICAL: Enable foreign key constraints
+        conn.execute('PRAGMA foreign_keys=ON')
         conn.row_factory = sqlite3.Row
         return conn
 

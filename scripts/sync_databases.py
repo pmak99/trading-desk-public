@@ -25,7 +25,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 LOCAL_DB = PROJECT_ROOT / "2.0" / "data" / "ivcrush.db"
 GCS_BUCKET = "your-gcs-bucket"
 GCS_BLOB = "ivcrush.db"
-GDRIVE_BACKUP_DIR = Path.home() / "Library/CloudStorage/GoogleDrive-pmakwana99@gmail.com/My Drive/Trading/Database Backups"
+GDRIVE_BACKUP_DIR = Path.home() / "Library/CloudStorage/GoogleDrive-pmakwana99@gmail.com/My Drive/Backups/trading-desk"
 
 
 def log(msg: str, level: str = "info"):
@@ -281,17 +281,42 @@ def sync_trade_journal(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Conne
 
 
 def backup_to_gdrive(db_path: Path) -> bool:
-    """Backup database to Google Drive."""
+    """
+    Backup database to Google Drive with integrity verification.
+
+    Raises:
+        RuntimeError: If backup directory doesn't exist or backup fails
+    """
     if not GDRIVE_BACKUP_DIR.exists():
-        log(f"Google Drive backup dir not found: {GDRIVE_BACKUP_DIR}", "warn")
-        return False
+        error_msg = (
+            f"CRITICAL: Google Drive backup directory not found: {GDRIVE_BACKUP_DIR}\n"
+            f"Backups are DISABLED. Either:\n"
+            f"  1. Mount Google Drive at the expected location\n"
+            f"  2. Update GDRIVE_BACKUP_DIR in sync_databases.py\n"
+            f"  3. Comment out backup_to_gdrive() call if not using GDrive"
+        )
+        log(error_msg, "error")
+        raise RuntimeError(error_msg)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_file = GDRIVE_BACKUP_DIR / f"ivcrush_{timestamp}.db"
 
     try:
+        # Copy database
         shutil.copy2(db_path, backup_file)
-        log(f"Backed up to Google Drive: {backup_file.name}")
+
+        # CRITICAL: Verify backup integrity
+        original_size = db_path.stat().st_size
+        backup_size = backup_file.stat().st_size
+
+        if backup_size != original_size:
+            backup_file.unlink()  # Remove corrupted backup
+            raise RuntimeError(
+                f"Backup verification failed: size mismatch "
+                f"(original: {original_size}, backup: {backup_size})"
+            )
+
+        log(f"✓ Backed up to Google Drive: {backup_file.name} ({backup_size:,} bytes)", "success")
 
         # Cleanup old backups (keep last 30 days)
         cutoff = datetime.now().timestamp() - (30 * 24 * 60 * 60)
@@ -302,8 +327,9 @@ def backup_to_gdrive(db_path: Path) -> bool:
 
         return True
     except Exception as e:
-        log(f"Backup to Google Drive failed: {e}", "error")
-        return False
+        error_msg = f"Backup to Google Drive FAILED: {e}"
+        log(error_msg, "error")
+        raise RuntimeError(error_msg)
 
 
 def main():
@@ -327,12 +353,19 @@ def main():
             # Just upload local to cloud
             if upload_cloud_db(LOCAL_DB):
                 log("Uploaded local DB to cloud", "success")
-            backup_to_gdrive(LOCAL_DB)
+            try:
+                backup_to_gdrive(LOCAL_DB)
+            except RuntimeError as e:
+                log(f"WARNING: Backup failed but sync completed: {e}", "warn")
             return
 
         # Open both databases
         local_conn = sqlite3.connect(str(LOCAL_DB))
         cloud_conn = sqlite3.connect(str(cloud_db_path))
+
+        # CRITICAL: Enable foreign key constraints
+        local_conn.execute("PRAGMA foreign_keys=ON")
+        cloud_conn.execute("PRAGMA foreign_keys=ON")
 
         # Enable WAL mode for better concurrency
         local_conn.execute("PRAGMA journal_mode=WAL")
@@ -366,7 +399,10 @@ def main():
 
         # Backup local DB to Google Drive
         log("Backing up to Google Drive...")
-        backup_to_gdrive(LOCAL_DB)
+        try:
+            backup_to_gdrive(LOCAL_DB)
+        except RuntimeError as e:
+            log(f"WARNING: Backup failed but sync completed: {e}", "warn")
 
         # Summary
         total_changes = (

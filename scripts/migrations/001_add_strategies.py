@@ -1,19 +1,34 @@
 #!/usr/bin/env python3
-"""Migration: Add strategies table for multi-leg tracking."""
+"""Migration 001: Add strategies table for multi-leg tracking."""
 
 import sqlite3
 import sys
 from pathlib import Path
 
+VERSION = 4
+NAME = "add_strategies_table"
+DESCRIPTION = "Create strategies table and add strategy_id foreign key to trade_journal"
+
 def migrate(db_path: str, dry_run: bool = False) -> bool:
     """Create strategies table and add strategy_id to trade_journal."""
     conn = sqlite3.connect(db_path)
+    conn.execute('PRAGMA foreign_keys=ON')
     cursor = conn.cursor()
 
-    # Check if already migrated
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strategies'")
+    # Ensure schema_migrations table exists
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Check if already migrated via version table
+    cursor.execute("SELECT version FROM schema_migrations WHERE version = ?", (VERSION,))
     if cursor.fetchone():
-        print("Migration already applied: strategies table exists")
+        print(f"Migration {VERSION} ({NAME}) already applied")
         conn.close()
         return True
 
@@ -54,8 +69,17 @@ def migrate(db_path: str, dry_run: bool = False) -> bool:
         cursor.execute("CREATE INDEX idx_strategies_symbol ON strategies(symbol)")
         cursor.execute("CREATE INDEX idx_strategies_sale_date ON strategies(sale_date)")
 
+        # Record migration in schema_migrations table
+        cursor.execute("""
+            INSERT INTO schema_migrations (version, name, description)
+            VALUES (?, ?, ?)
+        """, (VERSION, NAME, DESCRIPTION))
+
         conn.commit()
-        print("Migration successful: created strategies table and added strategy_id column")
+        print(f"Migration {VERSION} ({NAME}) applied successfully")
+        print(f"  ✓ Created strategies table")
+        print(f"  ✓ Added strategy_id column to trade_journal")
+        print(f"  ✓ Created 3 indexes")
         return True
 
     except Exception as e:
