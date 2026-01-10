@@ -335,6 +335,7 @@ def parse_all_statements(directory: str) -> Tuple[List[Transaction], Dict]:
         ('Statement9302025.pdf', '2025-09'),
         ('Statement10312025.pdf', '2025-10'),
         ('Statement11302025.pdf', '2025-11'),
+        ('Statement12312025.pdf', '2025-12'),
     ]
 
     all_transactions = []
