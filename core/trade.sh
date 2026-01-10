@@ -245,7 +245,7 @@ backup_database() {
     fi
 
     # Sync to Google Drive (async, non-blocking)
-    local gdrive_backup_dir="$HOME/Library/CloudStorage/GoogleDrive-pmakwana99@gmail.com/My Drive/Trading/Database Backups"
+    local gdrive_backup_dir="$HOME/Library/CloudStorage/GoogleDrive-pmakwana99@gmail.com/My Drive/Backups/trading-desk"
     if [ -d "$gdrive_backup_dir" ]; then
         # Copy in background to avoid blocking
         (cp "$backup_file" "$gdrive_backup_dir/" 2>/dev/null || true) &
