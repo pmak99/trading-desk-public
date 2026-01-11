@@ -1,0 +1,14 @@
+# 6.0 Agent System Dependencies
+# Reuses 2.0 venv - minimal additional dependencies
+
+# Core dependencies inherited from 2.0:
+# - pydantic (for schema validation)
+# - aiohttp (for async HTTP)
+# - pytest (for testing)
+# - requests (for synchronous HTTP)
+
+# Additional dependencies for 6.0:
+pyyaml>=6.0         # For config/agents.yaml parsing
+tabulate>=0.9.0     # For ASCII table formatting
+
+# All other dependencies already available in ../2.0/venv
