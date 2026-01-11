@@ -39,6 +39,9 @@ venv.bak/
 *~
 .DS_Store
 
+# Git worktrees
+.worktrees/
+
 # Testing
 .pytest_cache/
 .coverage
