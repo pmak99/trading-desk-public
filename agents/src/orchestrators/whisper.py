@@ -1,0 +1,304 @@
+"""WhisperOrchestrator - Most Anticipated Earnings discovery.
+
+Coordinates parallel ticker analysis for upcoming earnings, providing
+ranked opportunities with VRP, liquidity, sentiment, and explanations.
+
+Target: 90 seconds for 30 tickers (vs 180 seconds sequential).
+"""
+
+import asyncio
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
+
+from .base import BaseOrchestrator
+from ..agents.ticker_analysis import TickerAnalysisAgent
+from ..agents.explanation import ExplanationAgent
+from ..agents.anomaly import AnomalyDetectionAgent
+from ..agents.health import HealthCheckAgent
+from ..utils.formatter import format_whisper_results, format_cross_ticker_warnings
+
+
+class WhisperOrchestrator(BaseOrchestrator):
+    """
+    Orchestrator for /whisper - Most Anticipated Earnings.
+
+    Workflow:
+    1. Run health check (fail fast if APIs down)
+    2. Fetch earnings calendar for date range
+    3. Spawn N TickerAnalysisAgents in parallel
+    4. Filter by VRP >= 3.0 (discovery threshold)
+    5. Spawn ExplanationAgents for top candidates
+    6. Spawn AnomalyDetectionAgents for top candidates
+    7. Apply cross-ticker intelligence (sector correlation, portfolio risk)
+    8. Rank by composite score
+    9. Return top 10 with explanations
+
+    Example:
+        orchestrator = WhisperOrchestrator()
+        result = await orchestrator.orchestrate(
+            start_date="2026-02-05",
+            end_date="2026-02-09"
+        )
+    """
+
+    # Discovery threshold (lower than position sizing threshold)
+    VRP_DISCOVERY_THRESHOLD = 3.0
+
+    # Limit for performance
+    MAX_TICKERS_TO_ANALYZE = 30
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """Initialize WhisperOrchestrator."""
+        super().__init__(config)
+        self.timeout = self.config.get('timeout', 90)
+
+    async def orchestrate(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Execute whisper orchestration workflow.
+
+        Args:
+            start_date: Start date for earnings (default: today)
+            end_date: End date for earnings (default: today + 4 days)
+            limit: Number of results to return (default: 10)
+
+        Returns:
+            Orchestration result with ranked opportunities
+
+        Example:
+            result = await orchestrator.orchestrate(
+                start_date="2026-02-05",
+                end_date="2026-02-09",
+                limit=10
+            )
+        """
+        # Step 1: Health check
+        print("[1/7] Running health check...")
+        health_agent = HealthCheckAgent()
+        health_result = health_agent.check_health()
+
+        if health_result['status'] == 'unhealthy':
+            return {
+                'success': False,
+                'error': 'System unhealthy - cannot proceed',
+                'health': health_result
+            }
+
+        # Step 2: Fetch earnings calendar
+        print("[2/7] Fetching earnings calendar...")
+        earnings = self._fetch_earnings_calendar(start_date, end_date)
+
+        if not earnings:
+            return {
+                'success': True,
+                'results': [],
+                'message': 'No earnings found for date range'
+            }
+
+        print(f"  Found {len(earnings)} earnings")
+
+        # Limit for performance
+        if len(earnings) > self.MAX_TICKERS_TO_ANALYZE:
+            print(f"  Limiting to first {self.MAX_TICKERS_TO_ANALYZE} tickers")
+            earnings = earnings[:self.MAX_TICKERS_TO_ANALYZE]
+
+        # Step 3: Parallel ticker analysis
+        print(f"[3/7] Analyzing {len(earnings)} tickers in parallel...")
+        analysis_results = await self._parallel_ticker_analysis(earnings)
+
+        # Filter successful results
+        successful = self.filter_successful_results(analysis_results)
+        print(f"  {len(successful)} successful analyses")
+
+        # Step 4: Filter by VRP threshold
+        print(f"[4/7] Filtering by VRP >= {self.VRP_DISCOVERY_THRESHOLD}x...")
+        filtered = self._filter_by_vrp(successful, self.VRP_DISCOVERY_THRESHOLD)
+        print(f"  {len(filtered)} tickers meet threshold")
+
+        if not filtered:
+            return {
+                'success': True,
+                'results': [],
+                'message': f'No tickers with VRP >= {self.VRP_DISCOVERY_THRESHOLD}x'
+            }
+
+        # Step 5: Sort and take top candidates
+        print("[5/7] Ranking by composite score...")
+        filtered.sort(key=lambda x: x.get('score', 0), reverse=True)
+        top_candidates = filtered[:limit * 2]  # Get 2x limit for explanation phase
+
+        # Step 6: Add explanations to top candidates
+        print(f"[6/7] Adding explanations to top {len(top_candidates)} candidates...")
+        enriched = await self._add_explanations(top_candidates)
+
+        # Step 7: Add anomaly detection to top candidates
+        print(f"[7/7] Running anomaly detection on top {len(enriched)} candidates...")
+        final_results = await self._add_anomaly_detection(enriched)
+
+        # Apply cross-ticker intelligence
+        warnings = self._detect_cross_ticker_risks(final_results)
+
+        # Final sort and limit
+        final_results.sort(key=lambda x: x.get('score', 0), reverse=True)
+        final_results = final_results[:limit]
+
+        return {
+            'success': True,
+            'results': final_results,
+            'cross_ticker_warnings': warnings,
+            'summary': self.get_orchestration_summary()
+        }
+
+    def _fetch_earnings_calendar(
+        self,
+        start_date: Optional[str],
+        end_date: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Fetch earnings calendar from 2.0."""
+        # Default date range: today + 4 days
+        if start_date is None:
+            start_date = datetime.now().strftime('%Y-%m-%d')
+        if end_date is None:
+            end_dt = datetime.now() + timedelta(days=4)
+            end_date = end_dt.strftime('%Y-%m-%d')
+
+        try:
+            earnings = self.container_2_0.get_upcoming_earnings(
+                start_date=start_date,
+                end_date=end_date
+            )
+            return earnings
+        except Exception as e:
+            print(f"  Error fetching calendar: {e}")
+            return []
+
+    async def _parallel_ticker_analysis(
+        self,
+        earnings: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Analyze all tickers in parallel."""
+        # Create ticker analysis agents
+        analysis_agent = TickerAnalysisAgent()
+
+        # Build analysis tasks
+        tasks = []
+        for earning in earnings:
+            ticker = earning.get('ticker')
+            earnings_date = earning.get('date')
+
+            if ticker and earnings_date:
+                # Wrap synchronous analyze() in async task
+                task = asyncio.create_task(
+                    asyncio.to_thread(
+                        analysis_agent.analyze,
+                        ticker,
+                        earnings_date,
+                        generate_strategies=False  # Skip strategies in whisper
+                    )
+                )
+                tasks.append(task)
+
+        # Wait for all with timeout
+        if tasks:
+            results = await self.gather_with_timeout(tasks, timeout=self.timeout)
+            return results
+
+        return []
+
+    def _filter_by_vrp(
+        self,
+        results: List[Dict[str, Any]],
+        threshold: float
+    ) -> List[Dict[str, Any]]:
+        """Filter results by VRP threshold."""
+        return [
+            r for r in results
+            if r.get('vrp_ratio', 0) >= threshold
+        ]
+
+    async def _add_explanations(
+        self,
+        results: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Add explanations to top results."""
+        explanation_agent = ExplanationAgent()
+
+        enriched = []
+        for result in results:
+            # Add explanation
+            explanation = explanation_agent.explain(
+                ticker=result['ticker'],
+                vrp_ratio=result.get('vrp_ratio', 0),
+                liquidity_tier=result.get('liquidity_tier', 'N/A')
+            )
+
+            # Merge into result
+            result['explanation'] = explanation.get('explanation', '')
+            result['key_factors'] = explanation.get('key_factors', [])
+            result['historical_context'] = explanation.get('historical_context', '')
+
+            enriched.append(result)
+
+        return enriched
+
+    async def _add_anomaly_detection(
+        self,
+        results: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Add anomaly detection to results."""
+        anomaly_agent = AnomalyDetectionAgent()
+
+        enriched = []
+        for result in results:
+            # Run anomaly detection
+            anomaly_result = anomaly_agent.detect(
+                ticker=result['ticker'],
+                vrp_ratio=result.get('vrp_ratio', 0),
+                recommendation=result.get('recommendation', 'SKIP'),
+                liquidity_tier=result.get('liquidity_tier', 'REJECT'),
+                earnings_date=result.get('earnings_date', ''),
+                cache_age_hours=0.0,  # TODO: Get actual cache age
+                historical_quarters=12  # TODO: Get actual count
+            )
+
+            # Merge into result
+            result['anomalies'] = anomaly_result.get('anomalies', [])
+            result['anomaly_recommendation'] = anomaly_result.get('recommendation', 'TRADE')
+
+            enriched.append(result)
+
+        return enriched
+
+    def _detect_cross_ticker_risks(
+        self,
+        results: List[Dict[str, Any]]
+    ) -> List[str]:
+        """Detect cross-ticker correlation and portfolio risks."""
+        warnings = []
+
+        # TODO: Implement sector correlation detection
+        # Group by sector, flag if 3+ tickers in same sector
+
+        # TODO: Implement portfolio risk assessment
+        # Calculate total notional exposure, flag if >$150K
+
+        return warnings
+
+    def format_results(self, result: Dict[str, Any]) -> str:
+        """Format orchestration results as ASCII table."""
+        if not result.get('success'):
+            return f"Error: {result.get('error', 'Unknown error')}"
+
+        results = result.get('results', [])
+        warnings = result.get('cross_ticker_warnings', [])
+
+        output = format_whisper_results(results)
+
+        if warnings:
+            output += "\n" + format_cross_ticker_warnings(warnings)
+
+        return output
