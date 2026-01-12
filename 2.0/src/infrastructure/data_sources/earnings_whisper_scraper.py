@@ -267,7 +267,7 @@ class EarningsWhisperScraper:
         self,
         week_monday: Optional[str] = None,
         fallback_image: Optional[str] = None
-    ) -> Result[List[str], AppError]:
+    ) -> Result[Tuple[List[str], datetime], AppError]:
         """
         Get most anticipated earnings tickers.
 
@@ -276,11 +276,12 @@ class EarningsWhisperScraper:
             fallback_image: Path to screenshot image (PNG/JPG)
 
         Returns:
-            Result with ticker list or error
+            Result with tuple of (ticker list, week Monday datetime) or error
 
         Note:
             @eWhispers typically posts about the UPCOMING week's earnings,
             so when no date is specified, we try next week first, then current week.
+            Returns the actual week that tickers were found for.
         """
         if week_monday:
             try:
@@ -305,7 +306,8 @@ class EarningsWhisperScraper:
         for monday in weeks_to_try:
             result = self._try_fetch_week(monday, fallback_image)
             if result.is_ok:
-                return result
+                # Return tickers AND the week they're for
+                return Result.Ok((result.value, monday))
             last_error = result.error
             logger.debug(f"Week {monday.strftime('%Y-%m-%d')} not found, trying next...")
 

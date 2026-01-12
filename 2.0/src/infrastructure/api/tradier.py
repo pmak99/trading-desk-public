@@ -416,7 +416,9 @@ class TradierAPI:
                 )
 
             data = response.json()
-            expirations = data.get('expirations', {}).get('date', [])
+            # Handle case where 'expirations' key exists but has None value (preferred stocks)
+            expirations_obj = data.get('expirations') or {}
+            expirations = expirations_obj.get('date', [])
 
             if not isinstance(expirations, list):
                 expirations = [expirations]
