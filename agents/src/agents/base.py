@@ -16,7 +16,8 @@ from ..utils.schemas import (
     TickerAnalysisResponse,
     ExplanationResponse,
     AnomalyDetectionResponse,
-    HealthCheckResponse
+    HealthCheckResponse,
+    SentimentFetchResponse
 )
 
 
@@ -49,7 +50,8 @@ class BaseAgent:
         'TickerAnalysisAgent': TickerAnalysisResponse,
         'ExplanationAgent': ExplanationResponse,
         'AnomalyDetectionAgent': AnomalyDetectionResponse,
-        'HealthCheckAgent': HealthCheckResponse
+        'HealthCheckAgent': HealthCheckResponse,
+        'SentimentFetchAgent': SentimentFetchResponse
     }
 
     @staticmethod

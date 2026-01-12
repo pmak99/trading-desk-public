@@ -2,11 +2,14 @@
 # 6.0 Agent System CLI Entry Point
 #
 # Usage:
+#   ./agent.sh prime [DATE]           # Pre-cache sentiment
 #   ./agent.sh whisper [DATE]         # Most anticipated earnings
 #   ./agent.sh analyze TICKER [DATE]  # Deep dive on single ticker
 #   ./agent.sh maintenance health     # System health check
 #
 # Examples:
+#   ./agent.sh prime
+#   ./agent.sh prime 2026-02-05
 #   ./agent.sh whisper
 #   ./agent.sh whisper 2026-02-05
 #   ./agent.sh analyze NVDA
@@ -33,6 +36,17 @@ COMMAND="$1"
 shift || true  # Don't exit if no more args
 
 case "$COMMAND" in
+    prime)
+        DATE="${1:-}"
+        if [ -z "$DATE" ]; then
+            echo "Running /prime (next 5 days)..."
+            exec "$PYTHON" -m src.cli.prime
+        else
+            echo "Running /prime starting $DATE..."
+            exec "$PYTHON" -m src.cli.prime "$DATE"
+        fi
+        ;;
+
     whisper)
         DATE="${1:-}"
         if [ -z "$DATE" ]; then
@@ -73,11 +87,14 @@ case "$COMMAND" in
         echo "6.0 Agent System - Trading Desk"
         echo ""
         echo "Usage:"
+        echo "  $0 prime [DATE]           # Pre-cache sentiment"
         echo "  $0 whisper [DATE]         # Most anticipated earnings"
         echo "  $0 analyze TICKER [DATE]  # Deep dive on single ticker"
         echo "  $0 maintenance health     # System health check"
         echo ""
         echo "Examples:"
+        echo "  $0 prime"
+        echo "  $0 prime 2026-02-05"
         echo "  $0 whisper"
         echo "  $0 whisper 2026-02-05"
         echo "  $0 analyze NVDA"
