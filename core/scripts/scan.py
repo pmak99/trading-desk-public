@@ -2566,21 +2566,16 @@ def whisper_mode(
         fallback_image=fallback_image
     )
 
-    # Extract the actual week from result for display
-    # The scraper returns tickers for whichever week it found
-    if monday is None:
-        # Auto-detect succeeded - use next week's Monday for display
-        monday = get_week_monday() + timedelta(days=7)
-
-    # Calculate week range (Monday to Sunday)
-    week_end = monday + timedelta(days=6)
-    logger.info(f"Week: {monday.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
-
     if result.is_err:
         logger.error(f"Failed to fetch ticker list: {result.error}")
         return 1
 
-    tickers = result.value
+    # Unpack result - scraper returns (tickers, actual_week_monday)
+    tickers, monday = result.value
+
+    # Calculate week range (Monday to Sunday)
+    week_end = monday + timedelta(days=6)
+    logger.info(f"Week: {monday.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
 
     # Validate we got some tickers
     if not tickers:
