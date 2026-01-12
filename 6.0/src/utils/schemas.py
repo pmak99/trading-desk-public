@@ -149,6 +149,45 @@ class BudgetStatus(BaseModel):
         return max(0.0, self.monthly_budget - self.monthly_cost)
 
 
+class SentimentFetchResponse(BaseModel):
+    """Response from SentimentFetchAgent."""
+    ticker: str
+    direction: Optional[str] = None
+    score: Optional[float] = None
+    catalysts: List[str] = Field(default_factory=list)
+    risks: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+
+    @validator('direction')
+    def validate_direction(cls, v):
+        if v is not None and v not in ['bullish', 'bearish', 'neutral']:
+            raise ValueError(f'Invalid direction: {v}')
+        return v
+
+    @validator('score')
+    def validate_score(cls, v):
+        if v is not None and not (-1.0 <= v <= 1.0):
+            raise ValueError(f'Score must be between -1.0 and 1.0: {v}')
+        return v
+
+    @validator('catalysts')
+    def validate_catalysts(cls, v):
+        if len(v) > 5:
+            raise ValueError('Too many catalysts (max 5)')
+        return v
+
+    @validator('risks')
+    def validate_risks(cls, v):
+        if len(v) > 3:
+            raise ValueError('Too many risks (max 3)')
+        return v
+
+    @property
+    def success(self) -> bool:
+        """Fetch succeeded if no error."""
+        return self.error is None
+
+
 class HealthCheckResponse(BaseModel):
     """Response from HealthCheckAgent."""
     status: str

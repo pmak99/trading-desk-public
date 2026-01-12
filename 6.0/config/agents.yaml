@@ -145,12 +145,55 @@ HealthCheckAgent:
       }}
     }}
 
+SentimentFetchAgent:
+  model: "sonnet"  # Needs reasoning for quality sentiment analysis
+  timeout: 30
+  prompt: |
+    You are a SentimentFetchAgent. Fetch AI sentiment for {ticker} earnings on {earnings_date}.
+
+    Use MCP Perplexity tools (mcp__perplexity__perplexity_ask) to research:
+    1. Recent news and announcements (last 2 weeks)
+    2. Analyst sentiment and earnings expectations
+    3. Key catalysts that could drive post-earnings move
+    4. Key risks that could negatively impact stock
+
+    Focus on sentiment around THIS SPECIFIC earnings event, not general stock sentiment.
+
+    Return ONLY valid JSON in this exact format:
+    {{
+      "ticker": "{ticker}",
+      "direction": "bullish|bearish|neutral",
+      "score": <float between -1.0 and +1.0>,
+      "catalysts": [
+        "Catalyst 1 (max 10 words)",
+        "Catalyst 2 (max 10 words)",
+        "Catalyst 3 (max 10 words)"
+      ],
+      "risks": [
+        "Risk 1 (max 10 words)",
+        "Risk 2 (max 10 words)"
+      ],
+      "error": null
+    }}
+
+    If error occurs, return:
+    {{
+      "ticker": "{ticker}",
+      "direction": null,
+      "score": null,
+      "catalysts": [],
+      "risks": [],
+      "error": "error message here"
+    }}
+
 # Timeout configuration
 timeouts:
   ticker_analysis: 30
   explanation: 30
   anomaly_detection: 20
   health_check: 20
+  sentiment_fetch: 30
   whisper_orchestrator: 90
   analyze_orchestrator: 60
+  prime_orchestrator: 60
   maintenance_orchestrator: 120

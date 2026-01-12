@@ -18,12 +18,14 @@ Agent orchestration layer for Trading Desk, enabling parallel processing, automa
 │                  6.0 AGENT LAYER                        │
 ├─────────────────────────────────────────────────────────┤
 │ Orchestrators:                                          │
+│  - PrimeOrchestrator      (pre-cache sentiment)         │
 │  - WhisperOrchestrator    (parallel ticker analysis)    │
 │  - AnalyzeOrchestrator    (multi-faceted deep dive)     │
 │  - MaintenanceOrchestrator (background ops)             │
 ├─────────────────────────────────────────────────────────┤
 │ Worker Agents:                                          │
-│  - TickerAnalysisAgent    (VRP + liquidity + sentiment) │
+│  - SentimentFetchAgent    (Perplexity API via MCP)      │
+│  - TickerAnalysisAgent    (VRP + liquidity)             │
 │  - ExplanationAgent       (narrative reasoning)         │
 │  - AnomalyDetectionAgent  (data quality, outliers)      │
 │  - HealthCheckAgent       (system monitoring)           │
@@ -43,6 +45,9 @@ Agent orchestration layer for Trading Desk, enabling parallel processing, automa
 ```bash
 cd 6.0
 
+# Pre-cache sentiment (run at 7-8 AM)
+./agent.sh prime
+
 # Most anticipated earnings (next 5 days)
 ./agent.sh whisper
 
@@ -54,6 +59,33 @@ cd 6.0
 ```
 
 ## Commands
+
+### /prime - Pre-cache Sentiment
+
+Pre-caches sentiment for upcoming earnings, enabling fast /whisper lookups and predictable API costs:
+
+```bash
+./agent.sh prime                  # Next 5 days
+./agent.sh prime 2026-02-05       # Specific start date
+```
+
+**Workflow:**
+1. Health check (verify Perplexity budget available)
+2. Fetch earnings calendar for date range
+3. Filter tickers already cached (<3 hours old)
+4. Check budget allows fetching remaining tickers
+5. Spawn N SentimentFetchAgents in parallel (budget-limited)
+6. Cache all results (3-hour TTL)
+7. Return summary (tickers cached, API calls made, budget remaining)
+
+**Performance:** 30 tickers in ~10 seconds (vs 90 seconds sequential)
+
+**Daily Workflow:**
+```
+7:00 AM   ./agent.sh maintenance health    # Verify systems operational
+7:15 AM   ./agent.sh prime                 # Pre-cache sentiment (predictable cost)
+9:30 AM   ./agent.sh whisper               # Instant results from cache
+```
 
 ### /whisper - Most Anticipated Earnings
 
@@ -113,10 +145,17 @@ System monitoring and data quality:
 
 ### Orchestrators
 
+**PrimeOrchestrator**
+- Coordinates parallel sentiment fetching
+- Pre-caches sentiment for upcoming earnings
+- Budget-aware execution (respects 40 calls/day limit)
+- Performance: 30 tickers in ~10 seconds (9x faster than sequential)
+
 **WhisperOrchestrator**
 - Coordinates parallel ticker analysis
 - Applies cross-ticker intelligence (sector correlation, portfolio risk)
 - Returns ranked opportunities
+- Performance: 30 tickers in ~90 seconds
 
 **AnalyzeOrchestrator** (Phase 2)
 - Coordinates multi-specialist deep dive
@@ -129,6 +168,13 @@ System monitoring and data quality:
 - Manages data quality
 
 ### Worker Agents
+
+**SentimentFetchAgent**
+- Fetches sentiment from Perplexity API via MCP
+- Returns structured data (direction, score, catalysts, risks)
+- Caches results for 3 hours
+- Model: Sonnet (reasoning for quality)
+- Timeout: 30 seconds
 
 **TickerAnalysisAgent**
 - Executes 2.0's full analysis for single ticker
