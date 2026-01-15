@@ -53,17 +53,18 @@ def format_whisper_results(results: List[Dict[str, Any]]) -> str:
 
         row = [
             r.get('ticker', 'N/A'),
+            r.get('earnings_date', 'N/A')[:10],  # Format date (YYYY-MM-DD)
             f"{r.get('vrp_ratio', 0.0):.1f}x",
             f"{liquidity_emoji} {r.get('liquidity_tier', 'N/A')}",
             f"{recommendation_emoji} {r.get('recommendation', 'N/A')}",
             r.get('score', 0),
-            r.get('explanation', 'No explanation')[:60] + '...'
-            if len(r.get('explanation', '')) > 60
+            r.get('explanation', 'No explanation')[:50] + '...'
+            if len(r.get('explanation', '')) > 50
             else r.get('explanation', 'No explanation')
         ]
         table_data.append(row)
 
-    headers = ['Ticker', 'VRP', 'Liquidity', 'Recommendation', 'Score', 'Explanation']
+    headers = ['Ticker', 'Date', 'VRP', 'Liquidity', 'Recommendation', 'Score', 'Explanation']
 
     return tabulate(table_data, headers=headers, tablefmt='grid')
 

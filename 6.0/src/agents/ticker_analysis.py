@@ -87,11 +87,14 @@ class TickerAnalysisAgent:
             if hasattr(result, 'is_err') and result.is_err:
                 error_msg = str(result.unwrap_err())
                 logger.error(f"2.0 analyzer error for {ticker}: {error_msg}")
-                return BaseAgent.create_error_response(
+                error_response = BaseAgent.create_error_response(
                     agent_type="TickerAnalysisAgent",
                     error_message=error_msg,
                     ticker=ticker
                 )
+                # Add earnings_date to error response
+                error_response['earnings_date'] = earnings_date
+                return error_response
 
             # Unwrap Result value
             analysis_result = result.value if hasattr(result, 'value') else result
@@ -99,6 +102,7 @@ class TickerAnalysisAgent:
             # Extract key fields from 2.0's result
             response_data = {
                 'ticker': ticker,
+                'earnings_date': earnings_date,  # Include earnings date in response
                 'vrp_ratio': self._extract_vrp_ratio(analysis_result),
                 'recommendation': self._extract_recommendation(analysis_result),
                 'liquidity_tier': self._extract_liquidity_tier(analysis_result),
@@ -114,11 +118,14 @@ class TickerAnalysisAgent:
         except Exception as e:
             # Return error response
             logger.error(f"Error analyzing {ticker}: {e}")
-            return BaseAgent.create_error_response(
+            error_response = BaseAgent.create_error_response(
                 agent_type="TickerAnalysisAgent",
                 error_message=str(e),
                 ticker=ticker
             )
+            # Add earnings_date to error response
+            error_response['earnings_date'] = earnings_date
+            return error_response
 
     def _calculate_expiration(self, earnings_date: str) -> str:
         """

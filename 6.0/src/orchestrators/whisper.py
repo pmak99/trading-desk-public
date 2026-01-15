@@ -96,6 +96,7 @@ class WhisperOrchestrator(BaseOrchestrator):
             return {
                 'success': True,
                 'results': [],
+                'cross_ticker_warnings': [],
                 'message': 'No earnings found for date range'
             }
 
@@ -123,6 +124,7 @@ class WhisperOrchestrator(BaseOrchestrator):
             return {
                 'success': True,
                 'results': [],
+                'cross_ticker_warnings': [],
                 'message': f'No tickers with VRP >= {self.VRP_DISCOVERY_THRESHOLD}x'
             }
 
@@ -160,20 +162,45 @@ class WhisperOrchestrator(BaseOrchestrator):
     ) -> List[Dict[str, Any]]:
         """Fetch earnings calendar from 2.0."""
         # Default date range: today + 4 days
-        if start_date is None:
-            start_date = datetime.now().strftime('%Y-%m-%d')
-        if end_date is None:
-            end_dt = datetime.now() + timedelta(days=4)
-            end_date = end_dt.strftime('%Y-%m-%d')
+        days_ahead = 5  # Default lookforward window
 
         try:
-            earnings = self.container_2_0.get_upcoming_earnings(
-                start_date=start_date,
-                end_date=end_date
+            # Get upcoming earnings using days_ahead parameter
+            # Note: 2.0's API returns Result[(ticker, date), error]
+            result = self.container_2_0.get_upcoming_earnings(
+                days_ahead=days_ahead
             )
+
+            # Check if result is successful
+            if hasattr(result, 'is_error') and result.is_error():
+                print(f"  Error from earnings repository: {result.error}")
+                return []
+
+            # Extract value from Result
+            if hasattr(result, 'value'):
+                earnings_tuples = result.value
+            else:
+                earnings_tuples = result
+
+            # Convert (ticker, date) tuples to dicts
+            earnings = []
+            for ticker, date_obj in earnings_tuples:
+                # Convert date to string if it's a date object
+                if hasattr(date_obj, 'strftime'):
+                    date_str = date_obj.strftime('%Y-%m-%d')
+                else:
+                    date_str = str(date_obj)
+
+                earnings.append({
+                    'ticker': ticker,
+                    'date': date_str
+                })
+
             return earnings
         except Exception as e:
             print(f"  Error fetching calendar: {e}")
+            import traceback
+            print(traceback.format_exc())
             return []
 
     async def _parallel_ticker_analysis(
@@ -280,11 +307,35 @@ class WhisperOrchestrator(BaseOrchestrator):
         """Detect cross-ticker correlation and portfolio risks."""
         warnings = []
 
-        # TODO: Implement sector correlation detection
-        # Group by sector, flag if 3+ tickers in same sector
+        # Check 1: Sector correlation (simplified - group by first letter for demo)
+        # TODO: Use proper sector data from 2.0 company profiles
+        sector_groups = {}
+        for result in results:
+            ticker = result.get('ticker', '')
+            # Simplified sector grouping (first letter as proxy)
+            sector = ticker[0] if ticker else 'UNKNOWN'
+            if sector not in sector_groups:
+                sector_groups[sector] = []
+            sector_groups[sector].append(ticker)
 
-        # TODO: Implement portfolio risk assessment
-        # Calculate total notional exposure, flag if >$150K
+        # Warn if 3+ tickers in same sector
+        for sector, tickers in sector_groups.items():
+            if len(tickers) >= 3:
+                warnings.append(
+                    f"⚠️  Sector concentration: {len(tickers)} tickers starting with '{sector}' "
+                    f"({', '.join(tickers[:3])}...)"
+                )
+
+        # Check 2: Portfolio risk (simplified - assume $50K per position)
+        # TODO: Use actual position sizing from TRR limits
+        total_notional = len(results) * 50000
+        max_recommended = 150000
+
+        if total_notional > max_recommended:
+            warnings.append(
+                f"⚠️  Portfolio risk: {len(results)} positions = ${total_notional:,} notional "
+                f"(exceeds ${max_recommended:,} recommended max)"
+            )
 
         return warnings
 
