@@ -49,11 +49,18 @@ class ExplanationResponse(BaseModel):
     explanation: str
     key_factors: List[str] = Field(default_factory=list)
     historical_context: str = ""
+    win_probability: Optional[float] = None
 
     @validator('key_factors')
     def validate_key_factors(cls, v):
         if len(v) > 5:
             raise ValueError('Too many key factors (max 5)')
+        return v
+
+    @validator('win_probability')
+    def validate_win_probability(cls, v):
+        if v is not None and (v < 0 or v > 1):
+            raise ValueError('Win probability must be between 0 and 1')
         return v
 
 
