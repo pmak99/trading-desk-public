@@ -101,6 +101,9 @@ class Container2_0:
                 sys.path.remove(_2_0_dir_str)
                 sys.path.insert(0, _2_0_dir_str)
 
+            # Save 6.0's src modules before clearing
+            _6_0_src_modules = {}
+
             try:
                 # Clear cached imports of 'src' package to avoid using 6.0's cached version
                 # This is necessary because both 6.0 and 2.0 use 'src' as top-level package
@@ -109,12 +112,12 @@ class Container2_0:
                     # Save 6.0's src modules
                     _6_0_src_modules = {
                         k: v for k, v in sys.modules.items()
-                        if k.startswith('src.')
+                        if k.startswith('src.') or k == 'src'
                     }
                     # Clear src from sys.modules
                     del sys.modules['src']
                     for k in list(_6_0_src_modules.keys()):
-                        if k in sys.modules:
+                        if k in sys.modules and k != 'src':
                             del sys.modules[k]
 
                 # Import here to avoid namespace collision at module level
@@ -125,6 +128,10 @@ class Container2_0:
                 for p in _6_0_paths:
                     if p not in sys.path:
                         sys.path.append(p)
+
+                # Restore 6.0's src modules
+                for k, v in _6_0_src_modules.items():
+                    sys.modules[k] = v
 
         return self._container
 
