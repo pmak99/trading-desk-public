@@ -17,6 +17,7 @@ class AgentResponse(BaseModel):
 class TickerAnalysisResponse(BaseModel):
     """Response from TickerAnalysisAgent."""
     ticker: str
+    earnings_date: Optional[str] = None  # Earnings date (YYYY-MM-DD)
     vrp_ratio: Optional[float] = None
     recommendation: Optional[str] = None
     liquidity_tier: Optional[str] = None
