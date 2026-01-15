@@ -63,9 +63,19 @@ See [5.0 README](5.0/README.md) for full setup including Telegram bot.
 
 ## System Architecture
 
-The Trading Desk consists of three active systems:
+The Trading Desk consists of four active systems:
 
 ```
+┌─────────────────────────────────────────────────────────────┐
+│                  6.0 AGENT ORCHESTRATION                     │
+│  Parallel processing + intelligent coordination (Dev)       │
+│  - Parallel ticker analysis (2x faster /whisper)            │
+│  - Multi-specialist analysis (/analyze with explanations)   │
+│  - Automated sentiment pre-caching (/prime)                 │
+│  - Intelligent guardrails (anomaly detection)               │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    5.0 CLOUD AUTOPILOT                       │
 │  24/7 Cloud Run service with scheduled jobs & Telegram bot  │
@@ -104,6 +114,7 @@ The Trading Desk consists of three active systems:
 | **2.0** | Production | Core VRP/strategy math |
 | **4.0** | Production | AI sentiment layer |
 | **5.0** | Production | Cloud autopilot (24/7) |
+| **6.0** | In Development | Agent orchestration (Phase 1 complete) |
 | 1.0 | Archived | Original system (superseded by 2.0) |
 | 3.0 | Archived | ML research (direction prediction inconclusive) |
 
@@ -237,6 +248,33 @@ Available when using Claude Code CLI:
           Execute in Fidelity  → Human approval required
 Evening   /backfill --pending  → Record outcomes for completed earnings
 ```
+
+### 6.0 Agent Commands (In Development)
+
+From `6.0/` directory (git worktree):
+
+**System Operations:**
+- `/prime [DATE]` - Parallel sentiment pre-caching with rate limiting (replaces 4.0 version)
+- `/maintenance [health|data-quality|cache-cleanup]` - System health checks and diagnostics
+
+**Coming in Phase 2:**
+- `/whisper [DATE]` - Parallel ticker analysis (2x faster than 5.0)
+- `/analyze TICKER [DATE]` - Multi-specialist deep dive with explanations
+
+**Key Features:**
+- Parallel processing with asyncio (semaphore-based rate limiting)
+- Intelligent error handling (partial results on timeout)
+- Progress indicators for long-running operations
+- Comprehensive health checks (APIs, database, budget)
+
+**Example:**
+```bash
+cd 6.0
+./agent.sh prime          # Pre-cache sentiment for upcoming week
+./agent.sh maintenance health    # Check system health
+```
+
+See [6.0/README.md](6.0/README.md) for full documentation.
 
 ### 5.0 Cloud API Endpoints
 
@@ -566,6 +604,33 @@ Key test files:
 - `test_job_manager.py` - Job scheduling
 - `test_telegram_formatter.py` - Telegram message formatting
 
+### 6.0 Agent System (In Development)
+
+```bash
+cd 6.0
+../2.0/venv/bin/python -m pytest tests/ -v
+
+# Live integration tests
+./tests/test_health_live.py
+./tests/test_ticker_analysis_live.py
+./tests/test_prime_live.py
+```
+
+**Coverage:** Phase 1 complete - all core agents tested
+
+Key test files:
+- `test_health_live.py` - HealthCheckAgent with API verification
+- `test_ticker_analysis_live.py` - TickerAnalysisAgent with Result type handling
+- `test_prime_live.py` - PrimeOrchestrator with parallel processing
+- `test_anomaly_detection.py` - AnomalyDetectionAgent edge cases
+- `test_explanation.py` - ExplanationAgent narrative generation
+
+**Test Features:**
+- Live integration tests with real API calls
+- Result[T, Error] type handling validation
+- Date type conversion testing (string → date objects)
+- Enum case conversion verification (lowercase → uppercase)
+
 ### Strategy Scripts
 
 ```bash
@@ -654,6 +719,20 @@ Trading Desk/
 │   ├── Dockerfile
 │   └── DEPLOYMENT.md            # Full deployment guide
 │
+├── 6.0/                         # Agent orchestration (in development)
+│   ├── src/
+│   │   ├── orchestrators/       # PrimeOrchestrator, WhisperOrchestrator
+│   │   ├── agents/              # TickerAnalysis, Sentiment, Health, Anomaly
+│   │   ├── integration/         # Container2_0, Cache4_0 wrappers
+│   │   └── utils/               # Schemas, formatters, timeouts
+│   ├── tests/                   # Live integration tests
+│   ├── config/                  # Agent configurations
+│   ├── agent.sh                 # CLI entry point
+│   └── README.md                # Full documentation
+│
+├── .worktrees/
+│   └── 6.0-agent-system/        # Git worktree for 6.0 development
+│
 ├── scripts/                     # Project-wide utilities
 │   ├── migrations/              # Database migrations
 │   │   └── 001_add_strategies.py
@@ -667,7 +746,8 @@ Trading Desk/
 ├── docs/
 │   └── plans/                   # Design documents
 │       ├── 2026-01-08-multi-leg-strategy-tracking-design.md
-│       └── 2026-01-08-multi-leg-strategy-implementation.md
+│       ├── 2026-01-08-multi-leg-strategy-implementation.md
+│       └── 2026-01-11-6.0-agent-design.md
 │
 ├── archive/
 │   ├── 1.0-original-system/     # Deprecated (superseded by 2.0)
@@ -712,6 +792,7 @@ See [archive/3.0-ml-enhancement/PROGRESS.md](archive/3.0-ml-enhancement/PROGRESS
 - [5.0/README.md](5.0/README.md) - Cloud autopilot documentation
 - [5.0/DEPLOYMENT.md](5.0/DEPLOYMENT.md) - Full deployment guide
 - [5.0/DESIGN.md](5.0/DESIGN.md) - Architecture details
+- [6.0/README.md](6.0/README.md) - Agent orchestration documentation
 - [archive/README.md](archive/README.md) - Archived versions
 
 ---
