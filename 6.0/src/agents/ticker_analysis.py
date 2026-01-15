@@ -6,10 +6,13 @@ and strategy generation for a single ticker.
 
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+import logging
 
 from ..integration.container_2_0 import Container2_0
 from ..utils.schemas import TickerAnalysisResponse
 from .base import BaseAgent
+
+logger = logging.getLogger(__name__)
 
 
 class TickerAnalysisAgent:
@@ -68,23 +71,39 @@ class TickerAnalysisAgent:
             if expiration is None:
                 expiration = self._calculate_expiration(earnings_date)
 
+            # Convert dates to date objects (2.0 expects date objects, not strings)
+            earnings_date_obj = datetime.strptime(earnings_date, '%Y-%m-%d').date()
+            expiration_date_obj = datetime.strptime(expiration, '%Y-%m-%d').date()
+
             # Call 2.0's analyzer
             result = self.container.analyze_ticker(
                 ticker=ticker,
-                earnings_date=earnings_date,
-                expiration=expiration,
+                earnings_date=earnings_date_obj,
+                expiration=expiration_date_obj,
                 generate_strategies=generate_strategies
             )
 
+            # Handle Result type from 2.0
+            if hasattr(result, 'is_err') and result.is_err:
+                error_msg = str(result.unwrap_err())
+                logger.error(f"2.0 analyzer error for {ticker}: {error_msg}")
+                return BaseAgent.create_error_response(
+                    agent_type="TickerAnalysisAgent",
+                    error_message=error_msg,
+                    ticker=ticker
+                )
+
+            # Unwrap Result value
+            analysis_result = result.value if hasattr(result, 'value') else result
+
             # Extract key fields from 2.0's result
-            # Note: Adjust field names based on actual 2.0 analyzer output
             response_data = {
                 'ticker': ticker,
-                'vrp_ratio': self._extract_vrp_ratio(result),
-                'recommendation': self._extract_recommendation(result),
-                'liquidity_tier': self._extract_liquidity_tier(result),
-                'score': self._extract_score(result),
-                'strategies': self._extract_strategies(result) if generate_strategies else None,
+                'vrp_ratio': self._extract_vrp_ratio(analysis_result),
+                'recommendation': self._extract_recommendation(analysis_result),
+                'liquidity_tier': self._extract_liquidity_tier(analysis_result),
+                'score': self._extract_score(analysis_result),
+                'strategies': self._extract_strategies(analysis_result) if generate_strategies else None,
                 'error': None
             }
 
@@ -94,6 +113,7 @@ class TickerAnalysisAgent:
 
         except Exception as e:
             # Return error response
+            logger.error(f"Error analyzing {ticker}: {e}")
             return BaseAgent.create_error_response(
                 agent_type="TickerAnalysisAgent",
                 error_message=str(e),
@@ -121,50 +141,94 @@ class TickerAnalysisAgent:
         return expiration_dt.strftime('%Y-%m-%d')
 
     def _extract_vrp_ratio(self, result: Any) -> Optional[float]:
-        """Extract VRP ratio from 2.0 result."""
-        # TODO: Adjust based on actual 2.0 result structure
-        if hasattr(result, 'vrp_ratio'):
-            return result.vrp_ratio
-        elif isinstance(result, dict):
-            return result.get('vrp_ratio')
+        """Extract VRP ratio from 2.0 TickerAnalysis result."""
+        # TickerAnalysis has vrp: VRPResult with vrp_ratio field
+        if hasattr(result, 'vrp') and hasattr(result.vrp, 'vrp_ratio'):
+            return result.vrp.vrp_ratio
         return None
 
     def _extract_recommendation(self, result: Any) -> Optional[str]:
-        """Extract VRP recommendation from 2.0 result."""
-        # TODO: Adjust based on actual 2.0 result structure
-        if hasattr(result, 'vrp_recommendation'):
-            return result.vrp_recommendation
-        elif isinstance(result, dict):
-            return result.get('vrp_recommendation') or result.get('recommendation')
+        """Extract VRP recommendation from 2.0 TickerAnalysis result."""
+        # TickerAnalysis has vrp: VRPResult with recommendation (enum)
+        if hasattr(result, 'vrp') and hasattr(result.vrp, 'recommendation'):
+            # Convert enum to string and uppercase (schema expects uppercase)
+            rec = result.vrp.recommendation
+            rec_str = rec.value if hasattr(rec, 'value') else str(rec)
+            return rec_str.upper()
         return None
 
     def _extract_liquidity_tier(self, result: Any) -> Optional[str]:
-        """Extract liquidity tier from 2.0 result."""
-        # TODO: Adjust based on actual 2.0 result structure
-        if hasattr(result, 'liquidity_tier'):
-            return result.liquidity_tier
-        elif isinstance(result, dict):
-            return result.get('liquidity_tier')
+        """
+        Extract liquidity tier from 2.0 result.
+
+        Note: Liquidity tier is added to Strategy objects by strategy_generator,
+        not in TickerAnalysis. If strategies are generated, get tier from
+        recommended strategy. Otherwise return None.
+        """
+        if hasattr(result, 'strategies') and result.strategies:
+            # strategies is StrategyRecommendation with recommended_strategy property
+            strategy = result.strategies.recommended_strategy
+            if hasattr(strategy, 'liquidity_tier'):
+                return strategy.liquidity_tier
         return None
 
     def _extract_score(self, result: Any) -> Optional[int]:
-        """Extract composite score from 2.0 result."""
-        # TODO: Adjust based on actual 2.0 result structure
-        if hasattr(result, 'composite_score'):
-            return int(result.composite_score)
-        elif isinstance(result, dict):
-            score = result.get('composite_score') or result.get('score')
-            return int(score) if score is not None else None
-        return None
+        """
+        Extract composite score from 2.0 result.
+
+        Note: TickerAnalysis doesn't have composite_score. That's in a separate
+        TickerScore object from the scorer service. For now, we'll compute a
+        simple score from VRP ratio (main driver of quality).
+
+        Simplified scoring:
+        - VRP >= 7.0x: 90-100 (EXCELLENT)
+        - VRP >= 4.0x: 70-89 (GOOD)
+        - VRP >= 1.5x: 50-69 (MARGINAL)
+        - VRP < 1.5x: 0-49 (SKIP)
+        """
+        vrp_ratio = self._extract_vrp_ratio(result)
+        if vrp_ratio is None:
+            return None
+
+        # Simple scoring based on VRP thresholds from CLAUDE.md
+        if vrp_ratio >= 7.0:
+            # EXCELLENT: 90-100
+            return min(100, int(90 + (vrp_ratio - 7.0) * 2))
+        elif vrp_ratio >= 4.0:
+            # GOOD: 70-89
+            return int(70 + (vrp_ratio - 4.0) * (20/3.0))
+        elif vrp_ratio >= 1.5:
+            # MARGINAL: 50-69
+            return int(50 + (vrp_ratio - 1.5) * (20/2.5))
+        else:
+            # SKIP: 0-49
+            return int(vrp_ratio * 33)
 
     def _extract_strategies(self, result: Any) -> Optional[list]:
-        """Extract strategy recommendations from 2.0 result."""
-        # TODO: Adjust based on actual 2.0 result structure
-        if hasattr(result, 'strategies'):
-            return result.strategies
-        elif isinstance(result, dict):
-            return result.get('strategies')
-        return None
+        """
+        Extract strategy recommendations from 2.0 TickerAnalysis result.
+
+        Returns simplified dict representation of strategies.
+        """
+        if not hasattr(result, 'strategies') or not result.strategies:
+            return None
+
+        # strategies is StrategyRecommendation object
+        strategy_rec = result.strategies
+
+        # Convert strategies list to dicts
+        strategies_list = []
+        for strategy in strategy_rec.strategies:
+            strategy_dict = {
+                'type': strategy.strategy_type.value if hasattr(strategy.strategy_type, 'value') else str(strategy.strategy_type),
+                'max_profit': float(strategy.max_profit.amount) if hasattr(strategy.max_profit, 'amount') else float(strategy.max_profit),
+                'max_loss': float(strategy.max_loss.amount) if hasattr(strategy.max_loss, 'amount') else float(strategy.max_loss),
+                'probability_of_profit': strategy.probability_of_profit,
+                'contracts': strategy.contracts
+            }
+            strategies_list.append(strategy_dict)
+
+        return strategies_list
 
     def get_historical_moves(
         self,
@@ -181,4 +245,13 @@ class TickerAnalysisAgent:
         Returns:
             List of historical move records
         """
-        return self.container.get_historical_moves(ticker, limit)
+        result = self.container.get_historical_moves(ticker, limit)
+
+        # Handle Result type if present
+        if hasattr(result, 'is_err'):
+            if result.is_err:
+                logger.error(f"Error getting historical moves for {ticker}: {result.unwrap_err()}")
+                return []
+            return result.value if hasattr(result, 'value') else result
+
+        return result

@@ -21,8 +21,18 @@ set -e  # Exit on error
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Python from 2.0 venv
-PYTHON="${SCRIPT_DIR}/../2.0/venv/bin/python"
+# Find main repo root
+# If in worktree, .git is a file pointing to main repo
+if [ -f "$(git rev-parse --git-dir 2>/dev/null)/commondir" ]; then
+    # We're in a worktree - find main repo via git dir
+    MAIN_REPO="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+else
+    # We're in main repo
+    MAIN_REPO="$(git rev-parse --show-toplevel)"
+fi
+
+# Python from 2.0 venv in main repo
+PYTHON="${MAIN_REPO}/2.0/venv/bin/python"
 
 # Check if Python venv exists
 if [ ! -f "$PYTHON" ]; then

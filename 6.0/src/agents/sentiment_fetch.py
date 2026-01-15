@@ -1,14 +1,16 @@
 """SentimentFetchAgent - Fetches AI sentiment from Perplexity.
 
-This agent calls Perplexity API via MCP to fetch sentiment data for
+This agent calls Perplexity API directly to fetch sentiment data for
 upcoming earnings, enabling pre-caching for fast /whisper lookups.
 """
 
 import logging
+import asyncio
 from typing import Dict, Any, Optional
 from pydantic import ValidationError
 
 from ..integration.cache_4_0 import Cache4_0
+from ..integration.perplexity_5_0 import Perplexity5_0
 from ..utils.schemas import SentimentFetchResponse
 from .base import BaseAgent
 
@@ -19,7 +21,7 @@ class SentimentFetchAgent:
     """
     Worker agent for fetching sentiment data.
 
-    Uses MCP Perplexity tools to research:
+    Uses Perplexity API to research:
     1. Recent news and announcements
     2. Analyst sentiment and expectations
     3. Key catalysts driving earnings expectations
@@ -33,8 +35,13 @@ class SentimentFetchAgent:
     """
 
     def __init__(self):
-        """Initialize agent with cache."""
+        """Initialize agent with cache and Perplexity client."""
         self.cache = Cache4_0()
+        try:
+            self.perplexity = Perplexity5_0()
+        except ValueError as e:
+            logger.warning(f"Perplexity client initialization failed: {e}")
+            self.perplexity = None
 
     def fetch_sentiment(
         self,
@@ -90,20 +97,34 @@ class SentimentFetchAgent:
                     'error': 'Perplexity API budget limit reached (40 calls/day)'
                 }
 
-            # Fetch sentiment via MCP Perplexity tools
-            sentiment_data = self._fetch_via_mcp(ticker, earnings_date)
+            # Check if Perplexity client is available
+            if not self.perplexity:
+                return {
+                    'ticker': ticker,
+                    'direction': None,
+                    'score': None,
+                    'catalysts': [],
+                    'risks': [],
+                    'error': 'Perplexity client not initialized (check PERPLEXITY_API_KEY)'
+                }
+
+            # Fetch sentiment via Perplexity API
+            sentiment_data = self._fetch_via_api(ticker, earnings_date)
 
             # Validate with schema BEFORE recording budget/caching
             # This ensures we only track successful, valid responses
             validated = SentimentFetchResponse(**sentiment_data)
 
             # Only record API call after successful validation
-            self.cache.record_call("perplexity", cost=0.006)
+            self.cache.record_call(cost=0.006)
 
             # Cache the validated result
             self.cache.cache_sentiment(ticker, earnings_date, sentiment_data)
 
-            return validated.dict()
+            # Return dict with success field (property not included by default)
+            result = validated.dict()
+            result['success'] = validated.success
+            return result
 
         except ValidationError as e:
             # Pydantic validation failed - schema mismatch
@@ -121,15 +142,15 @@ class SentimentFetchAgent:
                 ticker=ticker
             )
 
-    def _fetch_via_mcp(
+    def _fetch_via_api(
         self,
         ticker: str,
         earnings_date: str
     ) -> Dict[str, Any]:
         """
-        Fetch sentiment via MCP Perplexity tools.
+        Fetch sentiment via Perplexity API.
 
-        Calls mcp__perplexity__perplexity_ask to get sentiment analysis
+        Calls Perplexity API directly to get sentiment analysis
         for the ticker's upcoming earnings.
 
         Args:
@@ -140,115 +161,35 @@ class SentimentFetchAgent:
             Raw sentiment data dict matching SentimentFetchResponse schema
 
         Raises:
-            Exception: If MCP call fails or response parsing fails
+            Exception: If API call fails or response parsing fails
         """
-        import re
-        import json
-
-        # Build prompt for Perplexity
-        prompt = f"""
-Analyze sentiment for {ticker} earnings on {earnings_date}.
-
-Research:
-1. Recent news and announcements (last 2 weeks)
-2. Analyst sentiment and earnings expectations
-3. Key catalysts that could drive post-earnings move
-4. Key risks that could negatively impact stock
-
-Focus on THIS SPECIFIC earnings event, not general stock sentiment.
-
-Return ONLY valid JSON in this exact format:
-{{
-  "direction": "bullish|bearish|neutral",
-  "score": <float between -1.0 and +1.0>,
-  "catalysts": ["Catalyst 1", "Catalyst 2", "Catalyst 3"],
-  "risks": ["Risk 1", "Risk 2"]
-}}
-
-Keep catalysts/risks concise (max 10 words each).
-"""
-
         try:
-            # Call MCP Perplexity tool
-            # The tool is available as a global function in the Claude runtime
-            response = self._call_perplexity_mcp(prompt)
+            # Call Perplexity API (async)
+            result = asyncio.run(self.perplexity.get_sentiment(ticker, earnings_date))
 
-            # Extract JSON from response (may be wrapped in markdown)
-            response_text = response if isinstance(response, str) else str(response)
+            # Check if API call was successful
+            if not result.get('success'):
+                raise Exception(result.get('error', 'Unknown API error'))
 
-            # Try to find JSON in code blocks first
-            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
-            if json_match:
-                json_text = json_match.group(1)
-            else:
-                # Try to find raw JSON
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    json_text = json_match.group(0)
-                else:
-                    raise ValueError(f"No JSON found in response: {response_text[:200]}")
+            # Convert API response to sentiment data format
+            sentiment_data = {
+                'ticker': ticker,
+                'direction': result['direction'],
+                'score': result['score'],
+                'catalysts': result.get('tailwinds', '').split('\n') if result.get('tailwinds') else [],
+                'risks': result.get('headwinds', '').split('\n') if result.get('headwinds') else [],
+                'error': None
+            }
 
-            # Parse JSON
-            sentiment_data = json.loads(json_text)
-
-            # Add ticker to response
-            sentiment_data['ticker'] = ticker
-            sentiment_data['error'] = None
-
-            # Ensure required fields exist
-            if 'direction' not in sentiment_data:
-                sentiment_data['direction'] = 'neutral'
-            if 'score' not in sentiment_data:
-                sentiment_data['score'] = 0.0
-            if 'catalysts' not in sentiment_data:
-                sentiment_data['catalysts'] = []
-            if 'risks' not in sentiment_data:
-                sentiment_data['risks'] = []
+            # Clean up lists (remove empty strings)
+            sentiment_data['catalysts'] = [c.strip() for c in sentiment_data['catalysts'] if c.strip()]
+            sentiment_data['risks'] = [r.strip() for r in sentiment_data['risks'] if r.strip()]
 
             return sentiment_data
 
-        except json.JSONDecodeError as e:
-            raise Exception(f"Failed to parse JSON from Perplexity response: {e}")
-        except ValueError as e:
-            # JSON extraction failed
-            raise Exception(f"Failed to extract JSON from response: {e}")
         except Exception as e:
-            # Catch-all for MCP errors, network errors, etc.
-            raise Exception(f"MCP Perplexity call failed: {e}")
-
-    def _call_perplexity_mcp(self, prompt: str) -> str:
-        """
-        Call Perplexity MCP tool with the given prompt.
-
-        This method handles the actual MCP tool invocation. In production,
-        this calls the mcp__perplexity__perplexity_ask tool which is
-        available in the Claude runtime environment.
-
-        Args:
-            prompt: The prompt to send to Perplexity
-
-        Returns:
-            Response text from Perplexity
-
-        Raises:
-            Exception: If MCP tool is not available or call fails
-        """
-        # In actual Claude runtime, mcp__perplexity__perplexity_ask is available
-        # For testing/development, this will raise an exception
-        try:
-            # This function is available in Claude's runtime when MCP is configured
-            response = mcp__perplexity__perplexity_ask(
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            return response
-        except NameError:
-            # MCP tool not available (likely in test environment)
-            raise Exception(
-                "MCP Perplexity tool (mcp__perplexity__perplexity_ask) not available. "
-                "Ensure Perplexity MCP server is configured in Claude."
-            )
+            # Catch-all for API errors, network errors, etc.
+            raise Exception(f"Perplexity API call failed: {e}")
 
     def get_cached_sentiment(
         self,

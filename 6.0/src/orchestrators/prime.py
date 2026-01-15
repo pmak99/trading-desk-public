@@ -80,21 +80,13 @@ class PrimeOrchestrator(BaseOrchestrator):
                 'health': health_result
             }
 
-        # Check Perplexity budget specifically
+        # Get budget status (don't block yet - may be all cached)
         budget_status = health_result.get('budget', {})
         daily_limit = budget_status.get('daily_limit', 40)
         daily_calls = budget_status.get('daily_calls', 0)
         daily_remaining = daily_limit - daily_calls
 
-        if daily_remaining <= 0:
-            logger.warning("Perplexity API budget exhausted")
-            return {
-                'success': False,
-                'error': 'Perplexity API budget exhausted (40 calls/day limit)',
-                'budget': budget_status
-            }
-
-        logger.info(f"Budget available: {daily_remaining} calls remaining (used {daily_calls}/{daily_limit})")
+        logger.info(f"Budget status: {daily_remaining} calls remaining (used {daily_calls}/{daily_limit})")
 
         # Step 2: Fetch earnings calendar
         logger.info("[2/6] Fetching earnings calendar...")
@@ -143,6 +135,19 @@ class PrimeOrchestrator(BaseOrchestrator):
 
         # Step 4: Budget check
         logger.info("[4/6] Verifying budget for API calls...")
+
+        # If budget exhausted and we need to fetch tickers, return error
+        if daily_remaining <= 0 and len(to_fetch) > 0:
+            logger.error("Perplexity API budget exhausted and uncached tickers remain")
+            return {
+                'success': False,
+                'error': f'Perplexity API budget exhausted (40 calls/day limit). Cannot fetch {len(to_fetch)} uncached tickers.',
+                'tickers_cached': len(already_cached),
+                'uncached_tickers': len(to_fetch),
+                'budget': budget_status
+            }
+
+        # If we need more calls than available, limit to budget
         if len(to_fetch) > daily_remaining:
             logger.warning(f"Need {len(to_fetch)} calls but only {daily_remaining} remaining")
             logger.warning(f"Limiting to first {daily_remaining} tickers")
@@ -154,11 +159,17 @@ class PrimeOrchestrator(BaseOrchestrator):
 
         # Count successes
         successful = self.filter_successful_results(results)
-        failed = len(results) - len(successful)
+        failed_results = [r for r in results if not r.get('success', False)]
+        failed = len(failed_results)
 
         logger.info(f"Successful: {len(successful)}")
         if failed > 0:
             logger.warning(f"Failed: {failed}")
+            # Log first few failures for debugging
+            for i, result in enumerate(failed_results[:3]):
+                ticker = result.get('ticker', 'unknown')
+                error = result.get('error', 'unknown error')
+                logger.warning(f"  [{i+1}] {ticker}: {error}")
 
         # Step 6: Summary
         logger.info("[6/6] Caching complete")
@@ -181,41 +192,77 @@ class PrimeOrchestrator(BaseOrchestrator):
         days_ahead: int
     ) -> List[Dict[str, Any]]:
         """Fetch earnings calendar from 2.0."""
-        # Default date range: today + days_ahead
-        if start_date is None:
-            start_date = datetime.now().strftime('%Y-%m-%d')
-        if end_date is None:
-            end_dt = datetime.now() + timedelta(days=days_ahead)
-            end_date = end_dt.strftime('%Y-%m-%d')
-
         try:
-            earnings = self.container_2_0.get_upcoming_earnings(
-                start_date=start_date,
-                end_date=end_date
+            # Get upcoming earnings using days_ahead parameter
+            # Note: 2.0's API returns Result[(ticker, date), error]
+            result = self.container_2_0.get_upcoming_earnings(
+                days_ahead=days_ahead
             )
+
+            # Check if result is successful
+            if hasattr(result, 'is_error') and result.is_error():
+                logger.error(f"Error from earnings repository: {result.error}")
+                return []
+
+            # Extract value from Result
+            if hasattr(result, 'value'):
+                earnings_tuples = result.value
+            else:
+                earnings_tuples = result
+
+            # Convert (ticker, date) tuples to dicts
+            earnings = []
+            for ticker, date_obj in earnings_tuples:
+                # Convert date to string if it's a date object
+                if hasattr(date_obj, 'strftime'):
+                    date_str = date_obj.strftime('%Y-%m-%d')
+                else:
+                    date_str = str(date_obj)
+
+                earnings.append({
+                    'ticker': ticker,
+                    'date': date_str
+                })
+
             return earnings
         except Exception as e:
             logger.error(f"Error fetching calendar: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
 
     async def _parallel_sentiment_fetch(
         self,
         tickers_to_fetch: List[tuple]
     ) -> List[Dict[str, Any]]:
-        """Fetch sentiment for all tickers in parallel."""
+        """
+        Fetch sentiment for all tickers with rate limiting.
+
+        Rate limit: Max 2 concurrent requests to avoid API throttling (429 errors).
+        """
         # Create sentiment fetch agents
         sentiment_agent = SentimentFetchAgent()
 
-        # Build fetch tasks
-        tasks = []
-        for ticker, earnings_date in tickers_to_fetch:
-            # Wrap synchronous fetch_sentiment() in async task
-            task = asyncio.create_task(
-                asyncio.to_thread(
+        # Semaphore to limit concurrent requests (prevent 429 rate limit errors)
+        semaphore = asyncio.Semaphore(2)
+
+        async def fetch_with_rate_limit(ticker, earnings_date):
+            """Fetch with semaphore to control concurrency."""
+            async with semaphore:
+                # Small delay to spread requests over time
+                await asyncio.sleep(0.5)
+                # Wrap synchronous fetch_sentiment() in async task
+                return await asyncio.to_thread(
                     sentiment_agent.fetch_sentiment,
                     ticker,
                     earnings_date
                 )
+
+        # Build fetch tasks with rate limiting
+        tasks = []
+        for ticker, earnings_date in tickers_to_fetch:
+            task = asyncio.create_task(
+                fetch_with_rate_limit(ticker, earnings_date)
             )
             tasks.append(task)
 

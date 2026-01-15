@@ -13,9 +13,9 @@ import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Add parent directories to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
+# Import 6.0 modules
+# Note: Namespace collision with 2.0/src is handled by deferring 2.0 imports
+# until inside Container2_0 class (after sys.path is properly configured)
 from src.orchestrators.prime import PrimeOrchestrator
 
 

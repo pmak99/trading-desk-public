@@ -4,14 +4,47 @@ Provides access to sentiment cache and budget tracker without duplication.
 """
 
 import sys
+import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
 
+# Find main repo root (handles both main repo and worktrees)
+def _find_main_repo() -> Path:
+    """Find main repository root, handling worktrees correctly."""
+    try:
+        # Get git common dir (works in both main repo and worktrees)
+        result = subprocess.run(
+            ['git', 'rev-parse', '--git-common-dir'],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=Path(__file__).parent
+        )
+        git_common_dir = Path(result.stdout.strip())
+
+        # If commondir path is relative, make it absolute
+        if not git_common_dir.is_absolute():
+            git_common_dir = (Path(__file__).parent / git_common_dir).resolve()
+
+        # Main repo is parent of .git directory
+        main_repo = git_common_dir.parent
+        return main_repo
+    except:
+        # Fallback: assume we're in main repo
+        return Path(__file__).parent.parent.parent.parent
+
 # Add 4.0/src to Python path
-_4_0_src = Path(__file__).parent.parent.parent.parent / "4.0" / "src"
-if str(_4_0_src) not in sys.path:
-    sys.path.insert(0, str(_4_0_src))
+_main_repo = _find_main_repo()
+_4_0_src = _main_repo / "4.0" / "src"
+_4_0_src_str = str(_4_0_src)
+
+# Remove if already in path (so we can re-insert)
+if _4_0_src_str in sys.path:
+    sys.path.remove(_4_0_src_str)
+
+# Insert with priority
+sys.path.insert(1, _4_0_src_str)  # Position 1 (2.0/ should be at 0)
 
 # Import 4.0 components
 from cache.sentiment_cache import SentimentCache
@@ -54,7 +87,17 @@ class Cache4_0:
         Returns:
             Cached sentiment dict or None if not cached/expired
         """
-        return self.sentiment_cache.get(ticker, earnings_date)
+        import json
+
+        cached = self.sentiment_cache.get(ticker, earnings_date)
+        if cached:
+            # Parse JSON string back to dict
+            try:
+                return json.loads(cached.sentiment)
+            except (json.JSONDecodeError, AttributeError):
+                # Invalid cache entry, return None
+                return None
+        return None
 
     def cache_sentiment(
         self,
@@ -70,7 +113,13 @@ class Cache4_0:
             earnings_date: Earnings date (YYYY-MM-DD)
             sentiment_data: Sentiment data to cache
         """
-        self.sentiment_cache.set(ticker, earnings_date, sentiment_data)
+        import json
+
+        # Serialize dict to JSON string for storage
+        sentiment_str = json.dumps(sentiment_data)
+
+        # Store with source='perplexity'
+        self.sentiment_cache.set(ticker, earnings_date, 'perplexity', sentiment_str)
 
     def can_call_perplexity(self) -> bool:
         """
@@ -79,21 +128,19 @@ class Cache4_0:
         Returns:
             True if budget allows, False otherwise
         """
-        return self.budget_tracker.can_call("perplexity")
+        return self.budget_tracker.can_call()
 
     def record_call(
         self,
-        service: str = "perplexity",
         cost: float = 0.006
     ):
         """
         Record an API call for budget tracking.
 
         Args:
-            service: Service name (default: "perplexity")
             cost: Cost per call (default: $0.006)
         """
-        self.budget_tracker.record_call(service, cost)
+        self.budget_tracker.record_call(cost)
 
     def get_budget_status(self) -> Dict[str, Any]:
         """
@@ -102,15 +149,18 @@ class Cache4_0:
         Returns:
             Budget status dict with daily/monthly usage
         """
+        info = self.budget_tracker.get_info()
+        monthly_summary = self.budget_tracker.get_monthly_summary()
+
         return {
-            'daily_calls': self.budget_tracker.get_daily_calls(),
+            'daily_calls': info.calls_today,
             'daily_limit': 40,
-            'monthly_cost': self.budget_tracker.get_monthly_cost(),
+            'monthly_cost': monthly_summary.get('month_cost', 0.0),
             'monthly_budget': 5.00,
-            'daily_remaining': max(0, 40 - self.budget_tracker.get_daily_calls()),
+            'daily_remaining': info.calls_remaining,
             'monthly_remaining': max(
                 0.0,
-                5.00 - self.budget_tracker.get_monthly_cost()
+                5.00 - monthly_summary.get('month_cost', 0.0)
             )
         }
 

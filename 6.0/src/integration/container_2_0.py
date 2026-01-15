@@ -5,17 +5,51 @@ without duplicating code.
 """
 
 import sys
+import os
+import subprocess
 from pathlib import Path
 from typing import Optional, Any
 
-# Add 2.0/src to Python path
-_2_0_src = Path(__file__).parent.parent.parent.parent / "2.0" / "src"
-if str(_2_0_src) not in sys.path:
-    sys.path.insert(0, str(_2_0_src))
+# Find main repo root (handles both main repo and worktrees)
+def _find_main_repo() -> Path:
+    """Find main repository root, handling worktrees correctly."""
+    try:
+        # Get git common dir (works in both main repo and worktrees)
+        result = subprocess.run(
+            ['git', 'rev-parse', '--git-common-dir'],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=Path(__file__).parent
+        )
+        git_common_dir = Path(result.stdout.strip())
 
-# Import 2.0 components
-from src.container import get_container
-from src.config.config import Config
+        # If commondir path is relative, make it absolute
+        if not git_common_dir.is_absolute():
+            git_common_dir = (Path(__file__).parent / git_common_dir).resolve()
+
+        # Main repo is parent of .git directory
+        main_repo = git_common_dir.parent
+        return main_repo
+    except:
+        # Fallback: assume we're in main repo
+        return Path(__file__).parent.parent.parent.parent
+
+# Add 2.0/ to Python path with highest priority
+# 2.0's code uses "from src.config..." imports, so it needs 2.0/ in path, not 2.0/src/
+_main_repo = _find_main_repo()
+_2_0_dir = _main_repo / "2.0"
+_2_0_dir_str = str(_2_0_dir)
+
+# Remove if already in path (so we can re-insert at position 0)
+if _2_0_dir_str in sys.path:
+    sys.path.remove(_2_0_dir_str)
+
+# Insert at position 0 for highest priority (before 6.0/src)
+sys.path.insert(0, _2_0_dir_str)
+
+# Note: We don't import at module level to avoid namespace collision with 6.0/src
+# Imports happen inside __init__ after sys.path is properly configured
 
 
 class Container2_0:
@@ -36,6 +70,17 @@ class Container2_0:
 
     def __init__(self):
         """Initialize container with 2.0's Config."""
+        # Import here to avoid namespace collision at module level
+        from src.config.config import Config
+
+        # Set DB_PATH to point to main repo's database
+        # This is necessary because Config.from_env() uses relative paths
+        # and we're running from 6.0/ worktree
+        import os
+        if 'DB_PATH' not in os.environ:
+            db_path = _main_repo / "2.0" / "data" / "ivcrush.db"
+            os.environ['DB_PATH'] = str(db_path)
+
         self.config = Config.from_env()
         self._container = None
 
@@ -43,7 +88,44 @@ class Container2_0:
     def container(self):
         """Lazy-load container on first access."""
         if self._container is None:
-            self._container = get_container()
+            # Critical: Remove 6.0/ from sys.path temporarily to avoid namespace collision
+            # Both 6.0 and 2.0 use 'src' as top-level package, causing import conflicts
+            _6_0_paths = [p for p in sys.path if '6.0' in p]
+            for p in _6_0_paths:
+                sys.path.remove(p)
+
+            # Ensure 2.0/ is at position 0
+            if _2_0_dir_str not in sys.path:
+                sys.path.insert(0, _2_0_dir_str)
+            elif sys.path.index(_2_0_dir_str) != 0:
+                sys.path.remove(_2_0_dir_str)
+                sys.path.insert(0, _2_0_dir_str)
+
+            try:
+                # Clear cached imports of 'src' package to avoid using 6.0's cached version
+                # This is necessary because both 6.0 and 2.0 use 'src' as top-level package
+                import importlib
+                if 'src' in sys.modules:
+                    # Save 6.0's src modules
+                    _6_0_src_modules = {
+                        k: v for k, v in sys.modules.items()
+                        if k.startswith('src.')
+                    }
+                    # Clear src from sys.modules
+                    del sys.modules['src']
+                    for k in list(_6_0_src_modules.keys()):
+                        if k in sys.modules:
+                            del sys.modules[k]
+
+                # Import here to avoid namespace collision at module level
+                from src.container import get_container
+                self._container = get_container()
+            finally:
+                # Restore 6.0/ paths after import
+                for p in _6_0_paths:
+                    if p not in sys.path:
+                        sys.path.append(p)
+
         return self._container
 
     def analyze_ticker(
@@ -94,22 +176,19 @@ class Container2_0:
 
     def get_upcoming_earnings(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        days_ahead: int = 7
     ) -> list:
         """
         Get upcoming earnings from calendar.
 
         Args:
-            start_date: Start date filter (YYYY-MM-DD)
-            end_date: End date filter (YYYY-MM-DD)
+            days_ahead: Number of days to look ahead (default: 7)
 
         Returns:
-            List of earnings calendar entries
+            Result with list of (ticker, date) tuples, or error
         """
         return self.container.earnings_repository.get_upcoming_earnings(
-            start_date=start_date,
-            end_date=end_date
+            days_ahead=days_ahead
         )
 
     def check_tradier_health(self) -> dict:
@@ -123,10 +202,8 @@ class Container2_0:
             import time
             start = time.time()
 
-            # Try a simple API call (market status)
-            # Note: Actual implementation depends on tradier_client interface
-            # This is a placeholder - adjust based on actual API
-            result = self.container.tradier_client.get_quotes(['SPY'])
+            # Try a simple API call (get stock price)
+            result = self.container.tradier.get_stock_price('SPY')
 
             latency_ms = int((time.time() - start) * 1000)
 
@@ -153,9 +230,12 @@ class Container2_0:
             import time
             start = time.time()
 
-            # Try a simple API call (earnings calendar)
-            # Note: Actual implementation depends on alphavantage_client interface
-            result = self.container.alphavantage_client.get_earnings_calendar()
+            # Try a simple API call (get earnings calendar for today)
+            from datetime import datetime
+            today = datetime.now().strftime('%Y-%m-%d')
+            result = self.container.alphavantage.get_earnings_calendar(
+                horizon='1month'
+            )
 
             latency_ms = int((time.time() - start) * 1000)
 
@@ -182,7 +262,7 @@ class Container2_0:
             import os
 
             # Get database connection
-            db_path = self.config.db_path
+            db_path = self.config.database.path
 
             # Check file size
             if os.path.exists(db_path):
@@ -191,13 +271,18 @@ class Container2_0:
             else:
                 size_mb = 0.0
 
-            # Get record counts
-            historical_moves = len(
-                self.container.prices_repository.get_all_historical_moves()
-            )
-            earnings_calendar = len(
-                self.container.earnings_repository.get_all_earnings()
-            )
+            # Get record counts by querying database directly
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT COUNT(*) FROM historical_moves")
+            historical_moves = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM earnings_calendar")
+            earnings_calendar = cursor.fetchone()[0]
+
+            conn.close()
 
             return {
                 'status': 'ok',
