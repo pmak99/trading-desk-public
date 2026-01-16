@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
-from src.utils.schemas import PositionLimits, TickerMetadata
+from src.utils.schemas import PositionLimits, TickerMetadata, PatternResult
 
 
 class TestPositionLimits:
@@ -80,3 +80,54 @@ class TestTickerMetadata:
             industry="Software"
         )
         assert meta.market_cap is None
+
+
+class TestPatternResult:
+    """Tests for PatternResult schema."""
+
+    def test_valid_pattern_result(self):
+        """Valid pattern result should be created."""
+        result = PatternResult(
+            ticker="NVDA",
+            quarters_analyzed=16,
+            bullish_pct=0.69,
+            bearish_pct=0.31,
+            directional_bias="BULLISH",
+            current_streak=3,
+            streak_direction="UP",
+            avg_move_recent=5.1,
+            avg_move_overall=3.8,
+            magnitude_trend="EXPANDING"
+        )
+        assert result.directional_bias == "BULLISH"
+        assert result.magnitude_trend == "EXPANDING"
+
+    def test_optional_fields(self):
+        """Optional fields should default to None."""
+        result = PatternResult(
+            ticker="TEST",
+            quarters_analyzed=8,
+            bullish_pct=0.5,
+            bearish_pct=0.5,
+            current_streak=0,
+            streak_direction="UP",
+            avg_move_recent=3.0,
+            avg_move_overall=3.0
+        )
+        assert result.directional_bias is None
+        assert result.seasonal_pattern is None
+
+    def test_invalid_directional_bias(self):
+        """Invalid bias should raise error."""
+        with pytest.raises(ValueError):
+            PatternResult(
+                ticker="TEST",
+                quarters_analyzed=8,
+                bullish_pct=0.5,
+                bearish_pct=0.5,
+                directional_bias="INVALID",
+                current_streak=0,
+                streak_direction="UP",
+                avg_move_recent=3.0,
+                avg_move_overall=3.0
+            )

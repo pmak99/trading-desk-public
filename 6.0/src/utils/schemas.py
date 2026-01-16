@@ -246,3 +246,46 @@ class TickerMetadata(BaseModel):
     industry: str
     market_cap: Optional[float] = None
     updated_at: Optional[str] = None
+
+
+class PatternResult(BaseModel):
+    """Historical pattern analysis result."""
+    ticker: str
+    quarters_analyzed: int
+
+    # Directional analysis
+    bullish_pct: float
+    bearish_pct: float
+    directional_bias: Optional[str] = None
+
+    # Streak analysis
+    current_streak: int
+    streak_direction: str
+
+    # Magnitude analysis
+    avg_move_recent: float  # Last 4 quarters
+    avg_move_overall: float
+    magnitude_trend: Optional[str] = None
+
+    # Optional patterns
+    seasonal_pattern: Optional[str] = None
+    fade_pct: Optional[float] = None
+    recent_moves: Optional[List[Dict[str, Any]]] = None
+
+    @validator('directional_bias')
+    def validate_directional_bias(cls, v):
+        if v is not None and v not in ['BULLISH', 'BEARISH', 'NEUTRAL']:
+            raise ValueError(f'Invalid directional_bias: {v}')
+        return v
+
+    @validator('streak_direction')
+    def validate_streak_direction(cls, v):
+        if v not in ['UP', 'DOWN']:
+            raise ValueError(f'Invalid streak_direction: {v}')
+        return v
+
+    @validator('magnitude_trend')
+    def validate_magnitude_trend(cls, v):
+        if v is not None and v not in ['EXPANDING', 'CONTRACTING', 'STABLE']:
+            raise ValueError(f'Invalid magnitude_trend: {v}')
+        return v
