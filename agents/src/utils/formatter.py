@@ -51,12 +51,19 @@ def format_whisper_results(results: List[Dict[str, Any]]) -> str:
             'SKIP': '⚪'
         }.get(r.get('recommendation', ''), '')
 
+        # Check for HIGH TRR
+        position_limits = r.get('position_limits', {})
+        trr_badge = ""
+        if position_limits and position_limits.get('tail_risk_level') == 'HIGH':
+            max_contracts = position_limits.get('max_contracts', 50)
+            trr_badge = f" | HIGH TRR (max {max_contracts})"
+
         row = [
             r.get('ticker', 'N/A'),
             r.get('earnings_date', 'N/A')[:10],  # Format date (YYYY-MM-DD)
             f"{r.get('vrp_ratio', 0.0):.1f}x",
             f"{liquidity_emoji} {r.get('liquidity_tier', 'N/A')}",
-            f"{recommendation_emoji} {r.get('recommendation', 'N/A')}",
+            f"{recommendation_emoji} {r.get('recommendation', 'N/A')}{trr_badge}",
             r.get('score', 0),
             r.get('explanation', 'No explanation')[:50] + '...'
             if len(r.get('explanation', '')) > 50
