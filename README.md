@@ -68,12 +68,11 @@ The Trading Desk consists of four active systems:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                  6.0 AGENT ORCHESTRATION                     │
-│  Parallel processing + intelligent coordination (Phase 1 ✅) │
-│  - Automated sentiment pre-caching (/prime) - 9x faster     │
-│  - Comprehensive system health checks (/maintenance health) │
-│  - Data quality monitoring (outliers, duplicates, gaps)     │
-│  - Automated cache cleanup with statistics                  │
-│  Coming Phase 2: Parallel /whisper, /analyze with AI       │
+│  Parallel processing + intelligent coordination (Phase 2 ✅) │
+│  - Parallel ticker analysis (2x faster /whisper)            │
+│  - Multi-specialist analysis (/analyze with explanations)   │
+│  - Automated sentiment pre-caching (/prime)                 │
+│  - Intelligent guardrails (anomaly detection)               │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -115,7 +114,7 @@ The Trading Desk consists of four active systems:
 | **2.0** | Production | Core VRP/strategy math |
 | **4.0** | Production | AI sentiment layer |
 | **5.0** | Production | Cloud autopilot (24/7) |
-| **6.0** | Phase 1 Complete ✅ | Agent orchestration (/prime, /maintenance) |
+| **6.0** | Phase 2 Complete ✅ | Agent orchestration (parallel processing, intelligent automation) |
 | 1.0 | Archived | Original system (superseded by 2.0) |
 | 3.0 | Archived | ML research (direction prediction inconclusive) |
 
@@ -131,16 +130,14 @@ The core edge comes from VRP - the ratio of implied move to historical average m
 VRP Ratio = Implied Move / Historical Mean Move
 ```
 
-**VRP Thresholds (BALANCED mode - default):**
+**VRP Thresholds:**
 
 | Tier | VRP Ratio | Action |
 |------|-----------|--------|
-| EXCELLENT | >= 1.8x | High confidence, full size |
-| GOOD | >= 1.4x | Tradeable |
-| MARGINAL | >= 1.2x | Minimum edge, size down |
-| SKIP | < 1.2x | No edge |
-
-*Set `VRP_THRESHOLD_MODE=LEGACY` for old thresholds (7x/4x/1.5x).*
+| EXCELLENT | >= 7.0x | High confidence, full size |
+| GOOD | >= 4.0x | Tradeable with caution |
+| MARGINAL | >= 1.5x | Minimum edge, size down |
+| SKIP | < 1.5x | No edge |
 
 ### Scoring System
 
@@ -192,7 +189,7 @@ TRR = Max Historical Move / Average Historical Move
 ### Critical Rules
 
 1. **Never trade REJECT liquidity** - learned from $26,930 loss on WDAY/ZS/SYM
-2. **VRP > 4x preferred** for full position sizing (BALANCED classifies ≥1.8x as EXCELLENT, but 4x+ gives highest confidence)
+2. **VRP > 4x minimum** for full position sizing
 3. **Prefer spreads over naked options** for defined risk
 4. **Half-Kelly sizing** (0.25 fraction)
 5. **Always check liquidity score first** before evaluating VRP
@@ -252,49 +249,30 @@ Available when using Claude Code CLI:
 Evening   /backfill --pending  → Record outcomes for completed earnings
 ```
 
-### 6.0 Agent Commands (In Development)
+### 6.0 Agent Commands
 
 From `6.0/` directory (git worktree):
 
-**✅ Phase 1 Complete - System Operations:**
-- `/prime [DATE]` - Parallel sentiment pre-caching with rate limiting (9x faster than sequential)
-- `/maintenance health` - Comprehensive system health check (APIs, database, budget)
-- `/maintenance data-quality` - Database integrity scanning (insufficient data, outliers, duplicates)
-- `/maintenance cache-cleanup` - Automated cache and budget tracker cleanup
+**System Operations:**
+- `/prime [DATE]` - Parallel sentiment pre-caching with rate limiting (replaces 4.0 version)
+- `/maintenance [health|data-quality|cache-cleanup]` - System health checks and diagnostics
 
-**🚧 Phase 2 In Progress - Discovery:**
+**Coming in Phase 2:**
 - `/whisper [DATE]` - Parallel ticker analysis (2x faster than 5.0)
-- `/analyze TICKER [DATE]` - Multi-specialist deep dive with explanations and anomaly detection
+- `/analyze TICKER [DATE]` - Multi-specialist deep dive with explanations
 
 **Key Features:**
 - Parallel processing with asyncio (semaphore-based rate limiting)
 - Intelligent error handling (partial results on timeout)
-- Structured logging (production-ready)
 - Progress indicators for long-running operations
 - Comprehensive health checks (APIs, database, budget)
-- Data quality guardrails (detects missing data, outliers, duplicates)
 
-**Examples:**
+**Example:**
 ```bash
 cd 6.0
-
-# Pre-cache sentiment for 30 tickers in ~10s
-./agent.sh prime
-
-# System health check
-./agent.sh maintenance health
-
-# Database integrity scan
-./agent.sh maintenance data-quality
-
-# Clean stale cache entries
-./agent.sh maintenance cache-cleanup
+./agent.sh prime          # Pre-cache sentiment for upcoming week
+./agent.sh maintenance health    # Check system health
 ```
-
-**Maintenance Features:**
-- **Health Check:** Verifies Tradier, Alpha Vantage, Perplexity connectivity with latency monitoring
-- **Data Quality:** Identifies tickers with <4 quarters, outlier moves >50%, duplicate entries
-- **Cache Cleanup:** Removes sentiment cache >3h old, budget tracker >30 days old with statistics
 
 See [6.0/README.md](6.0/README.md) for full documentation.
 
@@ -626,26 +604,24 @@ Key test files:
 - `test_job_manager.py` - Job scheduling
 - `test_telegram_formatter.py` - Telegram message formatting
 
-### 6.0 Agent System (Phase 1 Complete ✅)
+### 6.0 Agent System
 
 ```bash
 cd 6.0
 ../2.0/venv/bin/python -m pytest tests/ -v
 
 # Live integration tests
-../2.0/venv/bin/python tests/test_health_live.py
-../2.0/venv/bin/python tests/test_ticker_analysis_live.py
-../2.0/venv/bin/python tests/test_prime_live.py
-../2.0/venv/bin/python tests/test_maintenance_live.py
+./tests/test_health_live.py
+./tests/test_ticker_analysis_live.py
+./tests/test_prime_live.py
 ```
 
-**Coverage:** Phase 1 complete - all core agents and orchestrators tested
+**Coverage:** Phase 1 complete - all core agents tested
 
 Key test files:
 - `test_health_live.py` - HealthCheckAgent with API verification
 - `test_ticker_analysis_live.py` - TickerAnalysisAgent with Result type handling
 - `test_prime_live.py` - PrimeOrchestrator with parallel processing
-- `test_maintenance_live.py` - Maintenance tasks (health, data-quality, cache-cleanup)
 - `test_anomaly_detection.py` - AnomalyDetectionAgent edge cases
 - `test_explanation.py` - ExplanationAgent narrative generation
 
@@ -654,8 +630,6 @@ Key test files:
 - Result[T, Error] type handling validation
 - Date type conversion testing (string → date objects)
 - Enum case conversion verification (lowercase → uppercase)
-- Structured logging validation (no print statements)
-- Input validation testing (CLI argument checking)
 
 ### Strategy Scripts
 
