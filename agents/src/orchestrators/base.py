@@ -5,9 +5,12 @@ and aggregating results.
 """
 
 import asyncio
+import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from ..integration.mcp_client import MCPTaskClient
 from ..integration.container_2_0 import Container2_0
@@ -25,17 +28,26 @@ class BaseOrchestrator(ABC):
     Subclasses must implement:
     - orchestrate(*args, **kwargs): Main workflow logic
 
-    Example:
+    Current Pattern (Direct Agent Calls):
+        Uses agent instances directly with asyncio.to_thread() for
+        CPU-bound synchronous operations, or await for async methods.
+
         class WhisperOrchestrator(BaseOrchestrator):
             async def orchestrate(self, date_range):
-                # Spawn agents
+                agent = TickerAnalysisAgent()
                 tasks = [
-                    self.spawn_agent("TickerAnalysisAgent", prompt)
-                    for prompt in prompts
+                    asyncio.create_task(
+                        asyncio.to_thread(agent.analyze, ticker, date)
+                    )
+                    for ticker, date in tickers
                 ]
-                # Wait for results
                 results = await self.gather_with_timeout(tasks, 90)
                 return results
+
+    Future Pattern (MCP Task Tool - Phase 2):
+        Will spawn isolated Claude instances via MCP protocol for
+        true parallel execution with separate context windows.
+        The spawn_agent() method is reserved for this future use.
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -76,7 +88,13 @@ class BaseOrchestrator(ABC):
         model: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Spawn worker agent via Claude Task tool.
+        Spawn worker agent via Claude Task tool (Phase 2 - Not Yet Implemented).
+
+        NOTE: This method is reserved for Phase 2 MCP Task tool integration.
+        Current orchestrators should use direct agent calls instead:
+
+            agent = TickerAnalysisAgent()
+            result = await asyncio.to_thread(agent.analyze, ticker, date)
 
         Args:
             agent_type: Type of agent (e.g., "TickerAnalysisAgent")
@@ -85,14 +103,7 @@ class BaseOrchestrator(ABC):
             model: Claude model to use (default: from agent config)
 
         Returns:
-            Parsed JSON response dict
-
-        Example:
-            result = await self.spawn_agent(
-                "TickerAnalysisAgent",
-                "Analyze NVDA for earnings on 2026-02-05",
-                timeout=30
-            )
+            Parsed JSON response dict (currently returns error response)
         """
         # Get defaults from agent config
         if timeout is None:
@@ -151,9 +162,10 @@ class BaseOrchestrator(ABC):
             List of results or exceptions
 
         Example:
+            agent = TickerAnalysisAgent()
             tasks = [
-                self.spawn_agent("TickerAnalysisAgent", prompt1),
-                self.spawn_agent("TickerAnalysisAgent", prompt2)
+                asyncio.create_task(asyncio.to_thread(agent.analyze, t, d))
+                for t, d in tickers
             ]
             results = await self.gather_with_timeout(tasks, 90)
         """
@@ -182,7 +194,7 @@ class BaseOrchestrator(ABC):
 
         Example:
             result = await self.run_with_timeout(
-                self.spawn_agent("HealthCheckAgent", prompt),
+                asyncio.to_thread(agent.analyze, ticker, date),
                 timeout=20,
                 default={'status': 'timeout'}
             )
@@ -289,6 +301,7 @@ class BaseOrchestrator(ABC):
 
             return earnings
 
-        except Exception:
-            # Silently return empty list on failure - calendar fetch is non-critical
+        except Exception as e:
+            # Log and return empty list on failure - calendar fetch is non-critical
+            logger.warning(f"Failed to fetch earnings calendar: {e}")
             return []
