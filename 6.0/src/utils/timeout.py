@@ -5,7 +5,6 @@ Provides helper functions for managing timeouts in async agent orchestration.
 
 import asyncio
 from typing import List, Any, Optional
-from datetime import datetime
 
 
 async def gather_with_timeout(
@@ -82,51 +81,3 @@ async def run_with_timeout(
         return await asyncio.wait_for(coro, timeout=timeout)
     except asyncio.TimeoutError:
         return default
-
-
-class TimeoutTracker:
-    """Track timeout statistics for monitoring."""
-
-    def __init__(self):
-        self.timeouts: List[dict] = []
-
-    def record_timeout(
-        self,
-        agent_type: str,
-        ticker: str,
-        timeout_seconds: int
-    ):
-        """Record a timeout event."""
-        self.timeouts.append({
-            'agent_type': agent_type,
-            'ticker': ticker,
-            'timeout_seconds': timeout_seconds,
-            'timestamp': datetime.utcnow().isoformat()
-        })
-
-    def get_timeout_rate(self, agent_type: Optional[str] = None) -> float:
-        """
-        Calculate timeout rate.
-
-        Args:
-            agent_type: Filter by agent type, or None for all agents
-
-        Returns:
-            Timeout rate as percentage (0-100)
-        """
-        if not self.timeouts:
-            return 0.0
-
-        if agent_type:
-            filtered = [t for t in self.timeouts if t['agent_type'] == agent_type]
-            return len(filtered) / len(self.timeouts) * 100
-
-        return 100.0  # If tracking only timeouts
-
-    def clear(self):
-        """Clear timeout history."""
-        self.timeouts.clear()
-
-
-# Global timeout tracker instance
-timeout_tracker = TimeoutTracker()

@@ -135,11 +135,12 @@ def inspect_2_0_result():
         print()
 
         # Check if Result type
-        if hasattr(result, 'is_error'):
+        # Note: 2.0's Result type uses `is_err` property, not `is_error()` method
+        if hasattr(result, 'is_err'):
             print("✓ Result type detected")
-            print(f"  is_error: {result.is_error()}")
+            print(f"  is_err: {result.is_err}")
 
-            if result.is_error():
+            if result.is_err:
                 print(f"  error: {result.error}")
             else:
                 print(f"  has value: {hasattr(result, 'value')}")

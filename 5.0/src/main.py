@@ -123,6 +123,10 @@ async def lifespan(app: FastAPI):
 
     # Cleanup on shutdown
     log("info", "Shutting down Trading Desk 5.0")
+
+    # Shutdown metrics thread pool
+    metrics.shutdown()
+
     _app_state = None
 
 
@@ -211,11 +215,21 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 async def verify_api_key(api_key: str = Depends(api_key_header)):
-    """Verify API key for protected endpoints."""
+    """
+    Verify API key for protected endpoints.
+
+    SECURITY: Always fail closed - never allow access without valid API key.
+    This prevents unauthorized access to trading analysis and alerts.
+    """
     expected_key = settings.api_key
     if not expected_key:
-        # No API key configured - allow access (for development)
-        return True
+        # SECURITY: Always fail closed, even in development
+        # To test locally, set API_KEY env var
+        log("error", "API_KEY not configured - rejecting request")
+        raise HTTPException(
+            status_code=503,
+            detail="Service misconfigured: API_KEY not set"
+        )
     if not api_key:
         raise HTTPException(status_code=401, detail="Missing API key")
     if not hmac.compare_digest(api_key, expected_key):
@@ -562,9 +576,16 @@ async def scan(date: str, format: str = "json", _: bool = Depends(verify_api_key
         date: Target date in YYYY-MM-DD format (required)
         format: Output format - "json" or "cli"
     """
-    # Validate date format
+    # Validate date format and actual validity
     if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
         raise HTTPException(400, "Invalid date format (expected YYYY-MM-DD)")
+
+    # Validate it's a real date (e.g., not 2026-02-30)
+    try:
+        from datetime import datetime as dt
+        dt.strptime(date, '%Y-%m-%d')
+    except ValueError:
+        raise HTTPException(400, f"Invalid date: {date}")
 
     log("info", "Scan request", date=date)
     start_time = time.time()
