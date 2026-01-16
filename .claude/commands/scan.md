@@ -121,7 +121,8 @@ EARNINGS SCAN: {DATE}
 │ ...  │ ...     │ ...        │ ...   │ ...                │
 └──────┴─────────┴────────────┴───────┴────────────────────┘
 
-Legend: ⭐ EXCELLENT (≥7x) | ✓ GOOD (≥4x) | ○ MARGINAL (≥1.5x) | 🚫 REJECT
+Legend: ⭐ Top-tier (≥4x) | ✓ Good edge (≥3x) | ○ Tradeable (≥1.2x) | 🚫 REJECT
+*Note: Icons highlight relative strength; actual tier from 2.0 uses BALANCED mode thresholds*
 
 📊 SUMMARY
    Total earnings: {N}
