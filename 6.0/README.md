@@ -32,22 +32,52 @@
 
 ```bash
 # From 6.0/ directory
-./agent.sh health              # Verify all systems operational
+./agent.sh help                # Show all commands and options
+./agent.sh maintenance health  # Verify all systems operational
 ./agent.sh prime               # Pre-cache sentiment (7-8 AM daily)
-./agent.sh maintenance health  # Detailed system status
+./agent.sh whisper             # Find best opportunities this week
+./agent.sh analyze NVDA        # Deep dive on single ticker
+```
+
+### Typical Daily Workflow
+
+```bash
+# Morning (7-8 AM)
+./agent.sh prime               # Pre-cache sentiment (~10s for 30 tickers)
+./agent.sh whisper             # Instant results from cache
+
+# Deep dive on best candidate
+./agent.sh analyze NFLX        # Full analysis with patterns, TRR, sentiment
 ```
 
 ### Prerequisites
 
 - Python 3.11+
 - 2.0 virtual environment (shared)
-- API keys: Tradier, Alpha Vantage, Perplexity
+- API keys in `.env` files (auto-loaded from 2.0/.env and 5.0/.env)
 
 **Virtual Environment:** 6.0 uses 2.0's venv (no separate installation needed)
 
-```bash
-source ../2.0/venv/bin/activate
-```
+**API Keys:** Automatically loaded from existing `.env` files - no additional setup required:
+- `5.0/.env` → PERPLEXITY_API_KEY
+- `2.0/.env` → TRADIER_API_KEY, ALPHA_VANTAGE_KEY, DB_PATH
+
+---
+
+## Command Reference
+
+Run `./agent.sh help` for full documentation. Quick reference:
+
+| Command | Description |
+|---------|-------------|
+| `./agent.sh help` | Show all commands, options, and examples |
+| `./agent.sh prime [DATE]` | Pre-cache sentiment for upcoming earnings |
+| `./agent.sh whisper [DATE]` | Find most anticipated earnings with VRP |
+| `./agent.sh analyze TICKER [DATE]` | Deep dive with patterns, TRR, sentiment |
+| `./agent.sh maintenance health` | System health check |
+| `./agent.sh maintenance data-quality` | Database integrity scan |
+| `./agent.sh maintenance data-quality --fix` | Auto-fix safe data issues |
+| `./agent.sh maintenance sector-sync` | Populate sector data from Finnhub |
 
 ---
 
