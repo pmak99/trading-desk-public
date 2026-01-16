@@ -89,8 +89,9 @@ case "$COMMAND" in
 
     maintenance)
         TASK="${1:-health}"
+        shift || true
         echo "Running /maintenance $TASK..."
-        exec "$PYTHON" -m src.cli.maintenance "$TASK"
+        exec "$PYTHON" -m src.cli.maintenance "$TASK" "$@"
         ;;
 
     *)
