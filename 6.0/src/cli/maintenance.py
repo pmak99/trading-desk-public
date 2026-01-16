@@ -7,6 +7,7 @@ Usage:
     python -m src.cli.maintenance health         # Health check
     python -m src.cli.maintenance data-quality   # Database integrity check
     python -m src.cli.maintenance cache-cleanup  # Clean old cache entries
+    python -m src.cli.maintenance sector-sync    # Sync sector metadata for upcoming earnings
 """
 
 import sys
@@ -37,12 +38,13 @@ def main():
         logger.error("Error: Too many arguments")
         logger.info("")
         logger.info("Usage: ./agent.sh maintenance [task]")
-        logger.info("Available tasks: health, data-quality, cache-cleanup")
+        logger.info("Available tasks: health, data-quality, cache-cleanup, sector-sync")
         logger.info("")
         logger.info("Examples:")
         logger.info("  ./agent.sh maintenance health")
         logger.info("  ./agent.sh maintenance data-quality")
         logger.info("  ./agent.sh maintenance cache-cleanup")
+        logger.info("  ./agent.sh maintenance sector-sync")
         sys.exit(1)
 
     # Parse arguments
@@ -60,15 +62,18 @@ def main():
         run_data_quality()
     elif task == 'cache-cleanup':
         run_cache_cleanup()
+    elif task == 'sector-sync':
+        run_sector_sync()
     else:
         logger.error(f"Unknown maintenance task: {task}")
         logger.info("")
-        logger.info("Available tasks: health, data-quality, cache-cleanup")
+        logger.info("Available tasks: health, data-quality, cache-cleanup, sector-sync")
         logger.info("")
         logger.info("Examples:")
         logger.info("  ./agent.sh maintenance health")
         logger.info("  ./agent.sh maintenance data-quality")
         logger.info("  ./agent.sh maintenance cache-cleanup")
+        logger.info("  ./agent.sh maintenance sector-sync")
         sys.exit(1)
 
 
@@ -340,6 +345,85 @@ def run_cache_cleanup():
 
     except Exception as e:
         logger.info(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+def run_sector_sync():
+    """Sync sector data from Finnhub for upcoming earnings."""
+    try:
+        from src.agents.sector_fetch import SectorFetchAgent
+        from src.integration.container_2_0 import Container2_0
+
+        logger.info("[1/4] Getting upcoming earnings...")
+
+        container = Container2_0()
+        result = container.get_upcoming_earnings(days_ahead=30)
+
+        # Extract tickers
+        if hasattr(result, 'value'):
+            earnings_list = result.value
+        else:
+            earnings_list = result
+
+        tickers = [t for t, _ in earnings_list]
+        logger.info(f"  Found {len(tickers)} tickers with upcoming earnings")
+        logger.info("")
+
+        logger.info("[2/4] Checking existing metadata...")
+        agent = SectorFetchAgent()
+
+        # Check which need fetching
+        need_fetch = []
+        have_cached = []
+        for ticker in tickers:
+            cached = agent.metadata_repo.get_metadata(ticker)
+            if cached:
+                have_cached.append(ticker)
+            else:
+                need_fetch.append(ticker)
+
+        logger.info(f"  Already cached: {len(have_cached)}")
+        logger.info(f"  Need to fetch: {len(need_fetch)}")
+        logger.info("")
+
+        if not need_fetch:
+            logger.info("[3/4] All tickers already have metadata")
+            logger.info("")
+            logger.info("[4/4] Summary:")
+            logger.info(f"  Total tickers: {len(tickers)}")
+            logger.info(f"  Cached: {len(have_cached)}")
+            logger.info(f"  Fetched: 0")
+            logger.info("")
+            logger.info("=" * 60)
+            sys.exit(0)
+
+        logger.info(f"[3/4] Fetching sector data for {len(need_fetch)} tickers...")
+        logger.info("  (Rate limited: 1 request/second for Finnhub)")
+        logger.info("")
+
+        # Note: This is a placeholder. Real implementation would use
+        # the Finnhub MCP tool. For now, just log what would be fetched.
+        logger.info("  Note: Finnhub integration pending.")
+        logger.info("  Tickers needing data:")
+        for ticker in need_fetch[:10]:
+            logger.info(f"    - {ticker}")
+        if len(need_fetch) > 10:
+            logger.info(f"    ... and {len(need_fetch) - 10} more")
+
+        logger.info("")
+        logger.info("[4/4] Summary:")
+        logger.info(f"  Total tickers: {len(tickers)}")
+        logger.info(f"  Cached: {len(have_cached)}")
+        logger.info(f"  Pending Finnhub fetch: {len(need_fetch)}")
+        logger.info("")
+        logger.info("=" * 60)
+
+        sys.exit(0)
+
+    except Exception as e:
+        logger.error(f"Error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
