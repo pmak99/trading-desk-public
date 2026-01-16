@@ -278,15 +278,35 @@ Budget:
   "score": 78,
   "strategies": [
     {
-      "type": "BULL_PUT_SPREAD",
-      "max_profit": 210.0,
-      "max_loss": 290.0,
-      "probability_of_profit": 0.68,
-      "contracts": 50
+      "type": "bull_put_spread",
+      "max_profit": 48.0,
+      "max_loss": 452.0,
+      "probability_of_profit": 0.85,
+      "contracts": 1
+    },
+    {
+      "type": "iron_condor",
+      "max_profit": 114.0,
+      "max_loss": 484.0,
+      "probability_of_profit": 0.63,
+      "contracts": 1
     }
   ],
   "error": null
 }
+```
+
+**Analyze Output Format:**
+```
+## Strategies
+
+**bull_put_spread**
+  - Max Profit: $48.00 | Max Loss: $452.00
+  - POP: 85% | Contracts: 1
+
+**iron_condor**
+  - Max Profit: $114.00 | Max Loss: $484.00
+  - POP: 63% | Contracts: 1
 ```
 
 **Result Type Handling:** Properly unwraps 2.0's `Result[TickerAnalysis, AppError]` type
@@ -331,6 +351,8 @@ Budget:
 ```
 
 **Budget Protection:** Never records API call if response validation fails
+
+**Malformed Data Handling:** Filters out invalid catalysts/risks (e.g., just "**" or empty strings from malformed Perplexity responses)
 
 **Test Status:** ✅ Passing (integrated into PrimeOrchestrator)
 
@@ -551,6 +573,8 @@ All Phase 1, Phase 2, and Phase 3 agents tested and passing (48 tests total):
 - `/whisper` cross-ticker warnings use real sectors: `⚠️ 3 Technology tickers (NVDA, AAPL, MSFT)`
 - `/analyze` includes Position Limits section with TRR, max contracts, max notional
 - `/analyze` includes Historical Patterns section with directional bias, streaks, trends
+- `/analyze` shows full strategy details (type, max profit/loss, POP, contracts) instead of just count
+- `/analyze` filters malformed sentiment data (empty catalysts/risks from Perplexity)
 
 ### 📋 Phase 4: Refinement + Documentation (Future)
 
@@ -674,6 +698,11 @@ Global orchestrator timeout: 90s (allows for sequential fallback if parallel fai
 **4. Namespace collision between 6.0/src and 2.0/src**
 
 **Fix:** Container2_0 clears cached imports before loading 2.0 - fixed in Phase 1
+
+**5. Empty Catalysts/Risks showing "- **" in analyze output**
+
+**Cause:** Perplexity sometimes returns malformed responses with just markdown markers
+**Fix:** AnalyzeOrchestrator now filters out entries that are just "**" or empty - fixed in Jan 2026
 
 ---
 
