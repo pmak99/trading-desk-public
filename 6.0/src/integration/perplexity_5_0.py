@@ -4,38 +4,14 @@ Provides direct API access to Perplexity for sentiment analysis.
 """
 
 import sys
-import subprocess
 from pathlib import Path
 from typing import Dict, Any
 
-# Find main repo root (handles both main repo and worktrees)
-def _find_main_repo() -> Path:
-    """Find main repository root, handling worktrees correctly."""
-    try:
-        # Get git common dir (works in both main repo and worktrees)
-        result = subprocess.run(
-            ['git', 'rev-parse', '--git-common-dir'],
-            capture_output=True,
-            text=True,
-            check=True,
-            cwd=Path(__file__).parent
-        )
-        git_common_dir = Path(result.stdout.strip())
-
-        # If commondir path is relative, make it absolute
-        if not git_common_dir.is_absolute():
-            git_common_dir = (Path(__file__).parent / git_common_dir).resolve()
-
-        # Main repo is parent of .git directory
-        main_repo = git_common_dir.parent
-        return main_repo
-    except:
-        # Fallback: assume we're in main repo
-        return Path(__file__).parent.parent.parent.parent
+from ..utils.paths import MAIN_REPO, REPO_5_0
 
 # Add 5.0/ to Python path
 # 5.0's code uses "from src.core..." imports, so it needs 5.0/ in path, not 5.0/src/
-_main_repo = _find_main_repo()
+_main_repo = MAIN_REPO
 _5_0_dir = _main_repo / "5.0"
 _5_0_dir_str = str(_5_0_dir)
 

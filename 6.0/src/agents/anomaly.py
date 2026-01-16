@@ -4,7 +4,7 @@ This agent implements guardrails to prevent costly mistakes like the
 $26,930 WDAY/ZS loss from EXCELLENT VRP + REJECT liquidity conflict.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 
 from ..utils.schemas import AnomalyDetectionResponse, AnomalyDetail
@@ -149,7 +149,8 @@ class AnomalyDetectionAgent:
                     )
                 }
 
-        except Exception:
+        except (ValueError, TypeError):
+            # Date parsing failed - treat as no stale data anomaly
             pass
 
         return None
@@ -252,6 +253,3 @@ class AnomalyDetectionAgent:
 
         # No significant issues
         return 'TRADE'
-
-
-from typing import Optional  # Add missing import

@@ -15,6 +15,7 @@ from ..agents.ticker_analysis import TickerAnalysisAgent
 from ..agents.explanation import ExplanationAgent
 from ..agents.anomaly import AnomalyDetectionAgent
 from ..agents.health import HealthCheckAgent
+from ..integration.cache_4_0 import Cache4_0
 from ..utils.formatter import format_whisper_results, format_cross_ticker_warnings
 
 
@@ -90,7 +91,7 @@ class WhisperOrchestrator(BaseOrchestrator):
 
         # Step 2: Fetch earnings calendar
         print("[2/7] Fetching earnings calendar...")
-        earnings = self._fetch_earnings_calendar(start_date, end_date)
+        earnings = self.fetch_earnings_calendar(days_ahead=5)
 
         if not earnings:
             return {
@@ -154,54 +155,6 @@ class WhisperOrchestrator(BaseOrchestrator):
             'cross_ticker_warnings': warnings,
             'summary': self.get_orchestration_summary()
         }
-
-    def _fetch_earnings_calendar(
-        self,
-        start_date: Optional[str],
-        end_date: Optional[str]
-    ) -> List[Dict[str, Any]]:
-        """Fetch earnings calendar from 2.0."""
-        # Default date range: today + 4 days
-        days_ahead = 5  # Default lookforward window
-
-        try:
-            # Get upcoming earnings using days_ahead parameter
-            # Note: 2.0's API returns Result[(ticker, date), error]
-            result = self.container_2_0.get_upcoming_earnings(
-                days_ahead=days_ahead
-            )
-
-            # Check if result is successful
-            if hasattr(result, 'is_error') and result.is_error():
-                print(f"  Error from earnings repository: {result.error}")
-                return []
-
-            # Extract value from Result
-            if hasattr(result, 'value'):
-                earnings_tuples = result.value
-            else:
-                earnings_tuples = result
-
-            # Convert (ticker, date) tuples to dicts
-            earnings = []
-            for ticker, date_obj in earnings_tuples:
-                # Convert date to string if it's a date object
-                if hasattr(date_obj, 'strftime'):
-                    date_str = date_obj.strftime('%Y-%m-%d')
-                else:
-                    date_str = str(date_obj)
-
-                earnings.append({
-                    'ticker': ticker,
-                    'date': date_str
-                })
-
-            return earnings
-        except Exception as e:
-            print(f"  Error fetching calendar: {e}")
-            import traceback
-            print(traceback.format_exc())
-            return []
 
     async def _parallel_ticker_analysis(
         self,
@@ -278,18 +231,32 @@ class WhisperOrchestrator(BaseOrchestrator):
     ) -> List[Dict[str, Any]]:
         """Add anomaly detection to results."""
         anomaly_agent = AnomalyDetectionAgent()
+        ticker_agent = TickerAnalysisAgent()
+        cache = Cache4_0()
 
         enriched = []
         for result in results:
-            # Run anomaly detection
+            ticker = result['ticker']
+            earnings_date = result.get('earnings_date', '')
+
+            # Get actual cache age from sentiment cache
+            cache_age_hours = cache.get_cache_age_hours(ticker, earnings_date)
+            if cache_age_hours is None:
+                cache_age_hours = 0.0  # Fresh data if not cached
+
+            # Get actual historical quarters count
+            historical_moves = ticker_agent.get_historical_moves(ticker, limit=50)
+            historical_quarters = len(historical_moves) if historical_moves else 0
+
+            # Run anomaly detection with actual values
             anomaly_result = anomaly_agent.detect(
-                ticker=result['ticker'],
+                ticker=ticker,
                 vrp_ratio=result.get('vrp_ratio', 0),
                 recommendation=result.get('recommendation', 'SKIP'),
                 liquidity_tier=result.get('liquidity_tier', 'REJECT'),
-                earnings_date=result.get('earnings_date', ''),
-                cache_age_hours=0.0,  # TODO: Get actual cache age
-                historical_quarters=12  # TODO: Get actual count
+                earnings_date=earnings_date,
+                cache_age_hours=cache_age_hours,
+                historical_quarters=historical_quarters
             )
 
             # Merge into result
