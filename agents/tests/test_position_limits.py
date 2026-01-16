@@ -40,3 +40,14 @@ class TestPositionLimitsRepository:
         if result:
             assert result['tail_risk_level'] == "HIGH"
             assert result['max_contracts'] == 50
+
+    def test_get_all_high_risk_returns_list(self):
+        """Should return list of HIGH risk tickers."""
+        repo = PositionLimitsRepository()
+        result = repo.get_all_high_risk()
+
+        assert isinstance(result, list)
+        # If there are HIGH risk tickers, verify structure
+        if result:
+            assert 'ticker' in result[0]
+            assert result[0]['tail_risk_level'] == 'HIGH'
