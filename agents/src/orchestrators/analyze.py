@@ -323,7 +323,8 @@ class AnalyzeOrchestrator(BaseOrchestrator):
             'strategies': ticker_result.get('strategies', []),
             'anomalies': anomaly_result.get('anomalies', []) if anomaly_result else [],
             'key_factors': explanation_result.get('key_factors', []),
-            'historical_context': explanation_result.get('historical_context', '')
+            'historical_context': explanation_result.get('historical_context', ''),
+            'position_limits': ticker_result.get('position_limits')
         }
 
         return report
@@ -502,6 +503,17 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         else:
             output.append(f"❌ **{tier}** - Not tradeable")
         output.append("")
+
+        # Position Limits (if HIGH TRR)
+        position_limits = report.get('position_limits')
+        if position_limits and position_limits.get('tail_risk_level') == 'HIGH':
+            output.append("## Position Limits")
+            output.append("")
+            output.append(f"**Tail Risk Ratio:** {position_limits['tail_risk_ratio']:.2f}x (HIGH)")
+            output.append(f"**Max Contracts:** {position_limits['max_contracts']}")
+            output.append(f"**Max Notional:** ${position_limits['max_notional']:,.0f}")
+            output.append(f"**Reason:** Historical max move {position_limits['max_move']:.1f}% vs avg {position_limits['avg_move']:.1f}%")
+            output.append("")
 
         # Sentiment
         output.append("## Sentiment")
