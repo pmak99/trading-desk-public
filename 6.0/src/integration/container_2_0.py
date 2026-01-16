@@ -306,3 +306,35 @@ class Container2_0:
                 'earnings_calendar': None,
                 'error': str(e)
             }
+
+    def get_all_historical_moves(self) -> list:
+        """
+        Get all historical moves from database.
+
+        Returns:
+            List of all historical move records as dicts
+        """
+        try:
+            import sqlite3
+
+            db_path = self.config.database.path
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row  # Return rows as dict-like objects
+
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT ticker, earnings_date, prev_close, earnings_close,
+                       gap_move_pct, intraday_move_pct
+                FROM historical_moves
+                ORDER BY ticker, earnings_date DESC
+            """)
+
+            rows = cursor.fetchall()
+            conn.close()
+
+            # Convert Row objects to dicts
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            print(f"Error fetching historical moves: {e}")
+            return []
