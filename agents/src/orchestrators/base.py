@@ -276,7 +276,8 @@ class BaseOrchestrator(ABC):
             )
 
             # Check if result is successful
-            if hasattr(result, 'is_error') and result.is_error():
+            # Note: 2.0's Result type uses `is_err` property, not `is_error()` method
+            if hasattr(result, 'is_err') and result.is_err:
                 return []
 
             # Extract value from Result
