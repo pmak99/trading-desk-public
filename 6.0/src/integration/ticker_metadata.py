@@ -1,0 +1,144 @@
+"""Ticker metadata integration - sector and industry data.
+
+Provides access to the ticker_metadata table for cross-ticker
+sector correlation analysis.
+"""
+
+import sqlite3
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+
+from .container_2_0 import Container2_0
+
+
+class TickerMetadataRepository:
+    """Repository for ticker metadata (sector, industry, market cap)."""
+
+    # Finnhub industry to sector mapping
+    INDUSTRY_TO_SECTOR = {
+        'Semiconductors': 'Technology',
+        'Software': 'Technology',
+        'Technology': 'Technology',
+        'Hardware': 'Technology',
+        'Internet': 'Technology',
+        'Banks': 'Financial Services',
+        'Insurance': 'Financial Services',
+        'Investment Banking': 'Financial Services',
+        'Asset Management': 'Financial Services',
+        'Pharmaceuticals': 'Healthcare',
+        'Biotechnology': 'Healthcare',
+        'Medical Devices': 'Healthcare',
+        'Healthcare': 'Healthcare',
+        'Retail': 'Consumer Cyclical',
+        'Auto': 'Consumer Cyclical',
+        'Restaurants': 'Consumer Cyclical',
+        'Consumer Electronics': 'Consumer Cyclical',
+        'Oil & Gas': 'Energy',
+        'Utilities': 'Utilities',
+        'Telecom': 'Communication Services',
+        'Media': 'Communication Services',
+        'Aerospace': 'Industrials',
+        'Defense': 'Industrials',
+        'Industrial': 'Industrials',
+    }
+
+    def __init__(self):
+        """Initialize with database path."""
+        container = Container2_0()
+        self.db_path = container.get_db_path()
+
+    def get_metadata(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """Get metadata for a ticker."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT ticker, company_name, sector, industry,
+                       market_cap, updated_at
+                FROM ticker_metadata
+                WHERE ticker = ?
+            """, (ticker.upper(),))
+
+            row = cursor.fetchone()
+            conn.close()
+
+            if row is None:
+                return None
+
+            return dict(row)
+
+        except Exception:
+            return None
+
+    def save_metadata(
+        self,
+        ticker: str,
+        company_name: str,
+        sector: str,
+        industry: str,
+        market_cap: Optional[float] = None
+    ) -> bool:
+        """Save or update ticker metadata."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO ticker_metadata
+                (ticker, company_name, sector, industry, market_cap, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                ticker.upper(),
+                company_name,
+                sector,
+                industry,
+                market_cap,
+                datetime.now().isoformat()
+            ))
+
+            conn.commit()
+            conn.close()
+            return True
+
+        except Exception:
+            return False
+
+    def delete_metadata(self, ticker: str) -> bool:
+        """Delete ticker metadata (for testing)."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM ticker_metadata WHERE ticker = ?", (ticker.upper(),))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception:
+            return False
+
+    def get_by_sector(self, sector: str) -> List[Dict[str, Any]]:
+        """Get all tickers in a sector."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT ticker, company_name, sector, industry, market_cap
+                FROM ticker_metadata
+                WHERE sector = ?
+            """, (sector,))
+
+            rows = cursor.fetchall()
+            conn.close()
+
+            return [dict(row) for row in rows]
+
+        except Exception:
+            return []
+
+    @classmethod
+    def map_industry_to_sector(cls, industry: str) -> str:
+        """Map Finnhub industry to sector."""
+        return cls.INDUSTRY_TO_SECTOR.get(industry, 'Other')
