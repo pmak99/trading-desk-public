@@ -312,7 +312,13 @@ class TermStructureAnalyzer:
         try:
             slope, _ = np.polyfit(x, y, 1)
             return float(slope)
-        except Exception:
+        except (ValueError, np.linalg.LinAlgError) as e:
+            # Expected errors from polyfit with invalid data
+            logger.debug(f"Skew slope calculation failed: {e}")
+            return 0.0
+        except Exception as e:
+            # Unexpected errors should be logged
+            logger.warning(f"Unexpected error in skew slope calculation: {type(e).__name__}: {e}")
             return 0.0
 
     def _calculate_term_analysis(

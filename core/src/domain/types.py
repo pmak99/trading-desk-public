@@ -169,7 +169,7 @@ class OptionQuote:
         """Basic liquidity check."""
         return (
             self.open_interest > 0
-            and self.volume >= 0
+            and self.volume > 0  # Must have actual volume, not just >= 0
             and self.spread_pct < 50.0
             and self.bid.amount > 0
         )

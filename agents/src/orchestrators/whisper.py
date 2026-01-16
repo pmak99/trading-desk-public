@@ -58,11 +58,16 @@ class WhisperOrchestrator(BaseOrchestrator):
     # Conservative limit to avoid overconcentration in single week
     MAX_PORTFOLIO_NOTIONAL = 150000
 
+    # Concurrency limit for parallel ticker analysis
+    # Prevents database connection pool exhaustion and API rate limiting
+    MAX_CONCURRENT_ANALYSIS = 5
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize WhisperOrchestrator."""
         super().__init__(config)
         self.timeout = self.config.get('timeout', 90)
         self.metadata_repo = TickerMetadataRepository()
+        self._analysis_semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_ANALYSIS)
 
     async def orchestrate(
         self,
@@ -171,25 +176,34 @@ class WhisperOrchestrator(BaseOrchestrator):
         self,
         earnings: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Analyze all tickers in parallel."""
+        """
+        Analyze all tickers in parallel with controlled concurrency.
+
+        Uses semaphore to limit concurrent analysis to MAX_CONCURRENT_ANALYSIS,
+        preventing database connection pool exhaustion and API rate limiting.
+        """
         # Create ticker analysis agents
         analysis_agent = TickerAnalysisAgent()
 
-        # Build analysis tasks
+        async def analyze_with_semaphore(ticker: str, earnings_date: str) -> Dict[str, Any]:
+            """Run analysis with semaphore-controlled concurrency."""
+            async with self._analysis_semaphore:
+                return await asyncio.to_thread(
+                    analysis_agent.analyze,
+                    ticker,
+                    earnings_date,
+                    generate_strategies=False  # Skip strategies in whisper
+                )
+
+        # Build analysis tasks with concurrency control
         tasks = []
         for earning in earnings:
             ticker = earning.get('ticker')
             earnings_date = earning.get('date')
 
             if ticker and earnings_date:
-                # Wrap synchronous analyze() in async task
                 task = asyncio.create_task(
-                    asyncio.to_thread(
-                        analysis_agent.analyze,
-                        ticker,
-                        earnings_date,
-                        generate_strategies=False  # Skip strategies in whisper
-                    )
+                    analyze_with_semaphore(ticker, earnings_date)
                 )
                 tasks.append(task)
 

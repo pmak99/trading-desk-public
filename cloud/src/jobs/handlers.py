@@ -179,7 +179,9 @@ class JobRunner:
             log("info", "Job completed", job=job_name, result=result)
             return result
         except Exception as e:
-            log("error", "Job failed", job=job_name, error=str(e))
+            import traceback
+            tb = traceback.format_exc()
+            log("error", "Job failed", job=job_name, error=str(e), traceback=tb)
             return {"status": "error", "error": str(e)}
 
     async def _pre_market_prep(self) -> Dict[str, Any]:

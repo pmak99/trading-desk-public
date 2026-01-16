@@ -267,3 +267,16 @@ def budget_update(remaining_calls: int, remaining_dollars: float) -> None:
 def tickers_qualified(count_val: int) -> None:
     """Record number of qualified tickers from a scan."""
     gauge("ivcrush.tickers.qualified", count_val)
+
+
+def shutdown() -> None:
+    """
+    Shutdown the metrics thread pool.
+
+    Should be called during app shutdown to properly release resources.
+    Called automatically by FastAPI lifespan in main.py.
+    """
+    global _executor
+    if _executor:
+        _executor.shutdown(wait=False)  # Don't block on pending metrics
+        log("debug", "Metrics thread pool shut down")

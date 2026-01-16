@@ -349,15 +349,12 @@ def main():
         # Download cloud DB
         log("Downloading cloud DB from GCS...")
         if not download_cloud_db(cloud_db_path):
-            log("Cannot download cloud DB, syncing local → cloud only", "warn")
-            # Just upload local to cloud
-            if upload_cloud_db(LOCAL_DB):
-                log("Uploaded local DB to cloud", "success")
-            try:
-                backup_to_gdrive(LOCAL_DB)
-            except RuntimeError as e:
-                log(f"WARNING: Backup failed but sync completed: {e}", "warn")
-            return
+            # SAFETY: Don't overwrite cloud with local on download failure
+            # Cloud may have data we can't download due to transient error
+            log("Cannot download cloud DB - aborting to prevent data loss", "error")
+            log("To force local → cloud sync, delete cloud DB first:", "info")
+            log(f"  gsutil rm gs://{GCS_BUCKET}/{GCS_BLOB}", "info")
+            sys.exit(1)
 
         # Open both databases
         local_conn = sqlite3.connect(str(LOCAL_DB))

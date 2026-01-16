@@ -128,9 +128,19 @@ class BudgetTracker:
 
         Args:
             cost: Actual cost if known, otherwise uses estimate
+
+        Raises:
+            ValueError: If cost is negative or not a finite number
         """
         if cost is None:
             cost = self.COST_PER_CALL_ESTIMATE
+        else:
+            # Validate cost is a reasonable positive number
+            import math
+            if not isinstance(cost, (int, float)) or math.isnan(cost) or math.isinf(cost):
+                raise ValueError(f"Cost must be a finite number, got: {cost}")
+            if cost < 0:
+                raise ValueError(f"Cost cannot be negative, got: {cost}")
 
         today = self._get_today()
 
