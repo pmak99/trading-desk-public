@@ -1,6 +1,6 @@
 # Trading Desk 6.0 - Agent-Based Orchestration System
 
-**Status:** Phase 1 Complete (Jan 2026)
+**Status:** Phases 1-3 Complete (Jan 2026)
 **Purpose:** Agent-based orchestration with parallel processing and intelligent automation
 
 ---
@@ -147,9 +147,9 @@ Budget remaining: 25 calls/day
 ### /maintenance - System Operations
 
 ```bash
-./agent.sh maintenance health         # Health check
-./agent.sh maintenance data-quality   # Database integrity (Phase 2)
-./agent.sh maintenance cache-cleanup  # Cache management (Phase 2)
+./agent.sh maintenance health         # System health check
+./agent.sh maintenance data-quality   # Database integrity scan
+./agent.sh maintenance cache-cleanup  # Cache cleanup automation
 ```
 
 **Health Check Output:**
@@ -169,6 +169,53 @@ Database:
 Budget:
   Daily:         8/40 calls (32 remaining)
   Monthly:       $1.20/$5.00 ($3.80 remaining)
+```
+
+**Data Quality Scan Output:**
+```
+[1/5] Checking historical moves data...
+  Total tickers: 427
+  Total moves: 5,513
+
+[2/5] Analyzing data quality...
+[3/5] Checking for duplicates...
+
+[4/5] Data Quality Report:
+
+⚠️  4 tickers with <4 quarters:
+  - NAVN: 1 quarters
+  - BLSH: 2 quarters
+  - ABVX: 3 quarters
+  - SAIL: 3 quarters
+
+✅ No extreme outliers detected
+✅ No duplicate entries found
+
+[5/5] Recommendations:
+
+- Run backfill for tickers with <4 quarters
+  Command: cd ../2.0 && ./trade.sh backfill <TICKER>
+```
+
+**Cache Cleanup Output:**
+```
+[1/4] Analyzing sentiment cache...
+  Total entries: 5
+  Stale entries (>3h): 5
+  Cache hit rate: 70.0%
+
+[2/4] Cleaning sentiment cache...
+  ✓ Removed 5 stale entries
+
+[3/4] Cleaning budget tracker...
+  ✓ Removed 12 old entries (>30 days)
+
+[4/4] Summary:
+  Sentiment cache: 5 entries removed
+  Budget tracker: 12 entries removed
+  Disk space freed: ~0.02 MB
+
+  Cache efficiency: 70.0% hit rate
 ```
 
 ---
