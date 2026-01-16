@@ -130,11 +130,11 @@ class MCPTaskClient:
         """
         Spawn agent using Claude's Task tool.
 
-        NOTE: This is a placeholder for the actual MCP Task tool integration.
-        In production, this would call the Claude Desktop Task tool via MCP.
+        NOTE: This is a Phase 2 feature. Current orchestrators use direct agent
+        instances (e.g., TickerAnalysisAgent().analyze()) instead of this method.
 
-        For now, this method documents the interface and returns a mock response
-        that can be used for testing the orchestration layer.
+        In Phase 2, this will call Claude Desktop's Task tool via MCP protocol
+        to spawn isolated Claude instances for parallel agent execution.
 
         Args:
             agent_type: Type of agent (e.g., "TickerAnalysisAgent")
@@ -143,7 +143,7 @@ class MCPTaskClient:
             model: Claude model to use ("haiku" for speed, "sonnet" for complexity)
 
         Returns:
-            Raw agent response (string)
+            Raw agent response (JSON string)
 
         Example:
             response = await client.spawn_agent(
@@ -154,15 +154,16 @@ class MCPTaskClient:
             )
             result = client.parse_json_response(response)
         """
-        # TODO: Integrate with actual MCP Task tool
-        # This is where we would call Claude Desktop's Task tool via MCP protocol
-
-        # For now, raise NotImplementedError to make integration point clear
-        raise NotImplementedError(
-            "MCP Task tool integration not yet implemented. "
-            "This method will be implemented when integrating with Claude Desktop's "
-            "Task tool via MCP protocol."
-        )
+        # Phase 2: MCP Task tool integration
+        # Current implementation returns an error response for visibility
+        # Orchestrators should use direct agent calls until Phase 2
+        error_response = json.dumps({
+            "error": f"MCP Task tool not yet implemented (Phase 2). "
+                     f"Use direct agent calls instead: {agent_type}().method()",
+            "success": False,
+            "agent_type": agent_type
+        })
+        return error_response
 
     def get_agent_config(self, agent_type: str) -> Dict[str, Any]:
         """

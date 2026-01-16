@@ -90,7 +90,7 @@ class PrimeOrchestrator(BaseOrchestrator):
 
         # Step 2: Fetch earnings calendar
         logger.info("[2/6] Fetching earnings calendar...")
-        earnings = self._fetch_earnings_calendar(start_date, end_date, days_ahead)
+        earnings = self.fetch_earnings_calendar(days_ahead)
 
         if not earnings:
             logger.info("No earnings found for date range")
@@ -184,52 +184,6 @@ class PrimeOrchestrator(BaseOrchestrator):
             'budget_remaining': daily_remaining - len(to_fetch),
             'summary': self.get_orchestration_summary()
         }
-
-    def _fetch_earnings_calendar(
-        self,
-        start_date: Optional[str],
-        end_date: Optional[str],
-        days_ahead: int
-    ) -> List[Dict[str, Any]]:
-        """Fetch earnings calendar from 2.0."""
-        try:
-            # Get upcoming earnings using days_ahead parameter
-            # Note: 2.0's API returns Result[(ticker, date), error]
-            result = self.container_2_0.get_upcoming_earnings(
-                days_ahead=days_ahead
-            )
-
-            # Check if result is successful
-            if hasattr(result, 'is_error') and result.is_error():
-                logger.error(f"Error from earnings repository: {result.error}")
-                return []
-
-            # Extract value from Result
-            if hasattr(result, 'value'):
-                earnings_tuples = result.value
-            else:
-                earnings_tuples = result
-
-            # Convert (ticker, date) tuples to dicts
-            earnings = []
-            for ticker, date_obj in earnings_tuples:
-                # Convert date to string if it's a date object
-                if hasattr(date_obj, 'strftime'):
-                    date_str = date_obj.strftime('%Y-%m-%d')
-                else:
-                    date_str = str(date_obj)
-
-                earnings.append({
-                    'ticker': ticker,
-                    'date': date_str
-                })
-
-            return earnings
-        except Exception as e:
-            logger.error(f"Error fetching calendar: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return []
 
     async def _parallel_sentiment_fetch(
         self,
