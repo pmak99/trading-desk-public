@@ -48,6 +48,15 @@ class WhisperOrchestrator(BaseOrchestrator):
     # Limit for performance
     MAX_TICKERS_TO_ANALYZE = 30
 
+    # Portfolio risk thresholds (from TRR position limits in CLAUDE.md)
+    # Normal TRR tickers: $50K max notional per position
+    # HIGH TRR tickers: $25K max notional (enforced by TRR limits, not here)
+    DEFAULT_POSITION_NOTIONAL = 50000
+
+    # Maximum recommended portfolio exposure for /whisper candidates
+    # Conservative limit to avoid overconcentration in single week
+    MAX_PORTFOLIO_NOTIONAL = 150000
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize WhisperOrchestrator."""
         super().__init__(config)
@@ -293,10 +302,10 @@ class WhisperOrchestrator(BaseOrchestrator):
                     f"({', '.join(tickers[:3])}...)"
                 )
 
-        # Check 2: Portfolio risk (simplified - assume $50K per position)
-        # TODO: Use actual position sizing from TRR limits
-        total_notional = len(results) * 50000
-        max_recommended = 150000
+        # Check 2: Portfolio risk using configured thresholds
+        # Note: Individual TRR limits are enforced by TickerAnalysisAgent
+        total_notional = len(results) * self.DEFAULT_POSITION_NOTIONAL
+        max_recommended = self.MAX_PORTFOLIO_NOTIONAL
 
         if total_notional > max_recommended:
             warnings.append(

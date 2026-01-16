@@ -6,10 +6,14 @@ without duplicating code.
 
 import sys
 import os
+import threading
 from pathlib import Path
 from typing import Optional, Any
 
 from ..utils.paths import MAIN_REPO, REPO_2_0
+
+# Thread lock for container initialization (sys.path manipulation is not thread-safe)
+_container_lock = threading.Lock()
 
 # Add 2.0/ to Python path with highest priority
 # 2.0's code uses "from src.config..." imports, so it needs 2.0/ in path, not 2.0/src/
@@ -62,54 +66,59 @@ class Container2_0:
 
     @property
     def container(self):
-        """Lazy-load container on first access."""
+        """Lazy-load container on first access (thread-safe)."""
         if self._container is None:
-            # Critical: Remove 6.0/ from sys.path temporarily to avoid namespace collision
-            # Both 6.0 and 2.0 use 'src' as top-level package, causing import conflicts
-            _6_0_paths = [p for p in sys.path if '6.0' in p]
-            for p in _6_0_paths:
-                sys.path.remove(p)
-
-            # Ensure 2.0/ is at position 0
-            if _2_0_dir_str not in sys.path:
-                sys.path.insert(0, _2_0_dir_str)
-            elif sys.path.index(_2_0_dir_str) != 0:
-                sys.path.remove(_2_0_dir_str)
-                sys.path.insert(0, _2_0_dir_str)
-
-            # Save 6.0's src modules before clearing
-            _6_0_src_modules = {}
-
-            try:
-                # Clear cached imports of 'src' package to avoid using 6.0's cached version
-                # This is necessary because both 6.0 and 2.0 use 'src' as top-level package
-                import importlib
-                if 'src' in sys.modules:
-                    # Save 6.0's src modules
-                    _6_0_src_modules = {
-                        k: v for k, v in sys.modules.items()
-                        if k.startswith('src.') or k == 'src'
-                    }
-                    # Clear src from sys.modules
-                    del sys.modules['src']
-                    for k in list(_6_0_src_modules.keys()):
-                        if k in sys.modules and k != 'src':
-                            del sys.modules[k]
-
-                # Import here to avoid namespace collision at module level
-                from src.container import get_container
-                self._container = get_container()
-            finally:
-                # Restore 6.0/ paths after import
-                for p in _6_0_paths:
-                    if p not in sys.path:
-                        sys.path.append(p)
-
-                # Restore 6.0's src modules
-                for k, v in _6_0_src_modules.items():
-                    sys.modules[k] = v
-
+            with _container_lock:
+                # Double-check pattern for thread safety
+                if self._container is None:
+                    self._initialize_container()
         return self._container
+
+    def _initialize_container(self):
+        """Initialize the 2.0 container (called under lock)."""
+        # Critical: Remove 6.0/ from sys.path temporarily to avoid namespace collision
+        # Both 6.0 and 2.0 use 'src' as top-level package, causing import conflicts
+        _6_0_paths = [p for p in sys.path if '6.0' in p]
+        for p in _6_0_paths:
+            sys.path.remove(p)
+
+        # Ensure 2.0/ is at position 0
+        if _2_0_dir_str not in sys.path:
+            sys.path.insert(0, _2_0_dir_str)
+        elif sys.path.index(_2_0_dir_str) != 0:
+            sys.path.remove(_2_0_dir_str)
+            sys.path.insert(0, _2_0_dir_str)
+
+        # Save 6.0's src modules before clearing
+        _6_0_src_modules = {}
+
+        try:
+            # Clear cached imports of 'src' package to avoid using 6.0's cached version
+            # This is necessary because both 6.0 and 2.0 use 'src' as top-level package
+            if 'src' in sys.modules:
+                # Save 6.0's src modules
+                _6_0_src_modules = {
+                    k: v for k, v in sys.modules.items()
+                    if k.startswith('src.') or k == 'src'
+                }
+                # Clear src from sys.modules
+                del sys.modules['src']
+                for k in list(_6_0_src_modules.keys()):
+                    if k in sys.modules and k != 'src':
+                        del sys.modules[k]
+
+            # Import here to avoid namespace collision at module level
+            from src.container import get_container
+            self._container = get_container()
+        finally:
+            # Restore 6.0/ paths after import
+            for p in _6_0_paths:
+                if p not in sys.path:
+                    sys.path.append(p)
+
+            # Restore 6.0's src modules
+            for k, v in _6_0_src_modules.items():
+                sys.modules[k] = v
 
     def analyze_ticker(
         self,

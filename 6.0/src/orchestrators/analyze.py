@@ -187,11 +187,7 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 )
             ),
             'sentiment': asyncio.create_task(
-                asyncio.to_thread(
-                    sentiment_agent.fetch_sentiment,
-                    ticker,
-                    earnings_date
-                )
+                sentiment_agent.fetch_sentiment(ticker, earnings_date)
             )
         }
 

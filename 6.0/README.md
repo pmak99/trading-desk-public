@@ -390,61 +390,40 @@ def _find_main_repo() -> Path:
 
 ### Test Coverage
 
-All Phase 1 agents tested and passing:
+All Phase 1 and Phase 2 agents tested and passing (13 tests total):
 
-| Agent | Test File | Status |
+| Agent/Feature | Test File | Status |
 |-------|-----------|--------|
-| HealthCheckAgent | `test_health_agent.py` | ✅ Pass |
+| HealthCheckAgent | `tests/test_maintenance_live.py` | ✅ Pass |
 | TickerAnalysisAgent | `tests/test_ticker_analysis_live.py` | ✅ Pass |
-| AnomalyDetectionAgent | `test_anomaly_agent.py` | ✅ Pass |
-| ExplanationAgent | `test_explanation_agent.py` | ✅ Pass |
+| ExplanationAgent | `tests/test_explanation_agent.py` | ✅ Pass (5 scenarios) |
 | SentimentFetchAgent | (integrated in PrimeOrchestrator) | ✅ Pass |
+| WhisperOrchestrator | `tests/test_whisper_live.py` | ✅ Pass |
+| AnalyzeOrchestrator | `tests/test_analyze_live.py` | ✅ Pass |
+| MaintenanceOrchestrator | `tests/test_maintenance_live.py` | ✅ Pass (3 scenarios) |
 
 ### Running Tests
 
 ```bash
-# From 6.0/ directory
-../2.0/venv/bin/python tests/test_ticker_analysis_live.py
+# From 6.0/ directory - run all tests
+../2.0/venv/bin/python -m pytest tests/ -v
 
 # Output:
-# ============================================================
-# LIVE TEST: TickerAnalysisAgent
-# ============================================================
-#
-# Testing: AAPL
-# Earnings Date: 2026-01-21
-#
-# [1/3] Initializing TickerAnalysisAgent...
-# ✓ Agent initialized
-#
-# [2/3] Calling analyze()...
-# ✓ Analysis complete
-#
-# [3/3] Result:
-# ------------------------------------------------------------
-# Ticker: AAPL
-# VRP Ratio: 1.51
-# Recommendation: GOOD
-# Liquidity Tier: EXCELLENT
-# Score: 50
-# Strategies: 2 generated
-# ------------------------------------------------------------
-#
-# ✓ All required fields present
-#
-# [BONUS] Testing get_historical_moves()...
-# ✓ Retrieved 5 historical moves
-#
-# ============================================================
-# TEST PASSED ✓
-# ============================================================
+# tests/test_analyze_live.py::test_analyze_auto_detect PASSED
+# tests/test_analyze_live.py::test_analyze_specific_date PASSED
+# tests/test_explanation_agent.py::TestExplanationAgent::test_high_vrp_with_historical_data PASSED
+# tests/test_explanation_agent.py::TestExplanationAgent::test_high_vrp_no_sentiment PASSED
+# tests/test_explanation_agent.py::TestExplanationAgent::test_exceptional_vrp PASSED
+# tests/test_explanation_agent.py::TestExplanationAgent::test_marginal_vrp PASSED
+# tests/test_explanation_agent.py::TestExplanationAgent::test_unknown_ticker PASSED
+# tests/test_maintenance_live.py::test_health_check PASSED
+# tests/test_maintenance_live.py::test_data_quality PASSED
+# tests/test_maintenance_live.py::test_cache_cleanup PASSED
+# tests/test_ticker_analysis_live.py::test_ticker_analysis_live PASSED
+# tests/test_whisper_live.py::test_whisper_live PASSED
+# tests/test_whisper_live.py::test_whisper_specific_date PASSED
+# =================== 13 passed ===================
 ```
-
-### Test Reports
-
-Comprehensive test reports generated:
-- `AGENT_TEST_REPORT.md` - Full agent test results with examples
-- `TEST_RESULTS.md` - Summary of all tests
 
 ---
 
@@ -487,6 +466,18 @@ Comprehensive test reports generated:
 - **Anomaly detection**: Catches EXCELLENT VRP + REJECT liquidity conflicts (WDAY/ZS lesson)
 - **Error transparency**: Failed analyses show WHY they were blocked
 
+**Code Review Fixes (Jan 2026):**
+
+| Issue | Severity | Fix |
+|-------|----------|-----|
+| asyncio.run() inside to_thread() | Critical | Made SentimentFetchAgent async, removed to_thread wrapper |
+| Thread-safety in Container2_0 | Important | Added threading.Lock() with double-check pattern |
+| Silent exception handlers | Important | Added logging to base.py calendar fetch |
+| Hardcoded magic numbers | Important | Moved $50K/$150K to class constants in whisper.py |
+| Missing __all__ exports | Minor | Added __all__ to all __init__.py files |
+| Bare except clause | Minor | Removed duplicate test file with bare except |
+| MCP client placeholder | Minor | Updated docstrings to clarify Phase 2 status |
+
 ### 📋 Phase 3: Enhanced Intelligence + Maintenance (Future)
 
 **Planned:**
@@ -511,41 +502,51 @@ Comprehensive test reports generated:
 6.0/
 ├── agent.sh                    # CLI entry point
 ├── README.md                   # This file
-├── AGENT_TEST_REPORT.md        # Agent test results
-├── TEST_RESULTS.md             # Test summary
 ├── src/
+│   ├── __init__.py             # Package exports
 │   ├── orchestrators/
+│   │   ├── __init__.py         # BaseOrchestrator, WhisperOrchestrator, etc.
 │   │   ├── base.py             # BaseOrchestrator (common patterns)
 │   │   ├── prime.py            # ✅ PrimeOrchestrator
 │   │   ├── whisper.py          # ✅ WhisperOrchestrator
 │   │   ├── analyze.py          # ✅ AnalyzeOrchestrator
 │   │   └── maintenance.py      # ✅ MaintenanceOrchestrator
 │   ├── agents/
+│   │   ├── __init__.py         # All agent exports
 │   │   ├── base.py             # BaseAgent (JSON schema validation)
 │   │   ├── ticker_analysis.py  # ✅ TickerAnalysisAgent
-│   │   ├── sentiment_fetch.py  # ✅ SentimentFetchAgent
+│   │   ├── sentiment_fetch.py  # ✅ SentimentFetchAgent (async)
 │   │   ├── health.py           # ✅ HealthCheckAgent
 │   │   ├── explanation.py      # ✅ ExplanationAgent
 │   │   └── anomaly.py          # ✅ AnomalyDetectionAgent
 │   ├── integration/
-│   │   ├── container_2_0.py    # 2.0 integration (worktree-aware)
+│   │   ├── __init__.py         # Container2_0, Cache4_0, etc.
+│   │   ├── container_2_0.py    # 2.0 integration (thread-safe, worktree-aware)
 │   │   ├── cache_4_0.py        # 4.0 integration (JSON serialization)
-│   │   └── perplexity_5_0.py   # Perplexity API client
-│   ├── intelligence/           # Cross-ticker analysis (Phase 2)
+│   │   ├── perplexity_5_0.py   # Perplexity API client
+│   │   └── mcp_client.py       # MCP Task tool (Phase 2 placeholder)
+│   ├── intelligence/           # Cross-ticker analysis (future)
 │   ├── utils/
+│   │   ├── __init__.py         # Utility exports
+│   │   ├── paths.py            # Repository path resolution
 │   │   ├── schemas.py          # Pydantic models (TickerAnalysisResponse, etc.)
 │   │   ├── timeout.py          # Timeout utilities
-│   │   └── formatter.py        # Output formatting (Phase 2)
+│   │   └── formatter.py        # Output formatting
 │   └── cli/
+│       ├── __init__.py         # CLI exports
 │       ├── prime.py            # ✅ /prime CLI wrapper
 │       ├── maintenance.py      # ✅ /maintenance CLI wrapper
 │       ├── whisper.py          # ✅ /whisper CLI wrapper
 │       └── analyze.py          # ✅ /analyze CLI wrapper
-├── tests/
-│   ├── test_ticker_analysis_live.py  # ✅ Live TickerAnalysisAgent test
-│   └── fixtures/                      # Test data
-├── test_anomaly_agent.py       # ✅ AnomalyDetectionAgent unit test
-└── test_explanation_agent.py   # ✅ ExplanationAgent unit test
+├── config/
+│   └── agents.yaml             # Agent configuration (timeouts, models)
+└── tests/
+    ├── __init__.py
+    ├── test_analyze_live.py         # ✅ AnalyzeOrchestrator tests
+    ├── test_explanation_agent.py    # ✅ ExplanationAgent unit tests
+    ├── test_maintenance_live.py     # ✅ MaintenanceOrchestrator tests
+    ├── test_ticker_analysis_live.py # ✅ TickerAnalysisAgent tests
+    └── test_whisper_live.py         # ✅ WhisperOrchestrator tests
 ```
 
 ---

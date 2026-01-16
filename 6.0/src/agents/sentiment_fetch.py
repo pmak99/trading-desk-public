@@ -43,7 +43,7 @@ class SentimentFetchAgent:
             logger.warning(f"Perplexity client initialization failed: {e}")
             self.perplexity = None
 
-    def fetch_sentiment(
+    async def fetch_sentiment(
         self,
         ticker: str,
         earnings_date: str,
@@ -61,7 +61,7 @@ class SentimentFetchAgent:
             Sentiment data dict conforming to SentimentFetchResponse schema
 
         Example:
-            result = agent.fetch_sentiment("NVDA", "2026-02-05")
+            result = await agent.fetch_sentiment("NVDA", "2026-02-05")
             # Returns:
             # {
             #     "ticker": "NVDA",
@@ -109,7 +109,7 @@ class SentimentFetchAgent:
                 }
 
             # Fetch sentiment via Perplexity API
-            sentiment_data = self._fetch_via_api(ticker, earnings_date)
+            sentiment_data = await self._fetch_via_api(ticker, earnings_date)
 
             # Validate with schema BEFORE recording budget/caching
             # This ensures we only track successful, valid responses
@@ -142,7 +142,7 @@ class SentimentFetchAgent:
                 ticker=ticker
             )
 
-    def _fetch_via_api(
+    async def _fetch_via_api(
         self,
         ticker: str,
         earnings_date: str
@@ -165,7 +165,7 @@ class SentimentFetchAgent:
         """
         try:
             # Call Perplexity API (async)
-            result = asyncio.run(self.perplexity.get_sentiment(ticker, earnings_date))
+            result = await self.perplexity.get_sentiment(ticker, earnings_date)
 
             # Check if API call was successful
             if not result.get('success'):
