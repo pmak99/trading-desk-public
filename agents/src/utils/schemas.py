@@ -236,3 +236,13 @@ class PositionLimits(BaseModel):
     def is_high_risk(self) -> bool:
         """Check if ticker has high tail risk."""
         return self.tail_risk_level == "HIGH"
+
+
+class TickerMetadata(BaseModel):
+    """Company metadata including sector and industry."""
+    ticker: str
+    company_name: str
+    sector: str
+    industry: str
+    market_cap: Optional[float] = None
+    updated_at: Optional[str] = None
