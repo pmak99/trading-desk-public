@@ -16,6 +16,7 @@ from ..agents.sentiment_fetch import SentimentFetchAgent
 from ..agents.explanation import ExplanationAgent
 from ..agents.anomaly import AnomalyDetectionAgent
 from ..agents.health import HealthCheckAgent
+from ..agents.pattern_recognition import PatternRecognitionAgent
 from ..integration.cache_4_0 import Cache4_0
 
 
@@ -250,11 +251,16 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 historical_quarters=historical_quarters
             )
 
+            # Run pattern recognition
+            pattern_agent = PatternRecognitionAgent()
+            patterns = pattern_agent.analyze(ticker)
+
             return {
                 'ticker_analysis': ticker_result,
                 'sentiment': sentiment_result if not isinstance(sentiment_result, Exception) else {'error': str(sentiment_result)},
                 'explanation': explanation,
-                'anomaly': anomaly
+                'anomaly': anomaly,
+                'patterns': patterns
             }
 
         except asyncio.TimeoutError:
@@ -324,7 +330,8 @@ class AnalyzeOrchestrator(BaseOrchestrator):
             'anomalies': anomaly_result.get('anomalies', []) if anomaly_result else [],
             'key_factors': explanation_result.get('key_factors', []),
             'historical_context': explanation_result.get('historical_context', ''),
-            'position_limits': ticker_result.get('position_limits')
+            'position_limits': ticker_result.get('position_limits'),
+            'patterns': specialist_results.get('patterns')
         }
 
         return report
@@ -554,15 +561,54 @@ class AnalyzeOrchestrator(BaseOrchestrator):
 
         # Anomalies
         if report['anomalies']:
-            output.append("## ⚠️  Anomalies Detected")
+            output.append("## Anomalies Detected")
             output.append("")
             for anomaly in report['anomalies']:
                 severity = anomaly.get('severity', 'warning')
                 msg = anomaly.get('message', '')
                 if severity == 'critical':
-                    output.append(f"🚫 **CRITICAL:** {msg}")
+                    output.append(f"CRITICAL: {msg}")
                 else:
-                    output.append(f"⚠️  **Warning:** {msg}")
+                    output.append(f"Warning: {msg}")
+            output.append("")
+
+        # Historical Patterns
+        patterns = report.get('patterns')
+        if patterns and patterns.get('quarters_analyzed', 0) >= 8:
+            output.append("## Historical Patterns")
+            output.append("")
+            output.append(f"**Quarters Analyzed:** {patterns['quarters_analyzed']}")
+            output.append("")
+
+            # Directional bias
+            bias = patterns.get('directional_bias', 'NEUTRAL')
+            bullish_pct = patterns.get('bullish_pct', 0.5)
+            bias_indicator = {'BULLISH': '(UP)', 'BEARISH': '(DOWN)', 'NEUTRAL': '(--)'}.get(bias, '(--)')
+            output.append(f"{bias_indicator} **Directional Bias:** {bias} ({bullish_pct:.0%} UP moves)")
+
+            # Streak
+            streak = patterns.get('current_streak', 0)
+            streak_dir = patterns.get('streak_direction', 'UP')
+            if streak >= 3:
+                output.append(f"**Current Streak:** {streak} consecutive {streak_dir}")
+
+            # Magnitude trend
+            trend = patterns.get('magnitude_trend')
+            if trend and trend != 'STABLE':
+                recent = patterns.get('avg_move_recent', 0)
+                overall = patterns.get('avg_move_overall', 0)
+                trend_indicator = '(EXPANDING)' if trend == 'EXPANDING' else '(CONTRACTING)'
+                output.append(f"{trend_indicator} **Magnitude:** {trend} ({recent:.1f}% recent vs {overall:.1f}% avg)")
+
+            # Recent moves
+            recent_moves = patterns.get('recent_moves', [])
+            if recent_moves:
+                output.append("")
+                output.append("**Recent Earnings:**")
+                for move in recent_moves:
+                    arrow = '(UP)' if move['direction'] == 'UP' else '(DOWN)'
+                    output.append(f"  {move['date']}: {move['move']:+.1f}% {arrow}")
+
             output.append("")
 
         output.append("=" * 60)
