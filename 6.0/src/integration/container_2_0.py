@@ -292,6 +292,17 @@ class Container2_0:
                 'error': str(e)
             }
 
+    def get_db_path(self) -> str:
+        """Get database path from 2.0 container."""
+        if self._container is None:
+            self._initialize_container()
+        # Access DB path from environment or default
+        import os
+        db_path = os.environ.get('DB_PATH', 'data/ivcrush.db')
+        # Make absolute relative to 2.0 directory
+        main_repo = MAIN_REPO
+        return str(main_repo / "2.0" / db_path)
+
     def get_all_historical_moves(self) -> list:
         """
         Get all historical moves from database.
