@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import logging
 
 from ..integration.container_2_0 import Container2_0
+from ..integration.position_limits import PositionLimitsRepository
 from ..utils.schemas import TickerAnalysisResponse
 from .base import BaseAgent
 
@@ -31,8 +32,9 @@ class TickerAnalysisAgent:
     """
 
     def __init__(self):
-        """Initialize agent with 2.0 container."""
+        """Initialize agent with 2.0 container and position limits repo."""
         self.container = Container2_0()
+        self.position_limits_repo = PositionLimitsRepository()
 
     def analyze(
         self,
@@ -108,6 +110,7 @@ class TickerAnalysisAgent:
                 'liquidity_tier': self._extract_liquidity_tier(analysis_result),
                 'score': self._extract_score(analysis_result),
                 'strategies': self._extract_strategies(analysis_result) if generate_strategies else None,
+                'position_limits': self._get_position_limits(ticker),
                 'error': None
             }
 
@@ -262,3 +265,10 @@ class TickerAnalysisAgent:
             return result.value if hasattr(result, 'value') else result
 
         return result
+
+    def _get_position_limits(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """Get position limits for ticker if available."""
+        try:
+            return self.position_limits_repo.get_limits(ticker)
+        except Exception:
+            return None
