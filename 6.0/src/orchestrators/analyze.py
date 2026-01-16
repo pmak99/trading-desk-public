@@ -143,7 +143,8 @@ class AnalyzeOrchestrator(BaseOrchestrator):
             result = self.container_2_0.get_upcoming_earnings(days_ahead=30)
 
             # Handle Result type
-            if hasattr(result, 'is_error') and result.is_error():
+            # Note: 2.0's Result type uses `is_err` property, not `is_error()` method
+            if hasattr(result, 'is_err') and result.is_err:
                 return None
 
             # Extract value
@@ -539,15 +540,19 @@ class AnalyzeOrchestrator(BaseOrchestrator):
             output.append("*(Cached - pre-fetched)*")
         output.append("")
 
-        if sentiment['catalysts']:
+        # Filter malformed catalysts (e.g., just "**" or empty strings)
+        valid_catalysts = [c for c in sentiment['catalysts'] if c and c.strip('*').strip()]
+        if valid_catalysts:
             output.append("**Catalysts:**")
-            for catalyst in sentiment['catalysts']:
+            for catalyst in valid_catalysts:
                 output.append(f"- {catalyst}")
             output.append("")
 
-        if sentiment['risks']:
+        # Filter malformed risks (e.g., just "**" or empty strings)
+        valid_risks = [r for r in sentiment['risks'] if r and r.strip('*').strip()]
+        if valid_risks:
             output.append("**Risks:**")
-            for risk in sentiment['risks']:
+            for risk in valid_risks:
                 output.append(f"- {risk}")
             output.append("")
 
@@ -555,9 +560,18 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         if report['strategies']:
             output.append("## Strategies")
             output.append("")
-            output.append(f"**{len(report['strategies'])} strategies generated**")
-            output.append("*(Full strategy details available in ticker_analysis result)*")
-            output.append("")
+            for strategy in report['strategies']:
+                strategy_type = strategy.get('type', 'Unknown')
+                max_profit = strategy.get('max_profit', 0)
+                max_loss = strategy.get('max_loss', 0)
+                pop = strategy.get('probability_of_profit', 0)
+                contracts = strategy.get('contracts', 0)
+
+                # Format strategy line
+                output.append(f"**{strategy_type}**")
+                output.append(f"  - Max Profit: ${max_profit:,.2f} | Max Loss: ${max_loss:,.2f}")
+                output.append(f"  - POP: {pop:.0%} | Contracts: {contracts}")
+                output.append("")
 
         # Anomalies
         if report['anomalies']:
