@@ -4,10 +4,12 @@
 System monitoring and data quality operations.
 
 Usage:
-    python -m src.cli.maintenance health         # Health check
-    python -m src.cli.maintenance data-quality   # Database integrity check
-    python -m src.cli.maintenance cache-cleanup  # Clean old cache entries
-    python -m src.cli.maintenance sector-sync    # Sync sector metadata for upcoming earnings
+    python -m src.cli.maintenance health              # Health check
+    python -m src.cli.maintenance data-quality        # Database integrity check (report mode)
+    python -m src.cli.maintenance data-quality --dry-run  # Show what would be fixed
+    python -m src.cli.maintenance data-quality --fix  # Apply safe fixes automatically
+    python -m src.cli.maintenance cache-cleanup       # Clean old cache entries
+    python -m src.cli.maintenance sector-sync         # Sync sector metadata for upcoming earnings
 """
 
 import sys
@@ -33,22 +35,37 @@ from src.integration.cache_4_0 import Cache4_0
 
 def main():
     """Execute maintenance operations."""
-    # Validate argument count
-    if len(sys.argv) > 2:
-        logger.error("Error: Too many arguments")
+    # Parse arguments - extract task and flags
+    args = sys.argv[1:]
+
+    # Separate task from flags
+    task = 'health'  # default
+    flags = []
+    for arg in args:
+        if arg.startswith('--'):
+            flags.append(arg)
+        elif task == 'health':  # First non-flag argument is the task
+            task = arg
+
+    # Validate - only data-quality accepts flags
+    if flags and task != 'data-quality':
+        logger.error(f"Error: Flags not supported for task '{task}'")
         logger.info("")
         logger.info("Usage: ./agent.sh maintenance [task]")
         logger.info("Available tasks: health, data-quality, cache-cleanup, sector-sync")
         logger.info("")
+        logger.info("Flags (data-quality only):")
+        logger.info("  --dry-run   Show what would be fixed without applying")
+        logger.info("  --fix       Apply safe fixes automatically")
+        logger.info("")
         logger.info("Examples:")
         logger.info("  ./agent.sh maintenance health")
         logger.info("  ./agent.sh maintenance data-quality")
+        logger.info("  ./agent.sh maintenance data-quality --dry-run")
+        logger.info("  ./agent.sh maintenance data-quality --fix")
         logger.info("  ./agent.sh maintenance cache-cleanup")
         logger.info("  ./agent.sh maintenance sector-sync")
         sys.exit(1)
-
-    # Parse arguments
-    task = sys.argv[1] if len(sys.argv) > 1 else 'health'
 
     # Print header
     logger.info("=" * 60)
@@ -59,7 +76,16 @@ def main():
     if task == 'health':
         run_health_check()
     elif task == 'data-quality':
-        run_data_quality()
+        # Check for flags
+        fix_mode = '--fix' in flags
+        dry_run = '--dry-run' in flags
+
+        if fix_mode and dry_run:
+            logger.error("Cannot use both --fix and --dry-run")
+            sys.exit(1)
+
+        mode = "fix" if fix_mode else ("dry-run" if dry_run else "report")
+        run_data_quality_v2(mode)
     elif task == 'cache-cleanup':
         run_cache_cleanup()
     elif task == 'sector-sync':
@@ -69,9 +95,15 @@ def main():
         logger.info("")
         logger.info("Available tasks: health, data-quality, cache-cleanup, sector-sync")
         logger.info("")
+        logger.info("Flags (data-quality only):")
+        logger.info("  --dry-run   Show what would be fixed without applying")
+        logger.info("  --fix       Apply safe fixes automatically")
+        logger.info("")
         logger.info("Examples:")
         logger.info("  ./agent.sh maintenance health")
         logger.info("  ./agent.sh maintenance data-quality")
+        logger.info("  ./agent.sh maintenance data-quality --dry-run")
+        logger.info("  ./agent.sh maintenance data-quality --fix")
         logger.info("  ./agent.sh maintenance cache-cleanup")
         logger.info("  ./agent.sh maintenance sector-sync")
         sys.exit(1)
@@ -279,6 +311,83 @@ def run_data_quality():
 
     except Exception as e:
         logger.info(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+def run_data_quality_v2(mode: str):
+    """Run data quality with DataQualityAgent."""
+    try:
+        from src.agents.data_quality import DataQualityAgent
+
+        agent = DataQualityAgent()
+
+        logger.info(f"[1/3] Running data quality scan (mode: {mode})...")
+        result = agent.run(mode=mode)
+
+        logger.info("")
+        logger.info("[2/3] Results:")
+        logger.info("")
+
+        # Fixable issues
+        fixable = result.get('fixable_issues', [])
+        if fixable:
+            logger.info(f"Fixable issues ({sum(i['count'] for i in fixable)}):")
+            for issue in fixable:
+                logger.info(f"  - {issue['type']}: {issue['count']} items")
+                logger.info(f"    Action: {issue['fix_action']}")
+        else:
+            logger.info("No fixable issues found")
+        logger.info("")
+
+        # Flagged issues
+        flagged = result.get('flagged_issues', [])
+        if flagged:
+            logger.warning(f"Flagged for manual review ({sum(i['count'] for i in flagged)}):")
+            for issue in flagged:
+                logger.warning(f"  - {issue['type']}: {issue['count']} items")
+                logger.info(f"    Reason: {issue['reason']}")
+        else:
+            logger.info("No issues flagged for review")
+        logger.info("")
+
+        # Actions taken
+        if mode == "fix":
+            fixed = result.get('fixed_issues', [])
+            if fixed:
+                logger.info("Actions taken:")
+                for action in fixed:
+                    logger.info(f"  ✓ {action}")
+            else:
+                logger.info("No fixes applied")
+        elif mode == "dry-run":
+            would_fix = result.get('would_fix', [])
+            if would_fix:
+                logger.info("Would fix (dry-run):")
+                for issue in would_fix:
+                    logger.info(f"  - {issue['type']}: {issue['count']} items")
+
+        logger.info("")
+        logger.info("[3/3] Summary:")
+        summary = result.get('summary', {})
+        logger.info(f"  Fixable: {summary.get('total_fixable', 0)}")
+        logger.info(f"  Flagged: {summary.get('total_flagged', 0)}")
+        if mode == "fix":
+            logger.info(f"  Fixed: {summary.get('total_fixed', 0)}")
+
+        logger.info("")
+
+        if mode == "report" and summary.get('total_fixable', 0) > 0:
+            logger.info("Run with --fix to apply fixes, or --dry-run to preview")
+
+        logger.info("")
+        logger.info("=" * 60)
+
+        sys.exit(0)
+
+    except Exception as e:
+        logger.error(f"Error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
