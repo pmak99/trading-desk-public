@@ -16,6 +16,7 @@ from ..agents.explanation import ExplanationAgent
 from ..agents.anomaly import AnomalyDetectionAgent
 from ..agents.health import HealthCheckAgent
 from ..integration.cache_4_0 import Cache4_0
+from ..integration.ticker_metadata import TickerMetadataRepository
 from ..utils.formatter import format_whisper_results, format_cross_ticker_warnings
 
 
@@ -61,6 +62,7 @@ class WhisperOrchestrator(BaseOrchestrator):
         """Initialize WhisperOrchestrator."""
         super().__init__(config)
         self.timeout = self.config.get('timeout', 90)
+        self.metadata_repo = TickerMetadataRepository()
 
     async def orchestrate(
         self,
@@ -283,34 +285,41 @@ class WhisperOrchestrator(BaseOrchestrator):
         """Detect cross-ticker correlation and portfolio risks."""
         warnings = []
 
-        # Check 1: Sector correlation (simplified - group by first letter for demo)
-        # TODO: Use proper sector data from 2.0 company profiles
+        # Check 1: Sector correlation using real sector data
         sector_groups = {}
         for result in results:
             ticker = result.get('ticker', '')
-            # Simplified sector grouping (first letter as proxy)
-            sector = ticker[0] if ticker else 'UNKNOWN'
+
+            # Get sector from result (if enriched) or from metadata
+            sector = result.get('sector')
+            if not sector:
+                metadata = self.metadata_repo.get_metadata(ticker)
+                sector = metadata.get('sector', 'Unknown') if metadata else 'Unknown'
+
             if sector not in sector_groups:
                 sector_groups[sector] = []
             sector_groups[sector].append(ticker)
 
-        # Warn if 3+ tickers in same sector
+        # Warn if 3+ tickers in same sector (excluding Unknown)
         for sector, tickers in sector_groups.items():
-            if len(tickers) >= 3:
+            if sector != 'Unknown' and len(tickers) >= 3:
                 warnings.append(
-                    f"⚠️  Sector concentration: {len(tickers)} tickers starting with '{sector}' "
-                    f"({', '.join(tickers[:3])}...)"
+                    f"Sector concentration: {len(tickers)} {sector} tickers "
+                    f"({', '.join(tickers[:5])}{'...' if len(tickers) > 5 else ''})"
                 )
 
         # Check 2: Portfolio risk using configured thresholds
         # Note: Individual TRR limits are enforced by TickerAnalysisAgent
-        total_notional = len(results) * self.DEFAULT_POSITION_NOTIONAL
+        total_notional = sum(
+            self.DEFAULT_POSITION_NOTIONAL for r in results
+            if r.get('liquidity_tier') in ['EXCELLENT', 'GOOD']
+        )
         max_recommended = self.MAX_PORTFOLIO_NOTIONAL
 
         if total_notional > max_recommended:
             warnings.append(
-                f"⚠️  Portfolio risk: {len(results)} positions = ${total_notional:,} notional "
-                f"(exceeds ${max_recommended:,} recommended max)"
+                f"Total potential exposure ${total_notional:,.0f} exceeds "
+                f"${max_recommended:,.0f} recommended limit"
             )
 
         return warnings
