@@ -215,10 +215,12 @@ VRP Ratio = Implied Move / Historical Mean Move
 
 | Tier | VRP Ratio | Action |
 |------|-----------|--------|
-| EXCELLENT | ≥ 7.0x | High confidence |
-| GOOD | ≥ 4.0x | Tradeable |
-| MARGINAL | ≥ 1.5x | Reduce size |
-| SKIP | < 1.5x | No edge |
+| EXCELLENT | ≥ 1.8x | High confidence |
+| GOOD | ≥ 1.4x | Tradeable |
+| MARGINAL | ≥ 1.2x | Reduce size |
+| SKIP | < 1.2x | No edge |
+
+*BALANCED mode (default). Matches 2.0 local system.*
 
 ### Composite Score
 
