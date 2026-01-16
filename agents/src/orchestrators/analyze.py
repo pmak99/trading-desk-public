@@ -16,6 +16,7 @@ from ..agents.sentiment_fetch import SentimentFetchAgent
 from ..agents.explanation import ExplanationAgent
 from ..agents.anomaly import AnomalyDetectionAgent
 from ..agents.health import HealthCheckAgent
+from ..integration.cache_4_0 import Cache4_0
 
 
 class AnalyzeOrchestrator(BaseOrchestrator):
@@ -232,15 +233,25 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 liquidity_tier=ticker_result.get('liquidity_tier', 'N/A')
             )
 
-            # Run anomaly detection
+            # Get actual cache age from sentiment cache
+            cache = Cache4_0()
+            cache_age_hours = cache.get_cache_age_hours(ticker, earnings_date)
+            if cache_age_hours is None:
+                cache_age_hours = 0.0  # Fresh data if not cached
+
+            # Get actual historical quarters count
+            historical_moves = ticker_agent.get_historical_moves(ticker, limit=50)
+            historical_quarters = len(historical_moves) if historical_moves else 0
+
+            # Run anomaly detection with actual values
             anomaly = anomaly_agent.detect(
                 ticker=ticker,
                 vrp_ratio=ticker_result.get('vrp_ratio', 0),
                 recommendation=ticker_result.get('recommendation', 'SKIP'),
                 liquidity_tier=ticker_result.get('liquidity_tier', 'REJECT'),
                 earnings_date=earnings_date,
-                cache_age_hours=0.0,  # TODO: Get actual cache age
-                historical_quarters=12  # TODO: Get actual count
+                cache_age_hours=cache_age_hours,
+                historical_quarters=historical_quarters
             )
 
             return {

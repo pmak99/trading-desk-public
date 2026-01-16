@@ -167,6 +167,7 @@ class ExplanationAgent:
             return summary
 
         except Exception:
+            # Return default message on any data access failure
             return "Historical data unavailable"
 
     def _get_sentiment_summary(self, ticker: str, earnings_date: str) -> str:
@@ -189,6 +190,7 @@ class ExplanationAgent:
             return "Sentiment data not yet cached (run /prime first)"
 
         except Exception:
+            # Return default message on cache access failure
             return "Sentiment unavailable"
 
     def _calculate_win_probability(self, ticker: str, vrp_ratio: float) -> Optional[float]:
@@ -250,6 +252,7 @@ class ExplanationAgent:
             return round(final_prob, 2)
 
         except Exception:
+            # Return None on calculation failure - win probability is optional
             return None
 
     def _build_explanation(

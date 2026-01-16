@@ -6,38 +6,14 @@ without duplicating code.
 
 import sys
 import os
-import subprocess
 from pathlib import Path
 from typing import Optional, Any
 
-# Find main repo root (handles both main repo and worktrees)
-def _find_main_repo() -> Path:
-    """Find main repository root, handling worktrees correctly."""
-    try:
-        # Get git common dir (works in both main repo and worktrees)
-        result = subprocess.run(
-            ['git', 'rev-parse', '--git-common-dir'],
-            capture_output=True,
-            text=True,
-            check=True,
-            cwd=Path(__file__).parent
-        )
-        git_common_dir = Path(result.stdout.strip())
-
-        # If commondir path is relative, make it absolute
-        if not git_common_dir.is_absolute():
-            git_common_dir = (Path(__file__).parent / git_common_dir).resolve()
-
-        # Main repo is parent of .git directory
-        main_repo = git_common_dir.parent
-        return main_repo
-    except:
-        # Fallback: assume we're in main repo
-        return Path(__file__).parent.parent.parent.parent
+from ..utils.paths import MAIN_REPO, REPO_2_0
 
 # Add 2.0/ to Python path with highest priority
 # 2.0's code uses "from src.config..." imports, so it needs 2.0/ in path, not 2.0/src/
-_main_repo = _find_main_repo()
+_main_repo = MAIN_REPO
 _2_0_dir = _main_repo / "2.0"
 _2_0_dir_str = str(_2_0_dir)
 

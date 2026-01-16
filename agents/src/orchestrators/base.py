@@ -237,3 +237,58 @@ class BaseOrchestrator(ABC):
             'failed': failed,
             'success_rate': round(success_rate, 1)
         }
+
+    def fetch_earnings_calendar(
+        self,
+        days_ahead: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch earnings calendar from 2.0.
+
+        Args:
+            days_ahead: Number of days to look ahead (default: 5)
+
+        Returns:
+            List of earnings dicts with 'ticker' and 'date' keys
+
+        Example:
+            earnings = self.fetch_earnings_calendar(days_ahead=7)
+            for e in earnings:
+                print(f"{e['ticker']} reports on {e['date']}")
+        """
+        try:
+            # Get upcoming earnings using days_ahead parameter
+            # Note: 2.0's API returns Result[(ticker, date), error]
+            result = self.container_2_0.get_upcoming_earnings(
+                days_ahead=days_ahead
+            )
+
+            # Check if result is successful
+            if hasattr(result, 'is_error') and result.is_error():
+                return []
+
+            # Extract value from Result
+            if hasattr(result, 'value'):
+                earnings_tuples = result.value
+            else:
+                earnings_tuples = result
+
+            # Convert (ticker, date) tuples to dicts
+            earnings = []
+            for ticker, date_obj in earnings_tuples:
+                # Convert date to string if it's a date object
+                if hasattr(date_obj, 'strftime'):
+                    date_str = date_obj.strftime('%Y-%m-%d')
+                else:
+                    date_str = str(date_obj)
+
+                earnings.append({
+                    'ticker': ticker,
+                    'date': date_str
+                })
+
+            return earnings
+
+        except Exception:
+            # Silently return empty list on failure - calendar fetch is non-critical
+            return []

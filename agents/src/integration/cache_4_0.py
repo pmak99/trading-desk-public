@@ -4,38 +4,14 @@ Provides access to sentiment cache and budget tracker without duplication.
 """
 
 import sys
-import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-# Find main repo root (handles both main repo and worktrees)
-def _find_main_repo() -> Path:
-    """Find main repository root, handling worktrees correctly."""
-    try:
-        # Get git common dir (works in both main repo and worktrees)
-        result = subprocess.run(
-            ['git', 'rev-parse', '--git-common-dir'],
-            capture_output=True,
-            text=True,
-            check=True,
-            cwd=Path(__file__).parent
-        )
-        git_common_dir = Path(result.stdout.strip())
-
-        # If commondir path is relative, make it absolute
-        if not git_common_dir.is_absolute():
-            git_common_dir = (Path(__file__).parent / git_common_dir).resolve()
-
-        # Main repo is parent of .git directory
-        main_repo = git_common_dir.parent
-        return main_repo
-    except:
-        # Fallback: assume we're in main repo
-        return Path(__file__).parent.parent.parent.parent
+from ..utils.paths import MAIN_REPO, REPO_4_0
 
 # Add 4.0/src to Python path
-_main_repo = _find_main_repo()
+_main_repo = MAIN_REPO
 _4_0_src = _main_repo / "4.0" / "src"
 _4_0_src_str = str(_4_0_src)
 
@@ -312,3 +288,52 @@ class Cache4_0:
         conn.close()
 
         return deleted_count
+
+    def get_cache_age_hours(
+        self,
+        ticker: str,
+        earnings_date: str
+    ) -> Optional[float]:
+        """
+        Get cache age in hours for a specific ticker/earnings_date.
+
+        Args:
+            ticker: Stock ticker symbol
+            earnings_date: Earnings date (YYYY-MM-DD)
+
+        Returns:
+            Cache age in hours, or None if not cached
+        """
+        import sqlite3
+
+        cache_db = _main_repo / "4.0" / "data" / "sentiment_cache.db"
+
+        try:
+            conn = sqlite3.connect(str(cache_db))
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "SELECT cached_at FROM sentiment_cache WHERE ticker = ? AND earnings_date = ?",
+                (ticker.upper(), earnings_date)
+            )
+
+            row = cursor.fetchone()
+            conn.close()
+
+            if row and row[0]:
+                cached_at_str = row[0]
+                # Parse ISO format timestamp
+                try:
+                    cached_at = datetime.fromisoformat(cached_at_str.replace('Z', '+00:00'))
+                    # Handle timezone-naive comparison
+                    if cached_at.tzinfo is not None:
+                        cached_at = cached_at.replace(tzinfo=None)
+                    age_seconds = (datetime.now() - cached_at).total_seconds()
+                    return age_seconds / 3600.0
+                except (ValueError, TypeError):
+                    return None
+
+            return None
+        except Exception:
+            # Return None on database access failure - cache age is optional
+            return None
