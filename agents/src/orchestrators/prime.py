@@ -205,12 +205,8 @@ class PrimeOrchestrator(BaseOrchestrator):
             async with semaphore:
                 # Small delay to spread requests over time
                 await asyncio.sleep(0.5)
-                # Wrap synchronous fetch_sentiment() in async task
-                return await asyncio.to_thread(
-                    sentiment_agent.fetch_sentiment,
-                    ticker,
-                    earnings_date
-                )
+                # Call async fetch_sentiment directly
+                return await sentiment_agent.fetch_sentiment(ticker, earnings_date)
 
         # Build fetch tasks with rate limiting
         tasks = []
