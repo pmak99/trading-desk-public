@@ -11,10 +11,12 @@ from .container_2_0 import Container2_0
 from .cache_4_0 import Cache4_0
 from .perplexity_5_0 import Perplexity5_0
 from .mcp_client import MCPTaskClient
+from .position_limits import PositionLimitsRepository
 
 __all__ = [
     'Container2_0',
     'Cache4_0',
     'Perplexity5_0',
     'MCPTaskClient',
+    'PositionLimitsRepository',
 ]
