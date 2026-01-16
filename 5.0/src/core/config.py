@@ -40,11 +40,11 @@ def is_half_day(date_str: str = None) -> bool:
 class Settings:
     """Application settings."""
 
-    # VRP thresholds (from CLAUDE.md)
-    VRP_EXCELLENT = 7.0
-    VRP_GOOD = 4.0
-    VRP_MARGINAL = 1.5
-    VRP_DISCOVERY = 3.0  # For priming/whisper
+    # VRP thresholds - BALANCED mode (matching 2.0 default)
+    VRP_EXCELLENT = 1.8
+    VRP_GOOD = 1.4
+    VRP_MARGINAL = 1.2
+    VRP_DISCOVERY = 3.0  # For priming/whisper (separate from tier thresholds)
 
     # API budget limits
     PERPLEXITY_DAILY_LIMIT = 40

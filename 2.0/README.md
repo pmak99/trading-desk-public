@@ -42,10 +42,12 @@ The core edge comes from VRP - the ratio of implied move to historical average:
 
 | Tier | VRP Ratio | Action |
 |------|-----------|--------|
-| EXCELLENT | >= 7.0x | High confidence, full size |
-| GOOD | >= 4.0x | Tradeable with caution |
-| MARGINAL | >= 1.5x | Minimum edge, size down |
-| SKIP | < 1.5x | No edge |
+| EXCELLENT | >= 1.8x | High confidence, full size |
+| GOOD | >= 1.4x | Tradeable |
+| MARGINAL | >= 1.2x | Minimum edge, size down |
+| SKIP | < 1.2x | No edge |
+
+*BALANCED mode (default). Set `VRP_THRESHOLD_MODE=LEGACY` for 7x/4x/1.5x thresholds.*
 
 ## Scoring Weights (Dec 2025)
 

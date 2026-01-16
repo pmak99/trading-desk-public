@@ -14,11 +14,13 @@ The core edge comes from VRP - the ratio of implied move to historical average m
 VRP Ratio = Implied Move / Historical Mean Move
 ```
 
-**VRP Thresholds:**
-- EXCELLENT: >= 7.0x (top tier, high confidence)
-- GOOD: >= 4.0x (tradeable with caution)
-- MARGINAL: >= 1.5x (minimum edge, size down)
-- SKIP: < 1.5x (no edge)
+**VRP Thresholds (BALANCED mode - default):**
+- EXCELLENT: >= 1.8x (top tier, high confidence)
+- GOOD: >= 1.4x (tradeable)
+- MARGINAL: >= 1.2x (minimum edge, size down)
+- SKIP: < 1.2x (no edge)
+
+*Note: Set `VRP_THRESHOLD_MODE=LEGACY` for old thresholds (7x/4x/1.5x). Other modes: CONSERVATIVE, AGGRESSIVE.*
 
 ## Scoring System (Current Weights)
 
@@ -42,7 +44,7 @@ VRP Ratio = Implied Move / Historical Mean Move
 ## Critical Rules
 
 1. **Never trade REJECT liquidity** - learned from $26,930 loss on WDAY/ZS/SYM
-2. **VRP > 4x minimum** for full position sizing
+2. **VRP > 4x preferred** for full position sizing (BALANCED mode classifies ≥1.8x as EXCELLENT, but 4x+ gives highest confidence)
 3. **Prefer spreads over naked options** for defined risk
 4. **Half-Kelly sizing** (0.25 fraction) for position sizing
 5. **Always check liquidity score first** before evaluating VRP

@@ -62,11 +62,11 @@ From trade data, compute:
 - Profit factor (gross wins / gross losses)
 - Largest win / loss
 
-**By VRP Tier:**
-- EXCELLENT (≥7x): Win rate, avg P&L
-- GOOD (≥4x): Win rate, avg P&L
-- MARGINAL (≥1.5x): Win rate, avg P&L
-- SKIP (<1.5x): Win rate, avg P&L (should be 0 trades)
+**By VRP Tier (BALANCED mode):**
+- EXCELLENT (≥1.8x): Win rate, avg P&L
+- GOOD (≥1.4x): Win rate, avg P&L
+- MARGINAL (≥1.2x): Win rate, avg P&L
+- SKIP (<1.2x): Win rate, avg P&L (should be 0 trades)
 
 **By Liquidity Tier:**
 - EXCELLENT: Win rate, avg P&L

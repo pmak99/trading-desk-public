@@ -33,13 +33,15 @@ Show progress updates as you work:
 
 ## Reference Tables
 
-### VRP Tiers
+### VRP Tiers (BALANCED mode - default)
 | Tier | Threshold | Action |
 |------|-----------|--------|
-| EXCELLENT | ≥ 7.0x | Full size, high confidence |
-| GOOD | ≥ 4.0x | Full size |
-| MARGINAL | ≥ 1.5x | Reduced size |
-| SKIP | < 1.5x | No trade |
+| EXCELLENT | ≥ 1.8x | Full size, high confidence |
+| GOOD | ≥ 1.4x | Full size |
+| MARGINAL | ≥ 1.2x | Reduced size |
+| SKIP | < 1.2x | No trade |
+
+*Note: 2.0 system uses BALANCED mode by default. LEGACY mode (7x/4x/1.5x) available via VRP_THRESHOLD_MODE env var.*
 
 ### Liquidity Tiers
 | Tier | OI/Position | Spread | Action |
@@ -54,7 +56,7 @@ Show progress updates as you work:
 ### Budget Limits
 - Daily calls: 40 max
 - Monthly budget: $5.00
-- Cost per call: ~$0.005
+- Cost per call: ~$0.006
 
 ## Step-by-Step Instructions
 
@@ -74,11 +76,22 @@ sqlite3 2.0/data/ivcrush.db \
 ```
 Save `{EARNINGS_DATE}`, `{TIMING}` (BMO/AMC), and `{DAYS_UNTIL}` for later use.
 
-If no upcoming earnings found, display error and exit:
+**If no upcoming earnings in database, try Finnhub as fallback:**
+```
+mcp__finnhub__finnhub_calendar_data with:
+  operation="get_earnings_calendar"
+  symbol="{TICKER}"
+  from_date="{TODAY}"
+  to_date="{90_DAYS_FROM_NOW}"
+```
+
+Parse response: `earningsCalendar[0].date` and `earningsCalendar[0].hour` (amc/bmo).
+
+**If still no earnings found after Finnhub fallback:**
 ```
 ❌ No upcoming earnings found for {TICKER}
-   Run ./trade.sh sync to refresh calendar, or provide date manually:
-   /analyze {TICKER} YYYY-MM-DD
+   Neither database nor Finnhub have upcoming earnings.
+   Provide date manually: /analyze {TICKER} YYYY-MM-DD
 ```
 
 ### Step 1: Run 2.0 Core Analysis
@@ -104,7 +117,7 @@ cd 2.0 && ./trade.sh $TICKER $EARNINGS_DATE
 If any field cannot be parsed, use defaults: VRP=0, LIQUIDITY=REJECT, BIAS=NEUTRAL
 
 This provides:
-- VRP ratio and tier (EXCELLENT ≥7x, GOOD ≥4x, MARGINAL ≥1.5x, SKIP <1.5x)
+- VRP ratio and tier (uses configured mode - default BALANCED: ≥1.8x/≥1.4x/≥1.2x)
 - Implied move vs historical mean
 - Liquidity tier (EXCELLENT/GOOD/WARNING/REJECT)
 - Strategy recommendations with Greeks
@@ -127,8 +140,14 @@ Always fetch this regardless of VRP - it's free (rate limit: 60 calls/min).
 
 ⛔ **ONLY ONE FINNHUB CALL ALLOWED:**
 ```
-mcp__finnhub__finnhub_news_sentiment with operation="get_company_news", symbol="{TICKER}", from_date="{7_DAYS_AGO}", to_date="{TODAY}"
+mcp__finnhub__finnhub_news_sentiment with:
+  operation="get_company_news"
+  symbol="{TICKER}"
+  from_date="{7_DAYS_AGO}"
+  to_date="{TODAY}"
 ```
+**IMPORTANT:** Pass parameters as top-level arguments, NOT nested in a JSON object.
+The response may be large (70k+ chars) - extract only first 5 headlines.
 
 ⛔ **DO NOT CALL ANY OTHER FINNHUB TOOLS** - especially NOT:
 - `finnhub_stock_ownership` (returns 23k tokens)
@@ -144,10 +163,13 @@ mcp__finnhub__finnhub_news_sentiment with operation="get_company_news", symbol="
    ... (up to 5 headlines max)
 ```
 
-### Step 3: AI Sentiment (Conditional - Only if VRP ≥ 3x AND Liquidity ≠ REJECT)
+### Step 3: AI Sentiment (Conditional - Fetch for any TRADEABLE opportunity)
 
-**Skip sentiment if:**
-- VRP < 3x (insufficient edge for discovery)
+**For direct /analyze requests:** Fetch sentiment for any ticker where 2.0 says "TRADEABLE".
+This is different from discovery commands (/whisper, /scan) which use VRP ≥ 3x threshold.
+
+**Skip sentiment ONLY if:**
+- 2.0 output says "SKIP" or "NOT TRADEABLE" (VRP below marginal threshold)
 - Liquidity = REJECT (not tradeable anyway)
 
 **If qualified, use fallback chain:**
@@ -180,7 +202,7 @@ mcp__finnhub__finnhub_news_sentiment with operation="get_company_news", symbol="
      VALUES ('$TICKER', '$EARNINGS_DATE', 'perplexity', '$RESULT', datetime('now'));
 
      INSERT INTO api_budget (date, calls, cost, last_updated)
-     VALUES ('$(date +%Y-%m-%d)', 1, 0.005, datetime('now'))
+     VALUES ('$(date +%Y-%m-%d)', 1, 0.006, datetime('now'))
      ON CONFLICT(date) DO UPDATE SET
        calls = calls + 1,
        cost = cost + 0.005,
@@ -257,7 +279,7 @@ ANALYSIS: {TICKER}
    Direction: {BULLISH/BEARISH/NEUTRAL} | Score: {-1 to +1}
    Catalysts: {bullet list, 3 max}
    Risks: {bullet list, 2 max}
-   [Or: "ℹ️ Skipped - VRP < 3x" / "ℹ️ Unavailable"]
+   [Or: "ℹ️ Skipped - not tradeable" / "ℹ️ Unavailable"]
 
 🎯 DIRECTION (4.0 Adjusted)
    2.0 Skew: {NEUTRAL/BULLISH/BEARISH} → 4.0: {ADJUSTED}
@@ -282,7 +304,8 @@ ANALYSIS: {TICKER}
 
 ## Cost Control
 - Finnhub news: Always (free, 60/min rate limit)
+- Finnhub earnings calendar: Fallback when database empty (free)
 - Sentiment cache: 3-hour TTL, checked before any API call
-- Perplexity: Only if VRP ≥ 3x AND Liquidity ≠ REJECT AND cache miss AND budget OK
+- Perplexity: For any TRADEABLE opportunity (Liquidity ≠ REJECT) AND cache miss AND budget OK
 - WebSearch: Free fallback if Perplexity fails or budget exceeded
 - Maximum 1 paid API call per /analyze

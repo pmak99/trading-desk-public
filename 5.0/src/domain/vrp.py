@@ -7,10 +7,11 @@ Ported from 2.0/src/application/metrics/vrp.py with simplified interface.
 from typing import List, Dict, Any
 import statistics
 
-# Thresholds from CLAUDE.md
-VRP_EXCELLENT = 7.0
-VRP_GOOD = 4.0
-VRP_MARGINAL = 1.5
+# Thresholds - BALANCED mode (matching 2.0 default)
+# See CLAUDE.md for threshold explanation
+VRP_EXCELLENT = 1.8
+VRP_GOOD = 1.4
+VRP_MARGINAL = 1.2
 MIN_QUARTERS = 4
 
 
