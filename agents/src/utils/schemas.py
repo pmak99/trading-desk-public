@@ -213,3 +213,25 @@ class HealthCheckResponse(BaseModel):
     def is_healthy(self) -> bool:
         """Check if system is healthy overall."""
         return self.status == 'healthy'
+
+
+class PositionLimits(BaseModel):
+    """Position limits based on Tail Risk Ratio."""
+    ticker: str
+    tail_risk_ratio: float
+    tail_risk_level: str
+    max_contracts: int
+    max_notional: float
+    avg_move: float
+    max_move: float
+
+    @validator('tail_risk_level')
+    def validate_tail_risk_level(cls, v):
+        if v not in ['LOW', 'NORMAL', 'HIGH']:
+            raise ValueError(f'Invalid tail_risk_level: {v}')
+        return v
+
+    @property
+    def is_high_risk(self) -> bool:
+        """Check if ticker has high tail risk."""
+        return self.tail_risk_level == "HIGH"
