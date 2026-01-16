@@ -114,7 +114,7 @@ The Trading Desk consists of four active systems:
 | **2.0** | Production | Core VRP/strategy math |
 | **4.0** | Production | AI sentiment layer |
 | **5.0** | Production | Cloud autopilot (24/7) |
-| **6.0** | In Development | Agent orchestration (Phase 1 complete) |
+| **6.0** | Phase 2 Complete ✅ | Agent orchestration (parallel processing, intelligent automation) |
 | 1.0 | Archived | Original system (superseded by 2.0) |
 | 3.0 | Archived | ML research (direction prediction inconclusive) |
 
@@ -249,7 +249,7 @@ Available when using Claude Code CLI:
 Evening   /backfill --pending  → Record outcomes for completed earnings
 ```
 
-### 6.0 Agent Commands (In Development)
+### 6.0 Agent Commands
 
 From `6.0/` directory (git worktree):
 
@@ -604,7 +604,7 @@ Key test files:
 - `test_job_manager.py` - Job scheduling
 - `test_telegram_formatter.py` - Telegram message formatting
 
-### 6.0 Agent System (In Development)
+### 6.0 Agent System
 
 ```bash
 cd 6.0
