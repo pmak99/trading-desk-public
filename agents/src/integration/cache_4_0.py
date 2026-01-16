@@ -208,3 +208,107 @@ class Cache4_0:
             'monthly_remaining': monthly_remaining,
             'error': None if health_status == 'ok' else 'Budget limit approaching'
         }
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """
+        Get detailed cache statistics for maintenance.
+
+        Returns:
+            Cache stats with total entries, stale entries, hit rate
+        """
+        from datetime import datetime, timedelta
+
+        # Get cache database connection
+        import sqlite3
+        cache_db = _main_repo / "4.0" / "data" / "sentiment_cache.db"
+
+        conn = sqlite3.connect(str(cache_db))
+        cursor = conn.cursor()
+
+        # Total entries
+        cursor.execute("SELECT COUNT(*) FROM sentiment_cache")
+        total_entries = cursor.fetchone()[0]
+
+        # Stale entries (>3 hours old)
+        cutoff_time = datetime.now() - timedelta(hours=3)
+        cursor.execute(
+            "SELECT COUNT(*) FROM sentiment_cache WHERE cached_at < ?",
+            (cutoff_time.isoformat(),)
+        )
+        stale_entries = cursor.fetchone()[0]
+
+        conn.close()
+
+        # Note: Hit rate tracking not yet implemented in 4.0's cache
+        # Would require tracking cache hits/misses in sentiment_cache
+
+        return {
+            'total_entries': total_entries,
+            'stale_entries': stale_entries,
+            'hit_rate': None  # Not yet tracked
+        }
+
+    def cleanup_sentiment_cache(self, max_age_hours: int = 3) -> int:
+        """
+        Clean up sentiment cache entries older than specified age.
+
+        Args:
+            max_age_hours: Maximum age in hours (default: 3)
+
+        Returns:
+            Number of entries removed
+        """
+        from datetime import datetime, timedelta
+
+        cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
+
+        import sqlite3
+        cache_db = _main_repo / "4.0" / "data" / "sentiment_cache.db"
+
+        conn = sqlite3.connect(str(cache_db))
+        cursor = conn.cursor()
+
+        # Delete old entries
+        cursor.execute(
+            "DELETE FROM sentiment_cache WHERE cached_at < ?",
+            (cutoff_time.isoformat(),)
+        )
+
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+
+        return deleted_count
+
+    def cleanup_budget_tracker(self, max_age_days: int = 30) -> int:
+        """
+        Clean up budget tracker entries older than specified age.
+
+        Args:
+            max_age_days: Maximum age in days (default: 30)
+
+        Returns:
+            Number of entries removed
+        """
+        from datetime import datetime, timedelta
+
+        cutoff_date = datetime.now() - timedelta(days=max_age_days)
+
+        import sqlite3
+        budget_db = _main_repo / "4.0" / "data" / "perplexity_budget.db"
+
+        conn = sqlite3.connect(str(budget_db))
+        cursor = conn.cursor()
+
+        # Delete old entries (use date field for filtering)
+        cutoff_date_str = cutoff_date.strftime('%Y-%m-%d')
+        cursor.execute(
+            "DELETE FROM api_budget WHERE date < ?",
+            (cutoff_date_str,)
+        )
+
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+
+        return deleted_count
