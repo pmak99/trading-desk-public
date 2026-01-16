@@ -31,6 +31,25 @@ else
     MAIN_REPO="$(git rev-parse --show-toplevel)"
 fi
 
+# Load environment variables from existing .env files (secrets interpolation)
+# This avoids duplicating secrets - sources from existing secure locations
+#
+# Strategy: Load 5.0 first (for PERPLEXITY_API_KEY), then 2.0 (for DB_PATH, TRADIER, etc.)
+# 2.0 loaded last so its paths take priority
+for ENV_FILE in "${MAIN_REPO}/5.0/.env" "${MAIN_REPO}/2.0/.env" "${SCRIPT_DIR}/.env"; do
+    if [ -f "$ENV_FILE" ]; then
+        # Export variables from .env file (skip comments and empty lines)
+        set -a  # Auto-export all variables
+        source "$ENV_FILE" 2>/dev/null || true
+        set +a
+    fi
+done
+
+# Ensure DB_PATH is absolute (relative paths cause issues when running from 6.0/)
+if [[ "$DB_PATH" != /* ]]; then
+    export DB_PATH="${MAIN_REPO}/2.0/${DB_PATH}"
+fi
+
 # Python from 2.0 venv in main repo
 PYTHON="${MAIN_REPO}/2.0/venv/bin/python"
 
