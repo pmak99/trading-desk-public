@@ -384,7 +384,48 @@ class AnalyzeOrchestrator(BaseOrchestrator):
     def format_results(self, result: Dict[str, Any]) -> str:
         """Format orchestration results as markdown report."""
         if not result.get('success'):
-            return f"# Analysis Failed\n\nError: {result.get('error', 'Unknown error')}"
+            # Extract detailed error information if available
+            output = []
+            output.append("# Analysis Failed")
+            output.append("")
+            output.append(f"**Error:** {result.get('error', 'Unknown error')}")
+            output.append("")
+
+            # Check for anomaly details in specialist_results
+            specialist_results = result.get('specialist_results', {})
+            anomaly_result = specialist_results.get('anomaly', {})
+
+            if anomaly_result:
+                anomalies = anomaly_result.get('anomalies', [])
+                recommendation = anomaly_result.get('recommendation', '')
+
+                if anomalies:
+                    output.append("## Anomalies Detected")
+                    output.append("")
+                    for anomaly in anomalies:
+                        severity = anomaly.get('severity', 'warning')
+                        msg = anomaly.get('message', '')
+                        if severity == 'critical':
+                            output.append(f"🚫 **CRITICAL:** {msg}")
+                        else:
+                            output.append(f"⚠️  **Warning:** {msg}")
+                    output.append("")
+
+                if recommendation:
+                    output.append(f"**Recommendation:** {recommendation}")
+                    output.append("")
+
+            # Show ticker analysis details if available
+            ticker_result = specialist_results.get('ticker_analysis', {})
+            if ticker_result and not ticker_result.get('error'):
+                output.append("## Partial Analysis")
+                output.append("")
+                output.append(f"- **VRP Ratio:** {ticker_result.get('vrp_ratio', 'N/A')}")
+                output.append(f"- **Recommendation:** {ticker_result.get('recommendation', 'N/A')}")
+                output.append(f"- **Liquidity Tier:** {ticker_result.get('liquidity_tier', 'N/A')}")
+                output.append("")
+
+            return "\n".join(output)
 
         report = result.get('report', {})
         recommendation = result.get('recommendation', {})
