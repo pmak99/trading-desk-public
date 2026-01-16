@@ -10,6 +10,9 @@ from .sentiment_fetch import SentimentFetchAgent
 from .anomaly import AnomalyDetectionAgent
 from .explanation import ExplanationAgent
 from .health import HealthCheckAgent
+from .sector_fetch import SectorFetchAgent
+from .data_quality import DataQualityAgent
+from .pattern_recognition import PatternRecognitionAgent
 
 __all__ = [
     'BaseAgent',
@@ -18,4 +21,7 @@ __all__ = [
     'AnomalyDetectionAgent',
     'ExplanationAgent',
     'HealthCheckAgent',
+    'SectorFetchAgent',
+    'DataQualityAgent',
+    'PatternRecognitionAgent',
 ]
