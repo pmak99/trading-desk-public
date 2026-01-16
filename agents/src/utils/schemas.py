@@ -23,6 +23,7 @@ class TickerAnalysisResponse(BaseModel):
     liquidity_tier: Optional[str] = None
     score: Optional[int] = None
     strategies: Optional[List[Dict[str, Any]]] = None
+    position_limits: Optional[Dict[str, Any]] = None  # TRR-based position limits
     error: Optional[str] = None
 
     @validator('recommendation')
