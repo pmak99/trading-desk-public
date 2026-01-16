@@ -1,6 +1,6 @@
 # Trading Desk 6.0 - Agent-Based Orchestration System
 
-**Status:** Phase 1 Complete ✅, Phase 2 Complete ✅ (Jan 2026)
+**Status:** Phase 1 Complete ✅, Phase 2 Complete ✅, Phase 3 Complete ✅ (Jan 2026)
 **Purpose:** Agent-based orchestration with parallel processing and intelligent automation
 
 ---
@@ -65,16 +65,21 @@ source ../2.0/venv/bin/activate
 │  ✅ MaintenanceOrchestrator (background operations)         │
 ├─────────────────────────────────────────────────────────────┤
 │ Worker Agents:                                              │
-│  ✅ TickerAnalysisAgent    (VRP + liquidity + sentiment)    │
+│  ✅ TickerAnalysisAgent    (VRP + liquidity + TRR limits)   │
 │  ✅ SentimentFetchAgent    (Perplexity API integration)     │
 │  ✅ HealthCheckAgent       (system monitoring)              │
 │  ✅ ExplanationAgent       (narrative reasoning)            │
 │  ✅ AnomalyDetectionAgent  (data quality + edge cases)      │
+│  ✅ SectorFetchAgent       (Finnhub sector/industry data)   │
+│  ✅ DataQualityAgent       (automated data fixes)           │
+│  ✅ PatternRecognitionAgent (historical pattern mining)     │
 ├─────────────────────────────────────────────────────────────┤
 │ Intelligence Layer:                                         │
-│  ✅ Cross-ticker correlation (simplified sector grouping)   │
+│  ✅ Cross-ticker correlation (real sector data from Finnhub)│
 │  ✅ Anomaly detection (conflicting signals, stale data)     │
 │  ✅ Narrative explanations (why VRP is elevated)            │
+│  ✅ TRR-based position sizing (prevents oversizing)         │
+│  ✅ Historical pattern recognition (streaks, bias, trends)  │
 └─────────────────────────────────────────────────────────────┘
                             │
                             ▼
@@ -147,9 +152,12 @@ Budget remaining: 25 calls/day
 ### /maintenance - System Operations
 
 ```bash
-./agent.sh maintenance health         # System health check
-./agent.sh maintenance data-quality   # Database integrity scan
-./agent.sh maintenance cache-cleanup  # Cache cleanup automation
+./agent.sh maintenance health                   # System health check
+./agent.sh maintenance data-quality             # Database integrity scan
+./agent.sh maintenance data-quality --fix       # Auto-fix safe data issues
+./agent.sh maintenance data-quality --dry-run   # Preview fixes without applying
+./agent.sh maintenance sector-sync              # Sync sector data from Finnhub
+./agent.sh maintenance cache-cleanup            # Cache cleanup automation
 ```
 
 **Health Check Output:**
@@ -390,7 +398,7 @@ def _find_main_repo() -> Path:
 
 ### Test Coverage
 
-All Phase 1 and Phase 2 agents tested and passing (13 tests total):
+All Phase 1, Phase 2, and Phase 3 agents tested and passing (48 tests total):
 
 | Agent/Feature | Test File | Status |
 |-------|-----------|--------|
@@ -401,6 +409,16 @@ All Phase 1 and Phase 2 agents tested and passing (13 tests total):
 | WhisperOrchestrator | `tests/test_whisper_live.py` | ✅ Pass |
 | AnalyzeOrchestrator | `tests/test_analyze_live.py` | ✅ Pass |
 | MaintenanceOrchestrator | `tests/test_maintenance_live.py` | ✅ Pass (3 scenarios) |
+| PositionLimitsRepository | `tests/test_position_limits.py` | ✅ Pass |
+| TickerMetadataRepository | `tests/test_ticker_metadata.py` | ✅ Pass |
+| SectorFetchAgent | `tests/test_sector_fetch.py` | ✅ Pass |
+| DataQualityAgent | `tests/test_data_quality_agent.py` | ✅ Pass |
+| PatternRecognitionAgent | `tests/test_pattern_recognition.py` | ✅ Pass |
+| TRR Formatting | `tests/test_formatter_trr.py` | ✅ Pass |
+| TRR in Analyze | `tests/test_analyze_trr.py` | ✅ Pass |
+| Patterns in Analyze | `tests/test_analyze_patterns.py` | ✅ Pass |
+| Sector Warnings | `tests/test_whisper_sectors.py` | ✅ Pass |
+| Schemas | `tests/test_schemas.py` | ✅ Pass |
 
 ### Running Tests
 
@@ -408,21 +426,23 @@ All Phase 1 and Phase 2 agents tested and passing (13 tests total):
 # From 6.0/ directory - run all tests
 ../2.0/venv/bin/python -m pytest tests/ -v
 
-# Output:
-# tests/test_analyze_live.py::test_analyze_auto_detect PASSED
-# tests/test_analyze_live.py::test_analyze_specific_date PASSED
-# tests/test_explanation_agent.py::TestExplanationAgent::test_high_vrp_with_historical_data PASSED
-# tests/test_explanation_agent.py::TestExplanationAgent::test_high_vrp_no_sentiment PASSED
-# tests/test_explanation_agent.py::TestExplanationAgent::test_exceptional_vrp PASSED
-# tests/test_explanation_agent.py::TestExplanationAgent::test_marginal_vrp PASSED
-# tests/test_explanation_agent.py::TestExplanationAgent::test_unknown_ticker PASSED
-# tests/test_maintenance_live.py::test_health_check PASSED
-# tests/test_maintenance_live.py::test_data_quality PASSED
-# tests/test_maintenance_live.py::test_cache_cleanup PASSED
-# tests/test_ticker_analysis_live.py::test_ticker_analysis_live PASSED
-# tests/test_whisper_live.py::test_whisper_live PASSED
-# tests/test_whisper_live.py::test_whisper_specific_date PASSED
-# =================== 13 passed ===================
+# Output (abbreviated):
+# tests/test_analyze_live.py: 2 passed
+# tests/test_analyze_patterns.py: 5 passed
+# tests/test_analyze_trr.py: 2 passed
+# tests/test_data_quality_agent.py: 5 passed
+# tests/test_explanation_agent.py: 5 passed
+# tests/test_formatter_trr.py: 3 passed
+# tests/test_maintenance_live.py: 3 passed
+# tests/test_pattern_recognition.py: 5 passed
+# tests/test_position_limits.py: 4 passed
+# tests/test_schemas.py: 4 passed
+# tests/test_sector_fetch.py: 3 passed
+# tests/test_ticker_analysis_trr.py: 1 passed
+# tests/test_ticker_metadata.py: 4 passed
+# tests/test_whisper_live.py: 2 passed
+# tests/test_whisper_sectors.py: 2 passed
+# =================== 48 passed ===================
 ```
 
 ---
@@ -478,14 +498,29 @@ All Phase 1 and Phase 2 agents tested and passing (13 tests total):
 | Bare except clause | Minor | Removed duplicate test file with bare except |
 | MCP client placeholder | Minor | Updated docstrings to clarify Phase 2 status |
 
-### 📋 Phase 3: Enhanced Intelligence + Maintenance (Future)
+### ✅ Phase 3: Enhanced Intelligence + Maintenance (Complete - Jan 2026)
 
-**Planned:**
-- Real sector data integration (populate ticker_metadata from Finnhub/Alpha Vantage)
-- TRR-based position sizing in cross-ticker warnings (use position_limits table)
-- PatternRecognitionAgent (historical pattern mining)
-- Automated data quality fixes
-- MaintenanceOrchestrator enhancements (scheduling, background jobs)
+**Delivered:**
+- ✅ **TRR-based Position Sizing** - Surfaces tail risk data to prevent oversizing (learned from $134k MU loss)
+- ✅ **Real Sector Data Integration** - Finnhub-powered sector/industry data replaces placeholder grouping
+- ✅ **Automated Data Quality Fixes** - Auto-fix safe issues, flag ambiguous ones for review
+- ✅ **PatternRecognitionAgent** - Historical pattern mining (directional bias, streaks, magnitude trends)
+
+**New Agents:**
+- `SectorFetchAgent` - Fetches company profiles from Finnhub, maps to sectors
+- `DataQualityAgent` - Detects and fixes data quality issues
+- `PatternRecognitionAgent` - Analyzes historical earnings patterns
+
+**New Commands:**
+- `./agent.sh maintenance data-quality --fix` - Auto-fix safe data issues
+- `./agent.sh maintenance data-quality --dry-run` - Preview fixes without applying
+- `./agent.sh maintenance sector-sync` - Populate sector data for upcoming earnings
+
+**Output Enhancements:**
+- `/whisper` now shows TRR badge for high-risk tickers: `⚠️ HIGH TRR (max 50 contracts)`
+- `/whisper` cross-ticker warnings use real sectors: `⚠️ 3 Technology tickers (NVDA, AAPL, MSFT)`
+- `/analyze` includes Position Limits section with TRR, max contracts, max notional
+- `/analyze` includes Historical Patterns section with directional bias, streaks, trends
 
 ### 📋 Phase 4: Refinement + Documentation (Future)
 
@@ -512,19 +547,24 @@ All Phase 1 and Phase 2 agents tested and passing (13 tests total):
 │   │   ├── analyze.py          # ✅ AnalyzeOrchestrator
 │   │   └── maintenance.py      # ✅ MaintenanceOrchestrator
 │   ├── agents/
-│   │   ├── __init__.py         # All agent exports
-│   │   ├── base.py             # BaseAgent (JSON schema validation)
-│   │   ├── ticker_analysis.py  # ✅ TickerAnalysisAgent
-│   │   ├── sentiment_fetch.py  # ✅ SentimentFetchAgent (async)
-│   │   ├── health.py           # ✅ HealthCheckAgent
-│   │   ├── explanation.py      # ✅ ExplanationAgent
-│   │   └── anomaly.py          # ✅ AnomalyDetectionAgent
+│   │   ├── __init__.py             # All agent exports
+│   │   ├── base.py                 # BaseAgent (JSON schema validation)
+│   │   ├── ticker_analysis.py      # ✅ TickerAnalysisAgent
+│   │   ├── sentiment_fetch.py      # ✅ SentimentFetchAgent (async)
+│   │   ├── health.py               # ✅ HealthCheckAgent
+│   │   ├── explanation.py          # ✅ ExplanationAgent
+│   │   ├── anomaly.py              # ✅ AnomalyDetectionAgent
+│   │   ├── sector_fetch.py         # ✅ SectorFetchAgent (Finnhub)
+│   │   ├── data_quality.py         # ✅ DataQualityAgent
+│   │   └── pattern_recognition.py  # ✅ PatternRecognitionAgent
 │   ├── integration/
-│   │   ├── __init__.py         # Container2_0, Cache4_0, etc.
-│   │   ├── container_2_0.py    # 2.0 integration (thread-safe, worktree-aware)
-│   │   ├── cache_4_0.py        # 4.0 integration (JSON serialization)
-│   │   ├── perplexity_5_0.py   # Perplexity API client
-│   │   └── mcp_client.py       # MCP Task tool (Phase 2 placeholder)
+│   │   ├── __init__.py           # Container2_0, Cache4_0, etc.
+│   │   ├── container_2_0.py      # 2.0 integration (thread-safe, worktree-aware)
+│   │   ├── cache_4_0.py          # 4.0 integration (JSON serialization)
+│   │   ├── perplexity_5_0.py     # Perplexity API client
+│   │   ├── mcp_client.py         # MCP Task tool (Phase 2 placeholder)
+│   │   ├── position_limits.py    # ✅ Position limits repository (TRR)
+│   │   └── ticker_metadata.py    # ✅ Ticker metadata repository (sectors)
 │   ├── intelligence/           # Cross-ticker analysis (future)
 │   ├── utils/
 │   │   ├── __init__.py         # Utility exports
