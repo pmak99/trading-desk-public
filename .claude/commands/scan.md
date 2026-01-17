@@ -23,6 +23,16 @@ Show progress updates as you work:
 [4/4] Fetching sentiment for top 3...
 ```
 
+## Tail Risk Ratio (TRR)
+
+| Level | TRR | Max Contracts | Action |
+|-------|-----|---------------|--------|
+| HIGH | > 2.5x | 50 | ⚠️ TRR badge in table |
+| NORMAL | 1.5-2.5x | 100 | No badge |
+| LOW | < 1.5x | 100 | No badge |
+
+*TRR = Max Historical Move / Average Move. HIGH TRR tickers caused $134k MU loss.*
+
 ## Step-by-Step Instructions
 
 ### Step 1: Parse Date Argument
@@ -59,6 +69,18 @@ This provides:
 From scan results, identify the top 5 tickers where:
 - VRP >= 3.0x (discovery threshold)
 - Liquidity != REJECT
+
+### Step 4b: Check TRR for All Qualified Tickers
+Query tail risk for all qualified tickers:
+```bash
+TICKERS="'NVDA','AMD','MU'"  # Use actual tickers from Step 4
+
+sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/2.0/data/ivcrush.db \
+  "SELECT ticker, tail_risk_ratio, tail_risk_level, max_contracts
+   FROM position_limits WHERE ticker IN ($TICKERS) AND tail_risk_level = 'HIGH';"
+```
+
+Mark HIGH TRR tickers for ⚠️ badge display.
 
 ### Step 5: Add Sentiment for TOP 3 (Conditional)
 
@@ -108,20 +130,21 @@ EARNINGS SCAN: {DATE}
 ⏰ Market: [OPEN/CLOSED]
 
 📅 ALL EARNINGS FOR {DATE}
-┌──────┬─────────┬────────────┬───────┬────────────────────┐
-│ Rank │ Ticker  │ VRP        │ Liq   │ Score              │
-├──────┼─────────┼────────────┼───────┼────────────────────┤
-│  1   │ NVDA    │ 8.2x ⭐    │ EXCEL │ 92                 │
-│  2   │ AMD     │ 6.1x ⭐    │ EXCEL │ 85                 │
-│  3   │ AVGO    │ 5.4x ✓     │ WARN  │ 72                 │
-│  4   │ MU      │ 4.2x ✓     │ EXCEL │ 68                 │
-│  5   │ ORCL    │ 3.1x ○     │ EXCEL │ 55                 │
-│  6   │ CRM     │ 2.8x ○     │ WARN  │ 48                 │
-│  7   │ WDAY    │ 2.1x ○     │ REJCT │ 32 🚫              │
-│ ...  │ ...     │ ...        │ ...   │ ...                │
-└──────┴─────────┴────────────┴───────┴────────────────────┘
+┌──────┬─────────┬────────────┬───────┬───────┬─────┐
+│ Rank │ Ticker  │ VRP        │ Liq   │ Score │ TRR │
+├──────┼─────────┼────────────┼───────┼───────┼─────┤
+│  1   │ NVDA    │ 8.2x ⭐    │ EXCEL │ 92    │     │
+│  2   │ AMD     │ 6.1x ⭐    │ EXCEL │ 85    │     │
+│  3   │ AVGO    │ 5.4x ✓     │ WARN  │ 72    │ ⚠️  │
+│  4   │ MU      │ 4.2x ✓     │ EXCEL │ 68    │ ⚠️  │
+│  5   │ ORCL    │ 3.1x ○     │ EXCEL │ 55    │     │
+│  6   │ CRM     │ 2.8x ○     │ WARN  │ 48    │     │
+│  7   │ WDAY    │ 2.1x ○     │ REJCT │ 32 🚫 │     │
+│ ...  │ ...     │ ...        │ ...   │ ...   │     │
+└──────┴─────────┴────────────┴───────┴───────┴─────┘
 
 Legend: ⭐ Top-tier (≥4x) | ✓ Good edge (≥3x) | ○ Tradeable (≥1.2x) | 🚫 REJECT
+        TRR ⚠️ = HIGH tail risk (max 50 contracts)
 *Note: Icons highlight relative strength; actual tier from 2.0 uses BALANCED mode thresholds*
 
 📊 SUMMARY
@@ -148,6 +171,11 @@ Legend: ⭐ Top-tier (≥4x) | ✓ Good edge (≥3x) | ○ Tradeable (≥1.2x) |
    Liquidity: WARNING ⚠️
    🧠 Sentiment: {cached/fresh/websearch}
    {Brief sentiment summary}
+
+⚡ HIGH TAIL RISK TICKERS (if any):
+   • MU: TRR 3.05x → Max 50 contracts / $25k notional
+   • AVGO: TRR 5.72x → Max 50 contracts / $25k notional
+   [Only show tickers with TRR_LEVEL = "HIGH". Omit section if none.]
 
 💡 NEXT STEPS
    Run `/analyze NVDA` for full strategy recommendations
