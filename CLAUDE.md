@@ -301,7 +301,7 @@ Evening   /backfill --pending  → Record outcomes for completed earnings
 - Sentiment cached after `/prime` for instant subsequent commands
 - **TRR warnings** displayed for HIGH tail risk tickers (⚠️ badge + max 50 contracts)
 
-**Note:** Discovery threshold is 1.4x VRP (aligned with GOOD tier for more frequent alerts).
+**Note:** Discovery threshold is 1.8x VRP (aligned with EXCELLENT tier for high-confidence alerts).
 
 **TRR in Slash Commands:** All discovery commands (`/analyze`, `/whisper`, `/scan`, `/alert`) query the `position_limits` table and display warnings for HIGH TRR tickers. This prevents oversized positions on volatile tickers like MU (learned from $134k loss).
 
