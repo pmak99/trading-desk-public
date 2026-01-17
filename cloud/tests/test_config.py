@@ -29,4 +29,4 @@ def test_settings_vrp_thresholds():
     assert s.VRP_EXCELLENT == 1.8
     assert s.VRP_GOOD == 1.4
     assert s.VRP_MARGINAL == 1.2
-    assert s.VRP_DISCOVERY == 3.0
+    assert s.VRP_DISCOVERY == 1.4  # Aligned with GOOD tier
