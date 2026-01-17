@@ -355,7 +355,7 @@ class JobRunner:
                     historical_moves=historical_pcts,
                 )
 
-                # Only prime tickers with VRP >= 3.0 (discovery threshold)
+                # Only prime tickers with VRP >= discovery threshold
                 if vrp_data.get("vrp_ratio", 0) >= settings.VRP_DISCOVERY:
                     candidates.append({
                         "ticker": ticker,
