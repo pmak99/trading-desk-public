@@ -4,6 +4,7 @@ from .tradier import TradierClient
 from .perplexity import PerplexityClient, parse_sentiment_response
 from .alphavantage import AlphaVantageClient
 from .yahoo import YahooFinanceClient
+from .twelvedata import TwelveDataClient
 from .telegram import TelegramSender
 
 __all__ = [
@@ -12,5 +13,6 @@ __all__ = [
     "parse_sentiment_response",
     "AlphaVantageClient",
     "YahooFinanceClient",
+    "TwelveDataClient",
     "TelegramSender",
 ]

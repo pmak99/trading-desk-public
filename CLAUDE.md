@@ -85,7 +85,8 @@ TRR = Max Historical Move / Average Historical Move
 
 1. **Tradier** - Primary for options Greeks (IV, delta, theta, vega)
 2. **Alpha Vantage** - Earnings calendar and dates
-3. **Yahoo Finance** - Free fallback for prices and historical data
+3. **Twelve Data** - Historical stock prices (800 calls/day free, more reliable than yfinance)
+4. **Yahoo Finance** - Fallback for metadata only (NOT for price data around earnings)
 
 ## Directory Structure
 
@@ -239,6 +240,7 @@ The `strategies` table tracks:
 ```bash
 TRADIER_API_KEY=xxx      # Options data
 ALPHA_VANTAGE_KEY=xxx    # Earnings calendar
+TWELVE_DATA_KEY=xxx      # Historical stock prices (800/day free)
 DB_PATH=data/ivcrush.db  # Database location
 ```
 

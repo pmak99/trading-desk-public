@@ -28,6 +28,7 @@ from src.integrations import (
     PerplexityClient,
     TelegramSender,
     YahooFinanceClient,
+    TwelveDataClient,
 )
 from src.domain import (
     calculate_vrp,
@@ -107,6 +108,7 @@ class JobRunner:
         self._perplexity = None
         self._telegram = None
         self._yahoo = None
+        self._twelvedata = None
 
     @property
     def tradier(self) -> TradierClient:
@@ -143,6 +145,12 @@ class JobRunner:
         if self._yahoo is None:
             self._yahoo = YahooFinanceClient()
         return self._yahoo
+
+    @property
+    def twelvedata(self) -> TwelveDataClient:
+        if self._twelvedata is None:
+            self._twelvedata = TwelveDataClient(settings.twelve_data_key)
+        return self._twelvedata
 
     async def run(self, job_name: str) -> Dict[str, Any]:
         """
@@ -676,7 +684,7 @@ class JobRunner:
                     if historical_pcts:
                         historical_avg = sum(historical_pcts) / len(historical_pcts)
                         # If we have a previous close, check pre-market move
-                        history = await self.yahoo.get_stock_history(ticker, period="5d", interval="1d")
+                        history = await self.twelvedata.get_stock_history(ticker, period="5d", interval="1d")
                         if history and "Close" in history:
                             closes = list(history["Close"].values())
                             if len(closes) >= 2 and closes[-2]:
@@ -902,7 +910,7 @@ class JobRunner:
                 checked += 1
 
                 # Get today's close for comparison
-                history = await self.yahoo.get_stock_history(ticker, period="5d", interval="1d")
+                history = await self.twelvedata.get_stock_history(ticker, period="5d", interval="1d")
                 if not history or "Close" not in history:
                     log("debug", "No history data for after-hours check", ticker=ticker)
                     continue
@@ -1048,7 +1056,7 @@ class JobRunner:
                     await asyncio.sleep(RATE_LIMIT_DELAY)
 
                 # Get historical prices
-                history = await self.yahoo.get_stock_history(ticker, period="5d", interval="1d")
+                history = await self.twelvedata.get_stock_history(ticker, period="5d", interval="1d")
 
                 if not history or "Close" not in history:
                     log("debug", "No history data for outcome recording", ticker=ticker)
@@ -1238,7 +1246,7 @@ class JobRunner:
                     await asyncio.sleep(RATE_LIMIT_DELAY)
 
                 # Get historical prices around earnings
-                history = await self.yahoo.get_stock_history(ticker, period="1mo", interval="1d")
+                history = await self.twelvedata.get_stock_history(ticker, period="1mo", interval="1d")
 
                 # Validate API response
                 if not history:

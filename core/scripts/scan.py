@@ -1172,7 +1172,7 @@ def analyze_ticker(
                     result = subprocess.run(
                         [
                             sys.executable,
-                            "scripts/backfill_yfinance.py",
+                            "scripts/backfill_accurate.py",
                             ticker,
                             "--start-date", start_date,
                             "--end-date", end_date
@@ -1241,7 +1241,7 @@ def analyze_ticker(
                     }
             else:
                 # No auto-backfill - suggest manual backfill
-                logger.info("   Run: python scripts/backfill_yfinance.py " + ticker)
+                logger.info("   Run: python scripts/backfill_accurate.py " + ticker)
                 return {
                     'ticker': ticker,
                     'ticker_name': company_name,
