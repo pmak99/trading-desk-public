@@ -23,9 +23,10 @@ def test_is_half_day_normal_day():
     assert is_half_day("2025-12-12") is False
 
 def test_settings_vrp_thresholds():
-    """Settings should have correct VRP thresholds."""
+    """Settings should have correct VRP thresholds (BALANCED mode)."""
     s = Settings()
-    assert s.VRP_EXCELLENT == 7.0
-    assert s.VRP_GOOD == 4.0
-    assert s.VRP_MARGINAL == 1.5
+    # BALANCED mode thresholds (see CLAUDE.md)
+    assert s.VRP_EXCELLENT == 1.8
+    assert s.VRP_GOOD == 1.4
+    assert s.VRP_MARGINAL == 1.2
     assert s.VRP_DISCOVERY == 3.0
