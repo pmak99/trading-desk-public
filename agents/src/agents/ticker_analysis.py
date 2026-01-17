@@ -231,6 +231,7 @@ class TickerAnalysisAgent:
         for strategy in strategy_rec.strategies:
             strategy_dict = {
                 'type': strategy.strategy_type.value if hasattr(strategy.strategy_type, 'value') else str(strategy.strategy_type),
+                'strikes': strategy.strike_description if hasattr(strategy, 'strike_description') else None,
                 'max_profit': float(strategy.max_profit.amount) if hasattr(strategy.max_profit, 'amount') else float(strategy.max_profit),
                 'max_loss': float(strategy.max_loss.amount) if hasattr(strategy.max_loss, 'amount') else float(strategy.max_loss),
                 'probability_of_profit': strategy.probability_of_profit,
