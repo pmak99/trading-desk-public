@@ -23,6 +23,16 @@ Show progress updates as you work:
 Quick command to check if there are any tradeable opportunities TODAY.
 Run this after market open to see what's actionable.
 
+## Tail Risk Ratio (TRR)
+
+| Level | TRR | Max Contracts | Action |
+|-------|-----|---------------|--------|
+| HIGH | > 2.5x | 50 | ⚠️ TRR warning in alert box |
+| NORMAL | 1.5-2.5x | 100 | No warning |
+| LOW | < 1.5x | 100 | No warning |
+
+*TRR = Max Historical Move / Average Move. HIGH TRR tickers caused significant MU loss.*
+
 ## Step-by-Step Instructions
 
 ### Step 1: Check Market Status (Alpaca MCP)
@@ -69,6 +79,18 @@ If no alerts qualify:
 📭 No high-VRP opportunities today.
    Try `/scan {tomorrow}` to plan ahead.
 ```
+
+### Step 3b: Check TRR for Alert Tickers
+Query tail risk for all alert tickers:
+```bash
+TICKERS="'NVDA','MU'"  # Use actual tickers from Step 3
+
+sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
+  "SELECT ticker, tail_risk_ratio, tail_risk_level, max_contracts
+   FROM position_limits WHERE ticker IN ($TICKERS) AND tail_risk_level = 'HIGH';"
+```
+
+Mark HIGH TRR tickers for warning display in alert boxes.
 
 ### Step 4: Add Sentiment for Alerts (Conditional)
 
@@ -124,16 +146,19 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
 └─────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────┐
-│ 🚨 AMD - EARNINGS TODAY (BMO)                       │
+│ 🚨 MU - EARNINGS TODAY (AMC)          ⚠️ HIGH TRR   │
 ├─────────────────────────────────────────────────────┤
-│ VRP: 6.1x ⭐ GOOD                                   │
+│ VRP: 4.2x ✓ GOOD                                    │
 │ Implied Move: 6.2% | Historical: 1.0%               │
 │ Liquidity: EXCELLENT                                │
+│ ⚡ TRR: 3.05x → Max 50 contracts / $25k             │
 │                                                     │
 │ 🧠 {BULL/BEAR/NEUT} (+0.4): {1-line, max 20 words}  │
 │                                                     │
-│ 💡 Run `/analyze AMD` for strategy recommendations  │
+│ 💡 Run `/analyze MU` for strategy recommendations   │
 └─────────────────────────────────────────────────────┘
+
+[Note: Only show TRR line for HIGH TRR tickers. Omit for NORMAL/LOW.]
 
 📊 SUMMARY
    Alerts found: {N}
@@ -143,6 +168,7 @@ sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
    • Always check liquidity before trading
    • Use `/analyze TICKER` for full strategy
    • Never trade REJECT liquidity (lesson: significant loss)
+   • Respect TRR limits for HIGH tail risk tickers (lesson: significant MU loss)
 
 ══════════════════════════════════════════════════════
 ```
