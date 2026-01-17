@@ -183,6 +183,7 @@ Take TOP 5 from filtered results for sentiment enrichment (skip REJECT for senti
 Query tail risk for all qualified tickers in one batch:
 ```bash
 # Get comma-separated list of tickers from Step 4
+# Note: Tickers should already be sanitized (alphanumeric, uppercase) from 2.0 output
 TICKERS="'NVDA','AAPL','MU'"  # Example - use actual qualified tickers
 
 sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/2.0/data/ivcrush.db \

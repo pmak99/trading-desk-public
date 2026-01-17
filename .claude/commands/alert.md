@@ -83,6 +83,7 @@ If no alerts qualify:
 ### Step 3b: Check TRR for Alert Tickers
 Query tail risk for all alert tickers:
 ```bash
+# Note: Tickers should already be sanitized (alphanumeric, uppercase) from 2.0 output
 TICKERS="'NVDA','MU'"  # Use actual tickers from Step 3
 
 sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/2.0/data/ivcrush.db \
