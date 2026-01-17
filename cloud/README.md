@@ -410,7 +410,7 @@ All 12 scheduled jobs are fully implemented with rate limiting, error tracking, 
 | Time (ET) | Job | Description |
 |-----------|-----|-------------|
 | 5:30 AM | `pre-market-prep` | Fetch earnings calendar, calculate VRP for upcoming tickers |
-| 6:30 AM | `sentiment-scan` | Pre-cache AI sentiment for high-VRP tickers (≥3x) |
+| 6:30 AM | `sentiment-scan` | Pre-cache AI sentiment for high-VRP tickers (≥1.4x GOOD tier) |
 | 7:30 AM | `morning-digest` | Send Telegram digest with top 10 ranked opportunities |
 | 10:00 AM | `market-open-refresh` | Refresh prices, alert on significant pre-market moves |
 | 2:30 PM | `pre-trade-refresh` | Final VRP validation, actionable alert for AMC earnings |
