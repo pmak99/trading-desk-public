@@ -77,6 +77,7 @@ class Settings:
             'TELEGRAM_CHAT_ID': os.environ.get('TELEGRAM_CHAT_ID'),
             'API_KEY': os.environ.get('API_KEY'),
             'TELEGRAM_WEBHOOK_SECRET': os.environ.get('TELEGRAM_WEBHOOK_SECRET'),
+            'TWELVE_DATA_KEY': os.environ.get('TWELVE_DATA_KEY'),
         }
 
         # If any individual key is set, use individual env vars
@@ -148,6 +149,11 @@ class Settings:
     def telegram_webhook_secret(self) -> str:
         self._load_secrets()
         return self._secrets.get('TELEGRAM_WEBHOOK_SECRET', '')
+
+    @property
+    def twelve_data_key(self) -> str:
+        self._load_secrets()
+        return self._secrets.get('TWELVE_DATA_KEY', '')
 
     @property
     def account_size(self) -> int:

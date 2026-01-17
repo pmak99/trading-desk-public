@@ -49,6 +49,7 @@ from src.integrations import (
     PerplexityClient,
     TelegramSender,
     YahooFinanceClient,
+    TwelveDataClient,
 )
 from src.formatters.telegram import format_ticker_line, format_digest, format_alert
 from src.formatters.cli import format_digest_cli, format_analyze_cli
@@ -72,6 +73,7 @@ class AppState:
     perplexity: Optional[PerplexityClient] = None
     telegram: Optional[TelegramSender] = None
     yahoo: Optional[YahooFinanceClient] = None
+    twelvedata: Optional[TwelveDataClient] = None
     historical_repo: Optional[HistoricalMovesRepository] = None
     sentiment_cache: Optional[SentimentCacheRepository] = None
 
@@ -109,6 +111,7 @@ async def lifespan(app: FastAPI):
             chat_id=settings.telegram_chat_id,
         ),
         yahoo=YahooFinanceClient(),
+        twelvedata=TwelveDataClient(settings.twelve_data_key),
         historical_repo=HistoricalMovesRepository(settings.DB_PATH),
         sentiment_cache=SentimentCacheRepository(settings.DB_PATH),
     )
@@ -123,6 +126,10 @@ async def lifespan(app: FastAPI):
 
     # Cleanup on shutdown
     log("info", "Shutting down Trading Desk 5.0")
+
+    # Close HTTP clients
+    if state.twelvedata:
+        await state.twelvedata.close()
 
     # Shutdown metrics thread pool
     metrics.shutdown()
@@ -158,6 +165,7 @@ def _get_state() -> AppState:
                 chat_id=settings.telegram_chat_id,
             ),
             yahoo=YahooFinanceClient(),
+            twelvedata=TwelveDataClient(settings.twelve_data_key),
             historical_repo=HistoricalMovesRepository(settings.DB_PATH),
             sentiment_cache=SentimentCacheRepository(settings.DB_PATH),
         )
@@ -194,6 +202,10 @@ def get_telegram() -> TelegramSender:
 
 def get_yahoo() -> YahooFinanceClient:
     return _get_state().yahoo
+
+
+def get_twelvedata() -> TwelveDataClient:
+    return _get_state().twelvedata
 
 
 def get_historical_repo() -> HistoricalMovesRepository:
@@ -954,9 +966,9 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
         quote = await tradier.get_quote(ticker)
         price = quote.get("last") or quote.get("close") or quote.get("prevclose")
         if not price:
-            # Fallback to Yahoo if Tradier fails
-            yahoo = get_yahoo()
-            price = await yahoo.get_current_price(ticker)
+            # Fallback to Twelve Data if Tradier fails (more reliable than Yahoo)
+            twelvedata = get_twelvedata()
+            price = await twelvedata.get_current_price(ticker)
         if not price:
             return {
                 "ticker": ticker,

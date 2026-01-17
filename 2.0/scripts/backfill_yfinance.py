@@ -98,9 +98,11 @@ def calculate_earnings_move(
         earnings_close = float(price_data.loc[str(earnings_date)]['Close'])
 
         # Calculate moves (all percentages use prev_close as denominator for consistency)
-        gap_move_pct = abs((earnings_open - prev_close) / prev_close * 100)
+        # Note: gap_move_pct and close_move_pct preserve sign for direction
+        # intraday_move_pct uses abs() since it's always high-low range
+        gap_move_pct = (earnings_open - prev_close) / prev_close * 100
         intraday_move_pct = abs((earnings_high - earnings_low) / prev_close * 100)
-        close_move_pct = abs((earnings_close - prev_close) / prev_close * 100)
+        close_move_pct = (earnings_close - prev_close) / prev_close * 100
 
         # Get volume
         volume_earnings = int(price_data.loc[str(earnings_date)]['Volume'])
