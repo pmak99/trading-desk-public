@@ -115,6 +115,8 @@ Risks: [1-2 bullets, max 10 words each]
 
 **Note:** Discovery threshold is 3x VRP (position sizing still uses 4x rule).
 
+**TRR Warnings:** All discovery commands display ⚠️ warnings for HIGH tail risk tickers (TRR > 2.5x). These tickers are limited to 50 contracts / $25k notional to prevent catastrophic losses (learned from significant MU loss in Dec 2025).
+
 ## Daily Workflow
 
 ```
