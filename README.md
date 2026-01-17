@@ -224,6 +224,8 @@ Available when using Claude Code CLI:
 - `/scan DATE` - Scan all tickers with earnings on date
 - `/alert` - Today's high-VRP opportunities (auto-uses today's date)
 
+*All discovery commands display ⚠️ TRR warnings for HIGH tail risk tickers (max 50 contracts).*
+
 **System Operations:**
 - `/prime [DATE]` - Pre-cache sentiment for week's earnings (run 7-8 AM)
 - `/health` - Verify MCP connections, market status, API budgets
