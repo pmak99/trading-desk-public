@@ -569,6 +569,9 @@ class AnalyzeOrchestrator(BaseOrchestrator):
 
                 # Format strategy line
                 output.append(f"**{strategy_type}**")
+                strikes = strategy.get('strikes')
+                if strikes:
+                    output.append(f"  - Strikes: {strikes}")
                 output.append(f"  - Max Profit: ${max_profit:,.2f} | Max Loss: ${max_loss:,.2f}")
                 output.append(f"  - POP: {pop:.0%} | Contracts: {contracts}")
                 output.append("")

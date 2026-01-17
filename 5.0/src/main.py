@@ -1173,9 +1173,12 @@ async def _scan_tickers_for_whisper(
     to calculate accurate VRP ratios. Falls back to estimate only if options
     data unavailable.
 
+    Also generates trading strategies and looks up cached sentiment.
+
     Extracted for asyncio.wait_for timeout support.
     """
     results = []
+    cache = get_sentiment_cache()
 
     for e in upcoming[:30]:  # Limit to 30 tickers
         ticker = e["symbol"]
@@ -1209,6 +1212,7 @@ async def _scan_tickers_for_whisper(
                 im_result, historical_avg
             )
             price = im_result.get("price")
+            expiration = im_result.get("expiration", "")
 
             # Calculate VRP
             vrp_data = calculate_vrp(
@@ -1228,6 +1232,30 @@ async def _scan_tickers_for_whisper(
                 liquidity_tier="GOOD",
             )
 
+            # Get cached sentiment if available
+            direction = "NEUTRAL"
+            sentiment = cache.get_sentiment(ticker, earnings_date)
+            if sentiment:
+                direction = sentiment.get("direction", "neutral").upper()
+
+            # Generate trading strategies
+            strategy_name = f"VRP {vrp_data['tier']}"  # Fallback
+            credit = 0
+
+            if price and implied_move_pct > 0:
+                strategies = generate_strategies(
+                    ticker=ticker,
+                    price=price,
+                    implied_move_pct=implied_move_pct,
+                    direction=direction,
+                    liquidity_tier="GOOD",  # Assumed for screening
+                    expiration=expiration,
+                )
+                if strategies:
+                    top_strategy = strategies[0]
+                    strategy_name = top_strategy.description
+                    credit = top_strategy.max_profit / 100  # Convert to per-contract
+
             results.append({
                 "ticker": ticker,
                 "name": e.get("name", ""),
@@ -1239,6 +1267,9 @@ async def _scan_tickers_for_whisper(
                 "historical_mean": round(historical_avg, 1),
                 "score": score_data["total_score"],
                 "real_data": used_real_data,
+                "direction": direction,
+                "strategy": strategy_name,
+                "credit": credit,
             })
 
         except Exception as ex:
@@ -1406,11 +1437,11 @@ async def telegram_webhook(request: Request):
                         "ticker": t["ticker"],
                         "vrp_ratio": t["vrp_ratio"],
                         "score": t["score"],
-                        "direction": "NEUTRAL",
+                        "direction": t.get("direction", "NEUTRAL"),
                         "tailwinds": t.get("name", "")[:20],
                         "headwinds": "",
-                        "strategy": f"VRP {t['vrp_tier']}",
-                        "credit": 0,
+                        "strategy": t.get("strategy", f"VRP {t['vrp_tier']}"),
+                        "credit": t.get("credit", 0),
                     }
                     for t in result["tickers"][:5]
                 ]

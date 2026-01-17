@@ -36,6 +36,7 @@ from src.domain import (
     apply_sentiment_modifier,
     HistoricalMovesRepository,
     SentimentCacheRepository,
+    generate_strategies,
 )
 from src.domain.implied_move import (
     fetch_real_implied_move,
@@ -534,6 +535,26 @@ class JobRunner:
                     sentiment_score = sentiment.get("score", 0)
                     final_score = apply_sentiment_modifier(score_data["total_score"], sentiment_score)
 
+                # Generate actual trading strategies
+                price = im_result.get("price")
+                expiration = im_result.get("expiration", "")
+                strategy_name = f"VRP {vrp_data['tier']}"  # Fallback
+                credit = 0
+
+                if price and implied_move_pct > 0:
+                    strategies = generate_strategies(
+                        ticker=ticker,
+                        price=price,
+                        implied_move_pct=implied_move_pct,
+                        direction=direction,
+                        liquidity_tier="GOOD",  # Assumed for screening
+                        expiration=expiration,
+                    )
+                    if strategies:
+                        top_strategy = strategies[0]
+                        strategy_name = top_strategy.description
+                        credit = top_strategy.max_profit / 100  # Convert to per-contract
+
                 opportunities.append({
                     "ticker": ticker,
                     "vrp_ratio": vrp_data["vrp_ratio"],
@@ -541,7 +562,8 @@ class JobRunner:
                     "direction": direction,
                     "tailwinds": tailwinds,
                     "headwinds": headwinds,
-                    "strategy": f"VRP {vrp_data['tier']}",
+                    "strategy": strategy_name,
+                    "credit": credit,
                     "real_data": used_real,  # Track if we used real options data
                 })
 
