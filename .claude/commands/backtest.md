@@ -84,7 +84,7 @@ Using Claude's built-in analysis (no MCP cost):
 
 1. **Edge Validation**
    - Does higher VRP correlate with better results?
-   - Is the VRP threshold (4x) appropriate?
+   - Are the VRP thresholds (1.8x EXCELLENT, 1.4x GOOD) appropriate?
 
 2. **Liquidity Impact**
    - Are WARNING tier trades underperforming?
