@@ -53,6 +53,16 @@ Show progress updates as you work:
 
 *Final tier = worse of (OI tier, Spread tier)*
 
+### Tail Risk Ratio (TRR)
+| Level | TRR | Max Contracts | Max Notional | Action |
+|-------|-----|---------------|--------------|--------|
+| HIGH | > 2.5x | 50 | $25,000 | ⚠️ Reduce size 50% |
+| NORMAL | 1.5-2.5x | 100 | $50,000 | Standard sizing |
+| LOW | < 1.5x | 100 | $50,000 | Standard sizing |
+
+*TRR = Max Historical Move / Average Move. HIGH TRR tickers have extreme earnings surprises.*
+*Lesson: significant MU loss (Dec 2025) - 200 contracts on HIGH TRR ticker.*
+
 ### Budget Limits
 - Daily calls: 40 max
 - Monthly budget: $5.00
@@ -115,6 +125,34 @@ cd 2.0 && ./trade.sh $TICKER $EARNINGS_DATE
 - `{DIRECTIONAL_BIAS}` - NEUTRAL/BULLISH/BEARISH (from skew analysis)
 
 If any field cannot be parsed, use defaults: VRP=0, LIQUIDITY=REJECT, BIAS=NEUTRAL
+
+### Step 1b: Check Tail Risk Ratio (TRR)
+Query the position_limits table to check if this ticker has elevated tail risk:
+```bash
+sqlite3 2.0/data/ivcrush.db \
+  "SELECT tail_risk_ratio, tail_risk_level, max_contracts, max_notional, max_move, avg_move
+   FROM position_limits WHERE ticker='$TICKER';"
+```
+
+**Parse TRR data:**
+- `{TRR_RATIO}` - tail_risk_ratio (e.g., 3.05)
+- `{TRR_LEVEL}` - tail_risk_level (HIGH/NORMAL/LOW)
+- `{MAX_CONTRACTS}` - position limit (50 for HIGH, 100 otherwise)
+- `{MAX_NOTIONAL}` - max position value ($25k for HIGH, $50k otherwise)
+- `{MAX_MOVE}` - historical max earnings move
+- `{AVG_MOVE}` - historical average move
+
+**If no row returned, calculate TRR from historical_moves:**
+```bash
+sqlite3 2.0/data/ivcrush.db \
+  "SELECT MAX(ABS(gap_move_pct)) as max_move, AVG(ABS(gap_move_pct)) as avg_move,
+          COUNT(*) as quarters
+   FROM historical_moves WHERE ticker='$TICKER';"
+```
+Then: `TRR_RATIO = max_move / avg_move`
+- If TRR > 2.5 → TRR_LEVEL = "HIGH", MAX_CONTRACTS = 50
+- If TRR >= 1.5 → TRR_LEVEL = "NORMAL", MAX_CONTRACTS = 100
+- Else → TRR_LEVEL = "LOW", MAX_CONTRACTS = 100
 
 This provides:
 - VRP ratio and tier (uses configured mode - default BALANCED: ≥1.8x/≥1.4x/≥1.2x)
@@ -270,6 +308,14 @@ ANALYSIS: {TICKER}
    [Details: OI, spread width, volume]
    [If REJECT: 🚫 DO NOT TRADE]
 
+⚡ TAIL RISK (if TRR_LEVEL = HIGH)
+   TRR: {X.XX}x (HIGH)
+   Max Contracts: {50}
+   Max Notional: ${25,000}
+   Reason: Historical max {X.X}% vs avg {X.X}%
+   ⚠️ REDUCE POSITION SIZE - Elevated tail risk
+   [If TRR_LEVEL != HIGH: omit this section entirely]
+
 📰 NEWS SUMMARY (Finnhub)
    • {Recent headline 1}
    • {Recent headline 2}
@@ -298,6 +344,7 @@ ANALYSIS: {TICKER}
    • [Any concerns from sentiment]
    • [Liquidity warnings if WARNING tier]
    • [High implied move caution if > 15%]
+   • [If TRR HIGH: "⚠️ HIGH TAIL RISK - Max {50} contracts / ${25k} notional"]
 
 ══════════════════════════════════════════════════════
 ```

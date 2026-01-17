@@ -54,6 +54,16 @@ Show progress updates as you work:
 
 **4.0 Minimum:** After sentiment adjustment, only show if 4.0 Score ≥ 55
 
+## Tail Risk Ratio (TRR)
+
+| Level | TRR | Max Contracts | Action |
+|-------|-----|---------------|--------|
+| HIGH | > 2.5x | 50 | ⚠️ TRR badge in table |
+| NORMAL | 1.5-2.5x | 100 | No badge |
+| LOW | < 1.5x | 100 | No badge |
+
+*TRR = Max Historical Move / Average Move. HIGH TRR tickers caused significant MU loss.*
+
 ## Step-by-Step Instructions
 
 ### Step 1: Parse Date Argument
@@ -169,6 +179,32 @@ Parse the whisper output and filter to tickers with 2.0 Score ≥ 50.
 
 Take TOP 5 from filtered results for sentiment enrichment (skip REJECT for sentiment fetch to save budget, but still display them).
 
+### Step 4b: Check TRR for All Qualified Tickers
+Query tail risk for all qualified tickers in one batch:
+```bash
+# Get comma-separated list of tickers from Step 4
+TICKERS="'NVDA','AAPL','MU'"  # Example - use actual qualified tickers
+
+sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
+  "SELECT ticker, tail_risk_ratio, tail_risk_level, max_contracts
+   FROM position_limits WHERE ticker IN ($TICKERS) AND tail_risk_level = 'HIGH';"
+```
+
+**Store TRR data for each HIGH TRR ticker:**
+- Mark tickers with TRR_LEVEL = "HIGH" for badge display
+- MAX_CONTRACTS = 50 for HIGH TRR tickers
+
+**If ticker not in position_limits, calculate from historical_moves:**
+```bash
+sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
+  "SELECT ticker,
+          MAX(ABS(gap_move_pct)) / AVG(ABS(gap_move_pct)) as trr
+   FROM historical_moves
+   WHERE ticker IN ($TICKERS)
+   GROUP BY ticker
+   HAVING trr > 2.5;"
+```
+
 ### Step 5: Gather Sentiment for TOP 3 (Conditional)
 
 For EACH of the top 3 qualified tickers:
@@ -241,17 +277,18 @@ MOST ANTICIPATED EARNINGS - Week of {DATE}
 
 🔝 4.0 SENTIMENT-ADJUSTED RESULTS (Full Table)
 
-┌───┬────────┬────────────┬─────────┬───────────┬──────┬─────────────┬──────┬─────────────┬───────────┐
-│ # │ TICKER │ Earnings   │ VRP     │ Imp Move  │ 2.0  │ Sentiment   │ 4.0  │ DIR (4.0)   │ LIQUIDITY │
-├───┼────────┼────────────┼─────────┼───────────┼──────┼─────────────┼──────┼─────────────┼───────────┤
-│ 1 │ LULU   │ Dec 11 AMC │ 4.67x ⭐│ 12.04%    │ 95.1 │ Bear (-0.6) │ 88.5 │ NEUTRAL*    │ 🚫 REJECT │
-│ 2 │ ADBE   │ Dec 10 AMC │ 3.53x ✓ │ 8.01%     │ 88.2 │ Bull (+0.7) │ 98.8 │ BULLISH     │ WARNING   │
-│ 3 │ AVGO   │ Dec 11 AMC │ 2.72x ○ │ 7.85%     │ 87.0 │ Bull (+0.6) │ 93.1 │ BULLISH     │ GOOD      │
-│ 4 │ ORCL   │ Dec 10 AMC │ 3.87x ✓ │ 10.96%    │ 85.9 │ Bull (+0.4) │ 91.9 │ NEUTRAL     │ EXCELLENT │
-└───┴────────┴────────────┴─────────┴───────────┴──────┴─────────────┴──────┴─────────────┴───────────┘
+┌───┬────────┬────────────┬─────────┬───────────┬──────┬─────────────┬──────┬─────────────┬───────────┬─────┐
+│ # │ TICKER │ Earnings   │ VRP     │ Imp Move  │ 2.0  │ Sentiment   │ 4.0  │ DIR (4.0)   │ LIQUIDITY │ TRR │
+├───┼────────┼────────────┼─────────┼───────────┼──────┼─────────────┼──────┼─────────────┼───────────┼─────┤
+│ 1 │ LULU   │ Dec 11 AMC │ 4.67x ⭐│ 12.04%    │ 95.1 │ Bear (-0.6) │ 88.5 │ NEUTRAL*    │ 🚫 REJECT │     │
+│ 2 │ MU     │ Dec 10 AMC │ 3.53x ✓ │ 8.01%     │ 88.2 │ Bull (+0.7) │ 98.8 │ BULLISH     │ GOOD      │ ⚠️  │
+│ 3 │ AVGO   │ Dec 11 AMC │ 2.72x ○ │ 7.85%     │ 87.0 │ Bull (+0.6) │ 93.1 │ BULLISH     │ GOOD      │ ⚠️  │
+│ 4 │ ORCL   │ Dec 10 AMC │ 3.87x ✓ │ 10.96%    │ 85.9 │ Bull (+0.4) │ 91.9 │ NEUTRAL     │ EXCELLENT │     │
+└───┴────────┴────────────┴─────────┴───────────┴──────┴─────────────┴──────┴─────────────┴───────────┴─────┘
 
 Legend: VRP ⭐ EXCELLENT (≥4x) | ✓ GOOD (≥3x) | ○ MARGINAL (≥1.5x)
         * = direction changed from 2.0 skew (sentiment conflict → hedge)
+        TRR ⚠️ = HIGH tail risk (max 50 contracts) - learned from significant MU loss
 
 📊 TOP PICK: {TICKER} ({Date} {BMO/AMC})
    VRP: {X.X}x | Implied Move: {X.X}% | 4.0 Score: {X.X}
@@ -260,6 +297,10 @@ Legend: VRP ⭐ EXCELLENT (≥4x) | ✓ GOOD (≥3x) | ○ MARGINAL (≥1.5x)
 
 ⚠️ CONFLICTS (if any):
    • {TICKER}: Skew={X} vs Sentiment={Y} → Neutral stance (hedge both sides)
+
+⚡ HIGH TAIL RISK TICKERS (if any):
+   • {TICKER}: TRR {X.XX}x → Max 50 contracts / $25k notional
+   [Only show tickers with TRR_LEVEL = "HIGH". Omit section if none.]
 
 📦 CACHE STATUS
    Hits: X (instant, free)
