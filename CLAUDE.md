@@ -44,7 +44,7 @@ VRP Ratio = Implied Move / Historical Mean Move
 ## Critical Rules
 
 1. **Never trade REJECT liquidity** - learned from $26,930 loss on WDAY/ZS/SYM
-2. **VRP > 4x preferred** for full position sizing (BALANCED mode classifies ≥1.8x as EXCELLENT, but 4x+ gives highest confidence)
+2. **VRP ≥ 1.8x (EXCELLENT tier)** for full position sizing
 3. **Prefer spreads over naked options** for defined risk
 4. **Half-Kelly sizing** (0.25 fraction) for position sizing
 5. **Always check liquidity score first** before evaluating VRP
@@ -137,7 +137,7 @@ TRR = Max Historical Move / Average Historical Move
 
 1. Run health check first (`./trade.sh health`)
 2. Check liquidity tier - REJECT is no-trade, WARNING reduce size, GOOD/EXCELLENT full size
-3. Verify VRP ratio meets threshold (>4x preferred)
+3. Verify VRP ratio meets threshold (≥1.8x EXCELLENT, ≥1.4x GOOD)
 4. Review implied vs historical move spread
 5. Check POP (probability of profit) - target 60%+
 6. Validate theta decay is positive

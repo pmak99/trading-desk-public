@@ -189,7 +189,7 @@ TRR = Max Historical Move / Average Historical Move
 ### Critical Rules
 
 1. **Never trade REJECT liquidity** - learned from $26,930 loss on WDAY/ZS/SYM
-2. **VRP > 4x minimum** for full position sizing
+2. **VRP ≥ 1.8x (EXCELLENT tier)** for full position sizing
 3. **Prefer spreads over naked options** for defined risk
 4. **Half-Kelly sizing** (0.25 fraction)
 5. **Always check liquidity score first** before evaluating VRP
