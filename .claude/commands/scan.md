@@ -73,6 +73,7 @@ From scan results, identify the top 5 tickers where:
 ### Step 4b: Check TRR for All Qualified Tickers
 Query tail risk for all qualified tickers:
 ```bash
+# Note: Tickers should already be sanitized (alphanumeric, uppercase) from 2.0 output
 TICKERS="'NVDA','AMD','MU'"  # Use actual tickers from Step 4
 
 sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
