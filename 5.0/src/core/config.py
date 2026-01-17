@@ -44,7 +44,7 @@ class Settings:
     VRP_EXCELLENT = 1.8
     VRP_GOOD = 1.4
     VRP_MARGINAL = 1.2
-    VRP_DISCOVERY = 3.0  # For priming/whisper (separate from tier thresholds)
+    VRP_DISCOVERY = 1.4  # Aligned with GOOD tier - triggers alerts on tradeable opportunities
 
     # API budget limits
     PERPLEXITY_DAILY_LIMIT = 40
