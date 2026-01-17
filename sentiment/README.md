@@ -113,7 +113,7 @@ Risks: [1-2 bullets, max 10 words each]
 | `/journal` | Parse Fidelity PDFs | Free |
 | `/export-report` | Export scan results to CSV | Free |
 
-**Note:** Discovery threshold is 1.4x VRP (GOOD tier). Position sizing uses EXCELLENT tier (1.8x) for full size.
+**Note:** Discovery threshold is 1.8x VRP (EXCELLENT tier).
 
 **TRR Warnings:** All discovery commands display ⚠️ warnings for HIGH tail risk tickers (TRR > 2.5x). These tickers are limited to 50 contracts / $25k notional to prevent catastrophic losses (learned from significant MU loss in Dec 2025).
 

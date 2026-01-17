@@ -94,7 +94,7 @@ Cloud Scheduler: */15 * * * * → POST /dispatch
 | Time | Job | Status | Description |
 |------|-----|--------|-------------|
 | 5:30 AM | `pre-market-prep` | ✅ | Fetch earnings calendar, calculate VRP for today's tickers, rate-limited API calls |
-| 6:30 AM | `sentiment-scan` | ✅ | Pre-cache AI sentiment for high-VRP tickers (≥1.4x GOOD tier), respects budget limits |
+| 6:30 AM | `sentiment-scan` | ✅ | Pre-cache AI sentiment for high-VRP tickers (≥1.8x EXCELLENT tier), respects budget limits |
 | 7:30 AM | `morning-digest` | ✅ | Send Telegram digest with top 10 ranked opportunities |
 | 10:00 AM | `market-open-refresh` | ✅ | Refresh prices, alert on significant pre-market moves (>50% of historical avg) |
 | 2:30 PM | `pre-trade-refresh` | ✅ | Final VRP validation, send actionable alert with top 5 AMC earnings |

@@ -44,7 +44,7 @@ class Settings:
     VRP_EXCELLENT = 1.8
     VRP_GOOD = 1.4
     VRP_MARGINAL = 1.2
-    VRP_DISCOVERY = 1.4  # Aligned with GOOD tier - triggers alerts on tradeable opportunities
+    VRP_DISCOVERY = 1.8  # Aligned with EXCELLENT tier - triggers alerts on high-confidence opportunities
 
     # API budget limits
     PERPLEXITY_DAILY_LIMIT = 40

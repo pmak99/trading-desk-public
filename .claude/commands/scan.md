@@ -19,7 +19,7 @@ Show progress updates as you work:
 ```
 [1/4] Checking market status...
 [2/4] Running 2.0 scan for date...
-[3/4] Filtering VRP >= 1.4x tickers...
+[3/4] Filtering VRP >= 1.8x tickers...
 [4/4] Fetching sentiment for top 3...
 ```
 
@@ -65,9 +65,9 @@ This provides:
 - Liquidity tier for each
 - Quality score ranking
 
-### Step 4: Identify TOP 5 VRP >= 1.4x Tickers
+### Step 4: Identify TOP 5 VRP >= 1.8x Tickers
 From scan results, identify the top 5 tickers where:
-- VRP >= 1.4x (discovery threshold - GOOD tier)
+- VRP >= 1.8x (discovery threshold - EXCELLENT tier)
 - Liquidity != REJECT
 
 ### Step 4b: Check TRR for All Qualified Tickers
@@ -150,7 +150,7 @@ Legend: ⭐ EXCELLENT (≥1.8x) | ✓ GOOD (≥1.4x) | ○ MARGINAL (≥1.2x) | 
 
 📊 SUMMARY
    Total earnings: {N}
-   VRP >= 1.4x: {M} tickers
+   VRP >= 1.8x: {M} tickers
    Liquidity REJECT: {R} tickers (avoid)
 
 🔝 TOP 3 OPPORTUNITIES
@@ -185,6 +185,6 @@ Legend: ⭐ EXCELLENT (≥1.8x) | ✓ GOOD (≥1.4x) | ○ MARGINAL (≥1.2x) | 
 
 ## Cost Control
 - Maximum 3 Perplexity calls (top 3 only)
-- Only for VRP >= 1.4x AND Liquidity != REJECT (discovery threshold)
+- Only for VRP >= 1.8x AND Liquidity != REJECT (discovery threshold)
 - Cache-aware to avoid duplicate calls
 - If already primed with `/prime`, all sentiment from cache
