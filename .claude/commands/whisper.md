@@ -175,7 +175,7 @@ This provides:
 ### Step 4: Filter by 2.0 Score ≥ 50
 Parse the whisper output and filter to tickers with 2.0 Score ≥ 50.
 
-**IMPORTANT:** Do NOT suppress REJECT liquidity tickers from display. Show ALL qualified tickers (VRP >= 3x) in the results table, clearly marking REJECT ones as untradeable. This gives visibility into what opportunities exist even if liquidity is poor.
+**IMPORTANT:** Do NOT suppress REJECT liquidity tickers from display. Show ALL qualified tickers (VRP >= 1.4x GOOD tier) in the results table, clearly marking REJECT ones as untradeable. This gives visibility into what opportunities exist even if liquidity is poor.
 
 Take TOP 5 from filtered results for sentiment enrichment (skip REJECT for sentiment fetch to save budget, but still display them).
 
@@ -286,7 +286,7 @@ MOST ANTICIPATED EARNINGS - Week of {DATE}
 │ 4 │ ORCL   │ Dec 10 AMC │ 3.87x ✓ │ 10.96%    │ 85.9 │ Bull (+0.4) │ 91.9 │ NEUTRAL     │ EXCELLENT │     │
 └───┴────────┴────────────┴─────────┴───────────┴──────┴─────────────┴──────┴─────────────┴───────────┴─────┘
 
-Legend: VRP ⭐ EXCELLENT (≥4x) | ✓ GOOD (≥3x) | ○ MARGINAL (≥1.5x)
+Legend: VRP ⭐ EXCELLENT (≥1.8x) | ✓ GOOD (≥1.4x) | ○ MARGINAL (≥1.2x)
         * = direction changed from 2.0 skew (sentiment conflict → hedge)
         TRR ⚠️ = HIGH tail risk (max 50 contracts) - learned from significant MU loss
 
@@ -314,7 +314,7 @@ Legend: VRP ⭐ EXCELLENT (≥4x) | ✓ GOOD (≥3x) | ○ MARGINAL (≥1.5x)
 
 ## Cost Control
 - Maximum 5 Perplexity calls (top 5 only)
-- Only for VRP >= 3x AND Liquidity != REJECT (discovery threshold)
+- Only for VRP >= 1.4x AND Liquidity != REJECT (discovery threshold)
 - Cache hits are instant and free
 - After `/prime`, all sentiment comes from cache
 

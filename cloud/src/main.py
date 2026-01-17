@@ -529,8 +529,8 @@ async def prime(date: str = None, _: bool = Depends(verify_api_key)):
                     historical_moves=historical_pcts,
                 )
 
-                # Only prime tickers with VRP >= 3.0
-                if vrp_data.get("vrp_ratio", 0) < 3.0:
+                # Only prime tickers with VRP >= discovery threshold
+                if vrp_data.get("vrp_ratio", 0) < settings.VRP_DISCOVERY:
                     skipped_count += 1
                     continue
 
@@ -720,8 +720,8 @@ async def scan(date: str, format: str = "json", _: bool = Depends(verify_api_key
                     liquidity_tier=liquidity_tier if liquidity_tier != "UNKNOWN" else "WARNING",
                 )
 
-                # Determine if qualified (VRP >= 3.0)
-                if vrp_ratio >= 3.0:
+                # Determine if qualified (VRP >= discovery threshold)
+                if vrp_ratio >= settings.VRP_DISCOVERY:
                     qualified.append({
                         "ticker": ticker,
                         "name": e.get("name", ""),
@@ -738,7 +738,7 @@ async def scan(date: str, format: str = "json", _: bool = Depends(verify_api_key
                 else:
                     filtered.append({
                         "ticker": ticker,
-                        "reason": f"Low VRP ({vrp_ratio:.2f}x < 3.0x)",
+                        "reason": f"Low VRP ({vrp_ratio:.2f}x < {settings.VRP_DISCOVERY}x)",
                         "vrp_ratio": round(vrp_ratio, 2),
                     })
 
@@ -1232,8 +1232,8 @@ async def _scan_tickers_for_whisper(
                 historical_moves=historical_pcts,
             )
 
-            # Skip if VRP calculation failed or below threshold
-            if vrp_data.get("error") or vrp_data.get("vrp_ratio", 0) < 3.0:
+            # Skip if VRP calculation failed or below discovery threshold
+            if vrp_data.get("error") or vrp_data.get("vrp_ratio", 0) < settings.VRP_DISCOVERY:
                 continue
 
             # Calculate score (assume GOOD liquidity for screening)
