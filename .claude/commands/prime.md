@@ -26,7 +26,7 @@ Show progress updates as you work:
 ```
 [1/5] Checking market status...
 [2/5] Running whisper scan...
-[3/5] Filtering qualified tickers (VRP >= 1.4x, non-REJECT liquidity)...
+[3/5] Filtering qualified tickers (VRP >= 1.8x, non-REJECT liquidity)...
 [4/5] Fetching sentiment for N tickers...
       ✓ TICKER1 - Perplexity (VRP X.Xx)
       ✓ TICKER2 - Perplexity (VRP X.Xx)
@@ -73,10 +73,10 @@ This provides:
 
 ### Step 4: Filter Qualified Tickers
 From whisper results, filter to tickers where:
-- VRP >= 1.4x (discovery threshold for sentiment priming - GOOD tier)
+- VRP >= 1.8x (discovery threshold for sentiment priming - EXCELLENT tier)
 - Liquidity != REJECT
 
-Note: 1.4x (GOOD tier) is the discovery threshold for priming. Position sizing still uses EXCELLENT tier (1.8x) for full size.
+Note: 1.8x (EXCELLENT tier) is the discovery threshold for priming.
 
 ### Step 5: Check Budget Status
 ```bash
@@ -176,7 +176,7 @@ sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.d
 
 📊 WHISPER RESULTS
    Most anticipated: {N} tickers
-   VRP >= 1.4x qualified: {M} tickers
+   VRP >= 1.8x qualified: {M} tickers
    Liquidity REJECT: {R} tickers (excluded)
 
 🔄 FETCHING SENTIMENT
@@ -207,7 +207,7 @@ sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.d
 
 ## Cost Control
 - Uses whisper mode (most anticipated) instead of full scan
-- Only primes VRP >= 1.4x tickers (GOOD tier discovery threshold)
+- Only primes VRP >= 1.8x tickers (EXCELLENT tier discovery threshold)
 - Position sizing uses EXCELLENT tier (1.8x) for full size
 - Skips already-cached tickers (no duplicate calls)
 - Skips non-trading days entirely (save budget)

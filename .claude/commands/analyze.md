@@ -204,7 +204,7 @@ The response may be large (70k+ chars) - extract only first 5 headlines.
 ### Step 3: AI Sentiment (Conditional - Fetch for any TRADEABLE opportunity)
 
 **For direct /analyze requests:** Fetch sentiment for any ticker where 2.0 says "TRADEABLE".
-This is different from discovery commands (/whisper, /scan) which use VRP ≥ 1.4x threshold (GOOD tier).
+This is different from discovery commands (/whisper, /scan) which use VRP ≥ 1.8x threshold (EXCELLENT tier).
 
 **Skip sentiment ONLY if:**
 - 2.0 output says "SKIP" or "NOT TRADEABLE" (VRP below marginal threshold)
