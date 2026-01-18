@@ -1,19 +1,17 @@
-# 4.0 AI-First Trading System
+# 4.0 AI Sentiment Layer
 
-AI-enhanced layer on top of the proven 2.0 IV Crush system. Adds sentiment analysis, intelligent caching, and sentiment-adjusted scoring.
+AI-enhanced layer on top of 2.0's proven VRP system. Adds Perplexity-powered sentiment analysis with intelligent caching and budget tracking.
+
+## Design Principles
+
+1. **AI for Discovery, Math for Trading** - Sentiment informs what to look at; 2.0 math decides how to trade
+2. **Import 2.0, Don't Copy** - All core logic comes from 2.0 via sys.path injection
+3. **Graceful Degradation** - Sentiment never blocks analysis; falls back to WebSearch
+4. **Cost-Conscious** - 40 calls/day budget, 3-hour TTL caching, free fallbacks
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    SLASH COMMANDS (13 total)                │
-│  Discovery: /whisper /analyze /scan /alert                  │
-│  System: /prime /health /maintenance                        │
-│  Data: /collect /backfill  Reports: /history /backtest      │
-│  Utils: /journal /export-report                             │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    4.0 AI LAYER                             │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
@@ -27,18 +25,33 @@ AI-enhanced layer on top of the proven 2.0 IV Crush system. Adds sentiment analy
 ┌─────────────────────────────────────────────────────────────┐
 │                    2.0 CORE ENGINE                          │
 │  VRP Calculation │ Strategy Generation │ Liquidity Scoring │
-│  Historical Data │ Options Pricing     │ Risk Management   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Key Design Principles
+## Sentiment-Adjusted Scoring
 
-1. **AI for Discovery, Math for Trading** - Sentiment informs what to look at, 2.0 math decides how to trade
-2. **Import 2.0, Don't Copy** - All core logic comes from 2.0 to stay in sync
-3. **Graceful Degradation** - Sentiment never blocks analysis
-4. **Cost-Conscious** - 40 calls/day budget, caching, free fallbacks
+### Formula
 
-## Sentiment-Adjusted Directional Bias
+```
+4.0 Score = 2.0 Score × (1 + Sentiment Modifier)
+```
+
+### Modifiers
+
+| Sentiment | Score Range | Modifier |
+|-----------|-------------|----------|
+| Strong Bullish | >= +0.6 | +12% |
+| Bullish | +0.2 to +0.6 | +7% |
+| Neutral | -0.2 to +0.2 | 0% |
+| Bearish | -0.6 to -0.2 | -7% |
+| Strong Bearish | <= -0.6 | -12% |
+
+### Minimum Cutoffs
+
+- **2.0 Score >= 50** (pre-sentiment filter)
+- **4.0 Score >= 55** (post-sentiment filter)
+
+## Directional Bias Rules
 
 3-rule system for adjusting 2.0's skew-based direction using AI sentiment:
 
@@ -48,105 +61,70 @@ AI-enhanced layer on top of the proven 2.0 IV Crush system. Adds sentiment analy
 | 2 | Conflict (bullish skew + bearish sentiment) | Go neutral (hedge) |
 | 3 | Otherwise | Keep original skew bias |
 
-This allows AI to provide directional insight without overriding quantitative signals.
-
-## 4.0 Scoring System
-
-### Formula
-```
-4.0 Score = 2.0 Score × (1 + Sentiment_Modifier)
-```
-
-### Sentiment Modifiers
-| Sentiment | Score Range | Modifier |
-|-----------|-------------|----------|
-| Strong Bullish | +0.7 to +1.0 | +12% |
-| Bullish | +0.3 to +0.6 | +7% |
-| Neutral | -0.2 to +0.2 | 0% |
-| Bearish | -0.6 to -0.3 | -7% |
-| Strong Bearish | -1.0 to -0.7 | -12% |
-
-### Minimum Cutoffs
-- **2.0 Score ≥ 50** (pre-sentiment filter)
-- **4.0 Score ≥ 55** (post-sentiment filter)
-
-## Structured Sentiment Format
-
-All sentiment queries return structured data to minimize context:
-```
-Direction: [bullish/bearish/neutral]
-Score: [-1 to +1]
-Catalysts: [2-3 bullets, max 10 words each]
-Risks: [1-2 bullets, max 10 words each]
-```
-
 ## Slash Commands
 
+Available in Claude Code:
+
 ### Discovery & Analysis
-| Command | Purpose | AI Cost |
-|---------|---------|---------|
-| `/whisper [DATE]` | Most anticipated earnings this week | ~3-8 calls |
+
+| Command | Purpose | API Cost |
+|---------|---------|----------|
+| `/whisper [DATE]` | Most anticipated earnings | ~3-8 calls |
 | `/analyze TICKER [DATE]` | Deep analysis with strategies | ~1 call |
-| `/scan DATE` | Scan all earnings on specific date | Free |
+| `/scan DATE` | Scan all earnings on date | Free |
 | `/alert` | Today's high-VRP opportunities | ~3 calls |
 
 ### System Operations
-| Command | Purpose | AI Cost |
-|---------|---------|---------|
-| `/prime [DATE]` | Pre-cache sentiment (uses whisper list) | ~3-8 calls |
-| `/health` | System health check | Free |
-| `/maintenance [task]` | Database backup, cleanup, sync | Free |
 
-### Data Collection (Backtesting)
-| Command | Purpose | AI Cost |
-|---------|---------|---------|
-| `/collect TICKER [DATE]` | Explicitly collect sentiment | ~1 call |
+| Command | Purpose | API Cost |
+|---------|---------|----------|
+| `/prime [DATE]` | Pre-cache sentiment | ~3-8 calls |
+| `/health` | System health check | Free |
+| `/maintenance [task]` | Backup, cleanup, sync | Free |
+
+### Data Collection
+
+| Command | Purpose | API Cost |
+|---------|---------|----------|
+| `/collect TICKER [DATE]` | Store sentiment for backtesting | ~1 call |
 | `/backfill TICKER DATE` | Record post-earnings outcome | Free |
-| `/backfill --pending` | Backfill all pending outcomes | Free |
+| `/backfill --pending` | Backfill all pending | Free |
 | `/backfill --stats` | Show prediction accuracy | Free |
 
-### Analysis & Reporting
-| Command | Purpose | AI Cost |
-|---------|---------|---------|
-| `/history TICKER` | Visualize historical moves | Free |
+### Reporting
+
+| Command | Purpose | API Cost |
+|---------|---------|----------|
+| `/history TICKER` | Historical moves visualization | Free |
 | `/backtest [TICKER]` | Performance analysis | Free |
-| `/journal` | Parse Fidelity PDFs | Free |
-| `/export-report` | Export scan results to CSV | Free |
-
-**Note:** Discovery threshold is 1.8x VRP (EXCELLENT tier).
-
-**TRR Warnings:** All discovery commands display ⚠️ warnings for HIGH tail risk tickers (TRR > 2.5x). These tickers are limited to 50 contracts / $25k notional to prevent catastrophic losses (learned from significant MU loss in Dec 2025).
+| `/journal` | Parse Fidelity exports | Free |
+| `/export-report` | Export scan results | Free |
 
 ## Daily Workflow
 
 ```
-7:00 AM   /health              # Verify all systems operational
-7:15 AM   /prime               # Pre-cache sentiment (predictable cost)
-9:30 AM   /whisper             # Find opportunities (instant - cached)
-          /analyze NVDA        # Deep dive (instant sentiment)
-          Manual in Fidelity   # Human approval required
-Evening   /backfill --pending  # Record outcomes for backtesting
+7:00 AM   /health              # Verify systems
+7:15 AM   /prime               # Pre-cache sentiment
+9:30 AM   /whisper             # Find opportunities (instant from cache)
+          /analyze NVDA        # Deep dive
+          Execute in Fidelity  # Human approval required
+Evening   /backfill --pending  # Record outcomes
 ```
 
 ## Budget & Cost
 
-### Daily Limits
-- **Max:** 40 calls/day (~$0.24/day with sonar model)
-- **Warn:** At 80% (32 calls)
-- **Fallback:** WebSearch when exhausted
+| Limit | Value |
+|-------|-------|
+| Daily max | 40 calls |
+| Warning threshold | 32 calls (80%) |
+| Monthly budget | $5.00 |
+| Cost per call | ~$0.006 |
 
-### Monthly Cost
-| Item | Cost |
-|------|------|
-| Perplexity API | ~$3-5 |
-| All other MCPs | Free |
-| **Total** | **< $5/month** |
-
-## Fallback Chain
+### Fallback Chain
 
 ```
-1. Check sentiment_cache (3hr TTL)
-   └─ HIT → Return cached (FREE, instant)
+1. Check cache (3hr TTL)
+   └─ HIT → Return cached (FREE)
    └─ MISS → Continue
 
 2. Check budget (< 40 calls/day)
@@ -155,62 +133,63 @@ Evening   /backfill --pending  # Record outcomes for backtesting
 
 3. Perplexity API
    └─ SUCCESS → Cache + return
-   └─ FAIL/TIMEOUT → Continue
+   └─ FAIL → Continue
 
 4. WebSearch (free fallback)
    └─ SUCCESS → Cache + return
    └─ FAIL → Graceful degradation
 ```
 
-## File Structure
+## Structured Sentiment Format
+
+All queries return:
+
+```
+Direction: [bullish/bearish/neutral]
+Score: [-1 to +1]
+Catalysts: [2-3 bullets, max 10 words each]
+Risks: [1-2 bullets, max 10 words each]
+```
+
+## Architecture
 
 ```
 4.0/
-├── README.md                 # This file
-├── data/
-│   └── sentiment_cache.db    # SQLite: cache + budget + history
 ├── src/
 │   ├── __init__.py               # Imports from 2.0
-│   ├── sentiment_direction.py    # 3-rule directional bias adjustment
+│   ├── sentiment_direction.py    # 3-rule directional bias
 │   └── cache/
-│       ├── __init__.py
 │       ├── sentiment_cache.py    # 3-hour TTL cache
-│       ├── budget_tracker.py     # API budget tracking (40/day)
-│       └── sentiment_history.py  # Permanent backtesting data
-└── tests/                        # Unit tests (186 tests)
-    ├── test_budget_tracker.py
-    ├── test_sentiment_cache.py
-    ├── test_sentiment_direction.py
-    └── test_sentiment_history.py
+│       ├── budget_tracker.py     # API budget (40/day)
+│       └── sentiment_history.py  # Backtesting data
+├── data/
+│   └── sentiment_cache.db        # SQLite cache + budget
+└── tests/                        # 186 tests
 ```
-
-## MCP Servers Used
-
-| Server | Purpose | Cost |
-|--------|---------|------|
-| `perplexity` | AI sentiment synthesis | ~$0.006/call |
-| `alpaca` | Positions, market clock | Free |
-| `alphavantage` | Earnings calendar | Free |
-| `finnhub` | News, insider trades | Free |
-| `yahoo-finance` | Price data fallback | Free |
-| `memory` | Knowledge graph | Free |
 
 ## Testing
 
 ```bash
-# From project root
-cd 4.0 && ../2.0/venv/bin/python -m pytest tests/ -v
+cd 4.0
+../2.0/venv/bin/python -m pytest tests/ -v    # 186 tests
 ```
-
-**Test Coverage (Dec 2025):** 184 tests pass
 
 Key test files:
 - `test_sentiment_direction.py` - 3-rule directional bias
 - `test_sentiment_cache.py` - Cache TTL, invalidation
-- `test_budget_tracker.py` - API budget enforcement
-- `test_sentiment_history.py` - Backtesting data storage
+- `test_budget_tracker.py` - Budget enforcement
+- `test_sentiment_history.py` - Backtesting storage
 
-## Related Documentation
+## TRR Warnings
 
-- [CLAUDE.md](../CLAUDE.md) - Project-wide instructions
-- [2.0 README](../2.0/README.md) - Core trading system
+All discovery commands display warnings for HIGH tail risk tickers (TRR > 2.5x). These are limited to 50 contracts / $25k notional.
+
+## Related Systems
+
+- **2.0/** - Core VRP math (imported by 4.0)
+- **5.0/** - Cloud autopilot (uses similar sentiment logic)
+- **6.0/** - Agent orchestration (uses 4.0 cache directly)
+
+---
+
+**Disclaimer:** For research purposes only. Not financial advice.
