@@ -527,19 +527,19 @@ class StrategyScorer:
         - Compare to implied move percentage
         - Apply penalty multiplier when profit zone < implied move
 
-        Multiplier ranges:
+        Multiplier ranges (Jan 2026: raised floor from 0.3→0.6 for Iron Condors):
         - 1.0 (no penalty): Profit zone >= implied move
         - 0.9-1.0: Profit zone is 70-100% of implied move (slight penalty)
-        - 0.7-0.9: Profit zone is 40-70% of implied move (moderate penalty)
-        - 0.5-0.7: Profit zone is 20-40% of implied move (heavy penalty)
-        - 0.3: Profit zone < 20% of implied move (severe penalty)
+        - 0.8-0.9: Profit zone is 40-70% of implied move (moderate penalty)
+        - 0.7-0.8: Profit zone is 20-40% of implied move (heavy penalty)
+        - 0.6: Profit zone < 20% of implied move (severe penalty)
 
         Args:
             strategy: Strategy to evaluate
             vrp: VRP analysis containing implied move
 
         Returns:
-            Multiplier between 0.3 and 1.0 to apply to overall score
+            Multiplier between 0.6 and 1.0 to apply to overall score
         """
         # If no breakevens, no penalty (shouldn't happen, but be safe)
         if not strategy.breakeven or len(strategy.breakeven) == 0:
@@ -598,8 +598,8 @@ class StrategyScorer:
             return multiplier
         elif zone_to_move_ratio >= 0.40:
             # Profit zone is 40-70% of implied move - moderate penalty
-            # Linear interpolation: 0.40 → 0.7, 0.70 → 0.9
-            multiplier = 0.7 + (zone_to_move_ratio - 0.40) * (0.2 / 0.30)
+            # Linear interpolation: 0.40 → 0.8, 0.70 → 0.9 (Jan 2026: raised from 0.7-0.9)
+            multiplier = 0.8 + (zone_to_move_ratio - 0.40) * (0.1 / 0.30)
             logger.info(
                 f"{strategy.strategy_type.value}: Moderate profit zone penalty "
                 f"(zone {profit_zone_pct:.1f}% vs move ±{implied_move_pct:.1f}%, "
@@ -608,8 +608,8 @@ class StrategyScorer:
             return multiplier
         elif zone_to_move_ratio >= 0.20:
             # Profit zone is 20-40% of implied move - heavy penalty
-            # Linear interpolation: 0.20 → 0.5, 0.40 → 0.7
-            multiplier = 0.5 + (zone_to_move_ratio - 0.20) * (0.2 / 0.20)
+            # Linear interpolation: 0.20 → 0.7, 0.40 → 0.8 (Jan 2026: raised from 0.5-0.7)
+            multiplier = 0.7 + (zone_to_move_ratio - 0.20) * (0.1 / 0.20)
             logger.warning(
                 f"{strategy.strategy_type.value}: Heavy profit zone penalty - "
                 f"profit zone ({profit_zone_pct:.1f}%) much smaller than implied move "
@@ -617,13 +617,13 @@ class StrategyScorer:
             )
             return multiplier
         else:
-            # Profit zone < 20% of implied move - severe penalty
+            # Profit zone < 20% of implied move - severe penalty (Jan 2026: raised from 0.3)
             logger.warning(
                 f"{strategy.strategy_type.value}: SEVERE profit zone penalty - "
                 f"profit zone ({profit_zone_pct:.1f}%) is <20% of implied move "
-                f"(±{implied_move_pct:.1f}%), multiplier=0.30. Consider rejecting."
+                f"(±{implied_move_pct:.1f}%), multiplier=0.60. Consider rejecting."
             )
-            return 0.3
+            return 0.6
 
     def _generate_strategy_rationale(self, strategy: Strategy, vrp: VRPResult) -> str:
         """
