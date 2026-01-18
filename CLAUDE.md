@@ -411,7 +411,7 @@ curl -s "https://trading-desk-vquzm76kja-ue.a.run.app/api/budget" -H "X-API-Key:
 ## Testing
 
 ```bash
-# 2.0 tests (496 pass)
+# 2.0 tests (509 pass)
 cd 2.0 && ./venv/bin/python -m pytest tests/ -v
 
 # 4.0 tests (186 pass)
