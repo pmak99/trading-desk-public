@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .env
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 venv/
 .pytest_cache/
 .coverage
