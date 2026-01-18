@@ -133,10 +133,11 @@ def get_database_dates(
         ticker, earnings_date_str, timing_str, updated_at_str, last_validated_str = row
         earnings_date = datetime.strptime(earnings_date_str, "%Y-%m-%d").date()
         timing = EarningsTiming(timing_str)
-        updated_at = datetime.strptime(updated_at_str, "%Y-%m-%d %H:%M:%S")
+        # Handle both ISO format (with T and microseconds) and simple format
+        updated_at = datetime.fromisoformat(updated_at_str.replace(" ", "T").split(".")[0])
         last_validated_at = None
         if last_validated_str:
-            last_validated_at = datetime.strptime(last_validated_str, "%Y-%m-%d %H:%M:%S")
+            last_validated_at = datetime.fromisoformat(last_validated_str.replace(" ", "T").split(".")[0])
         result[ticker] = (earnings_date, timing, updated_at, last_validated_at)
 
     conn.close()
