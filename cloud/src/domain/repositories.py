@@ -348,6 +348,69 @@ class HistoricalMovesRepository:
             log("info", "Upserted earnings calendar", count=count)
         return count
 
+    def get_earnings_by_date(self, date: str) -> List[Dict[str, Any]]:
+        """
+        Get all earnings for a specific date from database.
+
+        Args:
+            date: Target date (YYYY-MM-DD)
+
+        Returns:
+            List of dicts with symbol, report_date, timing, name
+        """
+        date = validate_date(date)
+
+        with self._pool.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT ticker as symbol, earnings_date as report_date, timing
+                FROM earnings_calendar
+                WHERE earnings_date = ?
+                ORDER BY ticker
+                """,
+                (date,)
+            )
+            return [
+                {
+                    "symbol": row["symbol"],
+                    "report_date": row["report_date"],
+                    "timing": row["timing"],
+                    "name": "",  # Not stored in DB
+                }
+                for row in cursor.fetchall()
+            ]
+
+    def get_upcoming_earnings(self, days: int = 5) -> List[Dict[str, Any]]:
+        """
+        Get earnings for next N days from database.
+
+        Args:
+            days: Number of days to look ahead (default 5)
+
+        Returns:
+            List of dicts with symbol, report_date, timing, name
+        """
+        with self._pool.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT ticker as symbol, earnings_date as report_date, timing
+                FROM earnings_calendar
+                WHERE earnings_date >= date('now')
+                  AND earnings_date <= date('now', '+' || ? || ' days')
+                ORDER BY earnings_date, ticker
+                """,
+                (days,)
+            )
+            return [
+                {
+                    "symbol": row["symbol"],
+                    "report_date": row["report_date"],
+                    "timing": row["timing"],
+                    "name": "",  # Not stored in DB
+                }
+                for row in cursor.fetchall()
+            ]
+
     def count_moves(self, ticker: str) -> int:
         """Count historical moves for ticker."""
         ticker = validate_ticker(ticker)
