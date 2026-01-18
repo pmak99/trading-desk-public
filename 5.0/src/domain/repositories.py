@@ -302,6 +302,52 @@ class HistoricalMovesRepository:
                 return {"earnings_date": row["earnings_date"], "timing": row["timing"]}
             return None
 
+    def upsert_earnings_calendar(self, earnings: List[Dict[str, Any]]) -> int:
+        """
+        Upsert earnings calendar records from Alpha Vantage.
+
+        Args:
+            earnings: List of earnings records with symbol, report_date, timing
+
+        Returns:
+            Number of records upserted
+        """
+        if not earnings:
+            return 0
+
+        count = 0
+        with self._pool.get_connection() as conn:
+            for record in earnings:
+                try:
+                    ticker = record.get("symbol", "").upper().strip()
+                    report_date = record.get("report_date", "")
+                    timing = record.get("fiscalDateEnding") or "AMC"  # Default to AMC if unknown
+
+                    # Skip invalid records
+                    if not ticker or not report_date:
+                        continue
+                    if not TICKER_PATTERN.match(ticker):
+                        continue
+                    if not DATE_PATTERN.match(report_date):
+                        continue
+
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO earnings_calendar
+                        (ticker, earnings_date, timing, confirmed, updated_at)
+                        VALUES (?, ?, ?, 0, datetime('now'))
+                        """,
+                        (ticker, report_date, timing)
+                    )
+                    count += 1
+                except Exception as e:
+                    log("debug", "Skipped earnings record", ticker=ticker, error=str(e))
+                    continue
+
+            conn.commit()
+            log("info", "Upserted earnings calendar", count=count)
+        return count
+
     def count_moves(self, ticker: str) -> int:
         """Count historical moves for ticker."""
         ticker = validate_ticker(ticker)

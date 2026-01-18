@@ -1444,13 +1444,17 @@ class JobRunner:
                 metrics.count("ivcrush.job.api_empty", {"job": "calendar_sync", "api": "alphavantage"})
                 return {"status": "warning", "synced": 0, "note": "Empty calendar from API"}
 
+            # Actually store the earnings to the database
+            repo = HistoricalMovesRepository(settings.DB_PATH)
+            upserted = repo.upsert_earnings_calendar(earnings)
+
             # Record metrics
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
             metrics.record("ivcrush.job.duration", duration_ms, {"job": "calendar_sync"})
-            metrics.gauge("ivcrush.job.earnings_synced", len(earnings), {"job": "calendar_sync"})
+            metrics.gauge("ivcrush.job.earnings_synced", upserted, {"job": "calendar_sync"})
 
-            log("info", "Calendar sync complete", synced=len(earnings))
-            return {"status": "success", "synced": len(earnings)}
+            log("info", "Calendar sync complete", fetched=len(earnings), upserted=upserted)
+            return {"status": "success", "fetched": len(earnings), "synced": upserted}
         except Exception as e:
             log("error", "Calendar sync failed", error=str(e), job="calendar_sync")
             return {"status": "error", "error": str(e)}
