@@ -1358,8 +1358,16 @@ async def _scan_tickers_for_whisper(
     vrp_cache = get_vrp_cache()
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_ANALYSIS)
 
+    # Filter out invalid tickers (e.g., COF-PI preferred stocks, warrants)
+    # These don't have options and can't be analyzed for IV crush
+    valid_upcoming = [e for e in upcoming if validate_ticker(e["symbol"])]
+    invalid_count = len(upcoming) - len(valid_upcoming)
+    if invalid_count > 0:
+        invalid_tickers = [e["symbol"] for e in upcoming if not validate_ticker(e["symbol"])]
+        log("debug", "Filtered invalid tickers", count=invalid_count, tickers=invalid_tickers[:5])
+
     # Limit to 30 tickers
-    tickers_to_scan = upcoming[:30]
+    tickers_to_scan = valid_upcoming[:30]
 
     # Batch fetch all historical moves in ONE query (30 queries → 1)
     all_tickers = [e["symbol"] for e in tickers_to_scan]

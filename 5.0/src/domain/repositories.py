@@ -29,6 +29,22 @@ def validate_ticker(ticker: str) -> str:
     return ticker
 
 
+def is_valid_ticker(ticker: str) -> bool:
+    """
+    Check if ticker format is valid without raising exception.
+
+    Filters out preferred stocks (COF-PI), warrants (ACHR+), units (SPAC.U),
+    and other non-standard tickers that don't have options.
+
+    Returns:
+        True if ticker is valid for options analysis, False otherwise.
+    """
+    if not ticker:
+        return False
+    ticker = ticker.upper().strip()
+    return bool(TICKER_PATTERN.match(ticker))
+
+
 def validate_date(date_str: str) -> str:
     """Validate date string format."""
     if not DATE_PATTERN.match(date_str):
