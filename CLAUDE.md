@@ -269,7 +269,7 @@ DB_PATH=data/ivcrush.db  # Database location
 ### System Operations
 | Command | Arguments | Purpose |
 |---------|-----------|---------|
-| `/prime` | `[DATE]` | Pre-cache sentiment for week's earnings (run 7-8 AM) |
+| `/prime` | `[DATE]` | Sync calendar + pre-cache sentiment for week's earnings (run 7-8 AM) |
 | `/health` | none | Verify MCP connections, market status, API budgets |
 | `/maintenance` | `[task]` | Backups, cleanup, sync calendar, integrity checks |
 
@@ -290,7 +290,7 @@ DB_PATH=data/ivcrush.db  # Database location
 ### Typical Daily Workflow
 ```
 7:00 AM   /health              → Verify all systems operational
-7:15 AM   /prime               → Pre-cache sentiment (predictable cost)
+7:15 AM   /prime               → Sync calendar + pre-cache sentiment
 9:30 AM   /whisper             → Instant results from cache
           /analyze NVDA        → Deep dive on best candidate
           Execute in Fidelity  → Human approval required
@@ -300,6 +300,7 @@ Evening   /backfill --pending  → Record outcomes for completed earnings
 **Command Features:**
 - All commands show progress updates (`[1/N] Step description...`)
 - No tool permission prompts except for Perplexity API calls
+- `/prime` auto-syncs stale earnings dates (>24h old) before caching sentiment
 - `/whisper` shows ALL tickers including REJECT liquidity (marked 🚫)
 - Sentiment cached after `/prime` for instant subsequent commands
 - **TRR warnings** displayed for HIGH tail risk tickers (⚠️ badge + max 50 contracts)
