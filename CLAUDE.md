@@ -174,7 +174,7 @@ TRR = Max Historical Move / Average Historical Move
 Historical post-earnings price movements for VRP calculation.
 - `ticker`, `earnings_date`, `close_before`, `close_after`
 - `gap_move_pct`, `intraday_move_pct`, `direction` (UP/DOWN)
-- 4,926 records, used to calculate historical average moves per ticker
+- 5,675 records, used to calculate historical average moves per ticker
 
 ### trade_journal
 Actual executed trades imported from Fidelity CSV exports.
@@ -411,7 +411,7 @@ curl -s "https://your-cloud-run-url.run.app/api/budget" -H "X-API-Key: $API_KEY"
 ## Testing
 
 ```bash
-# 2.0 tests (509 pass)
+# 2.0 tests (514 pass)
 cd 2.0 && ./venv/bin/python -m pytest tests/ -v
 
 # 4.0 tests (186 pass)
