@@ -3,7 +3,7 @@
 from .vrp import calculate_vrp, get_vrp_tier
 from .liquidity import classify_liquidity_tier
 from .scoring import calculate_score, apply_sentiment_modifier
-from .repositories import HistoricalMovesRepository, SentimentCacheRepository
+from .repositories import HistoricalMovesRepository, SentimentCacheRepository, VRPCacheRepository
 from .strategies import Strategy, generate_strategies
 from .position_sizing import half_kelly, calculate_position_size
 from .implied_move import (
@@ -28,6 +28,7 @@ __all__ = [
     "apply_sentiment_modifier",
     "HistoricalMovesRepository",
     "SentimentCacheRepository",
+    "VRPCacheRepository",
     "Strategy",
     "generate_strategies",
     "half_kelly",

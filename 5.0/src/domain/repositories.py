@@ -172,6 +172,68 @@ class HistoricalMovesRepository:
                 results.append(d)
             return results
 
+    def get_moves_batch(self, tickers: List[str], limit: int = 12) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Get historical moves for multiple tickers in a single query.
+
+        Reduces N+1 query pattern (30 separate queries → 1 batch query).
+        Returns dict mapping ticker to list of moves.
+
+        Args:
+            tickers: List of stock symbols
+            limit: Max moves per ticker (1-100, default 12)
+
+        Returns:
+            Dict mapping ticker -> list of move dicts
+
+        Example:
+            moves = repo.get_moves_batch(["AAPL", "NVDA", "MSFT"])
+            aapl_moves = moves.get("AAPL", [])
+        """
+        if not tickers:
+            return {}
+
+        # Validate all tickers
+        validated_tickers = [validate_ticker(t) for t in tickers]
+        limit = validate_limit(limit)
+
+        # Build placeholders for IN clause
+        placeholders = ",".join("?" for _ in validated_tickers)
+
+        with self._pool.get_connection() as conn:
+            # Use window function to get top N moves per ticker
+            cursor = conn.execute(
+                f"""
+                WITH ranked AS (
+                    SELECT ticker, earnings_date, gap_move_pct, intraday_move_pct,
+                           prev_close, earnings_close,
+                           CASE WHEN gap_move_pct >= 0 THEN 'UP' ELSE 'DOWN' END as direction,
+                           ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY earnings_date DESC) as rn
+                    FROM historical_moves
+                    WHERE ticker IN ({placeholders})
+                )
+                SELECT ticker, earnings_date, gap_move_pct, intraday_move_pct,
+                       prev_close, earnings_close, direction
+                FROM ranked
+                WHERE rn <= ?
+                ORDER BY ticker, earnings_date DESC
+                """,
+                (*validated_tickers, limit)
+            )
+            rows = cursor.fetchall()
+
+            # Group by ticker
+            result: Dict[str, List[Dict[str, Any]]] = {t: [] for t in validated_tickers}
+            for row in rows:
+                d = dict(row)
+                ticker = d["ticker"]
+                d['close_before'] = d.pop('prev_close', None)
+                d['close_after'] = d.pop('earnings_close', None)
+                if ticker in result:
+                    result[ticker].append(d)
+
+            return result
+
     def get_average_move(self, ticker: str, metric: str = "intraday") -> Optional[float]:
         """
         Get average absolute move for VRP calculation.
@@ -487,3 +549,226 @@ class SentimentCacheRepository:
             count = cursor.rowcount
             conn.commit()
             return count
+
+
+class VRPCacheRepository:
+    """
+    Repository for cached VRP (Volatility Risk Premium) calculations.
+
+    Reduces Tradier API calls by caching implied move and VRP data with smart TTL:
+    - 6 hours when earnings >3 days away (options prices stable)
+    - 1 hour when earnings ≤3 days (need fresher data near expiry)
+
+    Expected impact: 90 → 10 API calls per /whisper scan (89% reduction).
+    """
+
+    # TTL based on earnings proximity
+    TTL_HOURS_FAR = 6       # earnings > 3 days away
+    TTL_HOURS_NEAR = 1      # earnings <= 3 days away
+    NEAR_THRESHOLD_DAYS = 3
+
+    def __init__(self, db_path: str = "data/ivcrush.db"):
+        self.db_path = db_path
+        self._pool = get_pool(db_path)
+        self._init_table()
+
+    def _init_table(self):
+        """Create vrp_cache table if not exists."""
+        with self._pool.get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS vrp_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    earnings_date TEXT NOT NULL,
+                    implied_move_pct REAL NOT NULL,
+                    vrp_ratio REAL NOT NULL,
+                    vrp_tier TEXT NOT NULL,
+                    historical_mean REAL,
+                    price REAL,
+                    expiration TEXT,
+                    used_real_data INTEGER,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    UNIQUE(ticker, earnings_date)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_vrp_ticker_date
+                ON vrp_cache(ticker, earnings_date)
+            """)
+            conn.commit()
+
+    def _calculate_ttl_hours(self, earnings_date: str) -> int:
+        """
+        Calculate TTL based on earnings proximity.
+
+        Smart TTL:
+        - Far (>3 days): 6 hours - options prices are stable
+        - Near (≤3 days): 1 hour - need fresher data as earnings approach
+
+        Uses Eastern Time (market timezone) for consistent behavior
+        across local development and Cloud Run (UTC).
+        """
+        try:
+            from datetime import datetime
+            from src.core.config import today_et
+            earnings = datetime.strptime(earnings_date, "%Y-%m-%d").date()
+            today = datetime.strptime(today_et(), "%Y-%m-%d").date()
+            days_until = (earnings - today).days
+
+            if days_until <= self.NEAR_THRESHOLD_DAYS:
+                return self.TTL_HOURS_NEAR
+            return self.TTL_HOURS_FAR
+        except (ValueError, TypeError):
+            # Default to shorter TTL if date parsing fails
+            return self.TTL_HOURS_NEAR
+
+    def get_vrp(self, ticker: str, earnings_date: str) -> Optional[Dict[str, Any]]:
+        """
+        Get cached VRP data for ticker.
+
+        Args:
+            ticker: Stock symbol (1-5 uppercase letters)
+            earnings_date: Earnings date (YYYY-MM-DD)
+
+        Returns:
+            VRP data dict if cached and not expired, None otherwise
+        """
+        ticker = validate_ticker(ticker)
+        earnings_date = validate_date(earnings_date)
+
+        with self._pool.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT ticker, earnings_date, implied_move_pct, vrp_ratio, vrp_tier,
+                       historical_mean, price, expiration, used_real_data,
+                       created_at, expires_at
+                FROM vrp_cache
+                WHERE ticker = ? AND earnings_date = ?
+                  AND expires_at > datetime('now')
+                """,
+                (ticker, earnings_date)
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "ticker": row["ticker"],
+                    "earnings_date": row["earnings_date"],
+                    "implied_move_pct": row["implied_move_pct"],
+                    "vrp_ratio": row["vrp_ratio"],
+                    "vrp_tier": row["vrp_tier"],
+                    "historical_mean": row["historical_mean"],
+                    "price": row["price"],
+                    "expiration": row["expiration"],
+                    "used_real_data": bool(row["used_real_data"]),
+                    "from_cache": True,
+                }
+            return None
+
+    def save_vrp(
+        self,
+        ticker: str,
+        earnings_date: str,
+        vrp_data: Dict[str, Any],
+    ) -> bool:
+        """
+        Cache VRP data.
+
+        Args:
+            ticker: Stock symbol (1-5 uppercase letters)
+            earnings_date: Earnings date (YYYY-MM-DD)
+            vrp_data: VRP dict with implied_move_pct, vrp_ratio, vrp_tier, etc.
+
+        Returns:
+            True if saved successfully
+        """
+        ticker = validate_ticker(ticker)
+        earnings_date = validate_date(earnings_date)
+
+        ttl_hours = self._calculate_ttl_hours(earnings_date)
+
+        with self._pool.get_connection() as conn:
+            try:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO vrp_cache
+                    (ticker, earnings_date, implied_move_pct, vrp_ratio, vrp_tier,
+                     historical_mean, price, expiration, used_real_data,
+                     created_at, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
+                            datetime('now', '+' || ? || ' hours'))
+                    """,
+                    (
+                        ticker,
+                        earnings_date,
+                        vrp_data.get("implied_move_pct"),
+                        vrp_data.get("vrp_ratio"),
+                        vrp_data.get("vrp_tier"),
+                        vrp_data.get("historical_mean"),
+                        vrp_data.get("price"),
+                        vrp_data.get("expiration"),
+                        1 if vrp_data.get("used_real_data") else 0,
+                        ttl_hours,
+                    )
+                )
+                conn.commit()
+                log("debug", "Cached VRP", ticker=ticker, ttl_hours=ttl_hours)
+                return True
+            except sqlite3.IntegrityError:
+                # Duplicate is OK - idempotent
+                return True
+            except sqlite3.Error as e:
+                log("error", "Failed to cache VRP", error=str(e), ticker=ticker)
+                raise
+
+    def clear_expired(self) -> int:
+        """Clear expired cache entries. Returns count deleted."""
+        with self._pool.get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM vrp_cache WHERE expires_at < datetime('now')"
+            )
+            count = cursor.rowcount
+            conn.commit()
+            if count > 0:
+                log("info", "Cleared expired VRP cache", count=count)
+            return count
+
+    def clear_all(self, ticker: Optional[str] = None) -> int:
+        """
+        Clear cache entries.
+
+        Args:
+            ticker: If provided, only clear for this ticker. Otherwise clear all.
+
+        Returns:
+            Count of deleted entries
+        """
+        with self._pool.get_connection() as conn:
+            if ticker:
+                ticker = validate_ticker(ticker)
+                cursor = conn.execute(
+                    "DELETE FROM vrp_cache WHERE ticker = ?",
+                    (ticker,)
+                )
+            else:
+                cursor = conn.execute("DELETE FROM vrp_cache")
+            count = cursor.rowcount
+            conn.commit()
+            return count
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for monitoring."""
+        with self._pool.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT
+                    COUNT(*) as total_entries,
+                    SUM(CASE WHEN expires_at > datetime('now') THEN 1 ELSE 0 END) as valid_entries,
+                    SUM(CASE WHEN expires_at <= datetime('now') THEN 1 ELSE 0 END) as expired_entries
+                FROM vrp_cache
+            """)
+            row = cursor.fetchone()
+            return {
+                "total_entries": row[0] or 0,
+                "valid_entries": row[1] or 0,
+                "expired_entries": row[2] or 0,
+            }
