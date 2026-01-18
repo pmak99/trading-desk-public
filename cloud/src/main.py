@@ -966,8 +966,37 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
                 except Exception as e:
                     log("debug", "Earnings validation failed, using cached date", ticker=ticker, error=str(e))
             else:
-                target_date = today_et()
-                log("warn", "No earnings date in calendar, using today", ticker=ticker)
+                # No earnings in calendar - query Alpha Vantage directly
+                log("info", "No earnings in calendar, querying Alpha Vantage", ticker=ticker)
+                try:
+                    alphavantage = get_alphavantage()
+                    av_earnings = await alphavantage.get_earnings_calendar(symbol=ticker)
+                    if av_earnings:
+                        av_date = av_earnings[0].get("report_date")
+                        if av_date:
+                            target_date = av_date
+                            log("info", "Found earnings from Alpha Vantage", ticker=ticker, date=av_date)
+                            # Store in calendar for future use
+                            repo.upsert_earnings_calendar(av_earnings)
+                        else:
+                            return {
+                                "ticker": ticker,
+                                "status": "no_earnings",
+                                "message": f"No upcoming earnings found for {ticker}",
+                            }
+                    else:
+                        return {
+                            "ticker": ticker,
+                            "status": "no_earnings",
+                            "message": f"No upcoming earnings found for {ticker}",
+                        }
+                except Exception as e:
+                    log("error", "Failed to fetch earnings from Alpha Vantage", ticker=ticker, error=str(e))
+                    return {
+                        "ticker": ticker,
+                        "status": "no_earnings",
+                        "message": f"Could not determine earnings date for {ticker}",
+                    }
 
         # Get current price from Tradier (more reliable than Yahoo in cloud)
         tradier = get_tradier()
