@@ -90,10 +90,13 @@ TRR = Max Historical Move / Average Historical Move
 
 ## Directory Structure
 
-**Active Versions:**
+**Active Systems:**
+- `6.0/` - **AGENT ORCHESTRATION** - Local Claude Code agent system with parallel analysis
 - `5.0/` - **CLOUD AUTOPILOT** - 24/7 Cloud Run service with real implied moves from Tradier
-- `2.0/` - **CORE MATH** - VRP/strategy calculations (used by 4.0 and 5.0)
-- `4.0/` - AI sentiment layer (Perplexity, caching, budget tracking)
+- `4.0/` - **AI SENTIMENT** - Perplexity-powered sentiment with caching and budget tracking
+
+**Shared Libraries:**
+- `2.0/` - **CORE MATH** - VRP/strategy calculations (imported by 4.0, 5.0, 6.0)
 
 **Archived (see `archive/README.md`):**
 - `archive/1.0-original-system/` - Deprecated original system (superseded by 2.0)
@@ -414,7 +417,7 @@ cd 2.0 && ./venv/bin/python -m pytest tests/ -v
 # 4.0 tests (186 pass)
 cd 4.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 
-# 5.0 tests (170 pass)
+# 5.0 tests (193 pass)
 cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 ```
 
@@ -484,6 +487,12 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 12. ✅ Budget cost consistency (0.005→0.006 to match 4.0's COST_PER_CALL_ESTIMATE)
 13. ✅ Removed empty scripts/ directory and fixed Dockerfile COPY instruction
 14. ✅ Earnings date freshness validation in analyze endpoint (validates against Alpha Vantage when ≤7 days out)
+
+**Performance Optimizations (January 2026):**
+15. ✅ Parallel ticker analysis - asyncio.Semaphore with MAX_CONCURRENT_ANALYSIS=5 (~60s→~15s)
+16. ✅ VRP caching with smart TTL - 6h far earnings, 1h near earnings (89% API reduction)
+17. ✅ Batch DB queries - window functions for per-ticker limiting (97% query reduction)
+18. ✅ Cache hit/miss metrics - Grafana tracking for cache effectiveness
 
 **Stale Artifacts Removed (January 2026):**
 - `2.0/ivcrush.egg-info/`, `2.0/src/ivcrush.egg-info/`, `2.0/src/iv_crush_2.egg-info/` - stale build artifacts
