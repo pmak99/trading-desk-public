@@ -224,11 +224,22 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for complete instructions.
 ### Quick Deploy
 
 ```bash
-gcloud builds submit --tag gcr.io/your-gcp-project/trading-desk
+# Build and push to Artifact Registry (Container Registry is deprecated)
+gcloud builds submit --tag us-docker.pkg.dev/your-gcp-project/gcr.io/trading-desk:latest \
+  --project=your-gcp-project
+
+# Deploy to Cloud Run
 gcloud run deploy trading-desk \
-  --image gcr.io/your-gcp-project/trading-desk \
-  --region us-east1
+  --image us-docker.pkg.dev/your-gcp-project/gcr.io/trading-desk:latest \
+  --region us-east1 \
+  --project your-gcp-project
+
+# IMPORTANT: Run calendar-sync after deployment (database is ephemeral)
+curl -X POST "https://your-cloud-run-url.run.app/dispatch?force=calendar-sync" \
+  -H "X-API-Key: $API_KEY"
 ```
+
+**Note:** Cloud Run instances use ephemeral SQLite. After each deployment, run `calendar-sync` to populate the earnings calendar from Alpha Vantage.
 
 ## Budget
 

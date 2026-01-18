@@ -36,6 +36,7 @@ from src.domain import (
     VRPCacheRepository,
     normalize_ticker,
     validate_ticker,
+    is_valid_ticker,
     InvalidTickerError,
     TICKER_ALIASES,
 )
@@ -1387,10 +1388,10 @@ async def _scan_tickers_for_whisper(
 
     # Filter out invalid tickers (e.g., COF-PI preferred stocks, warrants)
     # These don't have options and can't be analyzed for IV crush
-    valid_upcoming = [e for e in upcoming if validate_ticker(e["symbol"])]
+    valid_upcoming = [e for e in upcoming if is_valid_ticker(e["symbol"])]
     invalid_count = len(upcoming) - len(valid_upcoming)
     if invalid_count > 0:
-        invalid_tickers = [e["symbol"] for e in upcoming if not validate_ticker(e["symbol"])]
+        invalid_tickers = [e["symbol"] for e in upcoming if not is_valid_ticker(e["symbol"])]
         log("debug", "Filtered invalid tickers", count=invalid_count, tickers=invalid_tickers[:5])
 
     # Limit to 100 tickers (increased from 30 to capture more opportunities)

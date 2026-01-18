@@ -535,3 +535,397 @@ def test_vrp_cache_ttl_invalid_date(db_path):
     # Empty string - should default to NEAR TTL
     ttl = repo._calculate_ttl_hours("")
     assert ttl == VRPCacheRepository.TTL_HOURS_NEAR
+
+
+# Input Validation Tests
+
+from src.domain.repositories import is_valid_ticker, validate_days
+
+
+class TestIsValidTicker:
+    """Tests for is_valid_ticker boolean validation function."""
+
+    def test_valid_standard_tickers(self):
+        """Standard tickers should be valid."""
+        assert is_valid_ticker("AAPL") is True
+        assert is_valid_ticker("NVDA") is True
+        assert is_valid_ticker("A") is True  # Single letter
+        assert is_valid_ticker("META") is True
+
+    def test_valid_dotted_tickers(self):
+        """Dotted tickers like BRK.B should be valid."""
+        assert is_valid_ticker("BRK.B") is True
+        assert is_valid_ticker("BF.A") is True
+        assert is_valid_ticker("BRK.A") is True
+
+    def test_invalid_preferred_stocks(self):
+        """Preferred stocks with dash should be invalid."""
+        assert is_valid_ticker("COF-PI") is False
+        assert is_valid_ticker("BAC-PB") is False
+        assert is_valid_ticker("WFC-PL") is False
+
+    def test_invalid_warrants(self):
+        """Warrants with + should be invalid."""
+        assert is_valid_ticker("ACHR+") is False
+        assert is_valid_ticker("SPAC+") is False
+
+    def test_dotted_suffixes_valid(self):
+        """Dotted suffixes (.U, .WS) match the pattern for BRK.B style tickers."""
+        # These match the regex pattern - if filtering needed, do it elsewhere
+        assert is_valid_ticker("SPAC.U") is True  # Unit shares
+        assert is_valid_ticker("TEST.W") is True  # Some warrants
+
+    def test_invalid_too_long(self):
+        """Tickers longer than 5 chars should be invalid."""
+        assert is_valid_ticker("TOOLONG") is False
+        assert is_valid_ticker("ABCDEF") is False
+
+    def test_invalid_empty_or_none(self):
+        """Empty strings should be invalid."""
+        assert is_valid_ticker("") is False
+        assert is_valid_ticker("   ") is False
+
+    def test_case_insensitive(self):
+        """Should normalize to uppercase."""
+        assert is_valid_ticker("aapl") is True
+        assert is_valid_ticker("Nvda") is True
+
+    def test_whitespace_handling(self):
+        """Should strip whitespace."""
+        assert is_valid_ticker(" AAPL ") is True
+        assert is_valid_ticker("  NVDA") is True
+
+
+class TestValidateDays:
+    """Tests for validate_days bounds checking function."""
+
+    def test_valid_days(self):
+        """Days within bounds should pass."""
+        assert validate_days(1) == 1
+        assert validate_days(5) == 5
+        assert validate_days(30) == 30
+        assert validate_days(365) == 365
+
+    def test_invalid_zero(self):
+        """Zero days should raise ValueError."""
+        with pytest.raises(ValueError) as exc:
+            validate_days(0)
+        assert "must be 1-365" in str(exc.value)
+
+    def test_invalid_negative(self):
+        """Negative days should raise ValueError."""
+        with pytest.raises(ValueError) as exc:
+            validate_days(-1)
+        assert "must be 1-365" in str(exc.value)
+
+    def test_invalid_too_large(self):
+        """Days > 365 should raise ValueError."""
+        with pytest.raises(ValueError) as exc:
+            validate_days(366)
+        assert "must be 1-365" in str(exc.value)
+
+        with pytest.raises(ValueError) as exc:
+            validate_days(1000)
+        assert "must be 1-365" in str(exc.value)
+
+
+# Earnings Calendar Tests
+
+@pytest.fixture
+def db_with_earnings_calendar():
+    """Create temp database with earnings_calendar table."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+
+    conn = sqlite3.connect(path)
+    # Create required tables
+    conn.execute("""
+        CREATE TABLE historical_moves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            earnings_date DATE NOT NULL,
+            prev_close REAL,
+            earnings_open REAL,
+            earnings_high REAL,
+            earnings_low REAL,
+            earnings_close REAL,
+            intraday_move_pct REAL,
+            gap_move_pct REAL,
+            close_move_pct REAL,
+            UNIQUE(ticker, earnings_date)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE earnings_calendar (
+            ticker TEXT NOT NULL,
+            earnings_date DATE NOT NULL,
+            timing TEXT,
+            confirmed INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (ticker, earnings_date)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    yield path
+    os.unlink(path)
+
+
+class TestUpsertEarningsCalendar:
+    """Tests for upsert_earnings_calendar method."""
+
+    def test_upsert_empty_list(self, db_with_earnings_calendar):
+        """Empty list should return 0."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+        count = repo.upsert_earnings_calendar([])
+        assert count == 0
+
+    def test_upsert_valid_records(self, db_with_earnings_calendar):
+        """Valid records should be inserted."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        earnings = [
+            {"symbol": "AAPL", "report_date": "2025-01-20", "timing": "AMC"},
+            {"symbol": "NVDA", "report_date": "2025-01-21", "timing": "BMO"},
+            {"symbol": "MSFT", "report_date": "2025-01-22", "timing": "UNKNOWN"},
+        ]
+
+        count = repo.upsert_earnings_calendar(earnings)
+        assert count == 3
+
+    def test_upsert_filters_invalid_tickers(self, db_with_earnings_calendar):
+        """Invalid tickers should be skipped."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        earnings = [
+            {"symbol": "AAPL", "report_date": "2025-01-20", "timing": "AMC"},
+            {"symbol": "COF-PI", "report_date": "2025-01-21", "timing": "BMO"},  # Preferred - skip
+            {"symbol": "ACHR+", "report_date": "2025-01-22", "timing": "BMO"},   # Warrant - skip
+            {"symbol": "NVDA", "report_date": "2025-01-23", "timing": "AMC"},
+        ]
+
+        count = repo.upsert_earnings_calendar(earnings)
+        assert count == 2  # Only AAPL and NVDA
+
+    def test_upsert_filters_invalid_dates(self, db_with_earnings_calendar):
+        """Invalid dates should be skipped."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        earnings = [
+            {"symbol": "AAPL", "report_date": "2025-01-20", "timing": "AMC"},
+            {"symbol": "NVDA", "report_date": "invalid-date", "timing": "BMO"},  # Invalid - skip
+            {"symbol": "MSFT", "report_date": "", "timing": "BMO"},              # Empty - skip
+        ]
+
+        count = repo.upsert_earnings_calendar(earnings)
+        assert count == 1  # Only AAPL
+
+    def test_upsert_handles_missing_fields(self, db_with_earnings_calendar):
+        """Records with missing fields should be skipped."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        earnings = [
+            {"symbol": "AAPL", "report_date": "2025-01-20", "timing": "AMC"},
+            {"report_date": "2025-01-21", "timing": "BMO"},           # Missing symbol
+            {"symbol": "MSFT", "timing": "BMO"},                       # Missing date
+        ]
+
+        count = repo.upsert_earnings_calendar(earnings)
+        assert count == 1  # Only AAPL
+
+    def test_upsert_replaces_existing(self, db_with_earnings_calendar):
+        """Existing records should be updated (INSERT OR REPLACE)."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        # Insert first
+        earnings1 = [{"symbol": "AAPL", "report_date": "2025-01-20", "timing": "BMO"}]
+        count1 = repo.upsert_earnings_calendar(earnings1)
+        assert count1 == 1
+
+        # Update with new timing
+        earnings2 = [{"symbol": "AAPL", "report_date": "2025-01-20", "timing": "AMC"}]
+        count2 = repo.upsert_earnings_calendar(earnings2)
+        assert count2 == 1
+
+        # Verify only one record exists with updated timing
+        result = repo.get_earnings_by_date("2025-01-20")
+        assert len(result) == 1
+        assert result[0]["timing"] == "AMC"
+
+    def test_upsert_handles_none_timing(self, db_with_earnings_calendar):
+        """None timing should default to UNKNOWN."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        earnings = [{"symbol": "AAPL", "report_date": "2025-01-20", "timing": None}]
+        count = repo.upsert_earnings_calendar(earnings)
+        assert count == 1
+
+        result = repo.get_earnings_by_date("2025-01-20")
+        assert result[0]["timing"] == "UNKNOWN"
+
+
+class TestGetEarningsByDate:
+    """Tests for get_earnings_by_date method."""
+
+    def test_get_earnings_found(self, db_with_earnings_calendar):
+        """Should return earnings for specific date."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        earnings = [
+            {"symbol": "AAPL", "report_date": "2025-01-20", "timing": "AMC"},
+            {"symbol": "NVDA", "report_date": "2025-01-20", "timing": "BMO"},
+            {"symbol": "MSFT", "report_date": "2025-01-21", "timing": "AMC"},
+        ]
+        repo.upsert_earnings_calendar(earnings)
+
+        result = repo.get_earnings_by_date("2025-01-20")
+
+        assert len(result) == 2
+        symbols = [r["symbol"] for r in result]
+        assert "AAPL" in symbols
+        assert "NVDA" in symbols
+
+    def test_get_earnings_not_found(self, db_with_earnings_calendar):
+        """Should return empty list for date with no earnings."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        result = repo.get_earnings_by_date("2025-01-20")
+        assert result == []
+
+    def test_get_earnings_invalid_date(self, db_with_earnings_calendar):
+        """Should raise ValueError for invalid date format."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        with pytest.raises(ValueError) as exc:
+            repo.get_earnings_by_date("invalid-date")
+        assert "Invalid date format" in str(exc.value)
+
+    def test_get_earnings_returns_correct_format(self, db_with_earnings_calendar):
+        """Should return dicts with expected keys."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        earnings = [{"symbol": "AAPL", "report_date": "2025-01-20", "timing": "AMC"}]
+        repo.upsert_earnings_calendar(earnings)
+
+        result = repo.get_earnings_by_date("2025-01-20")
+
+        assert len(result) == 1
+        assert "symbol" in result[0]
+        assert "report_date" in result[0]
+        assert "timing" in result[0]
+        assert "name" in result[0]
+        assert result[0]["name"] == ""  # Not stored in DB
+
+
+class TestGetUpcomingEarnings:
+    """Tests for get_upcoming_earnings method."""
+
+    def test_get_upcoming_found(self, db_with_earnings_calendar):
+        """Should return earnings within date range."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        earnings = [
+            {"symbol": "AAPL", "report_date": "2025-01-20", "timing": "AMC"},
+            {"symbol": "NVDA", "report_date": "2025-01-22", "timing": "BMO"},
+            {"symbol": "MSFT", "report_date": "2025-01-25", "timing": "AMC"},
+            {"symbol": "GOOGL", "report_date": "2025-01-30", "timing": "AMC"},  # Outside 5 days
+        ]
+        repo.upsert_earnings_calendar(earnings)
+
+        result = repo.get_upcoming_earnings("2025-01-20", days=5)
+
+        assert len(result) == 3
+        symbols = [r["symbol"] for r in result]
+        assert "AAPL" in symbols
+        assert "NVDA" in symbols
+        assert "MSFT" in symbols
+        assert "GOOGL" not in symbols
+
+    def test_get_upcoming_empty_range(self, db_with_earnings_calendar):
+        """Should return empty list for date range with no earnings."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        result = repo.get_upcoming_earnings("2025-01-20", days=5)
+        assert result == []
+
+    def test_get_upcoming_default_days(self, db_with_earnings_calendar):
+        """Should default to 5 days."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        earnings = [
+            {"symbol": "AAPL", "report_date": "2025-01-20", "timing": "AMC"},
+            {"symbol": "NVDA", "report_date": "2025-01-25", "timing": "BMO"},  # Exactly 5 days
+            {"symbol": "MSFT", "report_date": "2025-01-26", "timing": "AMC"},  # 6 days - excluded
+        ]
+        repo.upsert_earnings_calendar(earnings)
+
+        result = repo.get_upcoming_earnings("2025-01-20")  # No days specified
+
+        assert len(result) == 2
+        symbols = [r["symbol"] for r in result]
+        assert "AAPL" in symbols
+        assert "NVDA" in symbols
+        assert "MSFT" not in symbols
+
+    def test_get_upcoming_custom_days(self, db_with_earnings_calendar):
+        """Should respect custom days parameter."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        earnings = [
+            {"symbol": "AAPL", "report_date": "2025-01-20", "timing": "AMC"},
+            {"symbol": "NVDA", "report_date": "2025-01-22", "timing": "BMO"},
+            {"symbol": "MSFT", "report_date": "2025-01-25", "timing": "AMC"},
+        ]
+        repo.upsert_earnings_calendar(earnings)
+
+        result = repo.get_upcoming_earnings("2025-01-20", days=2)
+
+        assert len(result) == 2
+        symbols = [r["symbol"] for r in result]
+        assert "AAPL" in symbols
+        assert "NVDA" in symbols
+        assert "MSFT" not in symbols
+
+    def test_get_upcoming_invalid_date(self, db_with_earnings_calendar):
+        """Should raise ValueError for invalid date format."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        with pytest.raises(ValueError) as exc:
+            repo.get_upcoming_earnings("invalid-date")
+        assert "Invalid date format" in str(exc.value)
+
+    def test_get_upcoming_invalid_days(self, db_with_earnings_calendar):
+        """Should raise ValueError for invalid days parameter."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        with pytest.raises(ValueError) as exc:
+            repo.get_upcoming_earnings("2025-01-20", days=0)
+        assert "must be 1-365" in str(exc.value)
+
+        with pytest.raises(ValueError) as exc:
+            repo.get_upcoming_earnings("2025-01-20", days=-1)
+        assert "must be 1-365" in str(exc.value)
+
+        with pytest.raises(ValueError) as exc:
+            repo.get_upcoming_earnings("2025-01-20", days=366)
+        assert "must be 1-365" in str(exc.value)
+
+    def test_get_upcoming_ordered_by_date_and_ticker(self, db_with_earnings_calendar):
+        """Should return results ordered by date, then ticker."""
+        repo = HistoricalMovesRepository(db_path=db_with_earnings_calendar)
+
+        # Insert in random order
+        earnings = [
+            {"symbol": "MSFT", "report_date": "2025-01-21", "timing": "AMC"},
+            {"symbol": "AAPL", "report_date": "2025-01-20", "timing": "AMC"},
+            {"symbol": "NVDA", "report_date": "2025-01-20", "timing": "BMO"},
+        ]
+        repo.upsert_earnings_calendar(earnings)
+
+        result = repo.get_upcoming_earnings("2025-01-20", days=5)
+
+        # Should be: AAPL (1/20), NVDA (1/20), MSFT (1/21)
+        assert result[0]["symbol"] == "AAPL"
+        assert result[1]["symbol"] == "NVDA"
+        assert result[2]["symbol"] == "MSFT"
