@@ -321,7 +321,7 @@ class HistoricalMovesRepository:
                 try:
                     ticker = record.get("symbol", "").upper().strip()
                     report_date = record.get("report_date", "")
-                    timing = record.get("fiscalDateEnding") or "AMC"  # Default to AMC if unknown
+                    timing = record.get("timing") or "UNKNOWN"  # Alpha Vantage doesn't provide timing
 
                     # Skip invalid records
                     if not ticker or not report_date:
@@ -380,26 +380,29 @@ class HistoricalMovesRepository:
                 for row in cursor.fetchall()
             ]
 
-    def get_upcoming_earnings(self, days: int = 5) -> List[Dict[str, Any]]:
+    def get_upcoming_earnings(self, start_date: str, days: int = 5) -> List[Dict[str, Any]]:
         """
         Get earnings for next N days from database.
 
         Args:
+            start_date: Start date in YYYY-MM-DD format (typically today in ET)
             days: Number of days to look ahead (default 5)
 
         Returns:
             List of dicts with symbol, report_date, timing, name
         """
+        start_date = validate_date(start_date)
+
         with self._pool.get_connection() as conn:
             cursor = conn.execute(
                 """
                 SELECT ticker as symbol, earnings_date as report_date, timing
                 FROM earnings_calendar
-                WHERE earnings_date >= date('now')
-                  AND earnings_date <= date('now', '+' || ? || ' days')
+                WHERE earnings_date >= ?
+                  AND earnings_date <= date(?, '+' || ? || ' days')
                 ORDER BY earnings_date, ticker
                 """,
-                (days,)
+                (start_date, start_date, days)
             )
             return [
                 {

@@ -1393,8 +1393,8 @@ async def _scan_tickers_for_whisper(
         invalid_tickers = [e["symbol"] for e in upcoming if not validate_ticker(e["symbol"])]
         log("debug", "Filtered invalid tickers", count=invalid_count, tickers=invalid_tickers[:5])
 
-    # Limit to 30 tickers
-    tickers_to_scan = valid_upcoming[:30]
+    # Limit to 100 tickers (increased from 30 to capture more opportunities)
+    tickers_to_scan = valid_upcoming[:100]
 
     # Batch fetch all historical moves in ONE query (30 queries → 1)
     all_tickers = [e["symbol"] for e in tickers_to_scan]
@@ -1471,8 +1471,8 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
         if date:
             target_dates = [date]
 
-        # Get upcoming earnings from database
-        upcoming = repo.get_upcoming_earnings(days=5)
+        # Get upcoming earnings from database (use ET date to avoid UTC mismatch)
+        upcoming = repo.get_upcoming_earnings(start_date=today, days=5)
         if date:
             upcoming = [e for e in upcoming if e["report_date"] == date]
         else:
