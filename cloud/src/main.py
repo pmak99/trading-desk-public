@@ -611,12 +611,11 @@ async def scan(date: str, format: str = "json", _: bool = Depends(verify_api_key
     start_time = time.time()
 
     try:
-        # Get earnings calendar
-        alphavantage = get_alphavantage()
-        earnings = await alphavantage.get_earnings_calendar()
-
-        # Filter to target date
-        target_earnings = [e for e in earnings if e["report_date"] == date]
+        # Get earnings from database (populated by calendar-sync job)
+        # This avoids rate-limiting issues with Alpha Vantage API
+        repo = get_historical_repo()
+        target_earnings = repo.get_earnings_by_date(date)
+        log("debug", "Fetched earnings from database", date=date, count=len(target_earnings))
 
         if not target_earnings:
             return {
@@ -629,8 +628,7 @@ async def scan(date: str, format: str = "json", _: bool = Depends(verify_api_key
                 "errors": [],
             }
 
-        # Get dependencies
-        repo = get_historical_repo()
+        # Get dependencies (repo already created above)
         tradier = get_tradier()
 
         qualified = []
@@ -1458,11 +1456,12 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
     start_time = time.time()
 
     try:
-        # Get earnings calendar
-        alphavantage = get_alphavantage()
-        earnings = await alphavantage.get_earnings_calendar()
+        # Get earnings from database (populated by calendar-sync job)
+        # This avoids rate-limiting issues with Alpha Vantage API
+        repo = get_historical_repo()
+        tradier = get_tradier()
 
-        # Filter to target dates
+        # Build target dates
         today = today_et()
         target_dates = [today]
         for i in range(1, 5):
@@ -1472,11 +1471,14 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
         if date:
             target_dates = [date]
 
-        upcoming = [e for e in earnings if e["report_date"] in target_dates]
+        # Get upcoming earnings from database
+        upcoming = repo.get_upcoming_earnings(days=5)
+        if date:
+            upcoming = [e for e in upcoming if e["report_date"] == date]
+        else:
+            upcoming = [e for e in upcoming if e["report_date"] in target_dates]
 
-        # Analyze each ticker with timeout protection
-        repo = get_historical_repo()
-        tradier = get_tradier()
+        log("debug", "Fetched upcoming earnings from database", count=len(upcoming), dates=target_dates)
 
         try:
             results = await asyncio.wait_for(
