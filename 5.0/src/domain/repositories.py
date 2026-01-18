@@ -59,6 +59,13 @@ def validate_limit(limit: int) -> int:
     return limit
 
 
+def validate_days(days: int) -> int:
+    """Validate days parameter for date range queries."""
+    if not (1 <= days <= 365):
+        raise ValueError(f"Invalid days: {days} (must be 1-365)")
+    return days
+
+
 class ConnectionPool:
     """Simple SQLite connection pool for better performance."""
 
@@ -386,12 +393,13 @@ class HistoricalMovesRepository:
 
         Args:
             start_date: Start date in YYYY-MM-DD format (typically today in ET)
-            days: Number of days to look ahead (default 5)
+            days: Number of days to look ahead (default 5, max 365)
 
         Returns:
             List of dicts with symbol, report_date, timing, name
         """
         start_date = validate_date(start_date)
+        days = validate_days(days)
 
         with self._pool.get_connection() as conn:
             cursor = conn.execute(
