@@ -78,7 +78,7 @@ Available in Claude Code:
 
 | Command | Purpose | API Cost |
 |---------|---------|----------|
-| `/prime [DATE]` | Pre-cache sentiment | ~3-8 calls |
+| `/prime [DATE]` | Sync calendar + pre-cache sentiment | ~3-8 calls |
 | `/health` | System health check | Free |
 | `/maintenance [task]` | Backup, cleanup, sync | Free |
 
@@ -104,7 +104,7 @@ Available in Claude Code:
 
 ```
 7:00 AM   /health              # Verify systems
-7:15 AM   /prime               # Pre-cache sentiment
+7:15 AM   /prime               # Sync calendar + pre-cache sentiment
 9:30 AM   /whisper             # Find opportunities (instant from cache)
           /analyze NVDA        # Deep dive
           Execute in Fidelity  # Human approval required
