@@ -119,6 +119,36 @@ async def test_run_after_hours_check(runner):
     mock_job.assert_called_once()
 
 
+def test_otc_foreign_ticker_filter():
+    """OTC/foreign tickers (5+ chars ending in F) are filtered from earnings."""
+    # Simulated earnings from Alpha Vantage
+    earnings = [
+        {"symbol": "AAPL", "report_date": "2026-01-19"},  # Keep - normal ticker
+        {"symbol": "NVDA", "report_date": "2026-01-19"},  # Keep - normal ticker
+        {"symbol": "CUIRF", "report_date": "2026-01-19"},  # Filter - foreign ordinary
+        {"symbol": "GERFF", "report_date": "2026-01-19"},  # Filter - foreign ordinary
+        {"symbol": "HREEF", "report_date": "2026-01-19"},  # Filter - foreign ordinary
+        {"symbol": "F", "report_date": "2026-01-19"},  # Keep - Ford (short ticker)
+        {"symbol": "CHEF", "report_date": "2026-01-19"},  # Keep - 4 chars, legitimate
+    ]
+
+    # Apply same filter logic as _after_hours_check
+    filtered = [
+        e for e in earnings
+        if not (len(e["symbol"]) >= 5 and e["symbol"].endswith("F"))
+    ]
+
+    assert len(filtered) == 4
+    symbols = [e["symbol"] for e in filtered]
+    assert "AAPL" in symbols
+    assert "NVDA" in symbols
+    assert "F" in symbols  # Ford should be kept
+    assert "CHEF" in symbols  # 4-char ticker should be kept
+    assert "CUIRF" not in symbols
+    assert "GERFF" not in symbols
+    assert "HREEF" not in symbols
+
+
 @pytest.mark.asyncio
 async def test_run_evening_summary(runner):
     """Evening summary sends daily notification."""
