@@ -231,29 +231,50 @@ GCS_BUCKET=trading-desk-data
 
 ```bash
 cd 5.0
-../2.0/venv/bin/python -m pytest tests/ -v    # 228 tests
+../2.0/venv/bin/python -m pytest tests/ -v    # 293 tests
 ```
 
 ## Deployment
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for complete instructions.
 
-### Quick Deploy
+### Deploy Methods
+
+| Method | Command | Use Case |
+|--------|---------|----------|
+| **Quick (recommended)** | `gcloud run deploy --source .` | Fastest for manual deploys |
+| **Cloud Build (manual)** | `gcloud builds submit --substitutions=_TAG=$(git rev-parse --short HEAD)` | Uses cloudbuild.yaml |
+| **Cloud Build (trigger)** | Push to main branch | CI/CD automation |
+
+### Quick Deploy (Recommended)
 
 ```bash
-# Build and push to Artifact Registry (Container Registry is deprecated)
-gcloud builds submit --tag us-docker.pkg.dev/trading-desk-prod/gcr.io/trading-desk:latest \
-  --project=trading-desk-prod
+cd 5.0
 
-# Deploy to Cloud Run
+# Deploy directly from source (handles build + deploy)
 gcloud run deploy trading-desk \
-  --image us-docker.pkg.dev/trading-desk-prod/gcr.io/trading-desk:latest \
+  --source . \
   --region us-east1 \
-  --project trading-desk-prod
+  --allow-unauthenticated \
+  --memory 512Mi \
+  --set-secrets 'SECRETS=trading-desk-secrets:latest' \
+  --set-env-vars 'GOOGLE_CLOUD_PROJECT=trading-desk-prod,GCS_BUCKET=trading-desk-data'
 
 # IMPORTANT: Run calendar-sync after deployment (database is ephemeral)
-curl -X POST "https://trading-desk-vquzm76kja-ue.a.run.app/dispatch?force=calendar-sync" \
+curl -X POST "https://trading-desk-670614791512.us-east1.run.app/dispatch?force=calendar-sync" \
   -H "X-API-Key: $API_KEY"
+```
+
+### Cloud Build Deploy
+
+```bash
+cd 5.0
+
+# Manual build with commit tag
+gcloud builds submit --substitutions=_TAG=$(git rev-parse --short HEAD)
+
+# Or just use 'manual' as the tag (default)
+gcloud builds submit
 ```
 
 **Note:** Cloud Run instances use ephemeral SQLite. After each deployment, run `calendar-sync` to populate the earnings calendar from Alpha Vantage.
