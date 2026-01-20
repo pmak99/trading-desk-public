@@ -21,6 +21,8 @@ from cache.budget_tracker import (
     check_budget,
     record_perplexity_call,
     get_budget_status,
+    PRICING,
+    MCP_COST_ESTIMATES,
 )
 
 
@@ -353,7 +355,10 @@ class TestConvenienceFunctions:
             )
             mock_instance.get_monthly_summary.return_value = {
                 'total_calls': 100,
-                'total_cost': 0.60
+                'total_cost': 0.60,
+                'total_output_tokens': 0,
+                'total_reasoning_tokens': 0,
+                'total_search_requests': 0
             }
 
             status = get_budget_status()
@@ -372,6 +377,23 @@ class TestEdgeCases:
         """Create a temporary tracker for testing."""
         db_path = tmp_path / "test_budget.db"
         return BudgetTracker(db_path=db_path)
+
+    def test_record_call_rejects_negative_cost(self, temp_tracker):
+        """record_call should reject negative costs."""
+        with pytest.raises(ValueError, match="negative"):
+            temp_tracker.record_call(cost=-0.01)
+
+    def test_record_call_rejects_nan_cost(self, temp_tracker):
+        """record_call should reject NaN costs."""
+        import math
+        with pytest.raises(ValueError, match="finite"):
+            temp_tracker.record_call(cost=math.nan)
+
+    def test_record_call_rejects_inf_cost(self, temp_tracker):
+        """record_call should reject infinite costs."""
+        import math
+        with pytest.raises(ValueError, match="finite"):
+            temp_tracker.record_call(cost=math.inf)
 
     def test_very_high_cost(self, temp_tracker):
         """Should handle unusually high costs."""
@@ -495,3 +517,207 @@ class TestWarningThreshold:
         assert BudgetTracker.WARN_THRESHOLD == 0.80
         # 80% of 40 = 32
         assert int(BudgetTracker.MAX_DAILY_CALLS * BudgetTracker.WARN_THRESHOLD) == 32
+
+
+class TestTokenTracking:
+    """Tests for token-based cost tracking."""
+
+    @pytest.fixture
+    def temp_tracker(self, tmp_path):
+        """Create a temporary tracker for testing."""
+        db_path = tmp_path / "test_budget.db"
+        return BudgetTracker(db_path=db_path)
+
+    def test_pricing_constants(self):
+        """Verify pricing constants match invoice rates."""
+        assert PRICING["sonar_output"] == 0.000001
+        assert PRICING["sonar_pro_output"] == 0.000015
+        assert PRICING["reasoning_pro"] == 0.000003
+        assert PRICING["search_request"] == 0.005
+
+    def test_mcp_cost_estimates(self):
+        """Verify MCP cost estimates are reasonable."""
+        assert MCP_COST_ESTIMATES["perplexity_ask"] == 0.001
+        assert MCP_COST_ESTIMATES["perplexity_search"] == 0.005
+        assert MCP_COST_ESTIMATES["perplexity_research"] == 0.008
+        assert MCP_COST_ESTIMATES["perplexity_reason"] == 0.012
+
+    def test_record_call_with_tokens(self, temp_tracker):
+        """record_call should track token counts."""
+        temp_tracker.record_call(
+            cost=0.01,
+            output_tokens=1000,
+            reasoning_tokens=500,
+            search_requests=1
+        )
+        info = temp_tracker.get_info()
+        assert info.calls_today == 1
+        assert info.output_tokens == 1000
+        assert info.reasoning_tokens == 500
+        assert info.search_requests == 1
+
+    def test_record_tokens_sonar(self, temp_tracker):
+        """record_tokens should calculate sonar cost correctly."""
+        # 1000 output tokens at $0.000001/token = $0.001
+        cost = temp_tracker.record_tokens(output_tokens=1000, model="sonar")
+        assert cost == pytest.approx(0.001, rel=0.01)
+
+        info = temp_tracker.get_info()
+        assert info.output_tokens == 1000
+        assert info.cost_today == pytest.approx(0.001, rel=0.01)
+
+    def test_record_tokens_sonar_pro(self, temp_tracker):
+        """record_tokens should calculate sonar-pro cost correctly."""
+        # 1000 output tokens at $0.000015/token = $0.015
+        cost = temp_tracker.record_tokens(output_tokens=1000, model="sonar-pro")
+        assert cost == pytest.approx(0.015, rel=0.01)
+
+    def test_record_tokens_reasoning(self, temp_tracker):
+        """record_tokens should calculate reasoning token cost correctly."""
+        # 1000 reasoning tokens at $0.000003/token = $0.003
+        cost = temp_tracker.record_tokens(reasoning_tokens=1000)
+        assert cost == pytest.approx(0.003, rel=0.01)
+
+        info = temp_tracker.get_info()
+        assert info.reasoning_tokens == 1000
+
+    def test_record_tokens_search(self, temp_tracker):
+        """record_tokens should calculate search request cost correctly."""
+        # 1 search request at $0.005 = $0.005
+        cost = temp_tracker.record_tokens(search_requests=1)
+        assert cost == pytest.approx(0.005, rel=0.01)
+
+        info = temp_tracker.get_info()
+        assert info.search_requests == 1
+
+    def test_record_tokens_combined(self, temp_tracker):
+        """record_tokens should handle combined costs correctly."""
+        # 1000 output + 2000 reasoning + 2 searches
+        # = $0.001 + $0.006 + $0.010 = $0.017
+        cost = temp_tracker.record_tokens(
+            output_tokens=1000,
+            reasoning_tokens=2000,
+            search_requests=2,
+            model="sonar"
+        )
+        assert cost == pytest.approx(0.017, rel=0.01)
+
+    def test_record_mcp_operation_ask(self, temp_tracker):
+        """record_mcp_operation should use estimated cost for ask."""
+        cost = temp_tracker.record_mcp_operation("perplexity_ask")
+        assert cost == 0.001
+
+        info = temp_tracker.get_info()
+        assert info.calls_today == 1
+        assert info.cost_today == 0.001
+
+    def test_record_mcp_operation_search(self, temp_tracker):
+        """record_mcp_operation should use estimated cost for search."""
+        cost = temp_tracker.record_mcp_operation("perplexity_search")
+        assert cost == 0.005
+
+    def test_record_mcp_operation_research(self, temp_tracker):
+        """record_mcp_operation should use estimated cost for research."""
+        cost = temp_tracker.record_mcp_operation("perplexity_research")
+        assert cost == 0.008
+
+    def test_record_mcp_operation_reason(self, temp_tracker):
+        """record_mcp_operation should use estimated cost for reason."""
+        cost = temp_tracker.record_mcp_operation("perplexity_reason")
+        assert cost == 0.012
+
+    def test_record_mcp_operation_unknown(self, temp_tracker):
+        """record_mcp_operation should use default cost for unknown operations."""
+        cost = temp_tracker.record_mcp_operation("unknown_operation")
+        assert cost == BudgetTracker.COST_PER_CALL_ESTIMATE
+
+    def test_tokens_accumulate(self, temp_tracker):
+        """Token counts should accumulate across calls."""
+        temp_tracker.record_tokens(output_tokens=500)
+        temp_tracker.record_tokens(output_tokens=300, reasoning_tokens=1000)
+
+        info = temp_tracker.get_info()
+        assert info.output_tokens == 800
+        assert info.reasoning_tokens == 1000
+
+    def test_monthly_summary_includes_tokens(self, temp_tracker):
+        """Monthly summary should include token breakdown."""
+        temp_tracker.record_tokens(output_tokens=1000, reasoning_tokens=500, search_requests=2)
+
+        summary = temp_tracker.get_monthly_summary()
+        assert summary['total_output_tokens'] == 1000
+        assert summary['total_reasoning_tokens'] == 500
+        assert summary['total_search_requests'] == 2
+
+    def test_reset_today_clears_tokens(self, temp_tracker):
+        """reset_today should clear token counts."""
+        temp_tracker.record_tokens(output_tokens=1000, reasoning_tokens=500, search_requests=2)
+        temp_tracker.reset_today()
+
+        info = temp_tracker.get_info()
+        assert info.output_tokens == 0
+        assert info.reasoning_tokens == 0
+        assert info.search_requests == 0
+
+    def test_budget_info_token_fields_default(self, temp_tracker):
+        """BudgetInfo should have token fields defaulting to 0."""
+        info = temp_tracker.get_info()
+        assert info.output_tokens == 0
+        assert info.reasoning_tokens == 0
+        assert info.search_requests == 0
+
+    def test_record_call_rejects_negative_tokens(self, temp_tracker):
+        """record_call should reject negative token counts."""
+        with pytest.raises(ValueError, match="negative"):
+            temp_tracker.record_call(cost=0.01, output_tokens=-100)
+
+    def test_record_call_rejects_excessive_tokens(self, temp_tracker):
+        """record_call should reject excessive token counts."""
+        from cache.budget_tracker import MAX_TOKENS_PER_CALL
+        with pytest.raises(ValueError, match="exceeds maximum"):
+            temp_tracker.record_call(cost=0.01, output_tokens=MAX_TOKENS_PER_CALL + 1)
+
+    def test_record_call_rejects_non_integer_tokens(self, temp_tracker):
+        """record_call should reject non-integer token counts."""
+        with pytest.raises(ValueError, match="must be an integer"):
+            temp_tracker.record_call(cost=0.01, output_tokens=100.5)
+
+    def test_schema_migration(self, tmp_path):
+        """Should add token columns to existing databases."""
+        db_path = tmp_path / "legacy.db"
+
+        # Create legacy schema without token columns
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("""
+                CREATE TABLE api_budget (
+                    date TEXT PRIMARY KEY,
+                    calls INTEGER DEFAULT 0,
+                    cost REAL DEFAULT 0.0,
+                    last_updated TEXT
+                )
+            """)
+            conn.execute("""
+                INSERT INTO api_budget (date, calls, cost, last_updated)
+                VALUES ('2025-01-15', 5, 0.03, '2025-01-15T12:00:00')
+            """)
+            conn.commit()
+
+        # Create tracker - should add columns
+        tracker = BudgetTracker(db_path=db_path)
+
+        # Verify columns exist and can be queried
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.execute("""
+                SELECT output_tokens, reasoning_tokens, search_requests
+                FROM api_budget WHERE date = '2025-01-15'
+            """)
+            row = cursor.fetchone()
+            # Legacy data should have 0 for token columns
+            assert row[0] == 0 or row[0] is None
+            assert row[1] == 0 or row[1] is None
+            assert row[2] == 0 or row[2] is None
+
+        # New calls should work with token tracking
+        tracker.record_tokens(output_tokens=100)
+        info = tracker.get_info()
+        assert info.output_tokens == 100
