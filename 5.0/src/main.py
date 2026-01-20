@@ -45,6 +45,8 @@ from src.domain.implied_move import (
     fetch_real_implied_move,
     get_implied_move_with_fallback,
 )
+from src.domain.skew import analyze_skew
+from src.domain.direction import get_direction, adjust_direction
 from src.integrations import (
     TradierClient,
     AlphaVantageClient,
@@ -1022,6 +1024,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
 
         implied_move_data = None
         liquidity_tier = "REJECT"
+        skew_analysis = None
         if nearest_exp:
             chain = await tradier.get_options_chain(ticker, nearest_exp)
             if chain:
@@ -1047,6 +1050,9 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
                     spread_pct=avg_spread,
                     position_size=settings.DEFAULT_POSITION_SIZE,
                 )
+
+                # Analyze skew for directional bias
+                skew_analysis = analyze_skew(ticker, price, chain)
 
         # Calculate VRP - extract historical move percentages (use intraday, matches 2.0)
         historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
@@ -1112,12 +1118,20 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
             if sentiment_data and not sentiment_data.get("error"):
                 cache.save_sentiment(ticker, target_date, sentiment_data)
 
-        # Apply sentiment modifier
-        direction = "NEUTRAL"
+        # Apply sentiment modifier and determine direction
+        # Uses 3-rule system: skew + sentiment → adjusted direction
+        skew_bias = skew_analysis.directional_bias.value if skew_analysis else None
+        sentiment_score = sentiment_data.get("score", 0) if sentiment_data else None
+        sentiment_direction = sentiment_data.get("direction") if sentiment_data else None
+
+        direction = get_direction(
+            skew_bias=skew_bias,
+            sentiment_score=sentiment_score,
+            sentiment_direction=sentiment_direction,
+        )
+
         final_score = score_data["total_score"]
-        if sentiment_data:
-            direction = sentiment_data.get("direction", "neutral").upper()
-            sentiment_score = sentiment_data.get("score", 0)
+        if sentiment_data and sentiment_score is not None:
             final_score = apply_sentiment_modifier(score_data["total_score"], sentiment_score)
 
         # Generate strategies
@@ -1163,6 +1177,12 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
                 "components": score_data["components"],
             },
             "sentiment": sentiment_data,
+            "skew": {
+                "bias": skew_analysis.directional_bias.value if skew_analysis else None,
+                "slope": round(skew_analysis.slope, 2) if skew_analysis else None,
+                "confidence": round(skew_analysis.confidence, 3) if skew_analysis else None,
+                "points": skew_analysis.num_points if skew_analysis else 0,
+            } if skew_analysis else None,
             "direction": direction,
             "strategies": [
                 {
