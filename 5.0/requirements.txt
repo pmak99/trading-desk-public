@@ -9,7 +9,7 @@ httpx==0.28.1
 yfinance==1.0
 
 # Retry logic
-tenacity==9.1.0
+tenacity==9.1.2
 
 # Google Cloud
 google-cloud-storage==3.8.0
