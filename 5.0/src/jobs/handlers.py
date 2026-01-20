@@ -510,6 +510,8 @@ class JobRunner:
 
         # Get earnings for today and next few days
         earnings = await self.alphavantage.get_earnings_calendar()
+        log("debug", "Fetched earnings from Alpha Vantage",
+            job="morning_digest", count=len(earnings) if earnings else 0)
 
         # Validate API response
         if not earnings:
@@ -530,11 +532,18 @@ class JobRunner:
             target_dates.append(future)
 
         upcoming = [e for e in earnings if e["report_date"] in target_dates]
+        log("debug", "Filtered by date",
+            job="morning_digest", target_dates=target_dates,
+            before=len(earnings), after=len(upcoming))
 
         # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
         repo = HistoricalMovesRepository(settings.DB_PATH)
         tracked_tickers = repo.get_tracked_tickers()
+        before_filter = len(upcoming)
         upcoming = filter_to_tracked_tickers(upcoming, tracked_tickers)
+        log("debug", "Filtered by tracked tickers",
+            job="morning_digest", tracked_count=len(tracked_tickers),
+            before=before_filter, after=len(upcoming))
 
         # Log truncation if limit exceeded
         if len(upcoming) > MAX_DIGEST_CANDIDATES:
