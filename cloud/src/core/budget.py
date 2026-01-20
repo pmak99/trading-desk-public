@@ -185,6 +185,8 @@ class BudgetTracker:
                 return False
             finally:
                 conn.close()
+        # All retries exhausted without success
+        log("error", "API call acquire failed after all retries", service=service, retries=max_retries)
         return False
 
     def get_daily_stats(self, service: str, date_str: Optional[str] = None) -> Dict[str, Any]:
@@ -304,6 +306,8 @@ class BudgetTracker:
                 return False
             finally:
                 conn.close()
+        # All retries exhausted without success
+        log("error", "API call acquire failed after all retries (async)", service=service, retries=max_retries)
         return False
 
     def can_call(self, service: str = "perplexity") -> bool:

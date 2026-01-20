@@ -35,7 +35,11 @@ from contextlib import contextmanager
 
 from src.core.logging import log
 
-# Thread pool for non-blocking metrics push
+# Thread pool for non-blocking metrics push.
+# Lifecycle: Created at module load, lives for process lifetime.
+# No explicit shutdown() needed - Cloud Run terminates gracefully with SIGTERM,
+# and ThreadPoolExecutor threads are daemonic (won't prevent shutdown).
+# The 2-worker pool handles burst metric writes without blocking FastAPI async loop.
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="metrics")
 
 
