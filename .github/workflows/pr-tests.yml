@@ -3,7 +3,7 @@ name: PR Tests
 on:
   pull_request:
     branches:
-      - '**'  # Run on PRs to any branch
+      - '**'
     types: [opened, synchronize, reopened]
 
 jobs:
@@ -24,9 +24,30 @@ jobs:
       run: |
         python -m pip install --upgrade pip setuptools wheel
         pip install -r requirements.txt
+        pip install -e 2.0/
 
-    - name: PR validation
+    - name: Run 2.0 tests
       run: |
-        echo "✅ PR validation passed"
-        echo "Note: 2.0/3.0 test requirements have been removed during active development"
-        echo "Tests will be added back once the 3.0 MCP integration is complete"
+        cd 2.0
+        python -m pytest tests/ -v --tb=short --no-cov
+      continue-on-error: false
+
+    - name: Run 4.0 tests
+      run: |
+        cd 4.0
+        python -m pytest tests/ -v --tb=short --no-cov
+      continue-on-error: false
+
+    - name: Run 5.0 tests
+      run: |
+        cd 5.0
+        pip install -r requirements.txt
+        python -m pytest tests/ -v --tb=short --no-cov
+      continue-on-error: false
+
+    - name: Test summary
+      run: |
+        echo "✅ All test suites passed"
+        echo "  - 2.0: Core math engine"
+        echo "  - 4.0: AI sentiment layer"
+        echo "  - 5.0: Cloud autopilot"
