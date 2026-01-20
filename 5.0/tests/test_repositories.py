@@ -108,6 +108,59 @@ def test_historical_moves_count(db_path):
     assert repo.count_moves("OTHER") == 0
 
 
+def test_get_tracked_tickers_empty(db_path):
+    """get_tracked_tickers returns empty set when no historical moves exist."""
+    repo = HistoricalMovesRepository(db_path=db_path)
+    tracked = repo.get_tracked_tickers()
+    assert tracked == set()
+
+
+def test_get_tracked_tickers_returns_distinct(db_path):
+    """get_tracked_tickers returns distinct tickers from historical_moves."""
+    repo = HistoricalMovesRepository(db_path=db_path)
+
+    # Save multiple moves for same ticker (should only appear once)
+    repo.save_move({"ticker": "AAPL", "earnings_date": "2025-01-15", "gap_move_pct": 5.0})
+    repo.save_move({"ticker": "AAPL", "earnings_date": "2025-04-15", "gap_move_pct": -3.0})
+    repo.save_move({"ticker": "NVDA", "earnings_date": "2025-01-15", "gap_move_pct": 8.0})
+    repo.save_move({"ticker": "MSFT", "earnings_date": "2025-01-15", "gap_move_pct": 2.0})
+
+    tracked = repo.get_tracked_tickers()
+
+    assert tracked == {"AAPL", "NVDA", "MSFT"}
+    assert len(tracked) == 3  # AAPL only counted once
+
+
+def test_get_tracked_tickers_used_for_filtering(db_path):
+    """get_tracked_tickers integrates with filter_to_tracked_tickers helper."""
+    from src.jobs.handlers import filter_to_tracked_tickers
+
+    repo = HistoricalMovesRepository(db_path=db_path)
+
+    # Add some tracked tickers
+    repo.save_move({"ticker": "AAPL", "earnings_date": "2025-01-15", "gap_move_pct": 5.0})
+    repo.save_move({"ticker": "NVDA", "earnings_date": "2025-01-15", "gap_move_pct": 8.0})
+
+    tracked = repo.get_tracked_tickers()
+
+    # Simulated Alpha Vantage earnings (includes OTC tickers)
+    earnings = [
+        {"symbol": "AAPL", "report_date": "2025-01-20"},
+        {"symbol": "NVDA", "report_date": "2025-01-20"},
+        {"symbol": "CUIRF", "report_date": "2025-01-20"},  # OTC - not tracked
+        {"symbol": "UNKNOWN", "report_date": "2025-01-20"},  # Not tracked
+    ]
+
+    filtered = filter_to_tracked_tickers(earnings, tracked)
+
+    assert len(filtered) == 2
+    symbols = [e["symbol"] for e in filtered]
+    assert "AAPL" in symbols
+    assert "NVDA" in symbols
+    assert "CUIRF" not in symbols
+    assert "UNKNOWN" not in symbols
+
+
 # Sentiment Cache Tests
 
 def test_sentiment_cache_empty(db_path):
