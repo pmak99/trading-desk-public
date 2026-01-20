@@ -130,7 +130,7 @@ API_KEY=xxx                   # API authentication
 ```bash
 cd 2.0 && ./venv/bin/python -m pytest tests/ -v    # 514 tests
 cd 4.0 && ../2.0/venv/bin/python -m pytest tests/  # 186 tests
-cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 193 tests
+cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 293 tests
 cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 48 tests
 ```
 

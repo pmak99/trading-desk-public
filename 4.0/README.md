@@ -187,7 +187,7 @@ All discovery commands display warnings for HIGH tail risk tickers (TRR > 2.5x).
 ## Related Systems
 
 - **2.0/** - Core VRP math (imported by 4.0)
-- **5.0/** - Cloud autopilot (uses similar sentiment logic)
+- **5.0/** - Cloud autopilot (full skew + 3-rule direction system ported from 2.0/4.0)
 - **6.0/** - Agent orchestration (uses 4.0 cache directly)
 
 ---
