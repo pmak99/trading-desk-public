@@ -9,6 +9,8 @@
 - **Automated Daily Workflow** - 12 scheduled jobs (pre-market prep, sentiment scan, digests)
 - **Telegram Bot** - Mobile access via `/health`, `/whisper`, `/analyze TICKER`
 - **VRP-Based Scoring** - Same calculations as 2.0 core engine
+- **Skew Analysis** - Polynomial-fitted IV skew for directional bias (ported from 2.0)
+- **3-Rule Direction System** - Combines skew + sentiment for direction (ported from 4.0)
 - **AI Sentiment** - Perplexity-powered with budget tracking
 - **Performance Optimized** - Parallel analysis, VRP caching, batch queries
 
@@ -139,16 +141,39 @@ Add `?format=cli` for terminal output, `?format=json` for raw data (default).
 ├── src/
 │   ├── main.py              # FastAPI entry point
 │   ├── core/                # Config, logging, job manager
-│   ├── domain/              # VRP, liquidity, scoring
+│   ├── domain/              # VRP, liquidity, scoring, skew, direction
 │   ├── integrations/        # Tradier, Perplexity, Telegram
 │   ├── formatters/          # Telegram HTML, CLI ASCII
 │   └── jobs/                # Scheduled job implementations
 ├── terraform/               # GCP infrastructure
-├── data/ivcrush.db          # SQLite database
+├── data/ivcrush.db          # SQLite database (gitignored)
 ├── Dockerfile
 ├── DEPLOYMENT.md            # Full deployment guide
 └── DESIGN.md                # Architecture details
 ```
+
+## Direction Determination
+
+Direction is determined by combining options skew analysis with AI sentiment using a 3-rule system:
+
+### Skew Analysis
+
+Polynomial-fitted IV skew from OTM options:
+
+| Slope | Bias |
+|-------|------|
+| > 150 | STRONG_BULLISH/BEARISH |
+| 80-150 | BULLISH/BEARISH |
+| 30-80 | WEAK_BULLISH/BEARISH |
+| <= 30 | NEUTRAL |
+
+### 3-Rule Direction Adjustment
+
+| Rule | Condition | Action |
+|------|-----------|--------|
+| 1 | Neutral skew + sentiment signal | Sentiment breaks tie |
+| 2 | Conflict (bullish skew + bearish sentiment) | Go neutral (hedge) |
+| 3 | Otherwise | Keep original skew bias |
 
 ## Performance Optimizations
 
