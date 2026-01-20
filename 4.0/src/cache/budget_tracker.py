@@ -1,33 +1,55 @@
 """
 Budget Tracker for Perplexity API Usage
 
-Tracks daily API calls and cost to stay within $5/month budget.
+Tracks daily API calls, tokens, and cost to stay within $5/month budget.
 Daily limits (40 calls) reset automatically at midnight based on date comparison.
 Monthly cost tracking resets on the 1st of each month.
 
-Perplexity Pricing (sonar model - configured via PERPLEXITY_ASK_MODEL=sonar):
-- Input: $1/1M tokens
-- Output: $1/1M tokens
-- Request fee: $5/1000 requests = $0.005/request
-- Typical query (~150 input, ~400 output): $0.0006 tokens + $0.005 fee = $0.0056
-- Estimated cost per call: ~$0.006 (conservative)
+Token-Based Pricing (from actual Perplexity invoice January 2025):
+- sonar output: $0.000001/token (1M tokens = $1)
+- sonar-pro output: $0.000015/token (1M tokens = $15)
+- reasoning-pro: $0.000003/token (1M tokens = $3)
+- Search API: $0.005/request (flat fee)
+
+MCP Tool Estimates (since MCP doesn't return token counts):
+- perplexity_ask: ~200 output tokens (sonar) = $0.001
+- perplexity_search: 1 search request = $0.005
+- perplexity_research: ~500 output tokens (sonar-pro) = $0.008
+- perplexity_reason: ~4000 reasoning tokens = $0.012
 
 Limits:
 - Monthly budget: $5.00
-- Max: 40 calls/day (~$0.24/day, ~$5.28/month at 22 trading days)
+- Max: 40 calls/day
 - Warn: At 80% (32 calls)
 - Hard stop: At 100% (graceful degradation to WebSearch)
-
-Note: Using sonar (basic) instead of sonar-pro.
-Sonar Pro would only allow ~18 calls/day vs 40 with sonar.
 """
 
 import sqlite3
 from datetime import datetime, date, timezone
 from pathlib import Path
-from typing import Optional, Tuple
-from dataclasses import dataclass
+from typing import Optional, Tuple, Dict, Any
+from dataclasses import dataclass, field
 from enum import Enum
+
+
+# Perplexity token pricing (per token, from invoice)
+PRICING = {
+    "sonar_output": 0.000001,      # $1/1M tokens
+    "sonar_pro_output": 0.000015,  # $15/1M tokens
+    "reasoning_pro": 0.000003,     # $3/1M tokens
+    "search_request": 0.005,       # $5/1000 requests (flat)
+}
+
+# MCP operation cost estimates (for operations without token counts)
+MCP_COST_ESTIMATES = {
+    "perplexity_ask": 0.001,      # ~200 sonar output tokens
+    "perplexity_search": 0.005,   # 1 search request
+    "perplexity_research": 0.008, # ~500 sonar-pro output tokens
+    "perplexity_reason": 0.012,   # ~4000 reasoning tokens
+}
+
+# Token count bounds (sanity check to catch bugs)
+MAX_TOKENS_PER_CALL = 10_000_000  # 10M tokens max per call (very generous limit)
 
 
 class BudgetStatus(Enum):
@@ -45,6 +67,10 @@ class BudgetInfo:
     cost_today: float
     calls_remaining: int
     status: BudgetStatus
+    # Token breakdown (optional, may be 0 for legacy data)
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+    search_requests: int = 0
 
     @property
     def usage_percent(self) -> float:
@@ -88,16 +114,32 @@ class BudgetTracker:
         self._init_db()
 
     def _init_db(self):
-        """Initialize database schema."""
+        """Initialize database schema with token tracking columns."""
         with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS api_budget (
                     date TEXT PRIMARY KEY,
                     calls INTEGER DEFAULT 0,
                     cost REAL DEFAULT 0.0,
-                    last_updated TEXT
+                    last_updated TEXT,
+                    output_tokens INTEGER DEFAULT 0,
+                    reasoning_tokens INTEGER DEFAULT 0,
+                    search_requests INTEGER DEFAULT 0
                 )
             """)
+            # Add token columns if they don't exist (migration for existing DBs)
+            try:
+                conn.execute("ALTER TABLE api_budget ADD COLUMN output_tokens INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                conn.execute("ALTER TABLE api_budget ADD COLUMN reasoning_tokens INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE api_budget ADD COLUMN search_requests INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
 
     def _get_today(self) -> str:
@@ -122,15 +164,54 @@ class BudgetTracker:
         info = self.get_info()
         return info.status == BudgetStatus.WARNING
 
-    def record_call(self, cost: float = None) -> None:
+    def _validate_token_counts(
+        self,
+        output_tokens: int,
+        reasoning_tokens: int,
+        search_requests: int
+    ) -> None:
         """
-        Record an API call.
+        Validate token counts are within reasonable bounds.
+
+        Args:
+            output_tokens: Number of output tokens
+            reasoning_tokens: Number of reasoning tokens
+            search_requests: Number of search requests
+
+        Raises:
+            ValueError: If any count is negative or exceeds MAX_TOKENS_PER_CALL
+        """
+        for name, value in [
+            ("output_tokens", output_tokens),
+            ("reasoning_tokens", reasoning_tokens),
+            ("search_requests", search_requests),
+        ]:
+            if not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer, got: {type(value).__name__}")
+            if value < 0:
+                raise ValueError(f"{name} cannot be negative, got: {value}")
+            if value > MAX_TOKENS_PER_CALL:
+                raise ValueError(f"{name} exceeds maximum ({MAX_TOKENS_PER_CALL}), got: {value}")
+
+    def record_call(
+        self,
+        cost: float = None,
+        output_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        search_requests: int = 0
+    ) -> None:
+        """
+        Record an API call with optional token breakdown.
 
         Args:
             cost: Actual cost if known, otherwise uses estimate
+            output_tokens: Number of output tokens (sonar/sonar-pro)
+            reasoning_tokens: Number of reasoning tokens (reasoning-pro)
+            search_requests: Number of search API requests
 
         Raises:
             ValueError: If cost is negative or not a finite number
+            ValueError: If token counts are negative or exceed bounds
         """
         if cost is None:
             cost = self.COST_PER_CALL_ESTIMATE
@@ -142,6 +223,9 @@ class BudgetTracker:
             if cost < 0:
                 raise ValueError(f"Cost cannot be negative, got: {cost}")
 
+        # Validate token counts
+        self._validate_token_counts(output_tokens, reasoning_tokens, search_requests)
+
         today = self._get_today()
 
         with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
@@ -150,13 +234,77 @@ class BudgetTracker:
                 UPDATE api_budget
                 SET calls = calls + 1,
                     cost = cost + ?,
+                    output_tokens = output_tokens + ?,
+                    reasoning_tokens = reasoning_tokens + ?,
+                    search_requests = search_requests + ?,
                     last_updated = ?
                 WHERE date = ?
-            """, (cost, datetime.now(timezone.utc).isoformat(), today))
+            """, (cost, output_tokens, reasoning_tokens, search_requests,
+                  datetime.now(timezone.utc).isoformat(), today))
             conn.commit()
 
+    def record_tokens(
+        self,
+        output_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        search_requests: int = 0,
+        model: str = "sonar"
+    ) -> float:
+        """
+        Record API usage by token count and calculate actual cost.
+
+        This is the preferred method when token data is available (REST API calls).
+        Cost is calculated from actual token counts using invoice-verified rates.
+
+        Args:
+            output_tokens: Number of output tokens
+            reasoning_tokens: Number of reasoning tokens (from reasoning-pro model)
+            search_requests: Number of search API requests
+            model: Model used ("sonar", "sonar-pro", or "reasoning-pro")
+
+        Returns:
+            Calculated cost in dollars
+        """
+        # Calculate cost from tokens
+        cost = 0.0
+        if output_tokens > 0:
+            if model == "sonar-pro":
+                cost += output_tokens * PRICING["sonar_pro_output"]
+            else:
+                cost += output_tokens * PRICING["sonar_output"]
+        if reasoning_tokens > 0:
+            cost += reasoning_tokens * PRICING["reasoning_pro"]
+        if search_requests > 0:
+            cost += search_requests * PRICING["search_request"]
+
+        # Record with token breakdown
+        self.record_call(
+            cost=cost,
+            output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
+            search_requests=search_requests
+        )
+
+        return cost
+
+    def record_mcp_operation(self, operation: str) -> float:
+        """
+        Record an MCP tool operation using estimated costs.
+
+        Use this when token data is not available (MCP tool calls).
+
+        Args:
+            operation: MCP operation name (e.g., "perplexity_ask", "perplexity_search")
+
+        Returns:
+            Estimated cost in dollars
+        """
+        cost = MCP_COST_ESTIMATES.get(operation, self.COST_PER_CALL_ESTIMATE)
+        self.record_call(cost=cost)
+        return cost
+
     def get_info(self) -> BudgetInfo:
-        """Get current budget information."""
+        """Get current budget information including token breakdown."""
         today = self._get_today()
 
         with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
@@ -164,7 +312,7 @@ class BudgetTracker:
             self._ensure_today_row(conn)
 
             row = conn.execute("""
-                SELECT date, calls, cost
+                SELECT date, calls, cost, output_tokens, reasoning_tokens, search_requests
                 FROM api_budget
                 WHERE date = ?
             """, (today,)).fetchone()
@@ -186,11 +334,14 @@ class BudgetTracker:
                 calls_today=calls,
                 cost_today=cost,
                 calls_remaining=remaining,
-                status=status
+                status=status,
+                output_tokens=row['output_tokens'] or 0,
+                reasoning_tokens=row['reasoning_tokens'] or 0,
+                search_requests=row['search_requests'] or 0
             )
 
     def get_monthly_summary(self) -> dict:
-        """Get monthly usage summary."""
+        """Get monthly usage summary including token breakdown."""
         today = date.today()
         month_start = today.replace(day=1).isoformat()
 
@@ -203,7 +354,10 @@ class BudgetTracker:
                     SUM(calls) as total_calls,
                     SUM(cost) as total_cost,
                     AVG(calls) as avg_calls_per_day,
-                    MAX(calls) as max_calls_day
+                    MAX(calls) as max_calls_day,
+                    SUM(output_tokens) as total_output_tokens,
+                    SUM(reasoning_tokens) as total_reasoning_tokens,
+                    SUM(search_requests) as total_search_requests
                 FROM api_budget
                 WHERE date >= ?
             """, (month_start,)).fetchone()
@@ -215,7 +369,11 @@ class BudgetTracker:
                 "total_cost": row['total_cost'] or 0.0,
                 "avg_calls_per_day": row['avg_calls_per_day'] or 0.0,
                 "max_calls_day": row['max_calls_day'] or 0,
-                "budget_remaining": 5.00 - (row['total_cost'] or 0.0)
+                "budget_remaining": 5.00 - (row['total_cost'] or 0.0),
+                # Token breakdown
+                "total_output_tokens": row['total_output_tokens'] or 0,
+                "total_reasoning_tokens": row['total_reasoning_tokens'] or 0,
+                "total_search_requests": row['total_search_requests'] or 0
             }
 
     def reset_today(self) -> None:
@@ -225,7 +383,9 @@ class BudgetTracker:
         with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
             conn.execute("""
                 UPDATE api_budget
-                SET calls = 0, cost = 0.0, last_updated = ?
+                SET calls = 0, cost = 0.0,
+                    output_tokens = 0, reasoning_tokens = 0, search_requests = 0,
+                    last_updated = ?
                 WHERE date = ?
             """, (datetime.now(timezone.utc).isoformat(), today))
             conn.commit()
@@ -266,7 +426,18 @@ def get_budget_status() -> str:
     info = tracker.get_info()
     monthly = tracker.get_monthly_summary()
 
-    return f"""Budget Status:
-  Today: {info.calls_today}/{tracker.MAX_DAILY_CALLS} calls (${info.cost_today:.2f})
-  Month: {monthly['total_calls']} calls (${monthly['total_cost']:.2f} of $5.00)
+    # Base status
+    status = f"""Budget Status:
+  Today: {info.calls_today}/{tracker.MAX_DAILY_CALLS} calls (${info.cost_today:.4f})
+  Month: {monthly['total_calls']} calls (${monthly['total_cost']:.4f} of $5.00)
   Status: {info.status.value.upper()}"""
+
+    # Add token breakdown if any tokens tracked
+    total_tokens = (monthly['total_output_tokens'] +
+                    monthly['total_reasoning_tokens'])
+    if total_tokens > 0:
+        status += f"""
+  Tokens: {monthly['total_output_tokens']:,} output, {monthly['total_reasoning_tokens']:,} reasoning
+  Searches: {monthly['total_search_requests']}"""
+
+    return status
