@@ -19,6 +19,10 @@ WEIGHT_VRP = 0.55
 WEIGHT_MOVE = 0.25
 WEIGHT_LIQUIDITY = 0.20
 
+# VRP normalization: ratio at which VRP component reaches max score (100)
+# With BALANCED thresholds (1.8x = EXCELLENT), 7x is exceptional
+VRP_MAX_RATIO = 7.0
+
 # Liquidity tier scores
 LIQUIDITY_SCORES = {
     "EXCELLENT": 100,
@@ -46,8 +50,8 @@ def calculate_score(
     Returns:
         Dict with total_score (0-100) and components breakdown
     """
-    # VRP score: normalize to 0-100 (7x = 100, 1x = 14)
-    vrp_score = min(100, (vrp_ratio / 7.0) * 100)
+    # VRP score: normalize to 0-100 (VRP_MAX_RATIO = 100, 1x = 14)
+    vrp_score = min(100, (vrp_ratio / VRP_MAX_RATIO) * 100)
 
     # Move difficulty score: easier moves score higher
     # 5% move = 100, 15% move = 33

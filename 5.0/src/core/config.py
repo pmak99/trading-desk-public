@@ -54,6 +54,9 @@ class Settings:
     CACHE_TTL_PRE_MARKET = 8
     CACHE_TTL_INTRADAY = 3
 
+    # Position sizing defaults
+    DEFAULT_POSITION_SIZE = 10  # Contracts for liquidity tier calculation
+
     def __init__(self):
         self._secrets: Optional[dict] = None
 

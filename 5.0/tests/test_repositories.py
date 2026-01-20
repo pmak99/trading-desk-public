@@ -590,6 +590,115 @@ def test_vrp_cache_ttl_invalid_date(db_path):
     assert ttl == VRPCacheRepository.TTL_HOURS_NEAR
 
 
+def test_vrp_cache_overwrite_existing(db_path):
+    """Saving VRP data for existing ticker/date overwrites the entry."""
+    repo = VRPCacheRepository(db_path=db_path)
+
+    # Save initial data
+    vrp_data = {
+        "implied_move_pct": 8.5,
+        "vrp_ratio": 2.1,
+        "vrp_tier": "EXCELLENT",
+        "historical_mean": 4.05,
+        "price": 500.0,
+        "expiration": "2025-01-17",
+        "used_real_data": True,
+    }
+    repo.save_vrp("AAPL", "2025-01-15", vrp_data)
+
+    # Overwrite with new data
+    vrp_data_updated = {
+        "implied_move_pct": 10.0,
+        "vrp_ratio": 2.5,
+        "vrp_tier": "EXCELLENT",
+        "historical_mean": 4.0,
+        "price": 510.0,
+        "expiration": "2025-01-17",
+        "used_real_data": True,
+    }
+    repo.save_vrp("AAPL", "2025-01-15", vrp_data_updated)
+
+    # Should get updated values
+    cached = repo.get_vrp("AAPL", "2025-01-15")
+    assert cached["vrp_ratio"] == 2.5
+    assert cached["implied_move_pct"] == 10.0
+    assert cached["price"] == 510.0
+
+
+def test_vrp_cache_missing_optional_fields(db_path):
+    """save_vrp handles missing optional fields with defaults."""
+    repo = VRPCacheRepository(db_path=db_path)
+
+    # Minimal required fields only
+    vrp_data = {
+        "implied_move_pct": 8.5,
+        "vrp_ratio": 2.1,
+        "vrp_tier": "GOOD",
+    }
+    result = repo.save_vrp("META", "2025-01-20", vrp_data)
+    assert result is True
+
+    cached = repo.get_vrp("META", "2025-01-20")
+    assert cached is not None
+    assert cached["vrp_ratio"] == 2.1
+
+
+def test_vrp_cache_case_insensitive_ticker(db_path):
+    """Ticker lookup is case-insensitive (normalized to uppercase)."""
+    repo = VRPCacheRepository(db_path=db_path)
+
+    vrp_data = {
+        "implied_move_pct": 5.0,
+        "vrp_ratio": 1.8,
+        "vrp_tier": "EXCELLENT",
+        "historical_mean": 2.8,
+        "price": 150.0,
+        "expiration": "2025-01-17",
+        "used_real_data": True,
+    }
+
+    # Save with lowercase
+    repo.save_vrp("msft", "2025-01-15", vrp_data)
+
+    # Retrieve with uppercase
+    cached = repo.get_vrp("MSFT", "2025-01-15")
+    assert cached is not None
+    assert cached["ticker"] == "MSFT"  # Should be normalized
+
+
+def test_vrp_cache_different_earnings_dates(db_path):
+    """Same ticker can have different cached VRP for different earnings dates."""
+    repo = VRPCacheRepository(db_path=db_path)
+
+    vrp_data_jan = {
+        "implied_move_pct": 8.0,
+        "vrp_ratio": 2.0,
+        "vrp_tier": "EXCELLENT",
+        "historical_mean": 4.0,
+        "price": 500.0,
+        "expiration": "2025-01-17",
+        "used_real_data": True,
+    }
+    vrp_data_apr = {
+        "implied_move_pct": 6.0,
+        "vrp_ratio": 1.5,
+        "vrp_tier": "GOOD",
+        "historical_mean": 4.0,
+        "price": 520.0,
+        "expiration": "2025-04-18",
+        "used_real_data": True,
+    }
+
+    repo.save_vrp("NVDA", "2025-01-15", vrp_data_jan)
+    repo.save_vrp("NVDA", "2025-04-15", vrp_data_apr)
+
+    cached_jan = repo.get_vrp("NVDA", "2025-01-15")
+    cached_apr = repo.get_vrp("NVDA", "2025-04-15")
+
+    assert cached_jan["vrp_ratio"] == 2.0
+    assert cached_apr["vrp_ratio"] == 1.5
+
+
 # Input Validation Tests
 
 from src.domain.repositories import is_valid_ticker, validate_days

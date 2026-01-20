@@ -81,6 +81,40 @@ def filter_to_tracked_tickers(
     """
     return [e for e in earnings if e["symbol"] in tracked_tickers]
 
+
+async def fetch_earnings_with_db_fallback(
+    alphavantage: AlphaVantageClient,
+    repo: HistoricalMovesRepository,
+    days: int = 5
+) -> List[Dict[str, Any]]:
+    """
+    Fetch earnings calendar with database fallback.
+
+    Tries Alpha Vantage first. If it returns empty (API issues, rate limits),
+    falls back to local database earnings_calendar table.
+
+    Args:
+        alphavantage: Alpha Vantage API client
+        repo: Repository with get_upcoming_earnings() method
+        days: Number of days to look ahead (default 5)
+
+    Returns:
+        List of earnings dicts with 'symbol', 'report_date', 'timing' keys
+    """
+    try:
+        earnings = await alphavantage.get_earnings_calendar()
+        if earnings:
+            return earnings
+
+        # Alpha Vantage returned empty - fall back to DB
+        log("warn", "Alpha Vantage returned empty, using DB fallback", days=days)
+        return repo.get_upcoming_earnings(today_et(), days)
+
+    except Exception as e:
+        # API error - fall back to DB
+        log("error", "Alpha Vantage failed, using DB fallback", error=str(e), days=days)
+        return repo.get_upcoming_earnings(today_et(), days)
+
 # Alert thresholds
 PRE_MARKET_ALERT_THRESHOLD = 0.5  # Alert if pre-market move > 50% of historical avg
 AFTER_HOURS_ALERT_THRESHOLD = 1.0  # Only track after-hours moves > 1%

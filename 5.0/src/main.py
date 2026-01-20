@@ -716,7 +716,7 @@ async def scan(date: str, format: str = "json", _: bool = Depends(verify_api_key
                     liquidity_tier = classify_liquidity_tier(
                         oi=total_oi,
                         spread_pct=avg_spread,
-                        position_size=10,
+                        position_size=settings.DEFAULT_POSITION_SIZE,
                     )
 
                 # Calculate score
@@ -1045,7 +1045,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
                 liquidity_tier = classify_liquidity_tier(
                     oi=total_oi,
                     spread_pct=avg_spread,
-                    position_size=10,
+                    position_size=settings.DEFAULT_POSITION_SIZE,
                 )
 
         # Calculate VRP - extract historical move percentages (use intraday, matches 2.0)
@@ -1656,7 +1656,9 @@ async def telegram_webhook(request: Request):
                     else:
                         await telegram.send_message(f"Analysis failed: {result.get('message', 'Unknown error')}")
                 except Exception as e:
-                    await telegram.send_message(f"Error analyzing {ticker}: {str(e)}")
+                    # Log full error but only send sanitized message to Telegram
+                    log("error", "Telegram analyze failed", ticker=ticker, error=str(e))
+                    await telegram.send_message(f"Error analyzing {ticker}: {type(e).__name__}")
 
         elif text.startswith("/dashboard"):
             grafana_url = settings.grafana_dashboard_url

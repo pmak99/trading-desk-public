@@ -21,8 +21,14 @@ TICKER_PATTERN = re.compile(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$')
 DATE_PATTERN = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 
-def validate_ticker(ticker: str) -> str:
-    """Validate and normalize ticker symbol."""
+def _normalize_ticker(ticker: str) -> str:
+    """
+    Validate and normalize ticker symbol (internal use).
+
+    For public ticker validation, use src.domain.ticker module which
+    provides validate_ticker() (boolean check) and normalize_ticker()
+    (with alias resolution).
+    """
     ticker = ticker.upper().strip()
     if not TICKER_PATTERN.match(ticker):
         raise ValueError(f"Invalid ticker format: {ticker}")
@@ -169,7 +175,7 @@ class HistoricalMovesRepository:
         Raises:
             ValueError: If ticker or limit is invalid
         """
-        ticker = validate_ticker(ticker)
+        ticker = _normalize_ticker(ticker)
         limit = validate_limit(limit)
 
         with self._pool.get_connection() as conn:
@@ -217,7 +223,7 @@ class HistoricalMovesRepository:
             return {}
 
         # Validate all tickers
-        validated_tickers = [validate_ticker(t) for t in tickers]
+        validated_tickers = [_normalize_ticker(t) for t in tickers]
         limit = validate_limit(limit)
 
         # Build placeholders for IN clause
@@ -268,7 +274,7 @@ class HistoricalMovesRepository:
         Returns:
             Average absolute move percent, or None if no data
         """
-        ticker = validate_ticker(ticker)
+        ticker = _normalize_ticker(ticker)
         moves = self.get_moves(ticker)
         if not moves:
             return None
@@ -291,7 +297,7 @@ class HistoricalMovesRepository:
         Returns:
             Dict with earnings_date, timing (BMO/AMC), or None if not found
         """
-        ticker = validate_ticker(ticker)
+        ticker = _normalize_ticker(ticker)
 
         with self._pool.get_connection() as conn:
             cursor = conn.execute(
@@ -424,7 +430,7 @@ class HistoricalMovesRepository:
 
     def count_moves(self, ticker: str) -> int:
         """Count historical moves for ticker."""
-        ticker = validate_ticker(ticker)
+        ticker = _normalize_ticker(ticker)
 
         with self._pool.get_connection() as conn:
             cursor = conn.execute(
@@ -463,7 +469,7 @@ class HistoricalMovesRepository:
             ValueError: If ticker or date is invalid
             sqlite3.Error: On database errors (except duplicates)
         """
-        ticker = validate_ticker(move["ticker"])
+        ticker = _normalize_ticker(move["ticker"])
         earnings_date = validate_date(move["earnings_date"])
 
         with self._pool.get_connection() as conn:
@@ -512,7 +518,7 @@ class HistoricalMovesRepository:
             Dict with tail_risk_ratio, tail_risk_level, max_contracts, max_notional,
             or None if not found or table doesn't exist
         """
-        ticker = validate_ticker(ticker)
+        ticker = _normalize_ticker(ticker)
 
         with self._pool.get_connection() as conn:
             try:
@@ -589,7 +595,7 @@ class SentimentCacheRepository:
         Returns:
             Sentiment dict if cached and not expired, None otherwise
         """
-        ticker = validate_ticker(ticker)
+        ticker = _normalize_ticker(ticker)
         earnings_date = validate_date(earnings_date)
 
         with self._pool.get_connection() as conn:
@@ -631,7 +637,7 @@ class SentimentCacheRepository:
             ValueError: If ticker or date is invalid
             sqlite3.Error: On database errors
         """
-        ticker = validate_ticker(ticker)
+        ticker = _normalize_ticker(ticker)
         earnings_date = validate_date(earnings_date)
 
         if not (0 <= ttl_hours <= 168):  # Max 1 week
@@ -691,7 +697,7 @@ class SentimentCacheRepository:
         """
         with self._pool.get_connection() as conn:
             if ticker:
-                ticker = validate_ticker(ticker)
+                ticker = _normalize_ticker(ticker)
                 cursor = conn.execute(
                     "DELETE FROM sentiment_cache WHERE ticker = ?",
                     (ticker,)
@@ -786,7 +792,7 @@ class VRPCacheRepository:
         Returns:
             VRP data dict if cached and not expired, None otherwise
         """
-        ticker = validate_ticker(ticker)
+        ticker = _normalize_ticker(ticker)
         earnings_date = validate_date(earnings_date)
 
         with self._pool.get_connection() as conn:
@@ -834,7 +840,7 @@ class VRPCacheRepository:
         Returns:
             True if saved successfully
         """
-        ticker = validate_ticker(ticker)
+        ticker = _normalize_ticker(ticker)
         earnings_date = validate_date(earnings_date)
 
         ttl_hours = self._calculate_ttl_hours(earnings_date)
@@ -897,7 +903,7 @@ class VRPCacheRepository:
         """
         with self._pool.get_connection() as conn:
             if ticker:
-                ticker = validate_ticker(ticker)
+                ticker = _normalize_ticker(ticker)
                 cursor = conn.execute(
                     "DELETE FROM vrp_cache WHERE ticker = ?",
                     (ticker,)
