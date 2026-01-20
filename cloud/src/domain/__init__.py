@@ -19,6 +19,8 @@ from .ticker import (
     InvalidTickerError,
     TICKER_ALIASES,
 )
+from .skew import analyze_skew, DirectionalBias, SkewAnalysis
+from .direction import adjust_direction, get_direction, DirectionAdjustment
 
 __all__ = [
     "calculate_vrp",
@@ -44,4 +46,11 @@ __all__ = [
     "resolve_alias",
     "InvalidTickerError",
     "TICKER_ALIASES",
+    # Skew analysis and direction adjustment
+    "analyze_skew",
+    "DirectionalBias",
+    "SkewAnalysis",
+    "adjust_direction",
+    "get_direction",
+    "DirectionAdjustment",
 ]
