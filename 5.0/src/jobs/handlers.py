@@ -1079,9 +1079,11 @@ class JobRunner:
         # Filter to today's earnings
         todays_earnings = [e for e in earnings if e["report_date"] == today]
 
-        # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
-        tracked_tickers = repo.get_tracked_tickers()
-        todays_earnings = filter_to_tracked_tickers(todays_earnings, tracked_tickers)
+        # NOTE: Unlike alert jobs, outcome-recorder does NOT filter to whitelist.
+        # This allows new tickers to build history and eventually be analyzed.
+        # Only filter out obviously invalid tickers (preferred stocks, warrants, etc.)
+        from src.domain.repositories import is_valid_ticker
+        todays_earnings = [e for e in todays_earnings if is_valid_ticker(e["symbol"])]
 
         if not todays_earnings:
             log("info", "No earnings today to record", job="outcome_recorder")
@@ -1263,9 +1265,15 @@ class JobRunner:
 
         today = now_et()
 
+        # Filter to valid tickers (excludes preferred stocks, warrants, etc.)
+        # NOTE: Like outcome-recorder, backfill does NOT use whitelist to allow new tickers to build history
+        from src.domain.repositories import is_valid_ticker
+
         past_earnings = []
         for e in earnings:
             try:
+                if not is_valid_ticker(e["symbol"]):
+                    continue
                 earnings_date_str = e["report_date"]
                 # Parse earnings date and make it timezone-aware for proper comparison
                 earnings_date = datetime.strptime(earnings_date_str, "%Y-%m-%d")
