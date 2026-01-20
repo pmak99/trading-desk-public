@@ -881,6 +881,13 @@ class JobRunner:
         # Filter to today's earnings
         todays_earnings = [e for e in earnings if e["report_date"] == today]
 
+        # Filter out OTC/foreign tickers (ending in F = foreign ordinaries, typically illiquid penny stocks)
+        # These have unreliable price data and no options for VRP trading
+        todays_earnings = [
+            e for e in todays_earnings
+            if not (len(e["symbol"]) >= 5 and e["symbol"].endswith("F"))
+        ]
+
         if not todays_earnings:
             log("info", "No earnings today", job="after_hours_check")
             return {"status": "success", "checked": 0, "note": "No earnings today"}
