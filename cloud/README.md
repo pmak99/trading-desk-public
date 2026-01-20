@@ -182,6 +182,23 @@ SELECT * FROM (
 
 **Impact:** 97% reduction in queries
 
+### Ticker Whitelist Filtering
+
+Alert jobs only process tickers from `historical_moves` table (429 tracked tickers). This filters out OTC/foreign stocks that:
+- Have unreliable price data
+- Don't have options (can't trade VRP strategy)
+
+| Job Type | Filter | Purpose |
+|----------|--------|---------|
+| Alert jobs | Whitelist | Clean alerts, only tracked tickers |
+| Recording jobs | `is_valid_ticker()` only | New tickers build history |
+
+**Alert jobs (use whitelist):** pre-market-prep, sentiment-scan, morning-digest, market-open-refresh, pre-trade-refresh, after-hours-check, evening-summary
+
+**Recording jobs (open to new tickers):** outcome-recorder, weekly-backfill
+
+New tickers get recorded by `outcome-recorder`, then appear in alerts after building 4+ quarters of history.
+
 ## Configuration
 
 ```bash
@@ -214,7 +231,7 @@ GCS_BUCKET=your-gcs-bucket
 
 ```bash
 cd 5.0
-../2.0/venv/bin/python -m pytest tests/ -v    # 193 tests
+../2.0/venv/bin/python -m pytest tests/ -v    # 228 tests
 ```
 
 ## Deployment
