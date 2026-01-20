@@ -433,6 +433,22 @@ class HistoricalMovesRepository:
             )
             return cursor.fetchone()[0]
 
+    def get_tracked_tickers(self) -> set:
+        """
+        Get set of all tickers with historical moves data.
+
+        Used to filter Alpha Vantage earnings to only include tickers
+        we can actually analyze (have VRP data for).
+
+        Returns:
+            Set of ticker symbols (uppercase)
+        """
+        with self._pool.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT DISTINCT ticker FROM historical_moves"
+            )
+            return {row["ticker"] for row in cursor.fetchall()}
+
     def save_move(self, move: Dict[str, Any]) -> bool:
         """
         Save a historical move record.

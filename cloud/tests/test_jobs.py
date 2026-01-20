@@ -119,34 +119,37 @@ async def test_run_after_hours_check(runner):
     mock_job.assert_called_once()
 
 
-def test_otc_foreign_ticker_filter():
-    """OTC/foreign tickers (5+ chars ending in F) are filtered from earnings."""
-    # Simulated earnings from Alpha Vantage
+def test_tracked_ticker_whitelist_filter():
+    """Only tickers in historical_moves whitelist are kept from earnings."""
+    from src.jobs.handlers import filter_to_tracked_tickers
+
+    # Simulated earnings from Alpha Vantage (includes OTC/foreign tickers)
     earnings = [
-        {"symbol": "AAPL", "report_date": "2026-01-19"},  # Keep - normal ticker
-        {"symbol": "NVDA", "report_date": "2026-01-19"},  # Keep - normal ticker
-        {"symbol": "CUIRF", "report_date": "2026-01-19"},  # Filter - foreign ordinary
-        {"symbol": "GERFF", "report_date": "2026-01-19"},  # Filter - foreign ordinary
-        {"symbol": "HREEF", "report_date": "2026-01-19"},  # Filter - foreign ordinary
-        {"symbol": "F", "report_date": "2026-01-19"},  # Keep - Ford (short ticker)
-        {"symbol": "CHEF", "report_date": "2026-01-19"},  # Keep - 4 chars, legitimate
+        {"symbol": "AAPL", "report_date": "2026-01-19"},  # Keep - in whitelist
+        {"symbol": "NVDA", "report_date": "2026-01-19"},  # Keep - in whitelist
+        {"symbol": "CUIRF", "report_date": "2026-01-19"},  # Filter - not in whitelist
+        {"symbol": "GERFF", "report_date": "2026-01-19"},  # Filter - not in whitelist
+        {"symbol": "HREEF", "report_date": "2026-01-19"},  # Filter - not in whitelist
+        {"symbol": "MSFT", "report_date": "2026-01-19"},  # Keep - in whitelist
+        {"symbol": "UNKNOWN", "report_date": "2026-01-19"},  # Filter - not in whitelist
     ]
 
-    # Apply same filter logic as _after_hours_check
-    filtered = [
-        e for e in earnings
-        if not (len(e["symbol"]) >= 5 and e["symbol"].endswith("F"))
-    ]
+    # Simulated whitelist from historical_moves table
+    tracked_tickers = {"AAPL", "NVDA", "MSFT", "TSLA", "AMZN"}
 
-    assert len(filtered) == 4
+    # Apply filter
+    filtered = filter_to_tracked_tickers(earnings, tracked_tickers)
+
+    assert len(filtered) == 3
     symbols = [e["symbol"] for e in filtered]
     assert "AAPL" in symbols
     assert "NVDA" in symbols
-    assert "F" in symbols  # Ford should be kept
-    assert "CHEF" in symbols  # 4-char ticker should be kept
+    assert "MSFT" in symbols
+    # These should be filtered out (not in whitelist)
     assert "CUIRF" not in symbols
     assert "GERFF" not in symbols
     assert "HREEF" not in symbols
+    assert "UNKNOWN" not in symbols
 
 
 @pytest.mark.asyncio

@@ -58,6 +58,29 @@ MAX_OUTCOME_TICKERS = 30  # Max tickers to record outcomes for same-day earnings
 RATE_LIMIT_DELAY = 0.5  # Seconds between API calls
 RATE_LIMIT_BATCH_SIZE = 5  # API calls before adding delay
 
+
+def filter_to_tracked_tickers(
+    earnings: List[Dict[str, Any]],
+    tracked_tickers: set
+) -> List[Dict[str, Any]]:
+    """
+    Filter earnings list to only include tickers with historical moves data.
+
+    This is the most reliable way to filter out OTC/foreign stocks because:
+    1. If a ticker is in historical_moves, we have VRP data for it
+    2. These are tickers we've explicitly tracked and can analyze
+    3. No false positives (legitimate tickers won't be filtered)
+    4. No false negatives (untraceable tickers won't slip through)
+
+    Args:
+        earnings: List of earnings dicts from Alpha Vantage (with 'symbol' key)
+        tracked_tickers: Set of ticker symbols from historical_moves table
+
+    Returns:
+        Filtered list containing only tracked tickers
+    """
+    return [e for e in earnings if e["symbol"] in tracked_tickers]
+
 # Alert thresholds
 PRE_MARKET_ALERT_THRESHOLD = 0.5  # Alert if pre-market move > 50% of historical avg
 AFTER_HOURS_ALERT_THRESHOLD = 1.0  # Only track after-hours moves > 1%
@@ -218,6 +241,11 @@ class JobRunner:
 
         upcoming = [e for e in earnings if e["report_date"] in target_dates]
 
+        # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
+        repo = HistoricalMovesRepository(settings.DB_PATH)
+        tracked_tickers = repo.get_tracked_tickers()
+        upcoming = filter_to_tracked_tickers(upcoming, tracked_tickers)
+
         # Log truncation if limit exceeded
         if len(upcoming) > MAX_PRE_MARKET_TICKERS:
             log("info", "Truncating pre-market candidates",
@@ -226,7 +254,6 @@ class JobRunner:
         # Calculate VRP for each
         results = []
         failed_tickers = []
-        repo = HistoricalMovesRepository(settings.DB_PATH)
         api_calls = 0
 
         for e in upcoming[:MAX_PRE_MARKET_TICKERS]:
@@ -300,13 +327,17 @@ class JobRunner:
 
         upcoming = [e for e in earnings if e["report_date"] in target_dates]
 
+        # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
+        repo = HistoricalMovesRepository(settings.DB_PATH)
+        tracked_tickers = repo.get_tracked_tickers()
+        upcoming = filter_to_tracked_tickers(upcoming, tracked_tickers)
+
         # Log truncation if limit exceeded
         if len(upcoming) > MAX_PRIME_CANDIDATES:
             log("info", "Truncating prime candidates",
                 total=len(upcoming), processing=MAX_PRIME_CANDIDATES)
 
         # Calculate VRP and filter to candidates worth priming
-        repo = HistoricalMovesRepository(settings.DB_PATH)
         cache = SentimentCacheRepository(settings.DB_PATH)
         budget = BudgetTracker(db_path=settings.DB_PATH)
 
@@ -466,13 +497,17 @@ class JobRunner:
 
         upcoming = [e for e in earnings if e["report_date"] in target_dates]
 
+        # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
+        repo = HistoricalMovesRepository(settings.DB_PATH)
+        tracked_tickers = repo.get_tracked_tickers()
+        upcoming = filter_to_tracked_tickers(upcoming, tracked_tickers)
+
         # Log truncation if limit exceeded
         if len(upcoming) > MAX_DIGEST_CANDIDATES:
             log("info", "Truncating digest candidates",
                 total=len(upcoming), processing=MAX_DIGEST_CANDIDATES)
 
         # Build opportunities list with VRP and sentiment
-        repo = HistoricalMovesRepository(settings.DB_PATH)
         cache = SentimentCacheRepository(settings.DB_PATH)
         budget = BudgetTracker(db_path=settings.DB_PATH)
 
@@ -649,12 +684,16 @@ class JobRunner:
         # Filter to today's earnings only
         todays_earnings = [e for e in earnings if e["report_date"] == today]
 
+        # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
+        repo = HistoricalMovesRepository(settings.DB_PATH)
+        tracked_tickers = repo.get_tracked_tickers()
+        todays_earnings = filter_to_tracked_tickers(todays_earnings, tracked_tickers)
+
         if not todays_earnings:
             log("info", "No earnings today", job="market_open_refresh")
             return {"status": "success", "refreshed": 0, "note": "No earnings today"}
 
         # Refresh prices and check for significant moves
-        repo = HistoricalMovesRepository(settings.DB_PATH)
         refreshed = 0
         significant_moves = []
         failed_tickers = []
@@ -756,12 +795,16 @@ class JobRunner:
         # Filter to today's AMC earnings (tradeable now)
         todays_earnings = [e for e in earnings if e["report_date"] == today]
 
+        # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
+        repo = HistoricalMovesRepository(settings.DB_PATH)
+        tracked_tickers = repo.get_tracked_tickers()
+        todays_earnings = filter_to_tracked_tickers(todays_earnings, tracked_tickers)
+
         if not todays_earnings:
             log("info", "No earnings today", job="pre_trade_refresh")
             return {"status": "success", "candidates": 0, "note": "No earnings today"}
 
         # Re-evaluate VRP for today's tickers with current prices
-        repo = HistoricalMovesRepository(settings.DB_PATH)
         cache = SentimentCacheRepository(settings.DB_PATH)
         candidates = []
         failed_tickers = []
@@ -881,19 +924,16 @@ class JobRunner:
         # Filter to today's earnings
         todays_earnings = [e for e in earnings if e["report_date"] == today]
 
-        # Filter out OTC/foreign tickers (ending in F = foreign ordinaries, typically illiquid penny stocks)
-        # These have unreliable price data and no options for VRP trading
-        todays_earnings = [
-            e for e in todays_earnings
-            if not (len(e["symbol"]) >= 5 and e["symbol"].endswith("F"))
-        ]
+        # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
+        repo = HistoricalMovesRepository(settings.DB_PATH)
+        tracked_tickers = repo.get_tracked_tickers()
+        todays_earnings = filter_to_tracked_tickers(todays_earnings, tracked_tickers)
 
         if not todays_earnings:
             log("info", "No earnings today", job="after_hours_check")
             return {"status": "success", "checked": 0, "note": "No earnings today"}
 
         # Check after-hours prices for earnings that just reported
-        repo = HistoricalMovesRepository(settings.DB_PATH)
         checked = 0
         reported = []
         failed_tickers = []
@@ -1039,6 +1079,10 @@ class JobRunner:
         # Filter to today's earnings
         todays_earnings = [e for e in earnings if e["report_date"] == today]
 
+        # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
+        tracked_tickers = repo.get_tracked_tickers()
+        todays_earnings = filter_to_tracked_tickers(todays_earnings, tracked_tickers)
+
         if not todays_earnings:
             log("info", "No earnings today to record", job="outcome_recorder")
             return {"status": "success", "recorded": 0, "note": "No earnings today"}
@@ -1146,6 +1190,11 @@ class JobRunner:
         earnings = await self.alphavantage.get_earnings_calendar()
         todays_earnings = [e for e in (earnings or []) if e["report_date"] == today]
 
+        # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
+        repo = HistoricalMovesRepository(settings.DB_PATH)
+        tracked_tickers = repo.get_tracked_tickers()
+        todays_earnings = filter_to_tracked_tickers(todays_earnings, tracked_tickers)
+
         sent = False
         telegram_error = None
 
@@ -1155,7 +1204,6 @@ class JobRunner:
         else:
             try:
                 # Get outcome stats from today's recordings
-                repo = HistoricalMovesRepository(settings.DB_PATH)
                 recorded_moves = []
                 for e in todays_earnings[:10]:
                     moves = repo.get_moves(e["symbol"])
