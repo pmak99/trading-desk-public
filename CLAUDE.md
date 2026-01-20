@@ -254,7 +254,48 @@ DB_PATH=data/ivcrush.db  # Database location
 - **alpaca** - Paper trading account, positions, orders
 - **memory** - Knowledge graph for context
 - **finnhub** - News, earnings surprises, insider trades
-- **perplexity** - AI sentiment analysis (budget: 40 calls/day, $5/month)
+- **perplexity** - AI sentiment analysis with token-aware cost tracking (see below)
+
+### Perplexity Token-Aware Budget Tracking
+
+Custom MCP server (`mcp-servers/perplexity-tracked/`) that wraps the Perplexity API with actual token-based cost tracking.
+
+**Invoice-Verified Pricing (January 2026):**
+
+| Model | Rate | Example |
+|-------|------|---------|
+| sonar output | $0.000001/token | 1000 tokens = $0.001 |
+| sonar-pro output | $0.000015/token | 1000 tokens = $0.015 |
+| reasoning-pro | $0.000003/token | 1000 tokens = $0.003 |
+| Search API | $0.005/request | Flat rate |
+
+**Budget Limits:**
+- Daily: 40 calls
+- Monthly: $5.00
+
+**Database Schema (`api_budget` table):**
+```sql
+-- Token columns added January 2026
+output_tokens INTEGER DEFAULT 0,
+reasoning_tokens INTEGER DEFAULT 0,
+search_requests INTEGER DEFAULT 0
+```
+
+**Query budget status:**
+```sql
+-- Today's usage with token breakdown
+SELECT date, calls, cost, output_tokens, reasoning_tokens, search_requests
+FROM api_budget WHERE date = date('now') ORDER BY date DESC;
+
+-- Monthly token totals
+SELECT SUM(output_tokens) as total_output,
+       SUM(reasoning_tokens) as total_reasoning,
+       SUM(search_requests) as total_searches,
+       SUM(cost) as total_cost
+FROM api_budget WHERE date LIKE strftime('%Y-%m', 'now') || '%';
+```
+
+**Migration:** Run `python scripts/migrate_budget_schema.py` to add token columns to existing databases.
 
 ## 4.0 Slash Commands
 
@@ -460,6 +501,7 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 - ✅ Added validation tests for invalid direction/trade_outcome
 - ✅ Removed unused empty MCP module
 - ✅ Fixed README broken link to non-existent docs/ARCHITECTURE.md
+- ✅ Token-aware budget tracking with invoice-verified Perplexity pricing (replaces fixed $0.006/call estimates)
 
 ### 5.0 - Cloud Autopilot (All issues resolved ✅)
 
@@ -488,6 +530,7 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 12. ✅ Budget cost consistency (0.005→0.006 to match 4.0's COST_PER_CALL_ESTIMATE)
 13. ✅ Removed empty scripts/ directory and fixed Dockerfile COPY instruction
 14. ✅ Earnings date freshness validation in analyze endpoint (validates against Alpha Vantage when ≤7 days out)
+15. ✅ Token-aware budget tracking with invoice-verified Perplexity pricing
 
 **Performance Optimizations (January 2026):**
 15. ✅ Parallel ticker analysis - asyncio.Semaphore with MAX_CONCURRENT_ANALYSIS=5 (~60s→~15s)
