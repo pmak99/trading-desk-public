@@ -1,0 +1,61 @@
+version: 2
+updates:
+  # Root requirements.txt (shared dependencies)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5
+    groups:
+      # Group minor/patch updates into single PR
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # 5.0 Cloud Run requirements
+  - package-ecosystem: "pip"
+    directory: "/5.0"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "cloud-run"
+    commit-message:
+      prefix: "chore(deps-5.0)"
+
+  # 2.0 pyproject.toml
+  - package-ecosystem: "pip"
+    directory: "/2.0"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "core"
+    commit-message:
+      prefix: "chore(deps-2.0)"
