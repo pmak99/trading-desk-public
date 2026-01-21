@@ -793,16 +793,16 @@ class JobRunner:
         telegram_error = None
         if significant_moves:
             try:
-                msg_lines = [f"⚡ <b>Pre-Market Alert ({today})</b>\n"]
+                msg_lines = [f"⚡ <b>Market Open Alert ({today})</b>\n"]
                 for move in significant_moves[:5]:
                     msg_lines.append(
-                        f"• <b>{move['ticker']}</b>: {move['pre_market_move']}% move "
+                        f"• <b>{move['ticker']}</b>: {move['pre_market_move']}% pre-market "
                         f"(avg: {move['historical_avg']}%)"
                     )
                 await self.telegram.send_message("\n".join(msg_lines))
             except Exception as tg_err:
                 telegram_error = str(tg_err)
-                log("error", "Failed to send pre-market alert", error=telegram_error)
+                log("error", "Failed to send market open alert", error=telegram_error)
 
         # Record metrics
         duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
