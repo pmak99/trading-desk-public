@@ -53,15 +53,9 @@ If pre-market/after-hours:
    Showing today's earnings opportunities.
 ```
 
-### Step 2: Run Alert Check Script
-Execute the check_alerts script (primary method):
+### Step 2: Run Today's Scan
 ```bash
 cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh scan $(date +%Y-%m-%d)
-```
-
-Alternative if custom script exists:
-```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk && python scripts/check_alerts.py
 ```
 
 This provides:

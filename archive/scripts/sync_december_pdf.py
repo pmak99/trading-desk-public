@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 """
+ARCHIVED: January 2026
+
+Reason: One-time data migration script for December 2025 trades.
+        Data has been migrated; script no longer needed.
+
+Original docstring:
+--------------------------------------------------------------------------------
 Sync December 2025 trades from PDF-parsed CSV to database.
 Estimates acquisition dates for earnings plays (typically 1-2 day holds).
 """
