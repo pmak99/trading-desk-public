@@ -3,12 +3,18 @@ Tests for weekly options detection filter.
 
 Tests both the standalone detection function and its integration
 with fetch_real_implied_move.
+
+Note: Weekly options detection is imported from 2.0 (follows "Import 2.0, Don't Copy" pattern).
 """
 
 import pytest
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
-from src.domain.weekly_options import (
+# Import from 2.0 (the source of truth)
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "2.0"))
+from src.application.filters.weekly_options import (
     has_weekly_options,
     WEEKLY_DETECTION_WINDOW_DAYS,
     WEEKLY_DETECTION_MIN_FRIDAYS,
@@ -182,3 +188,195 @@ class TestImpliedMoveIntegration:
 
         # Default is True (permissive - don't block trades on API error)
         assert result["has_weekly_options"] is True
+
+
+class TestFilterPathIntegration:
+    """Integration tests for full filter path in _analyze_single_ticker."""
+
+    @pytest.mark.asyncio
+    async def test_filter_mode_filter_returns_none_for_no_weeklies(self):
+        """filter_mode='filter' should return None for tickers without weekly options."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        # Mock settings to require weekly options
+        mock_settings = MagicMock()
+        mock_settings.require_weekly_options = True
+        mock_settings.VRP_DISCOVERY = 1.8
+
+        # Mock tradier client - only 1 Friday (no weeklies)
+        mock_tradier = AsyncMock()
+        mock_tradier.get_quote.return_value = {"last": 100.0}
+        mock_tradier.get_expirations.return_value = ["2026-01-23"]  # Only 1 Friday
+        mock_tradier.get_options_chain.return_value = [
+            {"strike": 100, "option_type": "call", "bid": 2.0, "ask": 2.2},
+            {"strike": 100, "option_type": "put", "bid": 1.8, "ask": 2.0},
+        ]
+
+        # Mock VRP cache (no cached data)
+        mock_vrp_cache = MagicMock()
+        mock_vrp_cache.get_vrp.return_value = None
+        mock_vrp_cache.save_vrp = MagicMock()
+
+        # Mock historical repo with intraday_move_pct (what the function actually uses)
+        mock_repo = MagicMock()
+        mock_repo.get_moves.return_value = [
+            {"earnings_date": "2025-10-22", "intraday_move_pct": 3.5, "direction": "UP"},
+            {"earnings_date": "2025-07-22", "intraday_move_pct": 2.8, "direction": "DOWN"},
+            {"earnings_date": "2025-04-22", "intraday_move_pct": 3.0, "direction": "UP"},
+            {"earnings_date": "2025-01-22", "intraday_move_pct": 2.5, "direction": "DOWN"},
+        ]
+
+        # Mock sentiment cache
+        mock_sentiment_cache = MagicMock()
+        mock_sentiment_cache.get_sentiment.return_value = None
+
+        # Patch settings module
+        with patch("src.main.settings", mock_settings):
+            from src.main import _analyze_single_ticker
+
+            semaphore = asyncio.Semaphore(5)
+            result = await _analyze_single_ticker(
+                ticker="NOWEEKLY",
+                earnings_date="2026-01-22",
+                name="No Weekly Corp",
+                repo=mock_repo,
+                tradier=mock_tradier,
+                sentiment_cache=mock_sentiment_cache,
+                vrp_cache=mock_vrp_cache,
+                semaphore=semaphore,
+                filter_mode="filter"
+            )
+
+            # Should return None (filtered out)
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_filter_mode_warn_includes_warning(self):
+        """filter_mode='warn' should include ticker with warning."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        # Mock settings to require weekly options
+        mock_settings = MagicMock()
+        mock_settings.require_weekly_options = True
+        mock_settings.VRP_DISCOVERY = 1.8
+        mock_settings.account_size = 100000
+        mock_settings.DEFAULT_POSITION_SIZE = 100
+
+        # Mock tradier client - only 1 Friday (no weeklies)
+        mock_tradier = AsyncMock()
+        mock_tradier.get_quote.return_value = {"last": 100.0}
+        mock_tradier.get_expirations.return_value = ["2026-01-23"]  # Only 1 Friday
+        mock_tradier.get_options_chain.return_value = [
+            {"strike": 100, "option_type": "call", "bid": 2.0, "ask": 2.2},
+            {"strike": 100, "option_type": "put", "bid": 1.8, "ask": 2.0},
+        ]
+
+        # Mock VRP cache (no cached data)
+        mock_vrp_cache = MagicMock()
+        mock_vrp_cache.get_vrp.return_value = None
+        mock_vrp_cache.save_vrp = MagicMock()
+
+        # Mock historical repo - low historical move to create high VRP
+        mock_repo = MagicMock()
+        mock_repo.get_moves.return_value = [
+            {"earnings_date": "2025-10-22", "intraday_move_pct": 2.0, "direction": "UP"},
+            {"earnings_date": "2025-07-22", "intraday_move_pct": 2.5, "direction": "DOWN"},
+            {"earnings_date": "2025-04-22", "intraday_move_pct": 1.8, "direction": "UP"},
+            {"earnings_date": "2025-01-22", "intraday_move_pct": 2.2, "direction": "DOWN"},
+        ]
+
+        # Mock sentiment cache
+        mock_sentiment_cache = MagicMock()
+        mock_sentiment_cache.get_sentiment.return_value = None
+
+        with patch("src.main.settings", mock_settings):
+            from src.main import _analyze_single_ticker
+
+            semaphore = asyncio.Semaphore(5)
+            result = await _analyze_single_ticker(
+                ticker="WARNME",
+                earnings_date="2026-01-22",
+                name="Warn Me Corp",
+                repo=mock_repo,
+                tradier=mock_tradier,
+                sentiment_cache=mock_sentiment_cache,
+                vrp_cache=mock_vrp_cache,
+                semaphore=semaphore,
+                filter_mode="warn"
+            )
+
+            # Should return result with warning
+            assert result is not None
+            assert result["has_weekly_options"] is False
+            assert result["weekly_warning"] is not None
+            assert "No weekly options" in result["weekly_warning"]
+
+    @pytest.mark.asyncio
+    async def test_vrp_cache_stores_weekly_status(self):
+        """VRP cache should include weekly options status."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        # Mock settings (weekly filter disabled)
+        mock_settings = MagicMock()
+        mock_settings.require_weekly_options = False
+        mock_settings.VRP_DISCOVERY = 1.8
+        mock_settings.account_size = 100000
+        mock_settings.DEFAULT_POSITION_SIZE = 100
+
+        # Mock tradier client - 3 Fridays (has weeklies)
+        mock_tradier = AsyncMock()
+        mock_tradier.get_quote.return_value = {"last": 100.0}
+        mock_tradier.get_expirations.return_value = [
+            "2026-01-23", "2026-01-30", "2026-02-06"  # 3 Fridays
+        ]
+        mock_tradier.get_options_chain.return_value = [
+            {"strike": 100, "option_type": "call", "bid": 2.0, "ask": 2.2},
+            {"strike": 100, "option_type": "put", "bid": 1.8, "ask": 2.0},
+        ]
+
+        # Mock VRP cache
+        mock_vrp_cache = MagicMock()
+        mock_vrp_cache.get_vrp.return_value = None
+        mock_vrp_cache.save_vrp = MagicMock()
+
+        # Mock historical repo - low historical move to create high VRP
+        mock_repo = MagicMock()
+        mock_repo.get_moves.return_value = [
+            {"earnings_date": "2025-10-22", "intraday_move_pct": 2.0, "direction": "UP"},
+            {"earnings_date": "2025-07-22", "intraday_move_pct": 2.5, "direction": "DOWN"},
+            {"earnings_date": "2025-04-22", "intraday_move_pct": 1.8, "direction": "UP"},
+            {"earnings_date": "2025-01-22", "intraday_move_pct": 2.2, "direction": "DOWN"},
+        ]
+
+        # Mock sentiment cache
+        mock_sentiment_cache = MagicMock()
+        mock_sentiment_cache.get_sentiment.return_value = None
+
+        with patch("src.main.settings", mock_settings):
+            from src.main import _analyze_single_ticker
+
+            semaphore = asyncio.Semaphore(5)
+            await _analyze_single_ticker(
+                ticker="CACHED",
+                earnings_date="2026-01-22",
+                name="Cached Corp",
+                repo=mock_repo,
+                tradier=mock_tradier,
+                sentiment_cache=mock_sentiment_cache,
+                vrp_cache=mock_vrp_cache,
+                semaphore=semaphore,
+                filter_mode="filter"
+            )
+
+            # Verify save_vrp was called with weekly status
+            mock_vrp_cache.save_vrp.assert_called_once()
+            call_args = mock_vrp_cache.save_vrp.call_args
+            saved_data = call_args[0][2]  # Third positional arg is the data dict
+
+            assert "has_weekly_options" in saved_data
+            assert saved_data["has_weekly_options"] is True
+            assert "weekly_reason" in saved_data
+            assert "Friday" in saved_data["weekly_reason"]

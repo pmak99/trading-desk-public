@@ -21,7 +21,14 @@ from .ticker import (
 )
 from .skew import analyze_skew, DirectionalBias, SkewAnalysis
 from .direction import adjust_direction, get_direction, DirectionAdjustment
-from .weekly_options import has_weekly_options
+
+# Import from 2.0 (follows "Import 2.0, Don't Copy" pattern from CLAUDE.md)
+import sys
+from pathlib import Path
+_two_zero_path = str(Path(__file__).parent.parent.parent.parent / "2.0")
+if _two_zero_path not in sys.path:
+    sys.path.insert(0, _two_zero_path)
+from src.application.filters.weekly_options import has_weekly_options
 
 __all__ = [
     "calculate_vrp",

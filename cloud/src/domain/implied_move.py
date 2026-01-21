@@ -24,7 +24,14 @@ if TYPE_CHECKING:
     from src.integrations.tradier import TradierClient
 
 from src.core.logging import log
-from src.domain.weekly_options import has_weekly_options
+
+# Import from 2.0 (follows "Import 2.0, Don't Copy" pattern from CLAUDE.md)
+import sys
+from pathlib import Path
+_two_zero_path = str(Path(__file__).parent.parent.parent.parent / "2.0")
+if _two_zero_path not in sys.path:
+    sys.path.insert(0, _two_zero_path)
+from src.application.filters.weekly_options import has_weekly_options
 
 
 def calculate_implied_move(
