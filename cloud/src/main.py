@@ -962,6 +962,22 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
                         if av_earnings:
                             av_date = av_earnings[0].get("report_date")
                             if av_date and av_date != target_date:
+                                # Check if API is returning next quarter (earnings already reported)
+                                av_date_parsed = datetime.strptime(av_date, "%Y-%m-%d").date()
+                                date_diff_days = (av_date_parsed - db_date).days
+                                db_date_is_past = db_date <= today
+
+                                if date_diff_days >= 45 and db_date_is_past:
+                                    # Earnings likely already reported - API shows next quarter
+                                    log("warn", "Earnings likely ALREADY REPORTED",
+                                        ticker=ticker, reported_date=target_date,
+                                        next_quarter=av_date, diff_days=date_diff_days)
+                                    return {
+                                        "ticker": ticker,
+                                        "status": "already_reported",
+                                        "message": f"Earnings already reported on {target_date}. Next: {av_date}",
+                                    }
+
                                 log("warn", "Earnings date changed", ticker=ticker, db_date=target_date, api_date=av_date)
                                 target_date = av_date
                 except Exception as e:
