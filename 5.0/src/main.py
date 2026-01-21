@@ -967,7 +967,9 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
                                 date_diff_days = (av_date_parsed - db_date).days
                                 db_date_is_past = db_date <= today
 
-                                if date_diff_days >= 45 and db_date_is_past:
+                                # Threshold: 45 days distinguishes same-quarter corrections from next quarter
+                                NEXT_QUARTER_THRESHOLD_DAYS = 45
+                                if date_diff_days >= NEXT_QUARTER_THRESHOLD_DAYS and db_date_is_past:
                                     # Earnings likely already reported - API shows next quarter
                                     log("warn", "Earnings likely ALREADY REPORTED",
                                         ticker=ticker, reported_date=target_date,

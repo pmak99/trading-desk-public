@@ -1017,7 +1017,9 @@ def fetch_earnings_for_ticker(
 
                             # If API returns a date 45+ days further AND DB date is past/today,
                             # earnings likely already reported - API is showing next quarter
-                            if date_diff_days >= 45 and db_date_is_past:
+                            # Threshold: 45 days distinguishes same-quarter corrections from next quarter
+                            NEXT_QUARTER_THRESHOLD_DAYS = 45
+                            if date_diff_days >= NEXT_QUARTER_THRESHOLD_DAYS and db_date_is_past:
                                 logger.warning(
                                     f"{ticker}: Earnings likely ALREADY REPORTED on {earnings_date}. "
                                     f"API shows next quarter: {av_date} ({date_diff_days}d later)"
