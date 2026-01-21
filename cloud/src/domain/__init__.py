@@ -21,6 +21,7 @@ from .ticker import (
 )
 from .skew import analyze_skew, DirectionalBias, SkewAnalysis
 from .direction import adjust_direction, get_direction, DirectionAdjustment
+from .weekly_options import has_weekly_options
 
 __all__ = [
     "calculate_vrp",
@@ -53,4 +54,6 @@ __all__ = [
     "adjust_direction",
     "get_direction",
     "DirectionAdjustment",
+    # Weekly options detection
+    "has_weekly_options",
 ]

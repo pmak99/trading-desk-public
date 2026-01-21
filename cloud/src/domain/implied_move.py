@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from src.integrations.tradier import TradierClient
 
 from src.core.logging import log
+from src.domain.weekly_options import has_weekly_options
 
 
 def calculate_implied_move(
@@ -188,6 +189,9 @@ async def fetch_real_implied_move(
         "atm_strike": None,
         "straddle_price": None,
         "expiration": None,
+        "expirations": [],  # Full list of expirations for weekly check
+        "has_weekly_options": True,  # Default to True (permissive on error)
+        "weekly_reason": "",
         "price": None,  # Stock price used for calculation
         "error": None,
     }
@@ -206,6 +210,15 @@ async def fetch_real_implied_move(
 
         # Get expirations and find nearest one after earnings
         expirations = await tradier.get_expirations(ticker)
+
+        # Store expirations for weekly check
+        result["expirations"] = expirations
+
+        # Check for weekly options availability
+        has_weeklies, weekly_reason = has_weekly_options(expirations, earnings_date)
+        result["has_weekly_options"] = has_weeklies
+        result["weekly_reason"] = weekly_reason
+
         nearest_exp = None
         for exp in expirations:
             if exp >= earnings_date:

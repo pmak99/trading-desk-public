@@ -102,6 +102,11 @@ class ThresholdsConfig:
     min_theta_good: float = 30.0
     min_vega_good: float = -50.0
 
+    # Weekly options filter (opt-in)
+    # When enabled, filters out tickers without weekly options
+    # Weekly options have better liquidity and tighter spreads
+    require_weekly_options: bool = False
+
 
 @dataclass(frozen=True)
 class ScoringWeights:
@@ -438,6 +443,8 @@ class Config:
             min_historical_quarters=int(os.getenv("MIN_HISTORICAL_QUARTERS", "4")),
             max_historical_quarters=int(os.getenv("MAX_HISTORICAL_QUARTERS", "12")),
             min_market_cap_millions=float(os.getenv("MIN_MARKET_CAP_MILLIONS", "1000.0")),
+            # Weekly options filter (opt-in, default OFF)
+            require_weekly_options=os.getenv("REQUIRE_WEEKLY_OPTIONS", "false").lower() == "true",
         )
 
         # Rate limits
