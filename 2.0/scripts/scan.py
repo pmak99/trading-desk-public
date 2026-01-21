@@ -42,6 +42,7 @@ Composite Quality Scoring (Dec 2025):
 
 import sys
 import argparse
+import functools
 import logging
 import re
 import time
@@ -74,6 +75,7 @@ from src.infrastructure.cache.hybrid_cache import HybridCache
 from src.application.services.earnings_date_validator import EarningsDateValidator
 from src.infrastructure.data_sources.yahoo_finance_earnings import YahooFinanceEarnings
 from src.utils.market_hours import is_market_open, get_market_status, is_trading_day
+from src.application.filters.weekly_options import has_weekly_options
 import os
 
 logger = logging.getLogger(__name__)
@@ -1013,16 +1015,16 @@ def fetch_earnings_for_ticker(
                         _, av_date, av_timing = av_result.value[0]
                         if av_date != earnings_date:
                             date_diff_days = (av_date - earnings_date).days
-                            db_date_is_past = earnings_date <= date.today()
 
-                            # If API returns a date 45+ days further AND DB date is past/today,
-                            # earnings likely already reported - API is showing next quarter
+                            # If API returns a date 45+ days further, it's showing next quarter
+                            # This means either: (a) earnings already reported, or (b) DB date was wrong
+                            # Either way, don't "correct" to next quarter - skip this ticker
                             # Threshold: 45 days distinguishes same-quarter corrections from next quarter
                             NEXT_QUARTER_THRESHOLD_DAYS = 45
-                            if date_diff_days >= NEXT_QUARTER_THRESHOLD_DAYS and db_date_is_past:
+                            if date_diff_days >= NEXT_QUARTER_THRESHOLD_DAYS:
                                 logger.warning(
-                                    f"{ticker}: Earnings likely ALREADY REPORTED on {earnings_date}. "
-                                    f"API shows next quarter: {av_date} ({date_diff_days}d later)"
+                                    f"{ticker}: API shows next quarter ({av_date}, {date_diff_days}d later). "
+                                    f"DB date {earnings_date} likely stale or already reported. Skipping."
                                 )
                                 # Mark as validated but don't update to next quarter
                                 cursor.execute(
@@ -1034,7 +1036,7 @@ def fetch_earnings_for_ticker(
                                     (ticker, earnings_date.isoformat())
                                 )
                                 conn.commit()
-                                # Return None to skip this ticker - earnings already happened
+                                # Return None to skip this ticker
                                 return None
 
                             logger.warning(f"{ticker}: Date changed! DB={earnings_date} → API={av_date}")
@@ -1103,7 +1105,8 @@ def analyze_ticker(
     ticker: str,
     earnings_date: date,
     expiration_date: date,
-    auto_backfill: bool = False
+    auto_backfill: bool = False,
+    include_monthly: bool = False
 ) -> Optional[dict]:
     """
     Analyze a single ticker for IV Crush opportunity.
@@ -1114,6 +1117,7 @@ def analyze_ticker(
         earnings_date: Date of earnings announcement
         expiration_date: Options expiration date
         auto_backfill: If True, automatically backfill missing historical data
+        include_monthly: If True, skip weekly options filter (override REQUIRE_WEEKLY_OPTIONS)
 
     Returns dict with analysis results or None if analysis failed.
     """
@@ -1126,6 +1130,25 @@ def analyze_ticker(
 
         # Fetch company name early (for result dictionaries)
         company_name = get_ticker_name(ticker)
+
+        # Check for weekly options (opt-in filter via REQUIRE_WEEKLY_OPTIONS)
+        has_weeklies = True  # Default: permissive
+        weekly_reason = ""
+        if container.config.thresholds.require_weekly_options and not include_monthly:
+            # Fetch expirations to check for weekly options
+            expirations_result = container.tradier.get_expirations(ticker)
+            if expirations_result.is_ok:
+                expirations_list = [exp.isoformat() for exp in expirations_result.value]
+                has_weeklies, weekly_reason = has_weekly_options(
+                    expirations_list,
+                    earnings_date.isoformat()
+                )
+                if not has_weeklies:
+                    logger.info(f"✗ {ticker}: No weekly options - {weekly_reason}")
+                    return None
+            else:
+                # On API error, be permissive - don't block trading opportunities
+                logger.debug(f"{ticker}: Could not check weekly options, skipping filter")
 
         # Validate expiration date
         validation_error = validate_expiration_date(expiration_date, earnings_date, ticker)
@@ -1419,7 +1442,8 @@ def analyze_ticker_concurrent(
     container: Container,
     ticker: str,
     earnings_date: date,
-    expiration_date: date
+    expiration_date: date,
+    include_monthly: bool = False
 ) -> Optional[dict]:
     """
     Wrapper for analyze_ticker() compatible with ConcurrentScanner.
@@ -1432,6 +1456,7 @@ def analyze_ticker_concurrent(
         ticker: Stock ticker symbol
         earnings_date: Earnings announcement date
         expiration_date: Options expiration date
+        include_monthly: If True, skip weekly options filter
 
     Returns:
         Analysis result dict or None
@@ -1441,7 +1466,8 @@ def analyze_ticker_concurrent(
         ticker=ticker,
         earnings_date=earnings_date,
         expiration_date=expiration_date,
-        auto_backfill=False  # Disable backfill in concurrent mode
+        auto_backfill=False,  # Disable backfill in concurrent mode
+        include_monthly=include_monthly
     )
 
 
@@ -1765,7 +1791,8 @@ def _display_scan_results(
 def scanning_mode_parallel(
     container: Container,
     scan_date: date,
-    expiration_offset: Optional[int] = None
+    expiration_offset: Optional[int] = None,
+    include_monthly: bool = False
 ) -> int:
     """
     Parallel scanning mode: Scan earnings using ConcurrentScanner.
@@ -1806,11 +1833,13 @@ def scanning_mode_parallel(
             logger.info(f"Progress: {completed}/{total} ({completed*100//total}%)")
 
     # Run concurrent scan
+    # Bind include_monthly to analyze function for weekly options filter
+    analyze_func = functools.partial(analyze_ticker_concurrent, include_monthly=include_monthly)
     scanner = container.concurrent_scanner
     batch_result = scanner.scan_tickers(
         tickers=tickers,
         earnings_lookup=earnings_lookup,
-        analyze_func=analyze_ticker_concurrent,
+        analyze_func=analyze_func,
         filter_func=filter_func,
         expiration_offset=expiration_offset or 0,
         progress_callback=progress_callback,
@@ -1848,7 +1877,8 @@ def scanning_mode(
     container: Container,
     scan_date: date,
     expiration_offset: Optional[int] = None,
-    parallel: bool = False
+    parallel: bool = False,
+    include_monthly: bool = False
 ) -> int:
     """
     Scanning mode: Scan earnings for a specific date.
@@ -1858,12 +1888,13 @@ def scanning_mode(
         scan_date: Target earnings date
         expiration_offset: Custom expiration offset in days
         parallel: If True, use parallel processing (5x speedup)
+        include_monthly: If True, skip weekly options filter
 
     Returns exit code (0 for success, 1 for error)
     """
     # Use parallel mode if requested
     if parallel:
-        return scanning_mode_parallel(container, scan_date, expiration_offset)
+        return scanning_mode_parallel(container, scan_date, expiration_offset, include_monthly)
 
     logger.info("=" * 80)
     logger.info("SCANNING MODE: Earnings Date Scan")
@@ -1925,7 +1956,8 @@ def scanning_mode(
             ticker,
             earnings_date,
             expiration_date,
-            auto_backfill=False
+            auto_backfill=False,
+            include_monthly=include_monthly
         )
 
         if result:
@@ -2033,7 +2065,8 @@ def scanning_mode(
 def ticker_mode_parallel(
     container: Container,
     tickers: List[str],
-    expiration_offset: Optional[int] = None
+    expiration_offset: Optional[int] = None,
+    include_monthly: bool = False
 ) -> int:
     """
     Parallel ticker mode: Analyze tickers using ConcurrentScanner.
@@ -2074,11 +2107,13 @@ def ticker_mode_parallel(
         logger.info(f"Progress: {completed}/{total} - {ticker}")
 
     # Run concurrent scan
+    # Bind include_monthly to analyze function for weekly options filter
+    analyze_func = functools.partial(analyze_ticker_concurrent, include_monthly=include_monthly)
     scanner = container.concurrent_scanner
     batch_result = scanner.scan_tickers(
         tickers=list(earnings_lookup.keys()),
         earnings_lookup=earnings_lookup,
-        analyze_func=analyze_ticker_concurrent,
+        analyze_func=analyze_func,
         filter_func=filter_func,
         expiration_offset=expiration_offset or 0,
         progress_callback=progress_callback,
@@ -2115,7 +2150,8 @@ def ticker_mode(
     container: Container,
     tickers: List[str],
     expiration_offset: Optional[int] = None,
-    parallel: bool = False
+    parallel: bool = False,
+    include_monthly: bool = False
 ) -> int:
     """
     Ticker mode: Analyze specific tickers from command line.
@@ -2125,12 +2161,13 @@ def ticker_mode(
         tickers: List of ticker symbols
         expiration_offset: Custom expiration offset in days
         parallel: If True, use parallel processing (5x speedup)
+        include_monthly: If True, skip weekly options filter
 
     Returns exit code (0 for success, 1 for error)
     """
     # Use parallel mode if requested and we have multiple tickers
     if parallel and len(tickers) > 1:
-        return ticker_mode_parallel(container, tickers, expiration_offset)
+        return ticker_mode_parallel(container, tickers, expiration_offset, include_monthly)
 
     logger.info("=" * 80)
     logger.info("TICKER MODE: Command Line Tickers")
@@ -2200,7 +2237,8 @@ def ticker_mode(
             ticker,
             earnings_date,
             expiration_date,
-            auto_backfill=True
+            auto_backfill=True,
+            include_monthly=include_monthly
         )
 
         if result:
@@ -2451,7 +2489,8 @@ def whisper_mode_parallel(
     tickers: List[str],
     monday: date,
     week_end: date,
-    expiration_offset: Optional[int] = None
+    expiration_offset: Optional[int] = None,
+    include_monthly: bool = False
 ) -> int:
     """
     Parallel whisper mode: Analyze anticipated earnings using ConcurrentScanner.
@@ -2464,6 +2503,7 @@ def whisper_mode_parallel(
         monday: Start of week (Monday)
         week_end: End of week (Sunday)
         expiration_offset: Custom expiration offset in days
+        include_monthly: If True, skip weekly options filter
 
     Returns:
         Exit code (0 = success, 1 = error)
@@ -2499,11 +2539,13 @@ def whisper_mode_parallel(
             logger.info(f"Progress: {completed}/{total} ({completed*100//total}%)")
 
     # Run concurrent scan
+    # Bind include_monthly to analyze function for weekly options filter
+    analyze_func = functools.partial(analyze_ticker_concurrent, include_monthly=include_monthly)
     scanner = container.concurrent_scanner
     batch_result = scanner.scan_tickers(
         tickers=list(earnings_lookup.keys()),
         earnings_lookup=earnings_lookup,
-        analyze_func=analyze_ticker_concurrent,
+        analyze_func=analyze_func,
         filter_func=filter_func,
         expiration_offset=expiration_offset or 0,
         progress_callback=progress_callback,
@@ -2546,7 +2588,8 @@ def whisper_mode(
     week_monday: Optional[str] = None,
     fallback_image: Optional[str] = None,
     expiration_offset: Optional[int] = None,
-    parallel: bool = False
+    parallel: bool = False,
+    include_monthly: bool = False
 ) -> int:
     """
     Whisper mode: Analyze most anticipated earnings.
@@ -2559,6 +2602,7 @@ def whisper_mode(
         fallback_image: Path to earnings screenshot (PNG/JPG)
         expiration_offset: Custom expiration offset in days
         parallel: If True, use parallel processing (5x speedup)
+        include_monthly: If True, skip weekly options filter
 
     Returns:
         Exit code (0 = success, 1 = error)
@@ -2624,7 +2668,7 @@ def whisper_mode(
     # Use parallel mode if requested
     if parallel:
         return whisper_mode_parallel(
-            container, tickers, monday, week_end, expiration_offset
+            container, tickers, monday, week_end, expiration_offset, include_monthly
         )
 
     # Analyze each ticker
@@ -2904,6 +2948,11 @@ Notes:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level"
+    )
+    parser.add_argument(
+        "--include-monthly",
+        action="store_true",
+        help="Include tickers with only monthly options (overrides REQUIRE_WEEKLY_OPTIONS filter)"
     )
 
     args = parser.parse_args()

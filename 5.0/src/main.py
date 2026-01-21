@@ -39,6 +39,7 @@ from src.domain import (
     is_valid_ticker,
     InvalidTickerError,
     TICKER_ALIASES,
+    has_weekly_options,
 )
 from src.domain.implied_move import (
     calculate_implied_move_from_chain,
@@ -962,22 +963,22 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
                         if av_earnings:
                             av_date = av_earnings[0].get("report_date")
                             if av_date and av_date != target_date:
-                                # Check if API is returning next quarter (earnings already reported)
+                                # Check if API is returning next quarter
                                 av_date_parsed = datetime.strptime(av_date, "%Y-%m-%d").date()
                                 date_diff_days = (av_date_parsed - db_date).days
-                                db_date_is_past = db_date <= today
 
-                                # Threshold: 45 days distinguishes same-quarter corrections from next quarter
+                                # If API returns 45+ days later, it's showing next quarter
+                                # This means either: (a) earnings already reported, or (b) DB date was wrong
+                                # Either way, don't "correct" to next quarter - skip this ticker
                                 NEXT_QUARTER_THRESHOLD_DAYS = 45
-                                if date_diff_days >= NEXT_QUARTER_THRESHOLD_DAYS and db_date_is_past:
-                                    # Earnings likely already reported - API shows next quarter
-                                    log("warn", "Earnings likely ALREADY REPORTED",
-                                        ticker=ticker, reported_date=target_date,
+                                if date_diff_days >= NEXT_QUARTER_THRESHOLD_DAYS:
+                                    log("warn", "API shows next quarter, DB date likely stale",
+                                        ticker=ticker, db_date=target_date,
                                         next_quarter=av_date, diff_days=date_diff_days)
                                     return {
                                         "ticker": ticker,
-                                        "status": "already_reported",
-                                        "message": f"Earnings already reported on {target_date}. Next: {av_date}",
+                                        "status": "stale_or_reported",
+                                        "message": f"DB date {target_date} stale or already reported. Next quarter: {av_date}",
                                     }
 
                                 log("warn", "Earnings date changed", ticker=ticker, db_date=target_date, api_date=av_date)
@@ -1034,6 +1035,13 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
 
         # Get options chain for implied move
         expirations = await tradier.get_expirations(ticker)
+
+        # Check for weekly options availability
+        has_weeklies, weekly_reason = has_weekly_options(expirations, target_date)
+        weekly_warning = None
+        if settings.require_weekly_options and not has_weeklies:
+            weekly_warning = f"No weekly options: {weekly_reason}"
+
         nearest_exp = None
         for exp in expirations:
             if exp >= target_date:
@@ -1220,6 +1228,8 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
                 "level": tail_risk_level,
                 "max_move": round(max_move, 2),
             },
+            "has_weekly_options": has_weeklies,
+            "weekly_warning": weekly_warning,
         }
 
         # Record metrics
@@ -1260,7 +1270,8 @@ async def _analyze_single_ticker(
     sentiment_cache,
     vrp_cache,
     semaphore: asyncio.Semaphore,
-    prefetched_moves: Optional[List[Dict[str, Any]]] = None
+    prefetched_moves: Optional[List[Dict[str, Any]]] = None,
+    filter_mode: str = "filter"
 ) -> Optional[Dict[str, Any]]:
     """
     Analyze a single ticker for VRP opportunity.
@@ -1269,6 +1280,10 @@ async def _analyze_single_ticker(
     Uses VRP cache to reduce Tradier API calls (smart TTL based on earnings proximity).
     Accepts pre-fetched moves to reduce N+1 database queries.
     Returns result dict if qualified, None otherwise.
+
+    Args:
+        filter_mode: "filter" to return None for non-weekly tickers (default),
+                     "warn" to include ticker with warning
     """
     async with semaphore:
         try:
@@ -1288,6 +1303,8 @@ async def _analyze_single_ticker(
 
             # Check VRP cache first (reduces Tradier API calls by ~89%)
             cached_vrp = vrp_cache.get_vrp(ticker, earnings_date)
+            has_weekly_options = True  # Default: permissive on error
+            weekly_reason = ""
             if cached_vrp:
                 # Use cached VRP data
                 implied_move_pct = cached_vrp["implied_move_pct"]
@@ -1296,6 +1313,8 @@ async def _analyze_single_ticker(
                 price = cached_vrp.get("price")
                 expiration = cached_vrp.get("expiration", "")
                 used_real_data = cached_vrp.get("used_real_data", False)
+                has_weekly_options = cached_vrp.get("has_weekly_options", True)
+                weekly_reason = cached_vrp.get("weekly_reason", "")
                 log("debug", "VRP cache hit", ticker=ticker, vrp_ratio=vrp_ratio)
                 metrics.count("ivcrush.vrp_cache.hit", {"ticker": ticker})
             else:
@@ -1316,6 +1335,8 @@ async def _analyze_single_ticker(
                 )
                 price = im_result.get("price")
                 expiration = im_result.get("expiration", "")
+                has_weekly_options = im_result.get("has_weekly_options", True)
+                weekly_reason = im_result.get("weekly_reason", "")
 
                 # Calculate VRP
                 vrp_data = calculate_vrp(
@@ -1330,7 +1351,7 @@ async def _analyze_single_ticker(
                 vrp_ratio = vrp_data["vrp_ratio"]
                 vrp_tier = vrp_data["tier"]
 
-                # Cache the VRP data for future requests
+                # Cache the VRP data for future requests (includes weekly options status)
                 vrp_cache.save_vrp(ticker, earnings_date, {
                     "implied_move_pct": implied_move_pct,
                     "vrp_ratio": vrp_ratio,
@@ -1339,8 +1360,21 @@ async def _analyze_single_ticker(
                     "price": price,
                     "expiration": expiration,
                     "used_real_data": used_real_data,
+                    "has_weekly_options": has_weekly_options,
+                    "weekly_reason": weekly_reason,
                 })
                 log("debug", "VRP cached", ticker=ticker, vrp_ratio=vrp_ratio)
+
+            # Check weekly options filter (opt-in via REQUIRE_WEEKLY_OPTIONS env var)
+            weekly_warning = None
+            if settings.require_weekly_options and not has_weekly_options:
+                if filter_mode == "filter":
+                    log("debug", "Filtered out non-weekly ticker", ticker=ticker, reason=weekly_reason)
+                    return None
+                else:
+                    # filter_mode == "warn": include ticker but with warning
+                    weekly_warning = f"No weekly options: {weekly_reason}"
+                    log("debug", "Weekly options warning", ticker=ticker, reason=weekly_reason)
 
             # Skip if below discovery threshold
             if vrp_ratio < settings.VRP_DISCOVERY:
@@ -1398,6 +1432,8 @@ async def _analyze_single_ticker(
                 "direction": direction,
                 "strategy": strategy_name,
                 "credit": credit,
+                "has_weekly_options": has_weekly_options,
+                "weekly_warning": weekly_warning,
             }
 
         except Exception as ex:
