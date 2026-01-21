@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 """
+ARCHIVED: January 2026
+
+Reason: Uses outdated VRP thresholds (7.0x/4.0x) from LEGACY mode.
+        Current system uses BALANCED mode (1.8x/1.4x).
+        Superseded by `/alert` skill which uses `trade.sh scan`.
+
+Use instead: /alert (runs 2.0/trade.sh scan with current thresholds)
+
+Original docstring:
+--------------------------------------------------------------------------------
 Check for trading alerts - high VRP opportunities and position status.
 Integrates with scan results and Alpaca positions.
 """

@@ -107,6 +107,26 @@ Use Case: Position sizing based on expected move size
 
 **Use Instead:** `python 2.0/scripts/backfill_historical.py TICKER`
 
+### check_alerts.py
+
+**Status:** Superseded by `/alert` skill on 2026-01-21
+
+**Why Archived:**
+- Used outdated VRP thresholds (7.0x/4.0x) from LEGACY mode
+- Current system uses BALANCED mode (1.8x/1.4x)
+- `/alert` skill now uses `trade.sh scan` which has current thresholds
+
+**Use Instead:** `/alert` command
+
+### sync_december_pdf.py
+
+**Status:** One-time migration completed, archived 2026-01-21
+
+**Why Archived:**
+- One-time data migration script for December 2025 trades
+- Data has been migrated to database
+- No longer needed for ongoing operations
+
 ---
 
 ## Restoration
