@@ -50,6 +50,7 @@ VRP Ratio = Implied Move / Historical Mean Move
 5. **Always check liquidity score first** before evaluating VRP
 6. **GOOD tier is tradeable** at full size (2-5x OI, 8-12% spread)
 7. **Respect TRR position limits** - learned from $127k December loss on MU/AVGO
+8. **Prefer weekly options** (opt-in with `REQUIRE_WEEKLY_OPTIONS=true`) - better liquidity/spreads
 
 ## Tail Risk Ratio (TRR)
 
@@ -80,6 +81,41 @@ TRR = Max Historical Move / Average Historical Move
   "position_limits": {"max_contracts": 50, "max_notional": 25000}
 }
 ```
+
+## Weekly Options Filter (Opt-in)
+
+Filters tickers to only those with weekly options available. Weekly options provide better liquidity, tighter spreads, and more flexible expiration timing around earnings.
+
+**Detection Logic:**
+- Get expirations from Tradier API
+- Count Friday expirations within next 21 days
+- If fridays >= 2 → has weekly options
+
+**Configuration:**
+```bash
+# Enable filter (opt-in, default OFF)
+export REQUIRE_WEEKLY_OPTIONS=true
+```
+
+**CLI Override:**
+```bash
+# Include monthly-only tickers despite filter
+./trade.sh scan 2026-01-22 --include-monthly
+```
+
+**API Response:** `/api/analyze` includes `has_weekly_options` and `weekly_warning` fields:
+```json
+{
+  "has_weekly_options": true,
+  "weekly_warning": null
+}
+```
+
+**Behavior by Endpoint:**
+- `/api/whisper`, `/api/scan`: Filter out non-weekly tickers when enabled
+- `/api/analyze`: Show warning but include ticker (for direct lookups)
+
+**Error Handling:** On API error, defaults to `true` (permissive - don't block trades).
 
 ## API Priority Order
 
@@ -276,10 +312,11 @@ The `strategies` table tracks:
 ## Environment Variables Required
 
 ```bash
-TRADIER_API_KEY=xxx      # Options data
-ALPHA_VANTAGE_KEY=xxx    # Earnings calendar
-TWELVE_DATA_KEY=xxx      # Historical stock prices (800/day free)
-DB_PATH=data/ivcrush.db  # Database location
+TRADIER_API_KEY=xxx          # Options data
+ALPHA_VANTAGE_KEY=xxx        # Earnings calendar
+TWELVE_DATA_KEY=xxx          # Historical stock prices (800/day free)
+DB_PATH=data/ivcrush.db      # Database location
+REQUIRE_WEEKLY_OPTIONS=false # Filter to weekly options only (opt-in)
 ```
 
 ## MCP Servers Available
@@ -567,10 +604,19 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 14. ✅ Earnings date freshness validation in analyze endpoint (validates against Alpha Vantage when ≤7 days out)
 15. ✅ Token-aware budget tracking with invoice-verified Perplexity pricing
 16. ✅ Direction consistency - `/whisper` and job handlers now use `get_direction()` (matches `/analyze` 3-rule system)
-17. ✅ Next-quarter detection - prevents "correcting" to next quarter when API returns 45+ days later
+17. ✅ Next-quarter detection - prevents "correcting" to different quarter when API returns 45+ days different
+18. ✅ Bidirectional date difference - uses `abs()` to catch both later (next quarter) and earlier (DB has future date) mismatches
 
 **Next-Quarter Detection Logic:**
-When validating stale cache dates, if API returns a date 45+ days later than DB, the system now recognizes this as "next quarter" (either already reported or DB date was wrong). Instead of blindly correcting to the API date, it skips the ticker and logs a warning. This fixes false "date changed" warnings for tickers like IBKR where the DB had a stale/wrong date.
+When validating stale cache dates, if API returns a date 45+ days **different** (earlier OR later) than DB, the system recognizes this as a cross-quarter mismatch. Instead of blindly correcting to the API date, it skips the ticker and logs a warning.
+
+| Scenario | Date Diff | Action |
+|----------|-----------|--------|
+| API shows next quarter | +45 to +90 days | Skip (earnings already reported) |
+| DB has next quarter | -45 to -90 days | Skip (DB date was wrong/stale) |
+| Same-quarter correction | -44 to +44 days | Accept API date |
+
+This fixes false "date changed" warnings for tickers like IBKR where the DB had a stale/wrong date. The `abs()` fix also handles the edge case where DB has a future (next quarter) date but API shows current quarter.
 
 **Performance Optimizations (January 2026):**
 15. ✅ Parallel ticker analysis - asyncio.Semaphore with MAX_CONCURRENT_ANALYSIS=5 (~60s→~15s)
