@@ -127,6 +127,44 @@ TRR = Max Historical Move / Average Historical Move
 | `2.0/data/ivcrush.db` | SQLite database (historical_moves, trade_journal, etc.) |
 | `scripts/parse_fidelity_csv.py` | Fidelity CSV parser with VRP correlation |
 
+## Historical Data Backfill
+
+Two scripts for backfilling historical earnings moves, with different data sources:
+
+| Script | Price Source | Timing Source | When to Use |
+|--------|--------------|---------------|-------------|
+| `backfill_accurate.py` | **Twelve Data** (preferred) | Database `earnings_calendar` | Production backfills |
+| `backfill_yfinance.py` | yfinance (fallback) | yfinance `earnings_dates` | Quick backfills, no API key needed |
+
+**BMO vs AMC Timing (Critical for Accuracy):**
+
+| Timing | Announcement | Reference Close | Reaction Day |
+|--------|--------------|-----------------|--------------|
+| **BMO** | Before market open | Previous day close | Earnings day |
+| **AMC** | After market close | Earnings day close | Next trading day |
+
+**Example - UAL 2026-01-20 (AMC):**
+```
+Earnings announced: Jan 20 after close (AMC)
+Reference close:    Jan 20 $108.57 (before announcement)
+Reaction day:       Jan 21 (market reacts next morning)
+Move calculation:   (Jan 21 close - Jan 20 close) / Jan 20 close
+```
+
+**Usage:**
+```bash
+# Preferred: Uses Twelve Data + database timing (requires TWELVE_DATA_KEY)
+python scripts/backfill_accurate.py UAL --start-date 2026-01-15
+
+# Fallback: Uses yfinance for both prices and timing (no API key needed)
+python scripts/backfill_yfinance.py UAL --start-date 2026-01-15
+```
+
+**Data Source Reliability:**
+- **Twelve Data**: More accurate prices, especially around market open/close
+- **yfinance**: Free, no API limits, but prices may differ slightly from official close
+- **Timing accuracy**: Finnhub (via database) > yfinance for BMO/AMC classification
+
 ## Strategy Types Generated
 
 | Strategy | Risk Level | When to Use |
@@ -531,6 +569,7 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 13. ✅ Removed empty scripts/ directory and fixed Dockerfile COPY instruction
 14. ✅ Earnings date freshness validation in analyze endpoint (validates against Alpha Vantage when ≤7 days out)
 15. ✅ Token-aware budget tracking with invoice-verified Perplexity pricing
+16. ✅ Direction consistency - `/whisper` and job handlers now use `get_direction()` (matches `/analyze` 3-rule system)
 
 **Performance Optimizations (January 2026):**
 15. ✅ Parallel ticker analysis - asyncio.Semaphore with MAX_CONCURRENT_ANALYSIS=5 (~60s→~15s)

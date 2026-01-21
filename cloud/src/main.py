@@ -1336,11 +1336,17 @@ async def _analyze_single_ticker(
                 liquidity_tier="GOOD",
             )
 
-            # Get cached sentiment if available
-            direction = "NEUTRAL"
+            # Get cached sentiment if available and use get_direction for consistency
+            # Note: skew analysis not available in whisper (would require extra API calls)
+            # so we pass skew_bias=None to let sentiment drive direction
             sentiment = sentiment_cache.get_sentiment(ticker, earnings_date)
-            if sentiment:
-                direction = sentiment.get("direction", "neutral").upper()
+            sentiment_score = sentiment.get("score") if sentiment else None
+            sentiment_direction = sentiment.get("direction") if sentiment else None
+            direction = get_direction(
+                skew_bias=None,  # No skew analysis in whisper endpoint
+                sentiment_score=sentiment_score,
+                sentiment_direction=sentiment_direction,
+            )
 
             # Generate trading strategies
             strategy_name = f"VRP {vrp_tier}"  # Fallback
