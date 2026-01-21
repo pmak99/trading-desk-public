@@ -129,12 +129,9 @@ TRR = Max Historical Move / Average Historical Move
 
 ## Historical Data Backfill
 
-Two scripts for backfilling historical earnings moves, with different data sources:
+Script: `2.0/scripts/backfill_historical.py`
 
-| Script | Price Source | Timing Source | When to Use |
-|--------|--------------|---------------|-------------|
-| `backfill_accurate.py` | **Twelve Data** (preferred) | Database `earnings_calendar` | Production backfills |
-| `backfill_yfinance.py` | yfinance (fallback) | yfinance `earnings_dates` | Quick backfills, no API key needed |
+Uses Twelve Data for prices + database earnings_calendar for BMO/AMC timing.
 
 **BMO vs AMC Timing (Critical for Accuracy):**
 
@@ -153,17 +150,17 @@ Move calculation:   (Jan 21 close - Jan 20 close) / Jan 20 close
 
 **Usage:**
 ```bash
-# Preferred: Uses Twelve Data + database timing (requires TWELVE_DATA_KEY)
-python scripts/backfill_accurate.py UAL --start-date 2026-01-15
-
-# Fallback: Uses yfinance for both prices and timing (no API key needed)
-python scripts/backfill_yfinance.py UAL --start-date 2026-01-15
+# Requires TWELVE_DATA_KEY environment variable
+python scripts/backfill_historical.py UAL --start-date 2026-01-15
+python scripts/backfill_historical.py MU ORCL AVGO
+python scripts/backfill_historical.py --file tickers.txt --start-date 2025-01-01
 ```
 
-**Data Source Reliability:**
-- **Twelve Data**: More accurate prices, especially around market open/close
-- **yfinance**: Free, no API limits, but prices may differ slightly from official close
-- **Timing accuracy**: Finnhub (via database) > yfinance for BMO/AMC classification
+**Data Sources:**
+- **Prices**: Twelve Data (800 calls/day free, accurate around market open/close)
+- **Timing**: Database earnings_calendar (populated from Finnhub with explicit BMO/AMC)
+
+*Note: yfinance-based backfill script archived to `archive/scripts/` - less accurate timing inference.*
 
 ## Strategy Types Generated
 

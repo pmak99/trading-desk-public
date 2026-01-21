@@ -395,7 +395,7 @@ analyze_single() {
             return 1
         fi
 
-        python scripts/backfill_yfinance.py "$ticker" \
+        python scripts/backfill_historical.py "$ticker" \
             --start-date "$start_date" \
             --end-date "$end_date" 2>&1 | \
             grep -E "Processing|Backfilled|saved|✓|Total moves" || {

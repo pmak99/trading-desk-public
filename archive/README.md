@@ -93,6 +93,22 @@ Use Case: Position sizing based on expected move size
 
 ---
 
+## scripts/ (Deprecated Scripts)
+
+### backfill_yfinance.py
+
+**Status:** Superseded by `2.0/scripts/backfill_historical.py` on 2026-01-21
+
+**Why Archived:**
+- Used yfinance for both prices AND timing inference (less accurate)
+- `backfill_historical.py` uses Twelve Data (better prices) + database timing (from Finnhub)
+- BMO/AMC logic was correct but data sources were unreliable
+- Timing inference from yfinance datetime less reliable than Finnhub's explicit "hour": "amc"
+
+**Use Instead:** `python 2.0/scripts/backfill_historical.py TICKER`
+
+---
+
 ## Restoration
 
 To restore an archived version:

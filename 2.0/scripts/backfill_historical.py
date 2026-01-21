@@ -11,8 +11,8 @@ Key fix: Handles BMO vs AMC timing correctly:
 - AMC: earnings_day close -> next_day open
 
 Usage:
-    python scripts/backfill_accurate.py MU ORCL AVGO
-    python scripts/backfill_accurate.py --file tickers.txt --start-date 2025-01-01
+    python scripts/backfill_historical.py MU ORCL AVGO
+    python scripts/backfill_historical.py --file tickers.txt --start-date 2025-01-01
 """
 
 import sys
@@ -460,13 +460,13 @@ def main():
         epilog="""
 Examples:
     # Backfill specific tickers
-    python scripts/backfill_accurate.py MU ORCL AVGO
+    python scripts/backfill_historical.py MU ORCL AVGO
 
     # Backfill with date range
-    python scripts/backfill_accurate.py MU --start-date 2025-01-01 --end-date 2025-12-31
+    python scripts/backfill_historical.py MU --start-date 2025-01-01 --end-date 2025-12-31
 
     # Backfill from file
-    python scripts/backfill_accurate.py --file tickers.txt --start-date 2025-01-01
+    python scripts/backfill_historical.py --file tickers.txt --start-date 2025-01-01
 
 Environment variables required:
     TWELVE_DATA_KEY     - Twelve Data API key for price history (free: 800 calls/day)

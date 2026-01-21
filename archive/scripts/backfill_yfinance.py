@@ -1,9 +1,29 @@
 #!/usr/bin/env python3
 """
+ARCHIVED: January 2026
+
+Reason: Superseded by backfill_historical.py which uses:
+    - Twelve Data for prices (more accurate than yfinance)
+    - Database earnings_calendar for timing (from Finnhub, more reliable)
+
+This script used yfinance for both prices AND timing inference, which was
+less accurate. The BMO/AMC timing logic was correct but the data sources
+were unreliable.
+
+Use instead: python 2.0/scripts/backfill_historical.py TICKER
+
+Original docstring below:
+--------------------------------------------------------------------------------
+
 Backfill historical earnings moves using yfinance for earnings dates.
 
-This is an alternative to backfill.py that uses yfinance for both
-earnings dates AND historical price data, avoiding Alpha Vantage limitations.
+This is a FALLBACK script that uses yfinance for both earnings dates AND
+historical price data. No API key required, but less accurate than Twelve Data.
+
+IMPORTANT - BMO/AMC Timing:
+    - BMO (Before Market Open): prev_day close → earnings_day reaction
+    - AMC (After Market Close): earnings_day close → next_day reaction
+    - Timing is inferred from yfinance earnings_dates datetime (hour >= 16 = AMC)
 
 Usage:
     python scripts/backfill_yfinance.py AAPL MSFT GOOGL
@@ -60,70 +80,107 @@ def get_earnings_timing(earnings_time: datetime) -> EarningsTiming:
 def calculate_earnings_move(
     ticker: str,
     earnings_date: date,
-    price_data: pd.DataFrame
+    price_data: pd.DataFrame,
+    timing: EarningsTiming = EarningsTiming.BMO
 ) -> Optional[HistoricalMove]:
     """
     Calculate price movement for an earnings event.
 
+    For BMO (Before Market Open):
+        - prev_close = trading day before earnings
+        - reaction = earnings day (market reacts at open)
+
+    For AMC (After Market Close):
+        - prev_close = earnings day close (before announcement)
+        - reaction = next trading day (market reacts next morning)
+
     Args:
         ticker: Stock symbol
-        earnings_date: Date of earnings
+        earnings_date: Date of earnings announcement
         price_data: DataFrame with OHLCV data indexed by date
+        timing: BMO, AMC, DMH, or UNKNOWN (defaults to BMO behavior)
 
     Returns:
         HistoricalMove object or None if insufficient data
     """
     try:
-        # Find the earnings date in the price data
-        # yfinance indexes by date, so we need to find the closest date
-        available_dates = price_data.index.date
+        available_dates = sorted(price_data.index.date)
 
-        # Find previous trading day (day before earnings)
-        prev_dates = [d for d in available_dates if d < earnings_date]
-        if not prev_dates:
-            logger.warning(f"  No price data before {earnings_date}")
-            return None
-        prev_date = max(prev_dates)
+        if timing == EarningsTiming.AMC:
+            # AMC: Earnings announced after market close on earnings_date
+            # prev_close = earnings_date close (before announcement)
+            # reaction = next trading day
+            if earnings_date not in available_dates:
+                logger.warning(f"  No price data for earnings date {earnings_date}")
+                return None
 
-        # Find earnings day
-        if earnings_date not in available_dates:
-            logger.warning(f"  No price data for {earnings_date}")
-            return None
+            # Find next trading day after earnings
+            next_dates = [d for d in available_dates if d > earnings_date]
+            if not next_dates:
+                logger.warning(f"  No price data after {earnings_date} (AMC - need next day)")
+                return None
+            reaction_date = min(next_dates)
 
-        # Get price data
-        prev_close = float(price_data.loc[str(prev_date)]['Close'])
-        earnings_open = float(price_data.loc[str(earnings_date)]['Open'])
-        earnings_high = float(price_data.loc[str(earnings_date)]['High'])
-        earnings_low = float(price_data.loc[str(earnings_date)]['Low'])
-        earnings_close = float(price_data.loc[str(earnings_date)]['Close'])
+            # prev_close is the earnings day close (before AMC announcement)
+            prev_close = float(price_data.loc[str(earnings_date)]['Close'])
+            volume_before = int(price_data.loc[str(earnings_date)]['Volume'])
 
-        # Calculate moves (all percentages use prev_close as denominator for consistency)
-        # Note: gap_move_pct and close_move_pct preserve sign for direction
-        # intraday_move_pct uses abs() since it's always high-low range
-        gap_move_pct = (earnings_open - prev_close) / prev_close * 100
-        intraday_move_pct = abs((earnings_high - earnings_low) / prev_close * 100)
-        close_move_pct = (earnings_close - prev_close) / prev_close * 100
+            # Reaction is on the next trading day
+            reaction_open = float(price_data.loc[str(reaction_date)]['Open'])
+            reaction_high = float(price_data.loc[str(reaction_date)]['High'])
+            reaction_low = float(price_data.loc[str(reaction_date)]['Low'])
+            reaction_close = float(price_data.loc[str(reaction_date)]['Close'])
+            volume_reaction = int(price_data.loc[str(reaction_date)]['Volume'])
 
-        # Get volume
-        volume_earnings = int(price_data.loc[str(earnings_date)]['Volume'])
-        try:
+            logger.debug(f"  AMC: prev_close={earnings_date}, reaction={reaction_date}")
+
+        else:
+            # BMO/DMH/UNKNOWN: Earnings announced before/during market open
+            # prev_close = trading day before earnings
+            # reaction = earnings day itself
+
+            # Find previous trading day
+            prev_dates = [d for d in available_dates if d < earnings_date]
+            if not prev_dates:
+                logger.warning(f"  No price data before {earnings_date}")
+                return None
+            prev_date = max(prev_dates)
+
+            if earnings_date not in available_dates:
+                logger.warning(f"  No price data for {earnings_date}")
+                return None
+
+            reaction_date = earnings_date
+
+            prev_close = float(price_data.loc[str(prev_date)]['Close'])
             volume_before = int(price_data.loc[str(prev_date)]['Volume'])
-        except KeyError:
-            volume_before = 0
+
+            reaction_open = float(price_data.loc[str(reaction_date)]['Open'])
+            reaction_high = float(price_data.loc[str(reaction_date)]['High'])
+            reaction_low = float(price_data.loc[str(reaction_date)]['Low'])
+            reaction_close = float(price_data.loc[str(reaction_date)]['Close'])
+            volume_reaction = int(price_data.loc[str(reaction_date)]['Volume'])
+
+            logger.debug(f"  BMO: prev_close={prev_date}, reaction={reaction_date}")
+
+        # Calculate moves (all percentages use prev_close as denominator)
+        gap_move_pct = (reaction_open - prev_close) / prev_close * 100
+        intraday_move_pct = abs((reaction_high - reaction_low) / prev_close * 100)
+        close_move_pct = (reaction_close - prev_close) / prev_close * 100
 
         return HistoricalMove(
             ticker=ticker,
             earnings_date=earnings_date,
             prev_close=Money(prev_close),
-            earnings_open=Money(earnings_open),
-            earnings_high=Money(earnings_high),
-            earnings_low=Money(earnings_low),
-            earnings_close=Money(earnings_close),
+            earnings_open=Money(reaction_open),
+            earnings_high=Money(reaction_high),
+            earnings_low=Money(reaction_low),
+            earnings_close=Money(reaction_close),
             intraday_move_pct=Percentage(intraday_move_pct),
             gap_move_pct=Percentage(gap_move_pct),
             close_move_pct=Percentage(close_move_pct),
             volume_before=volume_before,
-            volume_earnings=volume_earnings,
+            volume_earnings=volume_reaction,
         )
 
     except Exception as e:
@@ -264,13 +321,13 @@ def backfill_ticker(
 
         for earnings_dt in earnings_dates_df.index:
             earnings_date = earnings_dt.date()
-            logger.info(f"  Processing {earnings_date}...")
 
-            # Determine timing
+            # Determine timing (BMO vs AMC)
             timing = get_earnings_timing(earnings_dt)
+            logger.info(f"  Processing {earnings_date} ({timing.value})...")
 
-            # Calculate move
-            move = calculate_earnings_move(ticker, earnings_date, price_data)
+            # Calculate move with timing-aware logic
+            move = calculate_earnings_move(ticker, earnings_date, price_data, timing)
 
             if move is None:
                 continue
