@@ -567,6 +567,10 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 14. ✅ Earnings date freshness validation in analyze endpoint (validates against Alpha Vantage when ≤7 days out)
 15. ✅ Token-aware budget tracking with invoice-verified Perplexity pricing
 16. ✅ Direction consistency - `/whisper` and job handlers now use `get_direction()` (matches `/analyze` 3-rule system)
+17. ✅ Already-reported earnings detection - prevents "correcting" to next quarter when earnings already happened
+
+**Already-Reported Detection Logic:**
+When validating stale cache dates, if DB date is in past/today AND API returns a date 45+ days later, the system now recognizes this as "earnings already reported" (API showing next quarter) rather than blindly correcting to the API date. This fixes false "date changed" warnings for tickers like IBKR where earnings already happened.
 
 **Performance Optimizations (January 2026):**
 15. ✅ Parallel ticker analysis - asyncio.Semaphore with MAX_CONCURRENT_ANALYSIS=5 (~60s→~15s)
