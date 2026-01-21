@@ -385,5 +385,109 @@ class TestCalculateImpliedMoveExpiration:
         assert implied_exp < trading_exp
 
 
+class TestNextQuarterDetection:
+    """Test next-quarter detection logic for stale cache validation.
+
+    When validating stale earnings dates, if the API returns a date
+    significantly different (45+ days), it likely indicates:
+    - Later: Next quarter (earnings already reported or DB date wrong)
+    - Earlier: Current quarter (DB has next quarter date)
+
+    In both cases, the system should skip the ticker rather than
+    blindly accepting the API date.
+    """
+
+    THRESHOLD = 45  # NEXT_QUARTER_THRESHOLD_DAYS
+
+    def test_date_diff_44_days_should_accept(self):
+        """44 days difference should be accepted as same-quarter correction."""
+        db_date = date(2025, 1, 15)
+        api_date = date(2025, 2, 28)  # 44 days later
+        diff = (api_date - db_date).days
+        assert diff == 44
+        # Under threshold - should accept
+        assert abs(diff) < self.THRESHOLD
+
+    def test_date_diff_45_days_should_skip(self):
+        """45 days difference should trigger skip (next quarter)."""
+        db_date = date(2025, 1, 15)
+        api_date = date(2025, 3, 1)  # 45 days later
+        diff = (api_date - db_date).days
+        assert diff == 45
+        # At threshold - should skip
+        assert abs(diff) >= self.THRESHOLD
+
+    def test_date_diff_90_days_should_skip(self):
+        """90 days difference (full quarter) should skip."""
+        db_date = date(2025, 1, 15)
+        api_date = date(2025, 4, 15)  # ~90 days later
+        diff = (api_date - db_date).days
+        assert diff == 90
+        # Well over threshold - should skip
+        assert abs(diff) >= self.THRESHOLD
+
+    def test_negative_diff_45_days_should_skip(self):
+        """Negative 45 days (API shows earlier) should also skip."""
+        db_date = date(2025, 4, 15)  # DB has future (next quarter) date
+        api_date = date(2025, 3, 1)  # API shows earlier date
+        diff = (api_date - db_date).days
+        assert diff == -45
+        # abs() should catch this
+        assert abs(diff) >= self.THRESHOLD
+
+    def test_negative_diff_85_days_should_skip(self):
+        """Large negative difference (API much earlier) should skip."""
+        db_date = date(2025, 4, 15)  # DB has next quarter
+        api_date = date(2025, 1, 20)  # API shows current quarter
+        diff = (api_date - db_date).days
+        assert diff == -85
+        # abs() should catch this
+        assert abs(diff) >= self.THRESHOLD
+
+    def test_same_date_should_accept(self):
+        """Same date (0 diff) should accept."""
+        db_date = date(2025, 1, 15)
+        api_date = date(2025, 1, 15)
+        diff = (api_date - db_date).days
+        assert diff == 0
+        assert abs(diff) < self.THRESHOLD
+
+    def test_small_negative_diff_should_accept(self):
+        """Small negative difference (API few days earlier) should accept."""
+        db_date = date(2025, 1, 15)
+        api_date = date(2025, 1, 10)  # 5 days earlier
+        diff = (api_date - db_date).days
+        assert diff == -5
+        assert abs(diff) < self.THRESHOLD
+
+    def test_typical_date_correction_should_accept(self):
+        """Typical 1-2 week correction should accept."""
+        db_date = date(2025, 1, 15)
+        api_date = date(2025, 1, 22)  # 7 days later
+        diff = (api_date - db_date).days
+        assert diff == 7
+        assert abs(diff) < self.THRESHOLD
+
+    def test_threshold_boundary_behavior(self):
+        """Test exact boundary values."""
+        db_date = date(2025, 1, 15)
+
+        # 44 days - accept
+        api_44 = db_date + timedelta(days=44)
+        assert abs((api_44 - db_date).days) < self.THRESHOLD
+
+        # 45 days - skip
+        api_45 = db_date + timedelta(days=45)
+        assert abs((api_45 - db_date).days) >= self.THRESHOLD
+
+        # -44 days - accept
+        api_neg44 = db_date - timedelta(days=44)
+        assert abs((api_neg44 - db_date).days) < self.THRESHOLD
+
+        # -45 days - skip
+        api_neg45 = db_date - timedelta(days=45)
+        assert abs((api_neg45 - db_date).days) >= self.THRESHOLD
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

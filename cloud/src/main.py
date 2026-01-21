@@ -967,18 +967,21 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
                                 av_date_parsed = datetime.strptime(av_date, "%Y-%m-%d").date()
                                 date_diff_days = (av_date_parsed - db_date).days
 
-                                # If API returns 45+ days later, it's showing next quarter
-                                # This means either: (a) earnings already reported, or (b) DB date was wrong
-                                # Either way, don't "correct" to next quarter - skip this ticker
+                                # If API returns 45+ days different (earlier OR later), it's a different quarter
+                                # Later: API shows next quarter (earnings already reported or DB date was wrong)
+                                # Earlier: DB has next quarter date but API shows current quarter (rare edge case)
+                                # Either way, don't blindly accept - skip this ticker
+                                # Note: 5.0 is stateless per-request, doesn't update DB (sync handled separately)
                                 NEXT_QUARTER_THRESHOLD_DAYS = 45
-                                if date_diff_days >= NEXT_QUARTER_THRESHOLD_DAYS:
-                                    log("warn", "API shows next quarter, DB date likely stale",
+                                if abs(date_diff_days) >= NEXT_QUARTER_THRESHOLD_DAYS:
+                                    direction = "later" if date_diff_days > 0 else "earlier"
+                                    log("warn", f"API shows different quarter ({direction}), DB date likely stale",
                                         ticker=ticker, db_date=target_date,
-                                        next_quarter=av_date, diff_days=date_diff_days)
+                                        api_date=av_date, diff_days=abs(date_diff_days))
                                     return {
                                         "ticker": ticker,
                                         "status": "stale_or_reported",
-                                        "message": f"DB date {target_date} stale or already reported. Next quarter: {av_date}",
+                                        "message": f"DB date {target_date} stale or mismatched. API shows: {av_date} ({abs(date_diff_days)}d {direction})",
                                     }
 
                                 log("warn", "Earnings date changed", ticker=ticker, db_date=target_date, api_date=av_date)
