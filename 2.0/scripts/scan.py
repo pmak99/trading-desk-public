@@ -1012,6 +1012,29 @@ def fetch_earnings_for_ticker(
                     if av_result.is_ok and av_result.value:
                         _, av_date, av_timing = av_result.value[0]
                         if av_date != earnings_date:
+                            date_diff_days = (av_date - earnings_date).days
+                            db_date_is_past = earnings_date <= date.today()
+
+                            # If API returns a date 45+ days further AND DB date is past/today,
+                            # earnings likely already reported - API is showing next quarter
+                            if date_diff_days >= 45 and db_date_is_past:
+                                logger.warning(
+                                    f"{ticker}: Earnings likely ALREADY REPORTED on {earnings_date}. "
+                                    f"API shows next quarter: {av_date} ({date_diff_days}d later)"
+                                )
+                                # Mark as validated but don't update to next quarter
+                                cursor.execute(
+                                    '''
+                                    UPDATE earnings_calendar
+                                    SET last_validated_at = datetime('now')
+                                    WHERE ticker = ? AND earnings_date = ?
+                                    ''',
+                                    (ticker, earnings_date.isoformat())
+                                )
+                                conn.commit()
+                                # Return None to skip this ticker - earnings already happened
+                                return None
+
                             logger.warning(f"{ticker}: Date changed! DB={earnings_date} → API={av_date}")
                             # Delete old entry and insert new one to avoid PRIMARY KEY violation
                             try:
