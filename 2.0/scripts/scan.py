@@ -1016,15 +1016,17 @@ def fetch_earnings_for_ticker(
                         if av_date != earnings_date:
                             date_diff_days = (av_date - earnings_date).days
 
-                            # If API returns a date 45+ days further, it's showing next quarter
-                            # This means either: (a) earnings already reported, or (b) DB date was wrong
-                            # Either way, don't "correct" to next quarter - skip this ticker
-                            # Threshold: 45 days distinguishes same-quarter corrections from next quarter
+                            # If API returns a date 45+ days different (earlier OR later), it's a different quarter
+                            # Later: API shows next quarter (earnings already reported or DB date was wrong)
+                            # Earlier: DB has next quarter date but API shows current quarter (rare edge case)
+                            # Either way, don't blindly accept - skip this ticker
+                            # Threshold: 45 days distinguishes same-quarter corrections from cross-quarter
                             NEXT_QUARTER_THRESHOLD_DAYS = 45
-                            if date_diff_days >= NEXT_QUARTER_THRESHOLD_DAYS:
+                            if abs(date_diff_days) >= NEXT_QUARTER_THRESHOLD_DAYS:
+                                direction = "later" if date_diff_days > 0 else "earlier"
                                 logger.warning(
-                                    f"{ticker}: API shows next quarter ({av_date}, {date_diff_days}d later). "
-                                    f"DB date {earnings_date} likely stale or already reported. Skipping."
+                                    f"{ticker}: API shows different quarter ({av_date}, {abs(date_diff_days)}d {direction}). "
+                                    f"DB date {earnings_date} likely stale or mismatched. Skipping."
                                 )
                                 # Mark as validated but don't update to next quarter
                                 cursor.execute(
@@ -2741,7 +2743,8 @@ def whisper_mode(
             ticker,
             earnings_date,
             expiration_date,
-            auto_backfill=True
+            auto_backfill=True,
+            include_monthly=include_monthly
         )
 
         if result:
@@ -2977,7 +2980,8 @@ Notes:
             scan_date = parse_date(args.scan_date)
             return scanning_mode(
                 container, scan_date, args.expiration_offset,
-                parallel=args.parallel
+                parallel=args.parallel,
+                include_monthly=args.include_monthly
             )
         elif args.whisper_week is not None:
             # whisper_week can be '' (empty string) for current week or a date string
@@ -2987,13 +2991,15 @@ Notes:
                 week_monday=week_monday,
                 fallback_image=args.fallback_image,
                 expiration_offset=args.expiration_offset,
-                parallel=args.parallel
+                parallel=args.parallel,
+                include_monthly=args.include_monthly
             )
         else:
             tickers = [t.strip().upper() for t in args.tickers.split(',')]
             return ticker_mode(
                 container, tickers, args.expiration_offset,
-                parallel=args.parallel
+                parallel=args.parallel,
+                include_monthly=args.include_monthly
             )
 
     except KeyboardInterrupt:
