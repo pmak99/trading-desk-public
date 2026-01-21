@@ -99,8 +99,8 @@ export REQUIRE_WEEKLY_OPTIONS=true
 
 **CLI Override:**
 ```bash
-# Include monthly-only tickers despite filter
-./trade.sh scan 2026-01-22 --include-monthly
+# Skip weekly filter (include monthly-only tickers)
+./trade.sh scan 2026-01-22 --skip-weekly-filter
 ```
 
 **API Response:** `/api/analyze` includes `has_weekly_options` and `weekly_warning` fields:
@@ -116,6 +116,16 @@ export REQUIRE_WEEKLY_OPTIONS=true
 - `/api/analyze`: Show warning but include ticker (for direct lookups)
 
 **Error Handling:** On API error, defaults to `true` (permissive - don't block trades).
+
+**VRP Cache Extension:** Weekly options status is stored alongside VRP data to avoid extra API calls:
+```python
+# Fields added to vrp_cache data dict
+{
+    "has_weekly_options": True,   # Boolean
+    "weekly_reason": "3 Friday expirations in next 21 days"  # Explanation
+}
+```
+Cache TTL remains 6h (far earnings) / 1h (near earnings). Weekly check happens once on first fetch, then cached.
 
 ## API Priority Order
 
