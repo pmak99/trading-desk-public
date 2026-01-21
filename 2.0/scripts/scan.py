@@ -1108,7 +1108,7 @@ def analyze_ticker(
     earnings_date: date,
     expiration_date: date,
     auto_backfill: bool = False,
-    include_monthly: bool = False
+    skip_weekly_filter: bool = False
 ) -> Optional[dict]:
     """
     Analyze a single ticker for IV Crush opportunity.
@@ -1119,7 +1119,7 @@ def analyze_ticker(
         earnings_date: Date of earnings announcement
         expiration_date: Options expiration date
         auto_backfill: If True, automatically backfill missing historical data
-        include_monthly: If True, skip weekly options filter (override REQUIRE_WEEKLY_OPTIONS)
+        skip_weekly_filter: If True, skip weekly options filter (override REQUIRE_WEEKLY_OPTIONS)
 
     Returns dict with analysis results or None if analysis failed.
     """
@@ -1136,7 +1136,7 @@ def analyze_ticker(
         # Check for weekly options (opt-in filter via REQUIRE_WEEKLY_OPTIONS)
         has_weeklies = True  # Default: permissive
         weekly_reason = ""
-        if container.config.thresholds.require_weekly_options and not include_monthly:
+        if container.config.thresholds.require_weekly_options and not skip_weekly_filter:
             # Fetch expirations to check for weekly options
             expirations_result = container.tradier.get_expirations(ticker)
             if expirations_result.is_ok:
@@ -1445,7 +1445,7 @@ def analyze_ticker_concurrent(
     ticker: str,
     earnings_date: date,
     expiration_date: date,
-    include_monthly: bool = False
+    skip_weekly_filter: bool = False
 ) -> Optional[dict]:
     """
     Wrapper for analyze_ticker() compatible with ConcurrentScanner.
@@ -1458,7 +1458,7 @@ def analyze_ticker_concurrent(
         ticker: Stock ticker symbol
         earnings_date: Earnings announcement date
         expiration_date: Options expiration date
-        include_monthly: If True, skip weekly options filter
+        skip_weekly_filter: If True, skip weekly options filter
 
     Returns:
         Analysis result dict or None
@@ -1469,7 +1469,7 @@ def analyze_ticker_concurrent(
         earnings_date=earnings_date,
         expiration_date=expiration_date,
         auto_backfill=False,  # Disable backfill in concurrent mode
-        include_monthly=include_monthly
+        skip_weekly_filter=skip_weekly_filter
     )
 
 
@@ -1794,7 +1794,7 @@ def scanning_mode_parallel(
     container: Container,
     scan_date: date,
     expiration_offset: Optional[int] = None,
-    include_monthly: bool = False
+    skip_weekly_filter: bool = False
 ) -> int:
     """
     Parallel scanning mode: Scan earnings using ConcurrentScanner.
@@ -1835,8 +1835,8 @@ def scanning_mode_parallel(
             logger.info(f"Progress: {completed}/{total} ({completed*100//total}%)")
 
     # Run concurrent scan
-    # Bind include_monthly to analyze function for weekly options filter
-    analyze_func = functools.partial(analyze_ticker_concurrent, include_monthly=include_monthly)
+    # Bind skip_weekly_filter to analyze function for weekly options filter
+    analyze_func = functools.partial(analyze_ticker_concurrent, skip_weekly_filter=skip_weekly_filter)
     scanner = container.concurrent_scanner
     batch_result = scanner.scan_tickers(
         tickers=tickers,
@@ -1880,7 +1880,7 @@ def scanning_mode(
     scan_date: date,
     expiration_offset: Optional[int] = None,
     parallel: bool = False,
-    include_monthly: bool = False
+    skip_weekly_filter: bool = False
 ) -> int:
     """
     Scanning mode: Scan earnings for a specific date.
@@ -1890,13 +1890,13 @@ def scanning_mode(
         scan_date: Target earnings date
         expiration_offset: Custom expiration offset in days
         parallel: If True, use parallel processing (5x speedup)
-        include_monthly: If True, skip weekly options filter
+        skip_weekly_filter: If True, skip weekly options filter
 
     Returns exit code (0 for success, 1 for error)
     """
     # Use parallel mode if requested
     if parallel:
-        return scanning_mode_parallel(container, scan_date, expiration_offset, include_monthly)
+        return scanning_mode_parallel(container, scan_date, expiration_offset, skip_weekly_filter)
 
     logger.info("=" * 80)
     logger.info("SCANNING MODE: Earnings Date Scan")
@@ -1959,7 +1959,7 @@ def scanning_mode(
             earnings_date,
             expiration_date,
             auto_backfill=False,
-            include_monthly=include_monthly
+            skip_weekly_filter=skip_weekly_filter
         )
 
         if result:
@@ -2068,7 +2068,7 @@ def ticker_mode_parallel(
     container: Container,
     tickers: List[str],
     expiration_offset: Optional[int] = None,
-    include_monthly: bool = False
+    skip_weekly_filter: bool = False
 ) -> int:
     """
     Parallel ticker mode: Analyze tickers using ConcurrentScanner.
@@ -2109,8 +2109,8 @@ def ticker_mode_parallel(
         logger.info(f"Progress: {completed}/{total} - {ticker}")
 
     # Run concurrent scan
-    # Bind include_monthly to analyze function for weekly options filter
-    analyze_func = functools.partial(analyze_ticker_concurrent, include_monthly=include_monthly)
+    # Bind skip_weekly_filter to analyze function for weekly options filter
+    analyze_func = functools.partial(analyze_ticker_concurrent, skip_weekly_filter=skip_weekly_filter)
     scanner = container.concurrent_scanner
     batch_result = scanner.scan_tickers(
         tickers=list(earnings_lookup.keys()),
@@ -2153,7 +2153,7 @@ def ticker_mode(
     tickers: List[str],
     expiration_offset: Optional[int] = None,
     parallel: bool = False,
-    include_monthly: bool = False
+    skip_weekly_filter: bool = False
 ) -> int:
     """
     Ticker mode: Analyze specific tickers from command line.
@@ -2163,13 +2163,13 @@ def ticker_mode(
         tickers: List of ticker symbols
         expiration_offset: Custom expiration offset in days
         parallel: If True, use parallel processing (5x speedup)
-        include_monthly: If True, skip weekly options filter
+        skip_weekly_filter: If True, skip weekly options filter
 
     Returns exit code (0 for success, 1 for error)
     """
     # Use parallel mode if requested and we have multiple tickers
     if parallel and len(tickers) > 1:
-        return ticker_mode_parallel(container, tickers, expiration_offset, include_monthly)
+        return ticker_mode_parallel(container, tickers, expiration_offset, skip_weekly_filter)
 
     logger.info("=" * 80)
     logger.info("TICKER MODE: Command Line Tickers")
@@ -2240,7 +2240,7 @@ def ticker_mode(
             earnings_date,
             expiration_date,
             auto_backfill=True,
-            include_monthly=include_monthly
+            skip_weekly_filter=skip_weekly_filter
         )
 
         if result:
@@ -2492,7 +2492,7 @@ def whisper_mode_parallel(
     monday: date,
     week_end: date,
     expiration_offset: Optional[int] = None,
-    include_monthly: bool = False
+    skip_weekly_filter: bool = False
 ) -> int:
     """
     Parallel whisper mode: Analyze anticipated earnings using ConcurrentScanner.
@@ -2505,7 +2505,7 @@ def whisper_mode_parallel(
         monday: Start of week (Monday)
         week_end: End of week (Sunday)
         expiration_offset: Custom expiration offset in days
-        include_monthly: If True, skip weekly options filter
+        skip_weekly_filter: If True, skip weekly options filter
 
     Returns:
         Exit code (0 = success, 1 = error)
@@ -2541,8 +2541,8 @@ def whisper_mode_parallel(
             logger.info(f"Progress: {completed}/{total} ({completed*100//total}%)")
 
     # Run concurrent scan
-    # Bind include_monthly to analyze function for weekly options filter
-    analyze_func = functools.partial(analyze_ticker_concurrent, include_monthly=include_monthly)
+    # Bind skip_weekly_filter to analyze function for weekly options filter
+    analyze_func = functools.partial(analyze_ticker_concurrent, skip_weekly_filter=skip_weekly_filter)
     scanner = container.concurrent_scanner
     batch_result = scanner.scan_tickers(
         tickers=list(earnings_lookup.keys()),
@@ -2591,7 +2591,7 @@ def whisper_mode(
     fallback_image: Optional[str] = None,
     expiration_offset: Optional[int] = None,
     parallel: bool = False,
-    include_monthly: bool = False
+    skip_weekly_filter: bool = False
 ) -> int:
     """
     Whisper mode: Analyze most anticipated earnings.
@@ -2604,7 +2604,7 @@ def whisper_mode(
         fallback_image: Path to earnings screenshot (PNG/JPG)
         expiration_offset: Custom expiration offset in days
         parallel: If True, use parallel processing (5x speedup)
-        include_monthly: If True, skip weekly options filter
+        skip_weekly_filter: If True, skip weekly options filter
 
     Returns:
         Exit code (0 = success, 1 = error)
@@ -2670,7 +2670,7 @@ def whisper_mode(
     # Use parallel mode if requested
     if parallel:
         return whisper_mode_parallel(
-            container, tickers, monday, week_end, expiration_offset, include_monthly
+            container, tickers, monday, week_end, expiration_offset, skip_weekly_filter
         )
 
     # Analyze each ticker
@@ -2744,7 +2744,7 @@ def whisper_mode(
             earnings_date,
             expiration_date,
             auto_backfill=True,
-            include_monthly=include_monthly
+            skip_weekly_filter=skip_weekly_filter
         )
 
         if result:
@@ -2953,9 +2953,9 @@ Notes:
         help="Logging level"
     )
     parser.add_argument(
-        "--include-monthly",
+        "--skip-weekly-filter",
         action="store_true",
-        help="Include tickers with only monthly options (overrides REQUIRE_WEEKLY_OPTIONS filter)"
+        help="Skip weekly options filter (include tickers with only monthly options)"
     )
 
     args = parser.parse_args()
@@ -2981,7 +2981,7 @@ Notes:
             return scanning_mode(
                 container, scan_date, args.expiration_offset,
                 parallel=args.parallel,
-                include_monthly=args.include_monthly
+                skip_weekly_filter=args.skip_weekly_filter
             )
         elif args.whisper_week is not None:
             # whisper_week can be '' (empty string) for current week or a date string
@@ -2992,14 +2992,14 @@ Notes:
                 fallback_image=args.fallback_image,
                 expiration_offset=args.expiration_offset,
                 parallel=args.parallel,
-                include_monthly=args.include_monthly
+                skip_weekly_filter=args.skip_weekly_filter
             )
         else:
             tickers = [t.strip().upper() for t in args.tickers.split(',')]
             return ticker_mode(
                 container, tickers, args.expiration_offset,
                 parallel=args.parallel,
-                include_monthly=args.include_monthly
+                skip_weekly_filter=args.skip_weekly_filter
             )
 
     except KeyboardInterrupt:

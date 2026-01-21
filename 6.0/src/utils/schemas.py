@@ -24,6 +24,8 @@ class TickerAnalysisResponse(BaseModel):
     score: Optional[int] = None
     strategies: Optional[List[Dict[str, Any]]] = None
     position_limits: Optional[Dict[str, Any]] = None  # TRR-based position limits
+    has_weekly_options: Optional[bool] = None  # Whether ticker has weekly options
+    weekly_reason: Optional[str] = None  # Explanation of weekly options status
     error: Optional[str] = None
 
     @validator('recommendation')

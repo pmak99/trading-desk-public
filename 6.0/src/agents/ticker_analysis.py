@@ -4,9 +4,15 @@ This agent wraps 2.0's analyzer to provide VRP calculation, liquidity scoring,
 and strategy generation for a single ticker.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 import logging
+import sys
+from pathlib import Path
+
+# Add 2.0 to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "2.0"))
+from src.application.filters.weekly_options import has_weekly_options
 
 from ..integration.container_2_0 import Container2_0
 from ..integration.position_limits import PositionLimitsRepository
@@ -101,6 +107,9 @@ class TickerAnalysisAgent:
             # Unwrap Result value
             analysis_result = result.value if hasattr(result, 'value') else result
 
+            # Check weekly options availability
+            has_weeklies, weekly_reason = self._check_weekly_options(ticker, earnings_date)
+
             # Extract key fields from 2.0's result
             response_data = {
                 'ticker': ticker,
@@ -111,6 +120,8 @@ class TickerAnalysisAgent:
                 'score': self._extract_score(analysis_result),
                 'strategies': self._extract_strategies(analysis_result) if generate_strategies else None,
                 'position_limits': self._get_position_limits(ticker),
+                'has_weekly_options': has_weeklies,
+                'weekly_reason': weekly_reason,
                 'error': None
             }
 
@@ -273,3 +284,33 @@ class TickerAnalysisAgent:
             return self.position_limits_repo.get_limits(ticker)
         except Exception:
             return None
+
+    def _check_weekly_options(self, ticker: str, earnings_date: str) -> Tuple[bool, str]:
+        """
+        Check if ticker has weekly options available.
+
+        Args:
+            ticker: Stock ticker symbol
+            earnings_date: Earnings date (YYYY-MM-DD)
+
+        Returns:
+            Tuple of (has_weeklies, reason)
+        """
+        try:
+            # Get expirations from 2.0's tradier client
+            result = self.container.tradier.get_expirations(ticker)
+            if hasattr(result, 'is_err') and result.is_err:
+                # On error, be permissive
+                return True, "Unable to check expirations"
+
+            expirations = result.value if hasattr(result, 'value') else result
+
+            # Convert date objects to strings for has_weekly_options
+            expirations_list = [exp.isoformat() for exp in expirations]
+
+            return has_weekly_options(expirations_list, earnings_date)
+
+        except Exception as e:
+            logger.warning(f"Error checking weekly options for {ticker}: {e}")
+            # On error, be permissive - don't block trading opportunities
+            return True, f"Check failed: {e}"
