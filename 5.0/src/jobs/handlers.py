@@ -44,6 +44,7 @@ from src.domain.implied_move import (
     get_implied_move_with_fallback,
     IMPLIED_MOVE_FALLBACK_MULTIPLIER,
 )
+from src.domain.direction import get_direction
 from src.formatters.telegram import format_digest
 
 
@@ -607,18 +608,20 @@ class JobRunner:
                     liquidity_tier="GOOD",
                 )
 
-                # Get cached sentiment if available
+                # Get cached sentiment if available and use get_direction for consistency
+                # Note: skew analysis not available in job handlers (would require extra API calls)
                 sentiment = cache.get_sentiment(ticker, earnings_date)
-                direction = "NEUTRAL"
-                tailwinds = ""
-                headwinds = ""
+                sentiment_score = sentiment.get("score") if sentiment else None
+                sentiment_direction = sentiment.get("direction") if sentiment else None
+                direction = get_direction(
+                    skew_bias=None,  # No skew analysis in morning digest
+                    sentiment_score=sentiment_score,
+                    sentiment_direction=sentiment_direction,
+                )
+                tailwinds = sentiment.get("tailwinds", "") if sentiment else ""
+                headwinds = sentiment.get("headwinds", "") if sentiment else ""
                 final_score = score_data["total_score"]
-
-                if sentiment:
-                    direction = sentiment.get("direction", "neutral").upper()
-                    tailwinds = sentiment.get("tailwinds", "")
-                    headwinds = sentiment.get("headwinds", "")
-                    sentiment_score = sentiment.get("score", 0)
+                if sentiment_score is not None:
                     final_score = apply_sentiment_modifier(score_data["total_score"], sentiment_score)
 
                 # Generate actual trading strategies
@@ -891,9 +894,15 @@ class JobRunner:
                 # Get current price for context (use price from implied move result)
                 price = im_result.get("price")
 
-                # Get cached sentiment
+                # Get cached sentiment and use get_direction for consistency
                 sentiment = cache.get_sentiment(ticker, today)
-                direction = sentiment.get("direction", "neutral").upper() if sentiment else "NEUTRAL"
+                sentiment_score = sentiment.get("score") if sentiment else None
+                sentiment_direction = sentiment.get("direction") if sentiment else None
+                direction = get_direction(
+                    skew_bias=None,  # No skew analysis in pre-trade refresh
+                    sentiment_score=sentiment_score,
+                    sentiment_direction=sentiment_direction,
+                )
 
                 candidates.append({
                     "ticker": ticker,
