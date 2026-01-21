@@ -130,7 +130,7 @@ sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
 **6b. For each sparse ticker, run backfill:**
 ```bash
 cd $PROJECT_ROOT/2.0 && \
-  ./venv/bin/python scripts/backfill_yfinance.py $TICKER --start-date 2023-01-01
+  ./venv/bin/python scripts/backfill_historical.py $TICKER --start-date 2023-01-01
 ```
 
 Display progress:
