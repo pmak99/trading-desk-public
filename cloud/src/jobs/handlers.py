@@ -859,9 +859,9 @@ class JobRunner:
         for e in todays_earnings[:MAX_PRE_MARKET_TICKERS]:
             ticker = e["symbol"]
             try:
-                # Rate limiting
-                api_calls += 1
-                if api_calls % RATE_LIMIT_BATCH_SIZE == 0:
+                # Rate limiting for Tradier API calls (3 calls per ticker for implied move)
+                api_calls += TRADIER_CALLS_PER_TICKER
+                if api_calls % (RATE_LIMIT_BATCH_SIZE * TRADIER_CALLS_PER_TICKER) == 0:
                     await asyncio.sleep(RATE_LIMIT_DELAY)
 
                 # Get historical moves for VRP calc
@@ -1111,47 +1111,96 @@ class JobRunner:
     async def _outcome_recorder(self) -> Dict[str, Any]:
         """
         Outcome recorder (19:00 ET).
-        Record post-earnings moves for today's completed earnings.
-        Updates historical_moves table for same-day tracking.
+        Record post-earnings moves with BMO/AMC timing awareness.
+
+        BMO/AMC Timing Logic:
+            - BMO (Before Market Open): Reaction happens ON earnings day
+              Record: prev_day_close → earnings_day_close
+            - AMC (After Market Close): Reaction happens NEXT trading day
+              Record: earnings_day_close → next_day_close
+
+        This job processes:
+            1. Today's BMO earnings (reaction already happened today)
+            2. Yesterday's AMC earnings (reaction happened today)
         """
         from datetime import datetime
 
         start_time = asyncio.get_event_loop().time()
         today = today_et()
+        yesterday = (now_et() - timedelta(days=1)).strftime("%Y-%m-%d")
         repo = HistoricalMovesRepository(settings.DB_PATH)
 
-        # Get earnings for today
-        earnings = await self.alphavantage.get_earnings_calendar()
+        # Get earnings from DB (has timing info) with API fallback
+        earnings = await fetch_earnings_with_db_fallback(self.alphavantage, repo, days=5)
 
         if not earnings:
             log("warn", "Empty earnings calendar", job="outcome_recorder")
             metrics.count("ivcrush.job.api_empty", {"job": "outcome_recorder", "api": "alphavantage"})
             return {"status": "warning", "recorded": 0, "note": "Empty calendar from API"}
 
-        # Filter to today's earnings
-        todays_earnings = [e for e in earnings if e["report_date"] == today]
-
-        # NOTE: Unlike alert jobs, outcome-recorder does NOT filter to whitelist.
-        # This allows new tickers to build history and eventually be analyzed.
-        # Only filter out obviously invalid tickers (preferred stocks, warrants, etc.)
+        # Build list of earnings to record with timing awareness:
+        # 1. Today's BMO earnings (reaction happened today)
+        # 2. Yesterday's AMC earnings (reaction happened today)
         from src.domain.repositories import is_valid_ticker
-        todays_earnings = [e for e in todays_earnings if is_valid_ticker(e["symbol"])]
 
-        if not todays_earnings:
-            log("info", "No earnings today to record", job="outcome_recorder")
-            return {"status": "success", "recorded": 0, "note": "No earnings today"}
+        earnings_to_record = []
+        for e in earnings:
+            if not is_valid_ticker(e["symbol"]):
+                continue
+
+            report_date = e["report_date"]
+            timing = e.get("timing", "").upper()
+
+            # Today's BMO: record today's move
+            if report_date == today and timing == "BMO":
+                earnings_to_record.append({
+                    "symbol": e["symbol"],
+                    "earnings_date": today,
+                    "reference_close_day": yesterday,  # prev day close
+                    "reaction_day": today,  # reaction on earnings day
+                })
+            # Yesterday's AMC: record today's move (reaction happened today)
+            elif report_date == yesterday and timing == "AMC":
+                earnings_to_record.append({
+                    "symbol": e["symbol"],
+                    "earnings_date": yesterday,
+                    "reference_close_day": yesterday,  # earnings day close (before announcement)
+                    "reaction_day": today,  # reaction next morning
+                })
+            # Unknown timing for today: assume BMO (conservative - record if we can)
+            elif report_date == today and timing in ("", "UNKNOWN", None):
+                earnings_to_record.append({
+                    "symbol": e["symbol"],
+                    "earnings_date": today,
+                    "reference_close_day": yesterday,
+                    "reaction_day": today,
+                })
+
+        if not earnings_to_record:
+            log("info", "No recordable earnings (BMO today or AMC yesterday)", job="outcome_recorder")
+            return {"status": "success", "recorded": 0, "note": "No recordable earnings"}
+
+        log("info", "Processing earnings outcomes",
+            bmo_today=len([e for e in earnings_to_record if e["earnings_date"] == today]),
+            amc_yesterday=len([e for e in earnings_to_record if e["earnings_date"] == yesterday]),
+            job="outcome_recorder")
 
         recorded = 0
         skipped_duplicate = 0
+        skipped_amc_pending = 0
         failed_tickers = []
         api_calls = 0
 
-        for e in todays_earnings[:MAX_OUTCOME_TICKERS]:
+        for e in earnings_to_record[:MAX_OUTCOME_TICKERS]:
             ticker = e["symbol"]
+            earnings_date = e["earnings_date"]
+            reference_day = e["reference_close_day"]
+            reaction_day = e["reaction_day"]
+
             try:
                 # Check if we already have this record
                 existing = repo.get_moves(ticker)
-                if any(m.get("earnings_date") == today for m in existing):
+                if any(m.get("earnings_date") == earnings_date for m in existing):
                     skipped_duplicate += 1
                     continue
 
@@ -1173,40 +1222,37 @@ class JobRunner:
                     log("debug", "Insufficient price data", ticker=ticker, data_points=len(price_data))
                     continue
 
-                # Find today's close and previous close
-                today_close = None
-                prev_close = None
+                # Find reference close and reaction close
+                reference_close = None
+                reaction_close = None
 
-                for i, (date_str, price) in enumerate(price_data):
-                    if date_str == today:
-                        today_close = price
-                        if i > 0:
-                            prev_close = price_data[i - 1][1]
-                        break
+                for date_str, price in price_data:
+                    if date_str == reference_day:
+                        reference_close = price
+                    if date_str == reaction_day:
+                        reaction_close = price
 
-                # If today not found, use last two prices (with warning)
-                if today_close is None and len(price_data) >= 2:
-                    log("warn", "Today's close not found for outcome, using last available",
-                        ticker=ticker, last_date=price_data[-1][0], today=today)
-                    today_close = price_data[-1][1]
-                    prev_close = price_data[-2][1]
+                if not reference_close or not reaction_close or reference_close <= 0:
+                    log("debug", "Missing price data for outcome",
+                        ticker=ticker, reference_day=reference_day, reaction_day=reaction_day,
+                        reference_close=reference_close, reaction_close=reaction_close)
+                    continue
 
-                if prev_close and today_close and prev_close > 0:
-                    move_pct = ((today_close - prev_close) / prev_close) * 100
+                move_pct = ((reaction_close - reference_close) / reference_close) * 100
 
-                    move_record = {
-                        "ticker": ticker,
-                        "earnings_date": today,
-                        "gap_move_pct": round(move_pct, 4),
-                        "intraday_move_pct": round(move_pct, 4),
-                        "prev_close": round(prev_close, 2),
-                        "earnings_close": round(today_close, 2),
-                    }
+                move_record = {
+                    "ticker": ticker,
+                    "earnings_date": earnings_date,
+                    "gap_move_pct": round(move_pct, 4),
+                    "intraday_move_pct": round(move_pct, 4),
+                    "prev_close": round(reference_close, 2),
+                    "earnings_close": round(reaction_close, 2),
+                }
 
-                    repo.save_move(move_record)
-                    recorded += 1
-                    log("debug", "Recorded outcome", ticker=ticker, date=today,
-                        move=round(move_pct, 2))
+                repo.save_move(move_record)
+                recorded += 1
+                log("debug", "Recorded outcome", ticker=ticker, date=earnings_date,
+                    move=round(move_pct, 2), reference_day=reference_day, reaction_day=reaction_day)
 
             except Exception as ex:
                 failed_tickers.append(ticker)
@@ -1296,7 +1342,13 @@ class JobRunner:
     async def _weekly_backfill(self) -> Dict[str, Any]:
         """
         Weekly backfill (Saturday 04:00 ET).
-        Record actual moves for recent completed earnings.
+        Record actual moves for recent completed earnings with BMO/AMC timing awareness.
+
+        BMO/AMC Timing Logic:
+            - BMO (Before Market Open): Reaction happens ON earnings day
+              Record: prev_day_close → earnings_day_close
+            - AMC (After Market Close): Reaction happens NEXT trading day
+              Record: earnings_day_close → next_day_close
         """
         from datetime import datetime
 
@@ -1306,19 +1358,18 @@ class JobRunner:
         skipped_duplicate = 0
         failed_tickers = []
 
-        # Get earnings from past 7 days
-        earnings = await self.alphavantage.get_earnings_calendar()
+        # Get earnings from DB (has timing info) with API fallback
+        earnings = await fetch_earnings_with_db_fallback(self.alphavantage, repo, days=14)
 
         # Validate API response
         if not earnings:
-            log("warn", "Empty earnings calendar from Alpha Vantage", job="weekly_backfill")
+            log("warn", "Empty earnings calendar", job="weekly_backfill")
             metrics.count("ivcrush.job.api_empty", {"job": "weekly_backfill", "api": "alphavantage"})
             return {"status": "warning", "backfilled": 0, "note": "Empty calendar from API"}
 
         today = now_et()
 
-        # Filter to valid tickers (excludes preferred stocks, warrants, etc.)
-        # NOTE: Like outcome-recorder, backfill does NOT use whitelist to allow new tickers to build history
+        # Filter to valid tickers from past 7 days
         from src.domain.repositories import is_valid_ticker
 
         past_earnings = []
@@ -1327,7 +1378,6 @@ class JobRunner:
                 if not is_valid_ticker(e["symbol"]):
                     continue
                 earnings_date_str = e["report_date"]
-                # Parse earnings date and make it timezone-aware for proper comparison
                 earnings_date = datetime.strptime(earnings_date_str, "%Y-%m-%d")
                 earnings_date = MARKET_TZ.localize(earnings_date)
                 days_ago = (today - earnings_date).days
@@ -1347,15 +1397,16 @@ class JobRunner:
         for e in past_earnings[:MAX_BACKFILL_TICKERS]:
             ticker = e["symbol"]
             earnings_date = e["report_date"]
+            timing = e.get("timing", "").upper()
 
             try:
-                # FIXED: Check ALL existing moves for this ticker, not just the most recent
+                # Check ALL existing moves for this ticker
                 existing = repo.get_moves(ticker)
                 if any(m.get("earnings_date") == earnings_date for m in existing):
                     skipped_duplicate += 1
                     continue
 
-                # Rate limiting for Yahoo API calls
+                # Rate limiting
                 api_calls += 1
                 if api_calls % RATE_LIMIT_BATCH_SIZE == 0:
                     await asyncio.sleep(RATE_LIMIT_DELAY)
@@ -1363,65 +1414,72 @@ class JobRunner:
                 # Get historical prices around earnings
                 history = await self.twelvedata.get_stock_history(ticker, period="1mo", interval="1d")
 
-                # Validate API response
-                if not history:
-                    log("debug", "Empty history response for backfill", ticker=ticker)
-                    continue
-                if "Close" not in history:
-                    log("debug", "No Close data in history for backfill", ticker=ticker)
+                if not history or "Close" not in history:
+                    log("debug", "No history data for backfill", ticker=ticker)
                     continue
 
-                # Parse price history using helper function
                 price_data = _parse_price_history(history.get("Close", {}))
                 if not price_data:
                     log("debug", "No valid price data after parsing", ticker=ticker)
                     continue
 
-                # Find price before and after earnings with more robust matching
-                prev_close = None
-                earnings_close = None
-                earnings_idx = None
+                # Build date->price lookup
+                price_by_date = {d: p for d, p in price_data}
 
-                # First pass: look for exact earnings date match
-                for i, (date_str, price) in enumerate(price_data):
+                # Determine reference and reaction days based on timing
+                # BMO: reaction on earnings day, reference is prev day
+                # AMC: reaction on next trading day, reference is earnings day
+                earnings_idx = None
+                for i, (date_str, _) in enumerate(price_data):
                     if date_str == earnings_date:
                         earnings_idx = i
-                        earnings_close = price
                         break
 
-                # Second pass: if no exact match, find first trading day after earnings
                 if earnings_idx is None:
-                    for i, (date_str, price) in enumerate(price_data):
+                    # Earnings date not in price data - find closest trading day after
+                    for i, (date_str, _) in enumerate(price_data):
                         if date_str > earnings_date:
                             earnings_idx = i
-                            earnings_close = price
                             break
 
-                # Get previous close
-                if earnings_idx is not None and earnings_idx > 0:
-                    prev_close = price_data[earnings_idx - 1][1]
+                if earnings_idx is None or earnings_idx < 1:
+                    log("debug", "Cannot find earnings date in price data", ticker=ticker)
+                    continue
 
-                if prev_close and earnings_close and prev_close > 0:
-                    gap_move_pct = ((earnings_close - prev_close) / prev_close) * 100
-                    # For simplicity, use gap move as intraday move (could enhance with intraday data)
-                    intraday_move_pct = gap_move_pct
-
-                    move_record = {
-                        "ticker": ticker,
-                        "earnings_date": earnings_date,
-                        "gap_move_pct": round(gap_move_pct, 4),
-                        "intraday_move_pct": round(intraday_move_pct, 4),
-                        "prev_close": round(prev_close, 2),
-                        "earnings_close": round(earnings_close, 2),
-                    }
-
-                    repo.save_move(move_record)
-                    backfilled += 1
-                    log("debug", "Backfilled move", ticker=ticker, date=earnings_date,
-                        move=round(gap_move_pct, 2))
+                # Calculate reference and reaction closes based on timing
+                if timing == "AMC":
+                    # AMC: reference = earnings day close, reaction = next trading day
+                    if earnings_idx + 1 < len(price_data):
+                        reference_close = price_data[earnings_idx][1]  # earnings day
+                        reaction_close = price_data[earnings_idx + 1][1]  # next day
+                    else:
+                        log("debug", "No next-day data for AMC earnings", ticker=ticker)
+                        continue
                 else:
-                    log("debug", "Insufficient price data for backfill",
-                        ticker=ticker, prev_close=prev_close, earnings_close=earnings_close)
+                    # BMO or unknown: reference = prev day close, reaction = earnings day
+                    reference_close = price_data[earnings_idx - 1][1]  # prev day
+                    reaction_close = price_data[earnings_idx][1]  # earnings day
+
+                if not reference_close or not reaction_close or reference_close <= 0:
+                    log("debug", "Invalid price data for backfill",
+                        ticker=ticker, reference=reference_close, reaction=reaction_close)
+                    continue
+
+                move_pct = ((reaction_close - reference_close) / reference_close) * 100
+
+                move_record = {
+                    "ticker": ticker,
+                    "earnings_date": earnings_date,
+                    "gap_move_pct": round(move_pct, 4),
+                    "intraday_move_pct": round(move_pct, 4),
+                    "prev_close": round(reference_close, 2),
+                    "earnings_close": round(reaction_close, 2),
+                }
+
+                repo.save_move(move_record)
+                backfilled += 1
+                log("debug", "Backfilled move", ticker=ticker, date=earnings_date,
+                    timing=timing or "UNKNOWN", move=round(move_pct, 2))
 
             except Exception as ex:
                 failed_tickers.append(ticker)
