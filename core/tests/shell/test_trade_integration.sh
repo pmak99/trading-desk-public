@@ -99,8 +99,8 @@ elif args.whisper_week:
 EOF
     chmod +x "$mock_scripts_dir/scan.py"
 
-    # Mock backfill_yfinance.py
-    cat > "$mock_scripts_dir/backfill_yfinance.py" <<'EOF'
+    # Mock backfill_historical.py
+    cat > "$mock_scripts_dir/backfill_historical.py" <<'EOF'
 #!/usr/bin/env python3
 import sys
 import argparse
@@ -116,7 +116,7 @@ print(f"Backfilled 24 earnings moves")
 print("✓ Data saved to database")
 print(f"Total moves for {args.ticker}: 24")
 EOF
-    chmod +x "$mock_scripts_dir/backfill_yfinance.py"
+    chmod +x "$mock_scripts_dir/backfill_historical.py"
 
     # Mock store_bias_prediction.py (silent)
     cat > "$mock_scripts_dir/store_bias_prediction.py" <<'EOF'

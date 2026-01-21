@@ -66,7 +66,7 @@ If no outcome data yet:
 ```
 ⏳ Outcome not yet available for $TICKER on $DATE
    Historical data may not be recorded yet.
-   Try running: cd 2.0 && python scripts/backfill_yfinance.py $TICKER
+   Try running: cd 2.0 && python scripts/backfill_historical.py $TICKER
 ```
 
 **Step 3: Update sentiment_history with outcome**
@@ -248,6 +248,6 @@ Trade Outcomes (where recorded):
 ```
 
 ## Notes
-- Outcomes require 2.0 historical_moves data (may need backfill_yfinance.py)
+- Outcomes require 2.0 historical_moves data (may need backfill_historical.py)
 - Trade outcomes are optional but valuable for ROI analysis
 - Need ~30 records with outcomes for statistically meaningful accuracy
