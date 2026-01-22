@@ -70,9 +70,9 @@
             "mode": "absolute",
             "steps": [
               { "color": "red", "value": null },
-              { "color": "yellow", "value": 1.5 },
-              { "color": "green", "value": 4 },
-              { "color": "blue", "value": 7 }
+              { "color": "yellow", "value": 1.2 },
+              { "color": "green", "value": 1.4 },
+              { "color": "blue", "value": 1.8 }
             ]
           },
           "unit": "short"
