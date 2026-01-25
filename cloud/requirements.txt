@@ -6,7 +6,7 @@ uvicorn[standard]==0.40.0
 httpx==0.28.1
 
 # Yahoo Finance (for prices/historical data)
-yfinance==1.0
+yfinance==1.1.0
 
 # Retry logic
 tenacity==9.1.2
@@ -21,7 +21,7 @@ pytz==2025.2
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.24.0
-pytest-httpx==0.35.0
+pytest-httpx==0.36.0
 
 # Dev
 python-dotenv==1.2.1
