@@ -329,6 +329,21 @@ DB_PATH=data/ivcrush.db      # Database location
 REQUIRE_WEEKLY_OPTIONS=false # Filter to weekly options only (opt-in)
 ```
 
+**Cloud Run Environment Variables:**
+
+Set separately via `gcloud run services update` (not in secrets JSON):
+```bash
+gcloud run services update trading-desk --project=your-gcp-project --region=us-east1 \
+  --update-env-vars=REQUIRE_WEEKLY_OPTIONS=true
+```
+
+| Env Var | Cloud Run | Secrets JSON | Notes |
+|---------|-----------|--------------|-------|
+| `REQUIRE_WEEKLY_OPTIONS` | ✅ Set directly | N/A | Read from `os.environ`, not secrets |
+| `GOOGLE_CLOUD_PROJECT` | ✅ Set directly | N/A | GCP project ID |
+| `GCS_BUCKET` | ✅ Set directly | N/A | GCS bucket name |
+| API keys (Tradier, etc.) | Via `SECRETS` ref | ✅ Stored here | Loaded by `_load_secrets()` |
+
 ## MCP Servers Available
 
 - **alphavantage** - Earnings, fundamentals, economic data
@@ -616,6 +631,7 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 16. ✅ Direction consistency - `/whisper` and job handlers now use `get_direction()` (matches `/analyze` 3-rule system)
 17. ✅ Next-quarter detection - prevents "correcting" to different quarter when API returns 45+ days different
 18. ✅ Bidirectional date difference - uses `abs()` to catch both later (next quarter) and earlier (DB has future date) mismatches
+19. ✅ Weekly options filter in job handlers - `_morning_digest()` and `_pre_trade_refresh()` now apply `REQUIRE_WEEKLY_OPTIONS` filter (was only applied in `/api/whisper` and `/api/analyze`)
 
 **Next-Quarter Detection Logic:**
 When validating stale cache dates, if API returns a date 45+ days **different** (earlier OR later) than DB, the system recognizes this as a cross-quarter mismatch. Instead of blindly correcting to the API date, it skips the ticker and logs a warning.
