@@ -126,7 +126,11 @@ class ConnectionPool:
             # Simple query to verify connection
             conn.execute('SELECT 1').fetchone()
             return True
-        except sqlite3.Error:
+        except sqlite3.OperationalError as e:
+            logger.warning(f"Connection health check failed (operational): {e}")
+            return False
+        except sqlite3.DatabaseError as e:
+            logger.critical(f"Connection health check failed (database corruption): {e}")
             return False
 
     @contextmanager
@@ -192,8 +196,13 @@ class ConnectionPool:
                             self._total_connections -= 1
                         logger.debug("Closed overflow connection")
 
-                except sqlite3.Error as e:
-                    logger.error(f"Error returning connection to pool: {e}")
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"Lock/operational error returning connection to pool: {e}")
+                    conn.close()
+                    with self._lock:
+                        self._total_connections -= 1
+                except sqlite3.DatabaseError as e:
+                    logger.critical(f"Database corruption returning connection to pool: {e}")
                     conn.close()
                     with self._lock:
                         self._total_connections -= 1
@@ -206,8 +215,13 @@ class ConnectionPool:
         while True:
             try:
                 conn = self._pool.get_nowait()
-                conn.close()
-                closed_count += 1
+                try:
+                    conn.close()
+                    closed_count += 1
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"Operational error closing connection: {e}")
+                except sqlite3.DatabaseError as e:
+                    logger.critical(f"Database error closing connection: {e}")
             except Empty:
                 break
 
