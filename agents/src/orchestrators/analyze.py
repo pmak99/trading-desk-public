@@ -367,13 +367,13 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         vrp_ratio = ticker_result.get('vrp_ratio', 0)
         recommendation = ticker_result.get('recommendation', 'SKIP')
 
-        if vrp_ratio >= 4.0 and liquidity_tier in ['EXCELLENT', 'GOOD']:
+        if vrp_ratio >= 1.8 and liquidity_tier in ['EXCELLENT', 'GOOD']:
             return {
                 'action': 'TRADE',
                 'reason': f'{recommendation} VRP ({vrp_ratio:.2f}x) + {liquidity_tier} liquidity',
                 'details': 'Strong opportunity with acceptable risk'
             }
-        elif vrp_ratio >= 3.0 and liquidity_tier in ['EXCELLENT', 'GOOD']:
+        elif vrp_ratio >= 1.4 and liquidity_tier in ['EXCELLENT', 'GOOD']:
             return {
                 'action': 'TRADE_CAUTIOUSLY',
                 'reason': f'{recommendation} VRP ({vrp_ratio:.2f}x) + {liquidity_tier} liquidity',

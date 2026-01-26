@@ -200,24 +200,24 @@ class ExplanationAgent:
         Higher VRP generally correlates with higher win probability since
         we're selling overpriced volatility.
 
-        Baseline probability from VRP:
-        - VRP >= 7.0x: 75% base
-        - VRP >= 4.0x: 65% base
-        - VRP >= 3.0x: 55% base
-        - VRP < 3.0x: 45% base
+        Baseline probability from VRP (BALANCED mode):
+        - VRP >= 1.8x: 70% base (EXCELLENT)
+        - VRP >= 1.4x: 60% base (GOOD)
+        - VRP >= 1.2x: 50% base (MARGINAL)
+        - VRP < 1.2x: 40% base (SKIP)
 
         Adjusted by historical consistency patterns.
         """
         try:
-            # Base probability from VRP
-            if vrp_ratio >= 7.0:
-                base_prob = 0.75
-            elif vrp_ratio >= 4.0:
-                base_prob = 0.65
-            elif vrp_ratio >= 3.0:
-                base_prob = 0.55
+            # Base probability from VRP (BALANCED mode thresholds)
+            if vrp_ratio >= 1.8:
+                base_prob = 0.70
+            elif vrp_ratio >= 1.4:
+                base_prob = 0.60
+            elif vrp_ratio >= 1.2:
+                base_prob = 0.50
             else:
-                base_prob = 0.45
+                base_prob = 0.40
 
             # Adjust based on historical move consistency
             moves = self.container.get_historical_moves(ticker, limit=8)
@@ -289,13 +289,13 @@ class ExplanationAgent:
         """Extract key factors driving the opportunity."""
         factors = []
 
-        # VRP factor with win probability
-        if vrp_ratio >= 7.0:
+        # VRP factor with win probability (BALANCED mode thresholds)
+        if vrp_ratio >= 1.8:
             prob_str = f" ({win_probability:.0%} win prob)" if win_probability else ""
-            factors.append(f"Exceptionally high VRP (7x+) indicates strong edge{prob_str}")
-        elif vrp_ratio >= 4.0:
+            factors.append(f"EXCELLENT VRP ({vrp_ratio:.1f}x) indicates strong edge{prob_str}")
+        elif vrp_ratio >= 1.4:
             prob_str = f" ({win_probability:.0%} win prob)" if win_probability else ""
-            factors.append(f"Elevated VRP (4-7x) provides trading edge{prob_str}")
+            factors.append(f"GOOD VRP ({vrp_ratio:.1f}x) provides trading edge{prob_str}")
 
         # Parse sentiment factors if available
         if "catalysts:" in sentiment_summary.lower():
