@@ -117,30 +117,54 @@ class ExplanationAgent:
                 'win_probability': None
             }
 
+    def _unwrap_moves(self, result) -> list:
+        """Unwrap Result type and convert HistoricalMove dataclasses to usable data."""
+        # Unwrap Result type from 2.0
+        if hasattr(result, 'is_err'):
+            if result.is_err:
+                return []
+            result = result.value if hasattr(result, 'value') else result
+
+        if not result:
+            return []
+
+        # Convert HistoricalMove dataclasses: extract gap_move_pct and direction
+        moves = []
+        for m in result:
+            gap_pct = m.gap_move_pct
+            gap_value = gap_pct.value if hasattr(gap_pct, 'value') else float(gap_pct)
+            direction = 'UP' if gap_value >= 0 else 'DOWN'
+            moves.append({
+                'gap_move_pct': gap_value,
+                'direction': direction,
+            })
+        return moves
+
     def _build_historical_summary(self, ticker: str) -> str:
         """Build summary of historical earnings moves with pattern analysis."""
         try:
-            moves = self.container.get_historical_moves(ticker, limit=12)
+            raw = self.container.get_historical_moves(ticker, limit=12)
+            moves = self._unwrap_moves(raw)
 
             if not moves:
                 return "No historical earnings data available."
 
             # Calculate statistics
-            move_values = [abs(m.get('gap_move_pct', 0)) for m in moves]
+            move_values = [abs(m['gap_move_pct']) for m in moves]
             avg_move = sum(move_values) / len(move_values) if move_values else 0
             max_move = max(move_values) if move_values else 0
             min_move = min(move_values) if move_values else 0
 
-            # Count wins/losses (if direction data available)
-            ups = sum(1 for m in moves if m.get('direction') == 'UP')
-            downs = sum(1 for m in moves if m.get('direction') == 'DOWN')
+            # Count wins/losses
+            ups = sum(1 for m in moves if m['direction'] == 'UP')
+            downs = sum(1 for m in moves if m['direction'] == 'DOWN')
 
             # Detect patterns
             patterns = []
 
             # Directional consistency
             if len(moves) >= 4:
-                recent_4 = [m.get('direction') for m in moves[:4]]
+                recent_4 = [m['direction'] for m in moves[:4]]
                 if recent_4.count('UP') >= 3:
                     patterns.append("consistently bullish (3/4 recent quarters up)")
                 elif recent_4.count('DOWN') >= 3:
@@ -220,11 +244,12 @@ class ExplanationAgent:
                 base_prob = 0.40
 
             # Adjust based on historical move consistency
-            moves = self.container.get_historical_moves(ticker, limit=8)
+            raw = self.container.get_historical_moves(ticker, limit=8)
+            moves = self._unwrap_moves(raw)
             if not moves or len(moves) < 4:
                 return base_prob  # Not enough data for adjustment
 
-            move_values = [abs(m.get('gap_move_pct', 0)) for m in moves]
+            move_values = [abs(m['gap_move_pct']) for m in moves]
             if not move_values:
                 return base_prob
 
