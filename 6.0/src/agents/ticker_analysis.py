@@ -107,6 +107,17 @@ class TickerAnalysisAgent:
             # Unwrap Result value
             analysis_result = result.value if hasattr(result, 'value') else result
 
+            # Validate unwrapped value is not None (Result.Ok(None) is possible)
+            if analysis_result is None:
+                logger.error(f"2.0 analyzer returned Ok(None) for {ticker}")
+                error_response = BaseAgent.create_error_response(
+                    agent_type="TickerAnalysisAgent",
+                    error_message="Analyzer returned empty result",
+                    ticker=ticker
+                )
+                error_response['earnings_date'] = earnings_date
+                return error_response
+
             # Check weekly options availability
             has_weeklies, weekly_reason = self._check_weekly_options(ticker, earnings_date)
 
@@ -274,15 +285,18 @@ class TickerAnalysisAgent:
             if result.is_err:
                 logger.error(f"Error getting historical moves for {ticker}: {result.unwrap_err()}")
                 return []
-            return result.value if hasattr(result, 'value') else result
+            value = result.value if hasattr(result, 'value') else result
+            # Guard against Ok(None)
+            return value if value is not None else []
 
-        return result
+        return result if result is not None else []
 
     def _get_position_limits(self, ticker: str) -> Optional[Dict[str, Any]]:
         """Get position limits for ticker if available."""
         try:
             return self.position_limits_repo.get_limits(ticker)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Error fetching position limits for {ticker}: {e}")
             return None
 
     def _check_weekly_options(self, ticker: str, earnings_date: str) -> Tuple[bool, str]:

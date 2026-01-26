@@ -25,11 +25,17 @@ Limits:
 """
 
 import sqlite3
+import threading
+import logging
 from datetime import datetime, date, timezone
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from dataclasses import dataclass, field
 from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+_db_lock = threading.Lock()
 
 
 # Perplexity token pricing (per token, from invoice)
@@ -115,32 +121,33 @@ class BudgetTracker:
 
     def _init_db(self):
         """Initialize database schema with token tracking columns."""
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS api_budget (
-                    date TEXT PRIMARY KEY,
-                    calls INTEGER DEFAULT 0,
-                    cost REAL DEFAULT 0.0,
-                    last_updated TEXT,
-                    output_tokens INTEGER DEFAULT 0,
-                    reasoning_tokens INTEGER DEFAULT 0,
-                    search_requests INTEGER DEFAULT 0
-                )
-            """)
-            # Add token columns if they don't exist (migration for existing DBs)
-            try:
-                conn.execute("ALTER TABLE api_budget ADD COLUMN output_tokens INTEGER DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            try:
-                conn.execute("ALTER TABLE api_budget ADD COLUMN reasoning_tokens INTEGER DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                conn.execute("ALTER TABLE api_budget ADD COLUMN search_requests INTEGER DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass
-            conn.commit()
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS api_budget (
+                        date TEXT PRIMARY KEY,
+                        calls INTEGER DEFAULT 0,
+                        cost REAL DEFAULT 0.0,
+                        last_updated TEXT,
+                        output_tokens INTEGER DEFAULT 0,
+                        reasoning_tokens INTEGER DEFAULT 0,
+                        search_requests INTEGER DEFAULT 0
+                    )
+                """)
+                # Add token columns if they don't exist (migration for existing DBs)
+                try:
+                    conn.execute("ALTER TABLE api_budget ADD COLUMN output_tokens INTEGER DEFAULT 0")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+                try:
+                    conn.execute("ALTER TABLE api_budget ADD COLUMN reasoning_tokens INTEGER DEFAULT 0")
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    conn.execute("ALTER TABLE api_budget ADD COLUMN search_requests INTEGER DEFAULT 0")
+                except sqlite3.OperationalError:
+                    pass
+                conn.commit()
 
     def _get_today(self) -> str:
         """Get today's date as string."""
@@ -228,20 +235,26 @@ class BudgetTracker:
 
         today = self._get_today()
 
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            self._ensure_today_row(conn)
-            conn.execute("""
-                UPDATE api_budget
-                SET calls = calls + 1,
-                    cost = cost + ?,
-                    output_tokens = output_tokens + ?,
-                    reasoning_tokens = reasoning_tokens + ?,
-                    search_requests = search_requests + ?,
-                    last_updated = ?
-                WHERE date = ?
-            """, (cost, output_tokens, reasoning_tokens, search_requests,
-                  datetime.now(timezone.utc).isoformat(), today))
-            conn.commit()
+        try:
+            with _db_lock:
+                with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                    self._ensure_today_row(conn)
+                    conn.execute("""
+                        UPDATE api_budget
+                        SET calls = calls + 1,
+                            cost = cost + ?,
+                            output_tokens = output_tokens + ?,
+                            reasoning_tokens = reasoning_tokens + ?,
+                            search_requests = search_requests + ?,
+                            last_updated = ?
+                        WHERE date = ?
+                    """, (cost, output_tokens, reasoning_tokens, search_requests,
+                          datetime.now(timezone.utc).isoformat(), today))
+                    conn.commit()
+        except sqlite3.OperationalError as e:
+            logger.error(f"Budget DB operational error in record_call: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"Budget DB error in record_call: {e}")
 
     def record_tokens(
         self,
@@ -265,6 +278,9 @@ class BudgetTracker:
         Returns:
             Calculated cost in dollars
         """
+        # Validate token counts before calculation
+        self._validate_token_counts(output_tokens, reasoning_tokens, search_requests)
+
         # Calculate cost from tokens
         cost = 0.0
         if output_tokens > 0:
@@ -276,6 +292,13 @@ class BudgetTracker:
             cost += reasoning_tokens * PRICING["reasoning_pro"]
         if search_requests > 0:
             cost += search_requests * PRICING["search_request"]
+
+        # Validate calculated cost is non-negative
+        if cost < 0:
+            raise ValueError(f"Calculated cost cannot be negative, got: {cost}")
+
+        if cost > 10.0:  # $10 per call would be anomalous
+            logger.warning(f"Unusually high cost calculated: ${cost:.4f} for {output_tokens} output tokens")
 
         # Record with token breakdown
         self.record_call(
@@ -307,88 +330,91 @@ class BudgetTracker:
         """Get current budget information including token breakdown."""
         today = self._get_today()
 
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.row_factory = sqlite3.Row
-            self._ensure_today_row(conn)
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.row_factory = sqlite3.Row
+                self._ensure_today_row(conn)
 
-            row = conn.execute("""
-                SELECT date, calls, cost, output_tokens, reasoning_tokens, search_requests
-                FROM api_budget
-                WHERE date = ?
-            """, (today,)).fetchone()
+                row = conn.execute("""
+                    SELECT date, calls, cost, output_tokens, reasoning_tokens, search_requests
+                    FROM api_budget
+                    WHERE date = ?
+                """, (today,)).fetchone()
 
-            calls = row['calls']
-            cost = row['cost']
-            remaining = max(0, self.MAX_DAILY_CALLS - calls)
+                calls = row['calls']
+                cost = row['cost']
+                remaining = max(0, self.MAX_DAILY_CALLS - calls)
 
-            # Determine status
-            if calls >= self.MAX_DAILY_CALLS:
-                status = BudgetStatus.EXHAUSTED
-            elif calls >= int(self.MAX_DAILY_CALLS * self.WARN_THRESHOLD):
-                status = BudgetStatus.WARNING
-            else:
-                status = BudgetStatus.OK
+                # Determine status
+                if calls >= self.MAX_DAILY_CALLS:
+                    status = BudgetStatus.EXHAUSTED
+                elif calls >= int(self.MAX_DAILY_CALLS * self.WARN_THRESHOLD):
+                    status = BudgetStatus.WARNING
+                else:
+                    status = BudgetStatus.OK
 
-            return BudgetInfo(
-                date=today,
-                calls_today=calls,
-                cost_today=cost,
-                calls_remaining=remaining,
-                status=status,
-                output_tokens=row['output_tokens'] or 0,
-                reasoning_tokens=row['reasoning_tokens'] or 0,
-                search_requests=row['search_requests'] or 0
-            )
+                return BudgetInfo(
+                    date=today,
+                    calls_today=calls,
+                    cost_today=cost,
+                    calls_remaining=remaining,
+                    status=status,
+                    output_tokens=row['output_tokens'] or 0,
+                    reasoning_tokens=row['reasoning_tokens'] or 0,
+                    search_requests=row['search_requests'] or 0
+                )
 
     def get_monthly_summary(self) -> dict:
         """Get monthly usage summary including token breakdown."""
         today = date.today()
         month_start = today.replace(day=1).isoformat()
 
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.row_factory = sqlite3.Row
 
-            row = conn.execute("""
-                SELECT
-                    COUNT(*) as days_with_usage,
-                    SUM(calls) as total_calls,
-                    SUM(cost) as total_cost,
-                    AVG(calls) as avg_calls_per_day,
-                    MAX(calls) as max_calls_day,
-                    SUM(output_tokens) as total_output_tokens,
-                    SUM(reasoning_tokens) as total_reasoning_tokens,
-                    SUM(search_requests) as total_search_requests
-                FROM api_budget
-                WHERE date >= ?
-            """, (month_start,)).fetchone()
+                row = conn.execute("""
+                    SELECT
+                        COUNT(*) as days_with_usage,
+                        SUM(calls) as total_calls,
+                        SUM(cost) as total_cost,
+                        AVG(calls) as avg_calls_per_day,
+                        MAX(calls) as max_calls_day,
+                        SUM(output_tokens) as total_output_tokens,
+                        SUM(reasoning_tokens) as total_reasoning_tokens,
+                        SUM(search_requests) as total_search_requests
+                    FROM api_budget
+                    WHERE date >= ?
+                """, (month_start,)).fetchone()
 
-            return {
-                "month": today.strftime("%Y-%m"),
-                "days_with_usage": row['days_with_usage'] or 0,
-                "total_calls": row['total_calls'] or 0,
-                "total_cost": row['total_cost'] or 0.0,
-                "avg_calls_per_day": row['avg_calls_per_day'] or 0.0,
-                "max_calls_day": row['max_calls_day'] or 0,
-                "budget_remaining": 5.00 - (row['total_cost'] or 0.0),
-                # Token breakdown
-                "total_output_tokens": row['total_output_tokens'] or 0,
-                "total_reasoning_tokens": row['total_reasoning_tokens'] or 0,
-                "total_search_requests": row['total_search_requests'] or 0
-            }
+                return {
+                    "month": today.strftime("%Y-%m"),
+                    "days_with_usage": row['days_with_usage'] or 0,
+                    "total_calls": row['total_calls'] or 0,
+                    "total_cost": row['total_cost'] or 0.0,
+                    "avg_calls_per_day": row['avg_calls_per_day'] or 0.0,
+                    "max_calls_day": row['max_calls_day'] or 0,
+                    "budget_remaining": 5.00 - (row['total_cost'] or 0.0),
+                    # Token breakdown
+                    "total_output_tokens": row['total_output_tokens'] or 0,
+                    "total_reasoning_tokens": row['total_reasoning_tokens'] or 0,
+                    "total_search_requests": row['total_search_requests'] or 0
+                }
 
     def reset_today(self) -> None:
         """Reset today's counts (for testing)."""
         today = self._get_today()
 
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.execute("""
-                UPDATE api_budget
-                SET calls = 0, cost = 0.0,
-                    output_tokens = 0, reasoning_tokens = 0, search_requests = 0,
-                    last_updated = ?
-                WHERE date = ?
-            """, (datetime.now(timezone.utc).isoformat(), today))
-            conn.commit()
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.execute("""
+                    UPDATE api_budget
+                    SET calls = 0, cost = 0.0,
+                        output_tokens = 0, reasoning_tokens = 0, search_requests = 0,
+                        last_updated = ?
+                    WHERE date = ?
+                """, (datetime.now(timezone.utc).isoformat(), today))
+                conn.commit()
 
 
 # Convenience functions for slash commands

@@ -57,6 +57,13 @@ class DatabaseSync:
             # Get current metadata with timeout to avoid hanging on network issues
             blob.reload(timeout=self.DOWNLOAD_TIMEOUT)
             self._generation = blob.generation
+            # Validate generation is a positive integer (GCS always returns positive int64)
+            if self._generation is None:
+                log("error", "GCS blob has no generation number")
+            elif not isinstance(self._generation, int) or self._generation <= 0:
+                log("error", "GCS blob has invalid generation number",
+                    generation=self._generation, type=type(self._generation).__name__)
+                self._generation = None
             blob.download_to_filename(
                 str(self.local_path),
                 timeout=self.DOWNLOAD_TIMEOUT
@@ -70,7 +77,11 @@ class DatabaseSync:
             # Re-raise corruption errors - don't swallow them
             raise
         except Exception as e:
-            log("warn", "No existing database, starting fresh", error=str(e))
+            error_msg = str(e).lower()
+            if 'forbidden' in error_msg or '403' in error_msg or 'unauthorized' in error_msg or '401' in error_msg:
+                log("critical", "GCS authentication failed", error=type(e).__name__)
+                raise
+            log("warn", "No existing database, starting fresh", error=type(e).__name__)
             self._generation = None
 
         return str(self.local_path)
@@ -107,6 +118,13 @@ class DatabaseSync:
 
         try:
             if self._generation is not None:
+                # Validate generation before using in optimistic lock
+                if not isinstance(self._generation, int) or self._generation <= 0:
+                    log("error", "Invalid generation for upload, treating as new",
+                        generation=self._generation)
+                    self._generation = None
+
+            if self._generation is not None:
                 # Optimistic lock: only succeed if generation matches
                 blob.upload_from_filename(
                     str(self.local_path),
@@ -129,6 +147,14 @@ class DatabaseSync:
         except PreconditionFailed:
             log("error", "Database upload conflict - another instance wrote first")
             return False
+        except Exception as e:
+            error_msg = str(e).lower()
+            if 'forbidden' in error_msg or '403' in error_msg or 'unauthorized' in error_msg or '401' in error_msg:
+                log("critical", "GCS authentication failed during upload",
+                    error=type(e).__name__)
+            else:
+                log("error", "GCS upload failed", error=type(e).__name__)
+            raise
 
     def get_connection(self) -> sqlite3.Connection:
         """Get SQLite connection to local database."""

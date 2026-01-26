@@ -83,7 +83,7 @@ class BaseAgent:
         if config_path is None:
             config_path = Path(__file__).parent.parent.parent / "config" / "agents.yaml"
 
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
 
         if agent_type not in config:
@@ -102,9 +102,10 @@ class BaseAgent:
     @staticmethod
     def extract_json(response: str) -> str:
         """
-        Extract JSON string from response.
+        Extract JSON string from response using brace-counting.
 
-        Handles markdown code blocks and raw JSON.
+        Handles markdown code blocks and raw JSON with nested braces.
+        Uses brace-counting instead of regex for reliable nested JSON extraction.
 
         Args:
             response: Raw response string
@@ -115,20 +116,55 @@ class BaseAgent:
         Raises:
             ValueError: If no JSON found
         """
-        # Try to extract JSON from markdown code blocks
-        json_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
-        matches = re.findall(json_pattern, response, re.DOTALL)
+        # Try to extract JSON from markdown code blocks first
+        json_pattern = r'```(?:json)?\s*(\{[\s\S]*?\})\s*```'
+        matches = re.findall(json_pattern, response)
 
         if matches:
             return matches[0]
 
-        # Try to find raw JSON
-        json_pattern = r'\{.*?\}'
-        matches = re.findall(json_pattern, response, re.DOTALL)
+        # Use brace-counting to find the outermost JSON object
+        # This correctly handles nested braces unlike non-greedy regex
+        best_json = None
+        best_len = 0
 
-        if matches:
-            # Return longest match (likely the complete JSON)
-            return max(matches, key=len)
+        for i, char in enumerate(response):
+            if char == '{':
+                depth = 0
+                in_string = False
+                escape_next = False
+
+                for j in range(i, len(response)):
+                    c = response[j]
+
+                    if escape_next:
+                        escape_next = False
+                        continue
+
+                    if c == '\\' and in_string:
+                        escape_next = True
+                        continue
+
+                    if c == '"' and not escape_next:
+                        in_string = not in_string
+                        continue
+
+                    if in_string:
+                        continue
+
+                    if c == '{':
+                        depth += 1
+                    elif c == '}':
+                        depth -= 1
+                        if depth == 0:
+                            candidate = response[i:j + 1]
+                            if len(candidate) > best_len:
+                                best_json = candidate
+                                best_len = len(candidate)
+                            break
+
+        if best_json is not None:
+            return best_json
 
         raise ValueError(f"No JSON found in response: {response[:200]}")
 
@@ -218,6 +254,29 @@ class BaseAgent:
         }
         response.update(extra_fields)
         return response
+
+    @staticmethod
+    def is_result_error(result) -> bool:
+        """
+        Check if a 2.0 Result object is an error, handling both property and method patterns.
+
+        2.0's Result type uses `is_err` as a @property. This helper ensures correct
+        access regardless of whether it's a property or method, providing a single
+        consistent check point.
+
+        Args:
+            result: A 2.0 Result[T, Error] object
+
+        Returns:
+            True if the result is an error, False otherwise
+        """
+        if not hasattr(result, 'is_err'):
+            return False
+        is_err = result.is_err
+        # Handle both property (bool) and method (callable) patterns
+        if callable(is_err):
+            return is_err()
+        return bool(is_err)
 
     @staticmethod
     def validate_required_fields(

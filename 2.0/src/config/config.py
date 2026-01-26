@@ -557,7 +557,20 @@ class Config:
                 f"Database directory does not exist: {self.database.path.parent}"
             )
 
-        # Threshold validation
+        # Threshold validation - range checks
+        for name, value in [
+            ("vrp_excellent", self.thresholds.vrp_excellent),
+            ("vrp_good", self.thresholds.vrp_good),
+            ("vrp_marginal", self.thresholds.vrp_marginal),
+        ]:
+            if value < 0:
+                errors.append(f"{name} ({value}) must not be negative")
+            elif value < 0.1 or value > 50:
+                errors.append(
+                    f"{name} ({value}) outside reasonable range (0.1 to 50)"
+                )
+
+        # Threshold ordering validation
         if self.thresholds.vrp_excellent <= self.thresholds.vrp_good:
             errors.append(
                 f"vrp_excellent ({self.thresholds.vrp_excellent}) must be > vrp_good ({self.thresholds.vrp_good})"

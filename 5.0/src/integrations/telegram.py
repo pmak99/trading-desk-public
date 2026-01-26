@@ -29,6 +29,8 @@ class TelegramSender:
 
     def _truncate_message(self, text: str) -> str:
         """Truncate message to Telegram's limit, preserving header and footer."""
+        if not isinstance(text, str):
+            text = str(text)
         if len(text) <= MAX_MESSAGE_LENGTH:
             return text
 

@@ -105,10 +105,10 @@ class TestRule1TiebreakNeutralSkew:
         assert adj.rule_applied == "tiebreak_bullish"
 
     def test_neutral_skew_edge_bearish(self):
-        """Neutral skew + sentiment at edge (-0.2) → BEARISH."""
+        """Neutral skew + sentiment at edge (-0.2) → NEUTRAL (boundary is exclusive)."""
         adj = adjust_direction("NEUTRAL", -0.2)
-        assert adj.adjusted_bias == AdjustedBias.BEARISH
-        assert adj.rule_applied == "tiebreak_bearish"
+        assert adj.adjusted_bias == AdjustedBias.NEUTRAL
+        assert adj.rule_applied == "both_neutral"
 
 
 class TestRule2ConflictHedge:
@@ -282,8 +282,8 @@ class TestRealWorldScenarios:
         assert adj.rule_applied == "skew_dominates"
 
     def test_lulu_scenario(self):
-        """LULU: BULLISH skew + Bearish (-0.2) → NEUTRAL (conflict)."""
-        adj = adjust_direction("BULLISH", -0.2)
+        """LULU: BULLISH skew + Bearish (-0.21) → NEUTRAL (conflict)."""
+        adj = adjust_direction("BULLISH", -0.21)
         assert adj.adjusted_bias == AdjustedBias.NEUTRAL
         assert adj.rule_applied == "conflict_hedge"
 

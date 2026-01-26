@@ -84,31 +84,53 @@ class Trade:
 
 
 def find_column(headers: List[str], field_name: str) -> Optional[int]:
-    """Find column index for a field using flexible matching"""
+    """Find column index for a field using flexible matching.
+
+    Handles variations in Fidelity exports:
+    - Extra whitespace/padding
+    - Different capitalization
+    - Whitespace-collapsed comparison (e.g., "Date  Acquired" matches "Date Acquired")
+    """
     possible_names = COLUMN_MAPPINGS.get(field_name, [field_name])
 
     for i, header in enumerate(headers):
-        header_clean = header.strip()
+        # Normalize: strip, collapse internal whitespace, lowercase
+        header_normalized = ' '.join(header.strip().split()).lower()
         for name in possible_names:
-            if header_clean.lower() == name.lower():
+            name_normalized = ' '.join(name.strip().split()).lower()
+            if header_normalized == name_normalized:
                 return i
     return None
 
 
 def parse_money(value: str) -> float:
-    """Parse money string like '$1,234.56' or '(1,234.56)' to float"""
+    """Parse money string like '$1,234.56' or '(1,234.56)' to float.
+
+    Handles edge cases:
+    - Parenthesized negatives: "(123.45)" -> -123.45
+    - Dollar prefix: "$1,234.56" -> 1234.56
+    - Leading minus with dollar: "-$1,234.56" -> -1234.56
+    - Commas as thousands separators: "1,234.56" -> 1234.56
+    - European format: "1.234,56" -> 1234.56
+    - Currency codes: "USD 1,234.56" -> 1234.56
+    """
     if not value or value.strip() in ('-', '', '--'):
         return 0.0
 
     value = value.strip()
 
+    # Check for leading minus sign before currency symbol (e.g., "-$1,234.56")
+    is_negative = False
+    if value.startswith('-') and not value.startswith('-('):
+        is_negative = True
+        value = value[1:].strip()
+
     # Remove currency symbols and text prefixes
     clean = re.sub(r'[A-Z]{2,4}\s*', '', value.upper())  # Remove USD, EUR, etc.
-    clean = clean.replace('$', '').replace('€', '').replace('£', '')
+    clean = clean.replace('$', '').replace('\u20ac', '').replace('\u00a3', '')
     clean = clean.replace(' ', '')
 
     # Handle parentheses for negative (check BEFORE removing commas)
-    is_negative = False
     if clean.startswith('(') and clean.endswith(')'):
         is_negative = True
         clean = clean[1:-1]
@@ -131,6 +153,9 @@ def parse_money(value: str) -> float:
             clean = clean.replace(',', '.')
         else:
             clean = clean.replace(',', '')
+
+    # Remove any remaining non-numeric chars except . and -
+    clean = re.sub(r'[^\d.\-]', '', clean)
 
     try:
         amount = float(clean)
@@ -173,7 +198,16 @@ def parse_date(value: str) -> Optional[str]:
 
 
 def parse_option_description(description: str) -> Dict:
-    """Extract option details from Fidelity description"""
+    """Extract option details from Fidelity description.
+
+    Handles multiple formats:
+    - "PUT (NVDA) NVIDIA CORP JAN 17 25 $150.00"  (standard Fidelity)
+    - "NVDA 02/07/2026 150.00 C"                  (compact format)
+    - "CALL (AAPL) APPLE INC FEB 21 2025 $225"    (long year)
+
+    Returns dict with option_type, underlying, strike, expiration (or None for each).
+    Logs a warning if option type is detected but other fields cannot be parsed.
+    """
     result = {
         'option_type': None,
         'underlying': None,
@@ -184,7 +218,7 @@ def parse_option_description(description: str) -> Dict:
     if not description:
         return result
 
-    desc_upper = description.upper()
+    desc_upper = description.upper().strip()
 
     # Detect option type
     if 'PUT' in desc_upper:
@@ -192,6 +226,20 @@ def parse_option_description(description: str) -> Dict:
     elif 'CALL' in desc_upper:
         result['option_type'] = 'CALL'
     else:
+        # Try compact format: "NVDA 02/07/2026 150.00 C" or "NVDA 02/07/2026 150.00 P"
+        compact_match = re.match(
+            r'^([A-Z][A-Z0-9]{0,5})\s+(\d{1,2}/\d{1,2}/\d{2,4})\s+(\d+(?:\.\d+)?)\s+([CP])$',
+            desc_upper
+        )
+        if compact_match:
+            result['underlying'] = compact_match.group(1)
+            result['option_type'] = 'CALL' if compact_match.group(4) == 'C' else 'PUT'
+            result['strike'] = float(compact_match.group(3))
+            # Parse date
+            exp_date = parse_date(compact_match.group(2))
+            if exp_date:
+                result['expiration'] = exp_date
+            return result
         return result  # Not an option
 
     # Extract underlying - usually in parentheses like "PUT (NVDA)"
@@ -226,6 +274,11 @@ def parse_option_description(description: str) -> Dict:
         if len(year) == 2:
             year = '20' + year
         result['expiration'] = f"{year}-{month}-{day}"
+
+    # Log warning if option type detected but key fields are missing
+    if result['option_type'] and not result['underlying']:
+        import sys
+        print(f"      Warning: Option detected but could not parse underlying from: {description[:80]}", file=sys.stderr)
 
     return result
 

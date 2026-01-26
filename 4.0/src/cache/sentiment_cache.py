@@ -9,10 +9,13 @@ TTL: 3 hours (10800 seconds)
 """
 
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
+
+_db_lock = threading.Lock()
 
 
 @dataclass
@@ -74,22 +77,23 @@ class SentimentCache:
 
     def _init_db(self):
         """Initialize database schema."""
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS sentiment_cache (
-                    ticker TEXT NOT NULL,
-                    date TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    sentiment TEXT NOT NULL,
-                    cached_at TEXT NOT NULL,
-                    PRIMARY KEY (ticker, date, source)
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_sentiment_ticker_date
-                ON sentiment_cache(ticker, date)
-            """)
-            conn.commit()
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS sentiment_cache (
+                        ticker TEXT NOT NULL,
+                        date TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        sentiment TEXT NOT NULL,
+                        cached_at TEXT NOT NULL,
+                        PRIMARY KEY (ticker, date, source)
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_sentiment_ticker_date
+                    ON sentiment_cache(ticker, date)
+                """)
+                conn.commit()
 
     def get(self, ticker: str, date: str) -> Optional[CachedSentiment]:
         """
@@ -100,33 +104,34 @@ class SentimentCache:
         """
         ticker = ticker.upper()
 
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.row_factory = sqlite3.Row
 
-            # Get all entries for ticker+date, ordered by preference
-            cursor = conn.execute("""
-                SELECT ticker, date, source, sentiment, cached_at
-                FROM sentiment_cache
-                WHERE ticker = ? AND date = ?
-                ORDER BY
-                    CASE source WHEN 'perplexity' THEN 0 ELSE 1 END,
-                    cached_at DESC
-            """, (ticker, date))
+                # Get all entries for ticker+date, ordered by preference
+                cursor = conn.execute("""
+                    SELECT ticker, date, source, sentiment, cached_at
+                    FROM sentiment_cache
+                    WHERE ticker = ? AND date = ?
+                    ORDER BY
+                        CASE source WHEN 'perplexity' THEN 0 ELSE 1 END,
+                        cached_at DESC
+                """, (ticker, date))
 
-            for row in cursor:
-                cached_at = datetime.fromisoformat(row['cached_at'])
-                entry = CachedSentiment(
-                    ticker=row['ticker'],
-                    date=row['date'],
-                    source=row['source'],
-                    sentiment=row['sentiment'],
-                    cached_at=cached_at
-                )
+                for row in cursor:
+                    cached_at = datetime.fromisoformat(row['cached_at'])
+                    entry = CachedSentiment(
+                        ticker=row['ticker'],
+                        date=row['date'],
+                        source=row['source'],
+                        sentiment=row['sentiment'],
+                        cached_at=cached_at
+                    )
 
-                if not entry.is_expired:
-                    return entry
+                    if not entry.is_expired:
+                        return entry
 
-            return None
+                return None
 
     def set(self, ticker: str, date: str, source: str, sentiment: str) -> None:
         """
@@ -148,62 +153,66 @@ class SentimentCache:
         # Use UTC for consistent timezone handling
         cached_at = datetime.now(timezone.utc).isoformat()
 
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.execute("""
-                INSERT OR REPLACE INTO sentiment_cache
-                (ticker, date, source, sentiment, cached_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (ticker, date, source, sentiment, cached_at))
-            conn.commit()
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO sentiment_cache
+                    (ticker, date, source, sentiment, cached_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (ticker, date, source, sentiment, cached_at))
+                conn.commit()
 
     def clear_expired(self) -> int:
         """Remove expired cache entries. Returns count of deleted entries."""
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=self.DEFAULT_TTL_HOURS)).isoformat()
 
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            cursor = conn.execute("""
-                DELETE FROM sentiment_cache
-                WHERE cached_at < ?
-            """, (cutoff,))
-            conn.commit()
-            return cursor.rowcount
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                cursor = conn.execute("""
+                    DELETE FROM sentiment_cache
+                    WHERE cached_at < ?
+                """, (cutoff,))
+                conn.commit()
+                return cursor.rowcount
 
     def clear_all(self) -> int:
         """Clear all cache entries. Returns count of deleted entries."""
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            cursor = conn.execute("DELETE FROM sentiment_cache")
-            conn.commit()
-            return cursor.rowcount
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                cursor = conn.execute("DELETE FROM sentiment_cache")
+                conn.commit()
+                return cursor.rowcount
 
     def stats(self) -> dict:
         """Get cache statistics."""
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.row_factory = sqlite3.Row
 
-            total = conn.execute("SELECT COUNT(*) as cnt FROM sentiment_cache").fetchone()['cnt']
+                total = conn.execute("SELECT COUNT(*) as cnt FROM sentiment_cache").fetchone()['cnt']
 
-            by_source = {}
-            for row in conn.execute("""
-                SELECT source, COUNT(*) as cnt
-                FROM sentiment_cache
-                GROUP BY source
-            """):
-                by_source[row['source']] = row['cnt']
+                by_source = {}
+                for row in conn.execute("""
+                    SELECT source, COUNT(*) as cnt
+                    FROM sentiment_cache
+                    GROUP BY source
+                """):
+                    by_source[row['source']] = row['cnt']
 
-            # Count expired
-            cutoff = (datetime.now(timezone.utc) - timedelta(hours=self.DEFAULT_TTL_HOURS)).isoformat()
-            expired = conn.execute("""
-                SELECT COUNT(*) as cnt
-                FROM sentiment_cache
-                WHERE cached_at < ?
-            """, (cutoff,)).fetchone()['cnt']
+                # Count expired
+                cutoff = (datetime.now(timezone.utc) - timedelta(hours=self.DEFAULT_TTL_HOURS)).isoformat()
+                expired = conn.execute("""
+                    SELECT COUNT(*) as cnt
+                    FROM sentiment_cache
+                    WHERE cached_at < ?
+                """, (cutoff,)).fetchone()['cnt']
 
-            return {
-                "total_entries": total,
-                "by_source": by_source,
-                "expired": expired,
-                "valid": total - expired
-            }
+                return {
+                    "total_entries": total,
+                    "by_source": by_source,
+                    "expired": expired,
+                    "valid": total - expired
+                }
 
 
 # Convenience function for slash commands

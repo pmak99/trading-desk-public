@@ -534,7 +534,7 @@ class TestGetMethods:
             sentiment_text="Past"
         )
         temp_history.record_sentiment(
-            ticker="FUTURE",
+            ticker="FUTR",
             earnings_date="2025-12-15",
             source="perplexity",
             sentiment_text="Future"
@@ -546,24 +546,24 @@ class TestGetMethods:
 
     def test_get_by_date_range(self, temp_history):
         """get_by_date_range should return records in range."""
-        temp_history.record_sentiment("T1", "2025-12-01", "perplexity", "Test")
-        temp_history.record_sentiment("T2", "2025-12-05", "perplexity", "Test")
-        temp_history.record_sentiment("T3", "2025-12-10", "perplexity", "Test")
-        temp_history.record_sentiment("T4", "2025-12-15", "perplexity", "Test")
+        temp_history.record_sentiment("AA", "2025-12-01", "perplexity", "Test")
+        temp_history.record_sentiment("BB", "2025-12-05", "perplexity", "Test")
+        temp_history.record_sentiment("CC", "2025-12-10", "perplexity", "Test")
+        temp_history.record_sentiment("DD", "2025-12-15", "perplexity", "Test")
 
         records = temp_history.get_by_date_range("2025-12-03", "2025-12-12")
         tickers = [r.ticker for r in records]
-        assert "T2" in tickers
-        assert "T3" in tickers
-        assert "T1" not in tickers
-        assert "T4" not in tickers
+        assert "BB" in tickers
+        assert "CC" in tickers
+        assert "AA" not in tickers
+        assert "DD" not in tickers
 
     def test_get_by_date_range_with_outcomes_only(self, temp_history):
         """get_by_date_range with with_outcomes_only should filter."""
         temp_history.record_sentiment("HAS", "2025-12-05", "perplexity", "Test")
         temp_history.record_outcome("HAS", "2025-12-05", 5.2, "UP")
 
-        temp_history.record_sentiment("MISSING", "2025-12-06", "perplexity", "Test")
+        temp_history.record_sentiment("MISS", "2025-12-06", "perplexity", "Test")
 
         records = temp_history.get_by_date_range(
             "2025-12-01", "2025-12-10",
@@ -591,13 +591,13 @@ class TestAccuracyStats:
     def test_accuracy_stats_with_records(self, temp_history):
         """get_accuracy_stats should calculate accuracy correctly."""
         # 2 correct predictions
-        temp_history.record_sentiment("CORRECT1", "2025-12-01", "perplexity", "Bull",
+        temp_history.record_sentiment("COR", "2025-12-01", "perplexity", "Bull",
                                       sentiment_direction=SentimentDirection.BULLISH)
-        temp_history.record_outcome("CORRECT1", "2025-12-01", 5.0, "UP")
+        temp_history.record_outcome("COR", "2025-12-01", 5.0, "UP")
 
-        temp_history.record_sentiment("CORRECT2", "2025-12-02", "perplexity", "Bear",
+        temp_history.record_sentiment("CORR", "2025-12-02", "perplexity", "Bear",
                                       sentiment_direction=SentimentDirection.BEARISH)
-        temp_history.record_outcome("CORRECT2", "2025-12-02", 5.0, "DOWN")
+        temp_history.record_outcome("CORR", "2025-12-02", 5.0, "DOWN")
 
         # 1 wrong prediction
         temp_history.record_sentiment("WRONG", "2025-12-03", "perplexity", "Bull",
@@ -611,13 +611,13 @@ class TestAccuracyStats:
 
     def test_accuracy_stats_by_direction(self, temp_history):
         """get_accuracy_stats should break down by direction."""
-        temp_history.record_sentiment("B1", "2025-12-01", "perplexity", "Bull",
+        temp_history.record_sentiment("BULL", "2025-12-01", "perplexity", "Bull",
                                       sentiment_direction=SentimentDirection.BULLISH)
-        temp_history.record_outcome("B1", "2025-12-01", 5.0, "UP")
+        temp_history.record_outcome("BULL", "2025-12-01", 5.0, "UP")
 
-        temp_history.record_sentiment("B2", "2025-12-02", "perplexity", "Bear",
+        temp_history.record_sentiment("BEAR", "2025-12-02", "perplexity", "Bear",
                                       sentiment_direction=SentimentDirection.BEARISH)
-        temp_history.record_outcome("B2", "2025-12-02", 5.0, "DOWN")
+        temp_history.record_outcome("BEAR", "2025-12-02", 5.0, "DOWN")
 
         stats = temp_history.get_accuracy_stats()
         assert stats['by_direction']['bullish']['total'] == 1
@@ -673,8 +673,8 @@ class TestStats:
 
     def test_stats_date_range(self, temp_history):
         """stats should show correct date range."""
-        temp_history.record_sentiment("T1", "2025-12-01", "perplexity", "Test")
-        temp_history.record_sentiment("T2", "2025-12-15", "perplexity", "Test")
+        temp_history.record_sentiment("AA", "2025-12-01", "perplexity", "Test")
+        temp_history.record_sentiment("BB", "2025-12-15", "perplexity", "Test")
 
         stats = temp_history.stats()
         assert stats['earliest_date'] == "2025-12-01"
@@ -685,7 +685,7 @@ class TestStats:
         temp_history.record_sentiment("HAS", "2025-12-01", "perplexity", "Test")
         temp_history.record_outcome("HAS", "2025-12-01", 5.0, "UP")
 
-        temp_history.record_sentiment("PENDING", "2025-12-02", "perplexity", "Test")
+        temp_history.record_sentiment("PEND", "2025-12-02", "perplexity", "Test")
 
         stats = temp_history.stats()
         assert stats['with_outcomes'] == 1
@@ -832,18 +832,24 @@ class TestEdgeCases:
         assert record.sentiment_text == "Second"
 
     def test_sentiment_score_boundaries(self, temp_history):
-        """Should handle boundary sentiment scores."""
+        """Should handle boundary sentiment scores.
+
+        Boundary convention: >= for lower bounds, < for upper bounds.
+        - score >= 0.2 → BULLISH (0.2 is bullish)
+        - score < -0.2 → BEARISH (-0.2 is neutral, not bearish)
+        """
         # Exactly at threshold
-        temp_history.record_sentiment("T1", "2025-12-01", "perplexity", "Test",
+        temp_history.record_sentiment("AA", "2025-12-01", "perplexity", "Test",
                                       sentiment_score=0.2)
-        temp_history.record_sentiment("T2", "2025-12-02", "perplexity", "Test",
+        temp_history.record_sentiment("BB", "2025-12-02", "perplexity", "Test",
                                       sentiment_score=-0.2)
 
-        r1 = temp_history.get("T1", "2025-12-01")
-        r2 = temp_history.get("T2", "2025-12-02")
+        r1 = temp_history.get("AA", "2025-12-01")
+        r2 = temp_history.get("BB", "2025-12-02")
 
-        # At exactly 0.2, should be neutral (not > 0.2)
-        assert r1.sentiment_direction == SentimentDirection.NEUTRAL
+        # At exactly 0.2, bullish (>= 0.2 is lower bound of bullish)
+        assert r1.sentiment_direction == SentimentDirection.BULLISH
+        # At exactly -0.2, neutral (< -0.2 is upper bound of bearish, exclusive)
         assert r2.sentiment_direction == SentimentDirection.NEUTRAL
 
     def test_unknown_direction_in_database(self, temp_history):

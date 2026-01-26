@@ -135,17 +135,21 @@ backup_database() {
     # Create backup directory if it doesn't exist
     mkdir -p "$backup_dir"
 
-    # Atomic file locking to prevent race conditions
-    local backup_lock="${backup_dir}/.backup.lock"
+    # File-based locking using flock to prevent race conditions
+    local lock_file="${backup_dir}/.backup.lock"
 
-    # Try to acquire lock (fail if another backup is in progress)
-    if ! mkdir "$backup_lock" 2>/dev/null; then
+    # Open lock file on file descriptor 9
+    exec 9>"$lock_file"
+
+    # Try to acquire exclusive lock (non-blocking)
+    if ! flock -n 9; then
         # Another backup is in progress, skip silently
+        exec 9>&-
         return 0
     fi
 
-    # Ensure lock is removed on exit/error
-    trap 'rmdir "$backup_lock" 2>/dev/null || true' RETURN
+    # Ensure lock fd is closed on exit/error (releases flock automatically)
+    trap 'exec 9>&-' RETURN
 
     # Check if we need to backup (skip if last backup <6 hours old)
     local backup_interval_days
@@ -155,7 +159,7 @@ backup_database() {
     last_backup=$(find "$backup_dir" -maxdepth 1 -name "ivcrush_*.db" -type f -mtime "-${backup_interval_days}" -print -quit 2>/dev/null)
 
     if [ -n "$last_backup" ]; then
-        rmdir "$backup_lock" 2>/dev/null
+        exec 9>&-
         trap - RETURN
         return 0  # Recent backup exists, skip
     fi
@@ -166,8 +170,8 @@ backup_database() {
     local backup_file="${backup_dir}/ivcrush_${timestamp}.db"
     local temp_backup="${backup_file}.tmp.$$"
 
-    # Ensure temp file is cleaned up on error
-    trap 'rm -f "$temp_backup" 2>/dev/null; rmdir "$backup_lock" 2>/dev/null || true' RETURN
+    # Ensure temp file is cleaned up on error and lock fd is closed
+    trap 'rm -f "$temp_backup" 2>/dev/null; exec 9>&-' RETURN
 
     # Perform WAL checkpoint with retry logic
     local checkpoint_success=false
@@ -198,11 +202,11 @@ backup_database() {
 
     # Copy to temporary file first (atomic operation)
     if ! cp "$db_file" "$temp_backup" 2>/dev/null; then
-        echo -e "${YELLOW}⚠️  Backup failed (continuing anyway)${NC}" >&2
+        echo -e "${YELLOW}⚠️  Backup copy failed${NC}" >&2
         rm -f "$temp_backup" 2>/dev/null
-        rmdir "$backup_lock" 2>/dev/null
+        exec 9>&-
         trap - RETURN
-        return 0
+        return 1
     fi
 
     # Verify backup before committing
@@ -219,36 +223,46 @@ backup_database() {
     fi
 
     if [ "$orig_size" != "$temp_size" ]; then
-        echo -e "${YELLOW}⚠️  Backup size mismatch (continuing anyway)${NC}" >&2
+        echo -e "${YELLOW}⚠️  Backup size mismatch (original: ${orig_size}, backup: ${temp_size})${NC}" >&2
         rm -f "$temp_backup"
-        rmdir "$backup_lock" 2>/dev/null
+        exec 9>&-
         trap - RETURN
-        return 0
+        return 1
     fi
 
     # 2. Verify database can be opened
     if ! sqlite3 "$temp_backup" "SELECT 1;" >/dev/null 2>&1; then
-        echo -e "${YELLOW}⚠️  Backup verification failed (continuing anyway)${NC}" >&2
+        echo -e "${YELLOW}⚠️  Backup verification failed (database corrupted)${NC}" >&2
         rm -f "$temp_backup"
-        rmdir "$backup_lock" 2>/dev/null
+        exec 9>&-
         trap - RETURN
-        return 0
+        return 1
     fi
 
     # Atomic rename to commit backup
     if ! mv "$temp_backup" "$backup_file" 2>/dev/null; then
-        echo -e "${YELLOW}⚠️  Backup failed (continuing anyway)${NC}" >&2
+        echo -e "${YELLOW}⚠️  Backup rename failed${NC}" >&2
         rm -f "$temp_backup"
-        rmdir "$backup_lock" 2>/dev/null
+        exec 9>&-
         trap - RETURN
-        return 0
+        return 1
     fi
 
     # Sync to Google Drive (async, non-blocking)
-    local gdrive_backup_dir="$HOME/Library/CloudStorage/GoogleDrive-pmakwana99@gmail.com/My Drive/Backups/trading-desk"
+    local gdrive_backup_dir="${GDRIVE_BACKUP_PATH:-$HOME/Library/CloudStorage/GoogleDrive-pmakwana99@gmail.com/My Drive/Backups/trading-desk}"
     if [ -d "$gdrive_backup_dir" ]; then
-        # Copy in background to avoid blocking
-        (cp "$backup_file" "$gdrive_backup_dir/" 2>/dev/null || true) &
+        # Copy in background with verification
+        local gdrive_dest="$gdrive_backup_dir/$(basename "$backup_file")"
+        (
+            if cp "$backup_file" "$gdrive_backup_dir/" 2>/dev/null; then
+                # Verify destination file exists and has non-zero size
+                if [ ! -s "$gdrive_dest" ]; then
+                    echo -e "${YELLOW}Warning: Google Drive backup file is empty or missing${NC}" >&2
+                fi
+            else
+                echo -e "${YELLOW}Warning: Google Drive backup copy failed${NC}" >&2
+            fi
+        ) &
     fi
 
     # Cleanup old backups (keep last N days)
@@ -260,7 +274,7 @@ backup_database() {
     fi
 
     # Release lock and clear trap
-    rmdir "$backup_lock" 2>/dev/null
+    exec 9>&-
     trap - RETURN
 }
 

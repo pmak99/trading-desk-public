@@ -13,7 +13,7 @@ from typing import Optional, Any
 from ..utils.paths import MAIN_REPO, REPO_2_0
 
 # Thread lock for container initialization (sys.path manipulation is not thread-safe)
-_container_lock = threading.Lock()
+_container_lock = threading.RLock()
 
 # Add 2.0/ to Python path with highest priority
 # 2.0's code uses "from src.config..." imports, so it needs 2.0/ in path, not 2.0/src/
@@ -92,33 +92,34 @@ class Container2_0:
         # Save 6.0's src modules before clearing
         _6_0_src_modules = {}
 
-        try:
-            # Clear cached imports of 'src' package to avoid using 6.0's cached version
-            # This is necessary because both 6.0 and 2.0 use 'src' as top-level package
-            if 'src' in sys.modules:
-                # Save 6.0's src modules
-                _6_0_src_modules = {
-                    k: v for k, v in sys.modules.items()
-                    if k.startswith('src.') or k == 'src'
-                }
-                # Clear src from sys.modules
-                del sys.modules['src']
-                for k in list(_6_0_src_modules.keys()):
-                    if k in sys.modules and k != 'src':
-                        del sys.modules[k]
+        with _container_lock:
+            try:
+                # Clear cached imports of 'src' package to avoid using 6.0's cached version
+                # This is necessary because both 6.0 and 2.0 use 'src' as top-level package
+                if 'src' in sys.modules:
+                    # Save 6.0's src modules
+                    _6_0_src_modules = {
+                        k: v for k, v in sys.modules.items()
+                        if k.startswith('src.') or k == 'src'
+                    }
+                    # Clear src from sys.modules
+                    del sys.modules['src']
+                    for k in list(_6_0_src_modules.keys()):
+                        if k in sys.modules and k != 'src':
+                            del sys.modules[k]
 
-            # Import here to avoid namespace collision at module level
-            from src.container import get_container
-            self._container = get_container()
-        finally:
-            # Restore 6.0/ paths after import
-            for p in _6_0_paths:
-                if p not in sys.path:
-                    sys.path.append(p)
+                # Import here to avoid namespace collision at module level
+                from src.container import get_container
+                self._container = get_container()
+            finally:
+                # Restore 6.0/ paths after import
+                for p in _6_0_paths:
+                    if p not in sys.path:
+                        sys.path.append(p)
 
-            # Restore 6.0's src modules
-            for k, v in _6_0_src_modules.items():
-                sys.modules[k] = v
+                # Restore 6.0's src modules
+                for k, v in _6_0_src_modules.items():
+                    sys.modules[k] = v
 
     def analyze_ticker(
         self,
@@ -265,16 +266,15 @@ class Container2_0:
 
             # Get record counts by querying database directly
             import sqlite3
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                cursor = conn.cursor()
 
-            cursor.execute("SELECT COUNT(*) FROM historical_moves")
-            historical_moves = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM historical_moves")
+                historical_moves = cursor.fetchone()[0]
 
-            cursor.execute("SELECT COUNT(*) FROM earnings_calendar")
-            earnings_calendar = cursor.fetchone()[0]
-
-            conn.close()
+                cursor.execute("SELECT COUNT(*) FROM earnings_calendar")
+                earnings_calendar = cursor.fetchone()[0]
 
             return {
                 'status': 'ok',
@@ -314,22 +314,22 @@ class Container2_0:
             import sqlite3
 
             db_path = self.config.database.path
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row  # Return rows as dict-like objects
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.row_factory = sqlite3.Row  # Return rows as dict-like objects
 
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT ticker, earnings_date, prev_close, earnings_close,
-                       gap_move_pct, intraday_move_pct
-                FROM historical_moves
-                ORDER BY ticker, earnings_date DESC
-            """)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT ticker, earnings_date, prev_close, earnings_close,
+                           gap_move_pct, intraday_move_pct
+                    FROM historical_moves
+                    ORDER BY ticker, earnings_date DESC
+                """)
 
-            rows = cursor.fetchall()
-            conn.close()
+                rows = cursor.fetchall()
 
-            # Convert Row objects to dicts
-            return [dict(row) for row in rows]
+                # Convert Row objects to dicts
+                return [dict(row) for row in rows]
 
         except Exception as e:
             print(f"Error fetching historical moves: {e}")

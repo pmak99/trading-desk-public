@@ -4,6 +4,7 @@ Database schema initialization for IV Crush 2.0.
 Creates SQLite database with proper indexes and constraints.
 """
 
+import os
 import sqlite3
 import logging
 from pathlib import Path
@@ -27,6 +28,12 @@ def init_database(db_path: Path) -> None:
     """
     # Ensure parent directory exists
     db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Verify directory is writable
+    if not os.access(db_path.parent, os.W_OK):
+        raise PermissionError(
+            f"Database directory is not writable: {db_path.parent}"
+        )
 
     # Check if database already initialized to prevent race conditions
     if db_path.exists():

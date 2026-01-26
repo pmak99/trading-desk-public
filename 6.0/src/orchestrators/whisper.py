@@ -67,7 +67,9 @@ class WhisperOrchestrator(BaseOrchestrator):
         super().__init__(config)
         self.timeout = self.config.get('timeout', 90)
         self.metadata_repo = TickerMetadataRepository()
-        self._analysis_semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_ANALYSIS)
+        # Lazy-initialized in async context to avoid creating Semaphore
+        # before an event loop exists (causes RuntimeError in some environments)
+        self._analysis_semaphore: Optional[asyncio.Semaphore] = None
 
     async def orchestrate(
         self,
@@ -172,6 +174,12 @@ class WhisperOrchestrator(BaseOrchestrator):
             'summary': self.get_orchestration_summary()
         }
 
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """Get or create the analysis semaphore (lazy init in async context)."""
+        if self._analysis_semaphore is None:
+            self._analysis_semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_ANALYSIS)
+        return self._analysis_semaphore
+
     async def _parallel_ticker_analysis(
         self,
         earnings: List[Dict[str, Any]]
@@ -184,16 +192,25 @@ class WhisperOrchestrator(BaseOrchestrator):
         """
         # Create ticker analysis agents
         analysis_agent = TickerAnalysisAgent()
+        semaphore = self._get_semaphore()
 
         async def analyze_with_semaphore(ticker: str, earnings_date: str) -> Dict[str, Any]:
             """Run analysis with semaphore-controlled concurrency."""
-            async with self._analysis_semaphore:
-                return await asyncio.to_thread(
-                    analysis_agent.analyze,
-                    ticker,
-                    earnings_date,
-                    generate_strategies=False  # Skip strategies in whisper
-                )
+            try:
+                async with semaphore:
+                    return await asyncio.to_thread(
+                        analysis_agent.analyze,
+                        ticker,
+                        earnings_date,
+                        generate_strategies=False  # Skip strategies in whisper
+                    )
+            except asyncio.CancelledError:
+                # Ensure cancellation propagates cleanly (semaphore released by async with)
+                return {
+                    'ticker': ticker,
+                    'error': 'Analysis cancelled',
+                    'success': False
+                }
 
         # Build analysis tasks with concurrency control
         tasks = []

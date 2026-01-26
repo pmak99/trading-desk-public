@@ -20,6 +20,23 @@ import hmac
 
 from src.core.config import now_et, today_et, settings
 from src.core.logging import log, set_request_id
+
+
+def _mask_sensitive(text: str) -> str:
+    """Mask API keys and tokens in text to prevent leaking in logs.
+
+    Shows only the last 4 characters of any value that looks like an API key.
+    """
+    import re as _re
+    # Mask common API key patterns in URLs and error messages
+    # Matches: api_key=XXX, apikey=XXX, token=XXX, key=XXX, Bearer XXX
+    text = _re.sub(
+        r'((?:api[_-]?key|apikey|token|key|Bearer)\s*[=:]\s*)([A-Za-z0-9_\-]{8,})',
+        lambda m: m.group(1) + '***' + m.group(2)[-4:],
+        text,
+        flags=_re.IGNORECASE,
+    )
+    return text
 from src.core.job_manager import JobManager
 from src.core.budget import BudgetTracker
 from src.core import metrics
@@ -393,8 +410,8 @@ async def dispatch(
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_error("dispatch", duration_ms)
-        log("error", "Dispatch endpoint failed", error=str(e))
-        return {"status": "error", "error": str(e)}
+        log("error", "Dispatch endpoint failed", error=_mask_sensitive(str(e)))
+        return {"status": "error", "error": _mask_sensitive(str(e))}
 
 
 @app.get("/api/health")
@@ -584,8 +601,8 @@ async def prime(date: str = None, _: bool = Depends(verify_api_key)):
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_error("prime", duration_ms)
-        log("error", "Prime failed", error=str(e))
-        raise HTTPException(500, f"Prime failed: {str(e)}")
+        log("error", "Prime failed", error=_mask_sensitive(str(e)))
+        raise HTTPException(500, f"Prime failed: {_mask_sensitive(str(e))}")
 
 
 @app.get("/api/scan")
@@ -771,6 +788,7 @@ async def scan(date: str, format: str = "json", _: bool = Depends(verify_api_key
             "status": "success",
             "date": date,
             "total_found": len(target_earnings),
+            "analyzed": len(qualified) + len(filtered) + len(errors),
             "qualified_count": len(qualified),
             "filtered_count": len(filtered),
             "error_count": len(errors),
@@ -798,8 +816,8 @@ async def scan(date: str, format: str = "json", _: bool = Depends(verify_api_key
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_error("scan", duration_ms)
-        log("error", "Scan failed", date=date, error=str(e))
-        raise HTTPException(500, f"Scan failed: {str(e)}")
+        log("error", "Scan failed", date=date, error=_mask_sensitive(str(e)))
+        raise HTTPException(500, f"Scan failed: {_mask_sensitive(str(e))}")
 
 
 @app.post("/alerts/ingest")
@@ -837,7 +855,7 @@ async def alerts_ingest(
                     log("warn", "Alert webhook invalid password")
                     raise HTTPException(status_code=403, detail="Invalid credentials")
             except Exception as e:
-                log("warn", "Alert webhook Basic auth decode failed", error=str(e))
+                log("warn", "Alert webhook Basic auth decode failed", error=type(e).__name__)
                 raise HTTPException(status_code=401, detail="Invalid authorization format")
         elif authorization.startswith("Bearer "):
             token = authorization[7:]
@@ -899,8 +917,8 @@ async def alerts_ingest(
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_error("alerts_ingest", duration_ms)
-        log("error", "Alert ingest failed", error=str(e))
-        raise HTTPException(500, f"Alert processing failed: {str(e)}")
+        log("error", "Alert ingest failed", error=type(e).__name__)
+        raise HTTPException(500, f"Alert processing failed: {_mask_sensitive(str(e))}")
 
 
 @app.get("/api/analyze")
@@ -1252,8 +1270,8 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_error("analyze", duration_ms)
-        log("error", "Analyze failed", ticker=ticker, error=str(e))
-        raise HTTPException(500, f"Analysis failed: {str(e)}")
+        log("error", "Analyze failed", ticker=ticker, error=_mask_sensitive(str(e)))
+        raise HTTPException(500, f"Analysis failed: {_mask_sensitive(str(e))}")
 
 
 # Scan timeout for whisper endpoint to avoid Cloud Run timeout
@@ -1513,16 +1531,33 @@ async def _scan_tickers_for_whisper(
     # Execute all tasks in parallel with exception handling
     results_raw = await asyncio.gather(*tasks, return_exceptions=True)
 
+    # Detect high error rates (possible API outage)
+    error_count = sum(1 for r in results_raw if isinstance(r, Exception))
+    total_tasks = len(results_raw)
+    if total_tasks > 0 and error_count > total_tasks * 0.5:
+        error_types = {}
+        for r in results_raw:
+            if isinstance(r, Exception):
+                err_type = type(r).__name__
+                error_types[err_type] = error_types.get(err_type, 0) + 1
+        log("error", "High error rate in whisper scan - possible API outage",
+            total=total_tasks, errors=error_count,
+            error_rate_pct=round(error_count / total_tasks * 100, 1),
+            error_types=error_types)
+        metrics.count("ivcrush.whisper.high_error_rate", {
+            "errors": str(error_count), "total": str(total_tasks)
+        })
+
     # Filter out None results and exceptions
     results = []
     for result in results_raw:
         if isinstance(result, Exception):
-            log("debug", "Task failed with exception", error=str(result))
+            log("warning", "Task failed with exception", error=str(result))
             continue
         if result is not None:
             results.append(result)
 
-    return results
+    return results, error_count
 
 
 @app.get("/api/whisper")
@@ -1564,8 +1599,9 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
 
         log("debug", "Fetched upcoming earnings from database", count=len(upcoming), dates=target_dates)
 
+        scan_errors = 0
         try:
-            results = await asyncio.wait_for(
+            results, scan_errors = await asyncio.wait_for(
                 _scan_tickers_for_whisper(upcoming, repo, tradier),
                 timeout=MAX_SCAN_TIME_SECONDS
             )
@@ -1585,7 +1621,9 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
         response = {
             "status": "success",
             "target_dates": target_dates,
+            "analyzed": len(upcoming),
             "qualified_count": len(results),
+            "error_count": scan_errors,
             "tickers": results[:10],  # Top 10
             "budget": {
                 "calls_today": summary["today_calls"],
@@ -1633,8 +1671,8 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_error("whisper", duration_ms)
-        log("error", "Whisper failed", error=str(e))
-        raise HTTPException(500, f"Whisper failed: {str(e)}")
+        log("error", "Whisper failed", error=_mask_sensitive(str(e)))
+        raise HTTPException(500, f"Whisper failed: {_mask_sensitive(str(e))}")
 
 
 @app.post("/telegram")
@@ -1662,6 +1700,18 @@ async def telegram_webhook(request: Request):
 
         if not text or not chat_id:
             return {"ok": True}
+
+        # Issue 9: Validate text is actually a string
+        if not isinstance(text, str):
+            log("warn", "Telegram message text is not a string", type=type(text).__name__)
+            return {"ok": True}
+
+        # Issue 7: Truncate excessively long inputs to prevent abuse
+        MAX_COMMAND_LENGTH = 500
+        if len(text) > MAX_COMMAND_LENGTH:
+            log("warn", "Telegram command too long, truncating",
+                length=len(text), max=MAX_COMMAND_LENGTH)
+            text = text[:MAX_COMMAND_LENGTH]
 
         telegram = get_telegram()
 
@@ -1712,12 +1762,12 @@ async def telegram_webhook(request: Request):
             if len(parts) < 2:
                 await telegram.send_message("Usage: /analyze TICKER")
             else:
-                raw_ticker = parts[1]
+                raw_ticker = parts[1][:10]  # Truncate to prevent abuse
                 # Validate and normalize using centralized validation
                 try:
                     ticker = normalize_ticker(raw_ticker)
-                except InvalidTickerError as e:
-                    await telegram.send_message(str(e))
+                except InvalidTickerError:
+                    await telegram.send_message("Invalid ticker symbol. Use 1-5 letter stock symbols (e.g., AAPL).")
                     return {"ok": True}
                 try:
                     result = await analyze(ticker=ticker, format="json", fresh=True)
@@ -1739,8 +1789,8 @@ async def telegram_webhook(request: Request):
                     else:
                         await telegram.send_message(f"Analysis failed: {result.get('message', 'Unknown error')}")
                 except Exception as e:
-                    # Log full error but only send sanitized message to Telegram
-                    log("error", "Telegram analyze failed", ticker=ticker, error=str(e))
+                    # Log error type only - str(e) could contain API keys from HTTP errors
+                    log("error", "Telegram analyze failed", ticker=ticker, error=type(e).__name__)
                     await telegram.send_message(f"Error analyzing {ticker}: {type(e).__name__}")
 
         elif text.startswith("/dashboard"):
@@ -1762,7 +1812,7 @@ async def telegram_webhook(request: Request):
         return {"ok": True}
 
     except Exception as e:
-        log("error", "Telegram handler failed", error=str(e))
+        log("error", "Telegram handler failed", error=type(e).__name__)
         return {"ok": True}
 
 

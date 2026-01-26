@@ -158,10 +158,16 @@ def adjust_direction(
     # Determine sentiment direction from score if not provided
     if sentiment_direction:
         sent_dir = sentiment_direction.lower()
+        valid_directions = {"bullish", "bearish", "neutral"}
+        if sent_dir not in valid_directions:
+            raise ValueError(
+                f"Invalid sentiment_direction '{sentiment_direction}'. "
+                f"Must be one of: {valid_directions}"
+            )
     else:
         if sentiment_score >= 0.2:
             sent_dir = "bullish"
-        elif sentiment_score <= -0.2:
+        elif sentiment_score < -0.2:
             sent_dir = "bearish"
         else:
             sent_dir = "neutral"

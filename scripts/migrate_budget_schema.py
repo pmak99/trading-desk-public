@@ -70,8 +70,15 @@ def migrate_database(db_path: Path) -> bool:
         print(f"    Existing columns: {existing_columns}")
 
         # Add new columns if they don't exist
+        ALLOWED_COLUMNS = {
+            'output_tokens': 'INTEGER DEFAULT 0',
+            'reasoning_tokens': 'INTEGER DEFAULT 0',
+            'search_requests': 'INTEGER DEFAULT 0',
+        }
         columns_added = []
         for column_name, column_def in NEW_COLUMNS:
+            if column_name not in ALLOWED_COLUMNS:
+                raise ValueError(f"Unknown column: {column_name}")
             if column_name not in existing_columns:
                 try:
                     cursor.execute(f"ALTER TABLE api_budget ADD COLUMN {column_name} {column_def}")

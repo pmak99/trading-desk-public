@@ -137,7 +137,13 @@ class BudgetTracker:
         Raises:
             ValueError: If cost is negative or not a finite number
             ValueError: If token counts are negative or exceed bounds
+            ValueError: If service is not a recognized service name
         """
+        # Validate service parameter
+        VALID_SERVICES = {"perplexity"}
+        if service not in VALID_SERVICES:
+            raise ValueError(f"Invalid service: {service}")
+
         # Validate cost is a reasonable positive number
         import math
         if not isinstance(cost, (int, float)) or math.isnan(cost) or math.isinf(cost):
@@ -202,7 +208,15 @@ class BudgetTracker:
 
         Returns:
             Calculated cost in dollars
+
+        Raises:
+            ValueError: If model is not a recognized model name
         """
+        # Validate model name
+        VALID_MODELS = {"sonar", "sonar-pro", "reasoning-pro"}
+        if model not in VALID_MODELS:
+            raise ValueError(f"Invalid model: {model}. Must be one of: {', '.join(sorted(VALID_MODELS))}")
+
         # Calculate cost from tokens
         cost = 0.0
         if output_tokens > 0:

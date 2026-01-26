@@ -4,10 +4,14 @@ Provides direct API access to Perplexity for sentiment analysis.
 """
 
 import sys
+import threading
 from pathlib import Path
 from typing import Dict, Any
 
 from ..utils.paths import MAIN_REPO, REPO_5_0
+
+# Thread lock for sys.path manipulation (not thread-safe by default)
+_path_lock = threading.Lock()
 
 # Add 5.0/ to Python path
 # 5.0's code uses "from src.core..." imports, so it needs 5.0/ in path, not 5.0/src/
@@ -15,12 +19,13 @@ _main_repo = MAIN_REPO
 _5_0_dir = _main_repo / "5.0"
 _5_0_dir_str = str(_5_0_dir)
 
-# Remove if already in path (so we can re-insert)
-if _5_0_dir_str in sys.path:
-    sys.path.remove(_5_0_dir_str)
+with _path_lock:
+    # Remove if already in path (so we can re-insert)
+    if _5_0_dir_str in sys.path:
+        sys.path.remove(_5_0_dir_str)
 
-# Insert with priority (after 2.0 and 4.0)
-sys.path.insert(2, _5_0_dir_str)
+    # Insert with priority (after 2.0 and 4.0)
+    sys.path.insert(2, _5_0_dir_str)
 
 
 class Perplexity5_0:
@@ -46,49 +51,50 @@ class Perplexity5_0:
                 "This is required for standalone Perplexity API calls."
             )
 
-        # Critical: Remove 6.0/ from sys.path temporarily to avoid namespace collision
-        # Both 6.0 and 5.0 use 'src' as top-level package
-        _6_0_paths = [p for p in sys.path if '6.0' in p]
-        for p in _6_0_paths:
-            sys.path.remove(p)
-
-        # Ensure 5.0/src is at position 0
-        if _5_0_dir_str not in sys.path:
-            sys.path.insert(0, _5_0_dir_str)
-        elif sys.path.index(_5_0_dir_str) != 0:
-            sys.path.remove(_5_0_dir_str)
-            sys.path.insert(0, _5_0_dir_str)
-
-        try:
-            # Clear cached imports of 'src' package to avoid using 6.0's cached version
-            if 'src' in sys.modules:
-                # Save 6.0's src modules
-                _6_0_src_modules = {
-                    k: v for k, v in sys.modules.items()
-                    if k.startswith('src.')
-                }
-                # Clear src from sys.modules
-                del sys.modules['src']
-                for k in list(_6_0_src_modules.keys()):
-                    if k in sys.modules:
-                        del sys.modules[k]
-
-            # Initialize client (import after sys.path is set)
-            from src.integrations.perplexity import PerplexityClient
-
-            # Set database path to main repo
-            db_path = _main_repo / "4.0" / "data" / "perplexity_budget.db"
-
-            self.client = PerplexityClient(
-                api_key=self.api_key,
-                db_path=str(db_path),
-                model="sonar"  # Use basic sonar model
-            )
-        finally:
-            # Restore 6.0/ paths after import
+        with _path_lock:
+            # Critical: Remove 6.0/ from sys.path temporarily to avoid namespace collision
+            # Both 6.0 and 5.0 use 'src' as top-level package
+            _6_0_paths = [p for p in sys.path if '6.0' in p]
             for p in _6_0_paths:
-                if p not in sys.path:
-                    sys.path.append(p)
+                sys.path.remove(p)
+
+            # Ensure 5.0/src is at position 0
+            if _5_0_dir_str not in sys.path:
+                sys.path.insert(0, _5_0_dir_str)
+            elif sys.path.index(_5_0_dir_str) != 0:
+                sys.path.remove(_5_0_dir_str)
+                sys.path.insert(0, _5_0_dir_str)
+
+            try:
+                # Clear cached imports of 'src' package to avoid using 6.0's cached version
+                if 'src' in sys.modules:
+                    # Save 6.0's src modules
+                    _6_0_src_modules = {
+                        k: v for k, v in sys.modules.items()
+                        if k.startswith('src.')
+                    }
+                    # Clear src from sys.modules
+                    del sys.modules['src']
+                    for k in list(_6_0_src_modules.keys()):
+                        if k in sys.modules:
+                            del sys.modules[k]
+
+                # Initialize client (import after sys.path is set)
+                from src.integrations.perplexity import PerplexityClient
+
+                # Set database path to main repo
+                db_path = _main_repo / "4.0" / "data" / "perplexity_budget.db"
+
+                self.client = PerplexityClient(
+                    api_key=self.api_key,
+                    db_path=str(db_path),
+                    model="sonar"  # Use basic sonar model
+                )
+            finally:
+                # Restore 6.0/ paths after import
+                for p in _6_0_paths:
+                    if p not in sys.path:
+                        sys.path.append(p)
 
     async def get_sentiment(
         self,
@@ -123,19 +129,20 @@ class Perplexity5_0:
 
             # Parse response (import already done in __init__)
             # We have to import here because parse_sentiment_response is in 5.0's module
-            _6_0_paths = [p for p in sys.path if '6.0' in p]
-            for p in _6_0_paths:
-                if p in sys.path:
-                    sys.path.remove(p)
-
-            try:
-                from src.integrations.perplexity import parse_sentiment_response
-                text = response.get("choices", [{}])[0].get("message", {}).get("content", "")
-                sentiment = parse_sentiment_response(text)
-            finally:
+            with _path_lock:
+                _6_0_paths = [p for p in sys.path if '6.0' in p]
                 for p in _6_0_paths:
-                    if p not in sys.path:
-                        sys.path.append(p)
+                    if p in sys.path:
+                        sys.path.remove(p)
+
+                try:
+                    from src.integrations.perplexity import parse_sentiment_response
+                    text = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    sentiment = parse_sentiment_response(text)
+                finally:
+                    for p in _6_0_paths:
+                        if p not in sys.path:
+                            sys.path.append(p)
 
             return {
                 'success': True,

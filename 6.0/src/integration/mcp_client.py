@@ -45,7 +45,7 @@ class MCPTaskClient:
         """Lazy-load agent configuration."""
         if self._config is None:
             import yaml
-            with open(self.config_path, 'r') as f:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
                 self._config = yaml.safe_load(f)
         return self._config
 
@@ -88,7 +88,8 @@ class MCPTaskClient:
         """
         Parse JSON from agent response.
 
-        Handles markdown code blocks and extracts JSON content.
+        Handles markdown code blocks and extracts JSON content using
+        brace-counting for reliable nested JSON extraction.
 
         Args:
             response: Raw agent response string
@@ -99,20 +100,53 @@ class MCPTaskClient:
         Raises:
             ValueError: If no valid JSON found
         """
-        # Try to extract JSON from markdown code blocks
-        json_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
-        matches = re.findall(json_pattern, response, re.DOTALL)
+        # Try to extract JSON from markdown code blocks first
+        json_pattern = r'```(?:json)?\s*(\{[\s\S]*?\})\s*```'
+        matches = re.findall(json_pattern, response)
 
         if matches:
-            # Use first JSON block found
             json_str = matches[0]
         else:
-            # Try to find raw JSON
-            json_pattern = r'\{.*?\}'
-            matches = re.findall(json_pattern, response, re.DOTALL)
-            if matches:
-                json_str = matches[0]
-            else:
+            # Use brace-counting to find the outermost JSON object
+            json_str = None
+            best_len = 0
+
+            for i, char in enumerate(response):
+                if char == '{':
+                    depth = 0
+                    in_string = False
+                    escape_next = False
+
+                    for j in range(i, len(response)):
+                        c = response[j]
+
+                        if escape_next:
+                            escape_next = False
+                            continue
+
+                        if c == '\\' and in_string:
+                            escape_next = True
+                            continue
+
+                        if c == '"' and not escape_next:
+                            in_string = not in_string
+                            continue
+
+                        if in_string:
+                            continue
+
+                        if c == '{':
+                            depth += 1
+                        elif c == '}':
+                            depth -= 1
+                            if depth == 0:
+                                candidate = response[i:j + 1]
+                                if len(candidate) > best_len:
+                                    json_str = candidate
+                                    best_len = len(candidate)
+                                break
+
+            if json_str is None:
                 raise ValueError(f"No JSON found in response: {response[:200]}")
 
         try:

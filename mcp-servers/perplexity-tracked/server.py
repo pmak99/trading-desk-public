@@ -23,6 +23,7 @@ import os
 import sys
 import json
 import sqlite3
+import threading
 from datetime import datetime, date, timezone
 from pathlib import Path
 from typing import Any
@@ -208,20 +209,25 @@ app = Server("perplexity-tracked")
 # Initialize client and logger (lazy, to allow env vars to be set)
 _client = None
 _logger = None
+_init_lock = threading.Lock()
 
 
 def get_client() -> PerplexityClient:
     global _client
     if _client is None:
-        _client = PerplexityClient()
+        with _init_lock:
+            if _client is None:  # Double-checked locking
+                _client = PerplexityClient()
     return _client
 
 
 def get_logger() -> BudgetLogger:
     global _logger
     if _logger is None:
-        db_path = os.environ.get("BUDGET_DB_PATH")
-        _logger = BudgetLogger(db_path)
+        with _init_lock:
+            if _logger is None:  # Double-checked locking
+                db_path = os.environ.get("BUDGET_DB_PATH")
+                _logger = BudgetLogger(db_path)
     return _logger
 
 

@@ -78,15 +78,25 @@ def run_backfill(db_path: str, dry_run: bool = False) -> Dict[str, Any]:
             'by_symbol': {},
         }
 
+        expected_columns = 6  # strategy_id, earnings_date, actual_move, symbol, acq, sale
+
         if dry_run:
             print(f"\n[DRY RUN] Would update {len(matches)} strategies:")
-            for strategy_id, earnings_date, actual_move, symbol, acq, sale in matches[:20]:
+            for row in matches[:20]:
+                if len(row) != expected_columns:
+                    print(f"  WARNING: Skipping row with {len(row)} columns (expected {expected_columns}): {row}")
+                    continue
+                strategy_id, earnings_date, actual_move, symbol, acq, sale = row
                 print(f"  {symbol}: strategy {strategy_id}, earnings {earnings_date}, move {actual_move:.2f}%")
             if len(matches) > 20:
                 print(f"  ... and {len(matches) - 20} more")
             return stats
 
-        for strategy_id, earnings_date, actual_move, symbol, acq, sale in matches:
+        for row in matches:
+            if len(row) != expected_columns:
+                print(f"  WARNING: Skipping row with {len(row)} columns (expected {expected_columns}): {row}")
+                continue
+            strategy_id, earnings_date, actual_move, symbol, acq, sale = row
             if update_strategy_earnings(conn, strategy_id, earnings_date, actual_move):
                 stats['updates_made'] += 1
                 stats['by_symbol'][symbol] = stats['by_symbol'].get(symbol, 0) + 1
