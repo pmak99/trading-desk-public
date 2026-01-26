@@ -28,11 +28,10 @@ Pick:     /analyze NVDA    → Deep dive on best candidate
 ## Progress Display
 Show progress updates as you work:
 ```
-[1/5] Checking earnings cache freshness...
-[2/5] Checking market status...
-[3/5] Running 2.0 analysis for qualified tickers...
-[4/5] Loading cached sentiment...
-[5/5] Calculating 4.0 scores...
+[1/4] Checking market status...
+[2/4] Running 2.0 analysis for qualified tickers...
+[3/4] Loading cached sentiment...
+[4/4] Calculating 4.0 scores...
 ```
 
 ## Minimum Cutoffs
@@ -73,43 +72,6 @@ Show progress updates as you work:
   - If Friday-Sunday → use next week (most current week earnings are done)
 - If date argument provided, use that date's week
 - IMPORTANT: Get actual current date from system, not assumptions
-
-### Step 1.5: Check Earnings Cache Freshness (Auto-Sync if Stale)
-
-First, calculate TARGET_MONDAY (needed for cache check):
-```bash
-DAY_NUM=$(date '+%u')
-if [ $DAY_NUM -ge 5 ]; then
-    DAYS_TO_NEXT_MONDAY=$((8 - DAY_NUM))
-    TARGET_MONDAY=$(date -v+${DAYS_TO_NEXT_MONDAY}d '+%Y-%m-%d' 2>/dev/null || date -d "+${DAYS_TO_NEXT_MONDAY} days" '+%Y-%m-%d')
-else
-    DAYS_SINCE_MONDAY=$((DAY_NUM - 1))
-    TARGET_MONDAY=$(date -v-${DAYS_SINCE_MONDAY}d '+%Y-%m-%d' 2>/dev/null || date -d "-${DAYS_SINCE_MONDAY} days" '+%Y-%m-%d')
-fi
-```
-
-Check if any earnings in the target week have stale cache (not validated in 24h):
-```bash
-STALE_COUNT=$(sqlite3 -noheader $PROJECT_ROOT/2.0/data/ivcrush.db \
-  "SELECT COUNT(*) FROM earnings_calendar
-   WHERE earnings_date BETWEEN '$TARGET_MONDAY' AND date('$TARGET_MONDAY', '+4 days')
-   AND (last_validated_at IS NULL OR last_validated_at < datetime('now', '-24 hours'));")
-```
-
-If STALE_COUNT > 0:
-```
-⚠️ Found {STALE_COUNT} tickers with stale earnings data (>24h old)
-🔄 Running quick sync to refresh...
-```
-Then run sync:
-```bash
-cd $PROJECT_ROOT/2.0 && ./trade.sh sync 2>&1 | tail -5 || echo "⚠️ Sync completed with warnings"
-```
-
-If STALE_COUNT = 0:
-```
-✅ Earnings cache is fresh (validated within 24h)
-```
 
 ### Step 2: Check Market Status (Alpaca MCP)
 ```
