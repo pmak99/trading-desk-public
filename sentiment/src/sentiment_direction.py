@@ -167,7 +167,7 @@ def adjust_direction(
     else:
         if sentiment_score >= 0.2:
             sent_dir = "bullish"
-        elif sentiment_score < -0.2:
+        elif sentiment_score <= -0.2:
             sent_dir = "bearish"
         else:
             sent_dir = "neutral"

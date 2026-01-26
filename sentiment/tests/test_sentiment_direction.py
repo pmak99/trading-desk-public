@@ -105,10 +105,10 @@ class TestRule1TiebreakNeutralSkew:
         assert adj.rule_applied == "tiebreak_bullish"
 
     def test_neutral_skew_edge_bearish(self):
-        """Neutral skew + sentiment at edge (-0.2) → NEUTRAL (boundary is exclusive)."""
+        """Neutral skew + sentiment at edge (-0.2) → BEARISH (boundary is inclusive, symmetric with bullish >= 0.2)."""
         adj = adjust_direction("NEUTRAL", -0.2)
-        assert adj.adjusted_bias == AdjustedBias.NEUTRAL
-        assert adj.rule_applied == "both_neutral"
+        assert adj.adjusted_bias == AdjustedBias.BEARISH
+        assert adj.rule_applied == "tiebreak_bearish"
 
 
 class TestRule2ConflictHedge:
