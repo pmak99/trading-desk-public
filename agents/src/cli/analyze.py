@@ -60,8 +60,8 @@ async def main():
             recommendation = result.get('recommendation', {})
             action = recommendation.get('action', 'SKIP')
 
-            # Exit 0 for TRADE, 1 for others
-            if action == 'TRADE':
+            # Exit 0 for tradeable recommendations, 1 for skip/do-not-trade
+            if action in ('TRADE', 'TRADE_CAUTIOUSLY'):
                 sys.exit(0)
             else:
                 sys.exit(1)

@@ -191,15 +191,16 @@ curl -s "https://your-cloud-run-url.run.app/api/analyze?ticker=NVDA" -H "X-API-K
 
 ## 6.0 - Agent Orchestration
 
-Local Claude Code agent system for parallel ticker analysis. Coordinates multiple agents for concurrent earnings scanning.
+Local Claude Code agent system for parallel ticker analysis. Coordinates multiple agents for concurrent earnings scanning. Uses BALANCED VRP thresholds throughout.
 
 **CLI:**
 ```bash
 cd 6.0/
-./agent.sh prime        # Prime all systems
-./agent.sh whisper      # Most anticipated earnings
-./agent.sh analyze      # Parallel ticker analysis
-./agent.sh maintenance  # System maintenance
+./agent.sh prime                    # Prime all systems
+./agent.sh whisper                  # Most anticipated earnings (VRP ≥ 1.8x)
+./agent.sh analyze TICKER [DATE]    # Single ticker deep dive
+./agent.sh scan DATE                # Scan all earnings for date
+./agent.sh maintenance              # System maintenance
 ```
 
 **Key Files:**
@@ -208,12 +209,27 @@ cd 6.0/
 |------|---------|
 | `6.0/agent.sh` | CLI entry point |
 | `6.0/config/agents.yaml` | Agent definitions and orchestration rules |
-| `6.0/src/agents/` | Individual agent implementations |
-| `6.0/src/orchestrators/` | Parallel execution orchestration |
+| `6.0/src/agents/ticker_analysis.py` | VRP calculation, liquidity scoring, strategy generation |
+| `6.0/src/agents/explanation.py` | Narrative explanations with win probability |
+| `6.0/src/orchestrators/analyze.py` | Single-ticker deep dive with recommendation logic |
+| `6.0/src/orchestrators/whisper.py` | Most anticipated earnings (parallel, VRP ≥ 1.8x discovery) |
+| `6.0/src/utils/formatter.py` | ASCII table output (box-drawing chars, tier icons) |
 | `6.0/src/integration/container_2_0.py` | 2.0 container wrapper (sys.path/sys.modules management) |
 | `6.0/src/integration/` | Service integrations (4.0 cache, 5.0 Perplexity, MCP) |
 
-**Note:** `container_2_0.py` uses `threading.RLock` and careful `sys.modules` manipulation to import 2.0's `src` package without colliding with 6.0's own `src` package.
+**Recommendation Logic (analyze):**
+
+| VRP | Liquidity | Action |
+|-----|-----------|--------|
+| ≥ 1.8x | EXCELLENT/GOOD | TRADE |
+| ≥ 1.4x | EXCELLENT/GOOD | TRADE_CAUTIOUSLY |
+| ≥ 1.4x | WARNING | TRADE_CAUTIOUSLY (reduce size) |
+| < 1.4x | Any | SKIP (insufficient VRP) |
+| Any | REJECT | SKIP (liquidity) |
+
+**Liquidity in Whisper Mode:** When `generate_strategies=False`, liquidity tier is not available from strategy objects. The `TickerAnalysisAgent` falls back to calling 2.0's `classify_hybrid_tier_market_aware` directly using the already-cached option chain (no extra API calls).
+
+**Note:** `container_2_0.py` uses `threading.RLock` and careful `sys.modules` manipulation to import 2.0's `src` package without colliding with 6.0's own `src` package. Access inner 2.0 container via `self.container.container` (e.g., `self.container.container.tradier`, `self.container.container.liquidity_scorer`).
 
 ## Root Scripts
 
@@ -442,4 +458,4 @@ cd 6.0 && ../2.0/venv/bin/python -m pytest tests/ -v
 
 **5.0:** FastAPI lifespan pattern (AppState dataclass, no global singletons). Single-dispatcher job routing. Eastern Time handling. Job dependency DAG with cycle detection. Structured JSON logging with request IDs. Earnings date freshness validation (validates against Alpha Vantage when <=7 days out, skips cross-quarter mismatches >45 days).
 
-**6.0:** Parallel agent orchestration. `container_2_0.py` manages sys.path/sys.modules to import 2.0's `src` without colliding with 6.0's `src`. Uses `threading.RLock` for thread-safe container initialization.
+**6.0:** Parallel agent orchestration with BALANCED VRP thresholds. `container_2_0.py` manages sys.path/sys.modules to import 2.0's `src` without colliding with 6.0's `src`. Uses `threading.RLock` for thread-safe container initialization. Liquidity fallback: when strategies are skipped (whisper mode), calls 2.0's `classify_hybrid_tier_market_aware` directly on cached option chain. 2.0 domain types require unwrapping (e.g., `Percentage.value`, `Result.value`).
