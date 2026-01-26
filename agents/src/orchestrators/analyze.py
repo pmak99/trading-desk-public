@@ -318,7 +318,7 @@ class AnalyzeOrchestrator(BaseOrchestrator):
             },
             'liquidity': {
                 'tier': ticker_result.get('liquidity_tier'),
-                'tradeable': ticker_result.get('liquidity_tier') in ['EXCELLENT', 'GOOD']
+                'tradeable': ticker_result.get('liquidity_tier') in ['EXCELLENT', 'GOOD', 'WARNING']
             },
             'sentiment': {
                 'direction': sentiment_result.get('direction', 'neutral'),
@@ -379,11 +379,23 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 'reason': f'{recommendation} VRP ({vrp_ratio:.2f}x) + {liquidity_tier} liquidity',
                 'details': 'Moderate opportunity - consider reduced position size'
             }
+        elif vrp_ratio >= 1.4 and liquidity_tier == 'WARNING':
+            return {
+                'action': 'TRADE_CAUTIOUSLY',
+                'reason': f'{recommendation} VRP ({vrp_ratio:.2f}x) + WARNING liquidity',
+                'details': 'Reduce position size due to liquidity constraints'
+            }
+        elif vrp_ratio < 1.4:
+            return {
+                'action': 'SKIP',
+                'reason': f'VRP {vrp_ratio:.2f}x below GOOD threshold (1.4x)',
+                'details': 'Insufficient volatility risk premium'
+            }
         else:
             return {
                 'action': 'SKIP',
-                'reason': f'VRP {vrp_ratio:.2f}x below threshold or inadequate liquidity',
-                'details': 'Edge not sufficient for trade'
+                'reason': f'{liquidity_tier} liquidity despite {recommendation} VRP ({vrp_ratio:.2f}x)',
+                'details': 'Liquidity does not support safe execution'
             }
 
     def format_results(self, result: Dict[str, Any]) -> str:
@@ -506,8 +518,10 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         tier = liquidity['tier']
         tradeable = liquidity['tradeable']
 
-        if tradeable:
-            output.append(f"✅ **{tier}** - Tradeable")
+        if tier in ['EXCELLENT', 'GOOD']:
+            output.append(f"✅ **{tier}** - Tradeable at full size")
+        elif tier == 'WARNING':
+            output.append(f"⚠️  **{tier}** - Tradeable at reduced size")
         else:
             output.append(f"❌ **{tier}** - Not tradeable")
         output.append("")
