@@ -193,16 +193,37 @@ class TickerAnalysisAgent:
         """
         Extract liquidity tier from 2.0 result.
 
-        Note: Liquidity tier is added to Strategy objects by strategy_generator,
-        not in TickerAnalysis. If strategies are generated, get tier from
-        recommended strategy. Otherwise return None.
+        When strategies are generated, get tier from recommended strategy.
+        Otherwise, call 2.0's liquidity scorer directly using the cached
+        option chain (no extra API call since the analyzer already fetched it).
         """
+        # Path 1: Get from strategy (when strategies were generated)
         if hasattr(result, 'strategies') and result.strategies:
-            # strategies is StrategyRecommendation with recommended_strategy property
             strategy = result.strategies.recommended_strategy
             if hasattr(strategy, 'liquidity_tier'):
                 return strategy.liquidity_tier
-        return None
+
+        # Path 2: Call liquidity scorer directly (when strategies skipped)
+        try:
+            inner = self.container.container
+            chain_result = inner.cached_options_provider.get_option_chain(
+                result.ticker, result.expiration
+            )
+            if hasattr(chain_result, 'is_err') and chain_result.is_err:
+                return None
+
+            chain = chain_result.value if hasattr(chain_result, 'value') else chain_result
+            pct = result.implied_move.implied_move_pct
+            implied_move_pct = pct.value if hasattr(pct, 'value') else float(pct)
+
+            tier, _open, _reason, _details = inner.liquidity_scorer.classify_hybrid_tier_market_aware(
+                chain=chain,
+                implied_move_pct=implied_move_pct,
+            )
+            return tier
+        except Exception as e:
+            logger.debug(f"Liquidity scorer fallback failed for {result.ticker}: {e}")
+            return None
 
     def _extract_score(self, result: Any) -> Optional[int]:
         """
