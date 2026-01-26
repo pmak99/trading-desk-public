@@ -591,6 +591,13 @@ class JobRunner:
                 if used_real:
                     real_implied_count += 1
 
+                # Filter out tickers without weekly options if configured
+                if settings.require_weekly_options and not im_result.get("has_weekly_options", True):
+                    log("debug", "Skipping non-weekly ticker",
+                        ticker=ticker, reason=im_result.get("weekly_reason", ""),
+                        job="morning_digest")
+                    continue
+
                 vrp_data = calculate_vrp(
                     implied_move_pct=implied_move_pct,
                     historical_moves=historical_pcts,
@@ -882,6 +889,13 @@ class JobRunner:
                 implied_move_pct, _ = get_implied_move_with_fallback(
                     im_result, historical_avg
                 )
+
+                # Filter out tickers without weekly options if configured
+                if settings.require_weekly_options and not im_result.get("has_weekly_options", True):
+                    log("debug", "Skipping non-weekly ticker",
+                        ticker=ticker, reason=im_result.get("weekly_reason", ""),
+                        job="pre_trade_refresh")
+                    continue
 
                 vrp_data = calculate_vrp(
                     implied_move_pct=implied_move_pct,
