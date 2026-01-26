@@ -28,7 +28,7 @@ class WhisperOrchestrator(BaseOrchestrator):
     1. Run health check (fail fast if APIs down)
     2. Fetch earnings calendar for date range
     3. Spawn N TickerAnalysisAgents in parallel
-    4. Filter by VRP >= 3.0 (discovery threshold)
+    4. Filter by VRP >= 1.8 (discovery threshold - EXCELLENT tier)
     5. Spawn ExplanationAgents for top candidates
     6. Spawn AnomalyDetectionAgents for top candidates
     7. Apply cross-ticker intelligence (sector correlation, portfolio risk)
@@ -43,8 +43,8 @@ class WhisperOrchestrator(BaseOrchestrator):
         )
     """
 
-    # Discovery threshold (lower than position sizing threshold)
-    VRP_DISCOVERY_THRESHOLD = 3.0
+    # Discovery threshold - EXCELLENT tier (BALANCED mode)
+    VRP_DISCOVERY_THRESHOLD = 1.8
 
     # Limit for performance
     MAX_TICKERS_TO_ANALYZE = 30
