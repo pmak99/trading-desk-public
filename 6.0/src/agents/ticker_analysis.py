@@ -222,18 +222,18 @@ class TickerAnalysisAgent:
         if vrp_ratio is None:
             return None
 
-        # Simple scoring based on VRP thresholds from CLAUDE.md
-        if vrp_ratio >= 7.0:
-            # EXCELLENT: 90-100
-            return min(100, int(90 + (vrp_ratio - 7.0) * 2))
-        elif vrp_ratio >= 4.0:
-            # GOOD: 70-89
-            return int(70 + (vrp_ratio - 4.0) * (20/3.0))
-        elif vrp_ratio >= 1.5:
-            # MARGINAL: 50-69
-            return int(50 + (vrp_ratio - 1.5) * (20/2.5))
+        # Simple scoring based on VRP thresholds (BALANCED mode)
+        if vrp_ratio >= 1.8:
+            # EXCELLENT: 70-100
+            return min(100, int(70 + (vrp_ratio - 1.8) * 10))
+        elif vrp_ratio >= 1.4:
+            # GOOD: 55-69
+            return int(55 + (vrp_ratio - 1.4) * (15/0.4))
+        elif vrp_ratio >= 1.2:
+            # MARGINAL: 40-54
+            return int(40 + (vrp_ratio - 1.2) * (15/0.2))
         else:
-            # SKIP: 0-49
+            # SKIP: 0-39
             return int(vrp_ratio * 33)
 
     def _extract_strategies(self, result: Any) -> Optional[list]:
@@ -311,8 +311,8 @@ class TickerAnalysisAgent:
             Tuple of (has_weeklies, reason)
         """
         try:
-            # Get expirations from 2.0's tradier client
-            result = self.container.tradier.get_expirations(ticker)
+            # Get expirations from 2.0's tradier client (via inner container)
+            result = self.container.container.tradier.get_expirations(ticker)
             if hasattr(result, 'is_err') and result.is_err:
                 # On error, be permissive
                 return True, "Unable to check expirations"
