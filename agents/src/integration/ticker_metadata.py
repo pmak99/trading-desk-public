@@ -4,11 +4,14 @@ Provides access to the ticker_metadata table for cross-ticker
 sector correlation analysis.
 """
 
+import logging
 import sqlite3
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from .container_2_0 import Container2_0
+
+logger = logging.getLogger(__name__)
 
 
 class TickerMetadataRepository:
@@ -65,11 +68,20 @@ class TickerMetadataRepository:
             conn.close()
 
             if row is None:
+                logger.debug(f"No metadata found for ticker {ticker}")
                 return None
 
-            return dict(row)
+            metadata = dict(row)
 
-        except Exception:
+            # Log missing expected fields at debug level
+            for field in ('sector', 'industry', 'company_name'):
+                if not metadata.get(field):
+                    logger.debug(f"Ticker {ticker} missing metadata field: {field}")
+
+            return metadata
+
+        except Exception as e:
+            logger.debug(f"Error fetching metadata for {ticker}: {e}")
             return None
 
     def save_metadata(
@@ -102,7 +114,8 @@ class TickerMetadataRepository:
             conn.close()
             return True
 
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Error saving metadata for {ticker}: {e}")
             return False
 
     def delete_metadata(self, ticker: str) -> bool:
@@ -114,7 +127,8 @@ class TickerMetadataRepository:
             conn.commit()
             conn.close()
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Error deleting metadata for {ticker}: {e}")
             return False
 
     def get_by_sector(self, sector: str) -> List[Dict[str, Any]]:
@@ -135,7 +149,8 @@ class TickerMetadataRepository:
 
             return [dict(row) for row in rows]
 
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Error fetching tickers for sector {sector}: {e}")
             return []
 
     @classmethod

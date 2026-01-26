@@ -142,11 +142,11 @@ class VRPCalculator:
         # Calculate mean historical move
         mean_move = np.mean(historical_pcts)
 
-        if mean_move <= 0:
+        if mean_move <= 0 or np.isnan(mean_move) or np.isinf(mean_move):
             return Err(
                 AppError(
                     ErrorCode.INVALID,
-                    f"Invalid mean move: {mean_move:.2f}%",
+                    f"Invalid mean move: {mean_move}",
                 )
             )
 

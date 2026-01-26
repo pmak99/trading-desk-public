@@ -23,12 +23,19 @@ Schema:
     )
 """
 
+import re
 import sqlite3
+import threading
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+_db_lock = threading.Lock()
 
 
 class SentimentDirection(Enum):
@@ -110,35 +117,36 @@ class SentimentHistory:
 
     def _init_db(self):
         """Initialize database schema."""
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS sentiment_history (
-                    ticker TEXT NOT NULL,
-                    earnings_date TEXT NOT NULL,
-                    collected_at TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    sentiment_text TEXT NOT NULL,
-                    sentiment_score REAL,
-                    sentiment_direction TEXT,
-                    vrp_ratio REAL,
-                    implied_move_pct REAL,
-                    actual_move_pct REAL,
-                    actual_direction TEXT,
-                    prediction_correct INTEGER,
-                    trade_outcome TEXT,
-                    updated_at TEXT,
-                    PRIMARY KEY (ticker, earnings_date)
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_history_date
-                ON sentiment_history(earnings_date)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_history_outcome
-                ON sentiment_history(trade_outcome)
-            """)
-            conn.commit()
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS sentiment_history (
+                        ticker TEXT NOT NULL,
+                        earnings_date TEXT NOT NULL,
+                        collected_at TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        sentiment_text TEXT NOT NULL,
+                        sentiment_score REAL,
+                        sentiment_direction TEXT,
+                        vrp_ratio REAL,
+                        implied_move_pct REAL,
+                        actual_move_pct REAL,
+                        actual_direction TEXT,
+                        prediction_correct INTEGER,
+                        trade_outcome TEXT,
+                        updated_at TEXT,
+                        PRIMARY KEY (ticker, earnings_date)
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_history_date
+                    ON sentiment_history(earnings_date)
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_history_outcome
+                    ON sentiment_history(trade_outcome)
+                """)
+                conn.commit()
 
     def record_sentiment(
         self,
@@ -171,11 +179,13 @@ class SentimentHistory:
             raise ValueError(f"Invalid source '{source}'. Must be one of: {self.VALID_SOURCES}")
 
         ticker = ticker.upper()
+        if not ticker or not re.match(r'^[A-Z]{1,5}$', ticker):
+            raise ValueError(f"Invalid ticker format: {ticker}")
         now = datetime.now(timezone.utc).isoformat()
 
         # Auto-detect direction from score if not provided
         if sentiment_direction is None and sentiment_score is not None:
-            if sentiment_score > 0.2:
+            if sentiment_score >= 0.2:
                 sentiment_direction = SentimentDirection.BULLISH
             elif sentiment_score < -0.2:
                 sentiment_direction = SentimentDirection.BEARISH
@@ -184,17 +194,18 @@ class SentimentHistory:
 
         direction_str = sentiment_direction.value if sentiment_direction else SentimentDirection.UNKNOWN.value
 
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.execute("""
-                INSERT OR REPLACE INTO sentiment_history
-                (ticker, earnings_date, collected_at, source, sentiment_text,
-                 sentiment_score, sentiment_direction, vrp_ratio, implied_move_pct, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                ticker, earnings_date, now, source, sentiment_text,
-                sentiment_score, direction_str, vrp_ratio, implied_move_pct, now
-            ))
-            conn.commit()
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO sentiment_history
+                    (ticker, earnings_date, collected_at, source, sentiment_text,
+                     sentiment_score, sentiment_direction, vrp_ratio, implied_move_pct, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    ticker, earnings_date, now, source, sentiment_text,
+                    sentiment_score, direction_str, vrp_ratio, implied_move_pct, now
+                ))
+                conn.commit()
 
     def record_outcome(
         self,
@@ -241,75 +252,78 @@ class SentimentHistory:
 
         now = datetime.now(timezone.utc).isoformat()
 
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            # Get existing record to check prediction
-            row = conn.execute("""
-                SELECT sentiment_direction FROM sentiment_history
-                WHERE ticker = ? AND earnings_date = ?
-            """, (ticker, earnings_date)).fetchone()
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                # Get existing record to check prediction
+                row = conn.execute("""
+                    SELECT sentiment_direction FROM sentiment_history
+                    WHERE ticker = ? AND earnings_date = ?
+                """, (ticker, earnings_date)).fetchone()
 
-            if not row:
-                return False
+                if not row:
+                    return False
 
-            # Calculate if prediction was correct
-            sentiment_dir = row[0]
-            prediction_correct = None
-            if sentiment_dir in ("bullish", "bearish"):
-                predicted_up = sentiment_dir == "bullish"
-                actual_up = actual_direction == "UP"
-                prediction_correct = 1 if predicted_up == actual_up else 0
+                # Calculate if prediction was correct
+                sentiment_dir = row[0]
+                prediction_correct = None
+                if sentiment_dir in ("bullish", "bearish"):
+                    predicted_up = sentiment_dir == "bullish"
+                    actual_up = actual_direction == "UP"
+                    prediction_correct = 1 if predicted_up == actual_up else 0
 
-            conn.execute("""
-                UPDATE sentiment_history
-                SET actual_move_pct = ?,
-                    actual_direction = ?,
-                    prediction_correct = ?,
-                    trade_outcome = ?,
-                    updated_at = ?
-                WHERE ticker = ? AND earnings_date = ?
-            """, (
-                actual_move_pct, actual_direction, prediction_correct,
-                trade_outcome, now, ticker, earnings_date
-            ))
-            conn.commit()
-            return True
+                conn.execute("""
+                    UPDATE sentiment_history
+                    SET actual_move_pct = ?,
+                        actual_direction = ?,
+                        prediction_correct = ?,
+                        trade_outcome = ?,
+                        updated_at = ?
+                    WHERE ticker = ? AND earnings_date = ?
+                """, (
+                    actual_move_pct, actual_direction, prediction_correct,
+                    trade_outcome, now, ticker, earnings_date
+                ))
+                conn.commit()
+                return True
 
     def get(self, ticker: str, earnings_date: str) -> Optional[SentimentRecord]:
         """Get a specific sentiment record."""
         ticker = ticker.upper()
 
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute("""
-                SELECT * FROM sentiment_history
-                WHERE ticker = ? AND earnings_date = ?
-            """, (ticker, earnings_date)).fetchone()
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("""
+                    SELECT * FROM sentiment_history
+                    WHERE ticker = ? AND earnings_date = ?
+                """, (ticker, earnings_date)).fetchone()
 
-            if not row:
-                return None
+                if not row:
+                    return None
 
-            return self._row_to_record(row)
+                return self._row_to_record(row)
 
     def get_pending_outcomes(self, before_date: Optional[str] = None) -> List[SentimentRecord]:
         """Get records that need outcome data filled in."""
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.row_factory = sqlite3.Row
 
-            if before_date:
-                rows = conn.execute("""
-                    SELECT * FROM sentiment_history
-                    WHERE actual_move_pct IS NULL
-                    AND earnings_date < ?
-                    ORDER BY earnings_date
-                """, (before_date,)).fetchall()
-            else:
-                rows = conn.execute("""
-                    SELECT * FROM sentiment_history
-                    WHERE actual_move_pct IS NULL
-                    ORDER BY earnings_date
-                """).fetchall()
+                if before_date:
+                    rows = conn.execute("""
+                        SELECT * FROM sentiment_history
+                        WHERE actual_move_pct IS NULL
+                        AND earnings_date < ?
+                        ORDER BY earnings_date
+                    """, (before_date,)).fetchall()
+                else:
+                    rows = conn.execute("""
+                        SELECT * FROM sentiment_history
+                        WHERE actual_move_pct IS NULL
+                        ORDER BY earnings_date
+                    """).fetchall()
 
-            return [self._row_to_record(row) for row in rows]
+                return [self._row_to_record(row) for row in rows]
 
     def get_by_date_range(
         self,
@@ -318,24 +332,25 @@ class SentimentHistory:
         with_outcomes_only: bool = False
     ) -> List[SentimentRecord]:
         """Get records within a date range."""
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.row_factory = sqlite3.Row
 
-            if with_outcomes_only:
-                rows = conn.execute("""
-                    SELECT * FROM sentiment_history
-                    WHERE earnings_date BETWEEN ? AND ?
-                    AND actual_move_pct IS NOT NULL
-                    ORDER BY earnings_date
-                """, (start_date, end_date)).fetchall()
-            else:
-                rows = conn.execute("""
-                    SELECT * FROM sentiment_history
-                    WHERE earnings_date BETWEEN ? AND ?
-                    ORDER BY earnings_date
-                """, (start_date, end_date)).fetchall()
+                if with_outcomes_only:
+                    rows = conn.execute("""
+                        SELECT * FROM sentiment_history
+                        WHERE earnings_date BETWEEN ? AND ?
+                        AND actual_move_pct IS NOT NULL
+                        ORDER BY earnings_date
+                    """, (start_date, end_date)).fetchall()
+                else:
+                    rows = conn.execute("""
+                        SELECT * FROM sentiment_history
+                        WHERE earnings_date BETWEEN ? AND ?
+                        ORDER BY earnings_date
+                    """, (start_date, end_date)).fetchall()
 
-            return [self._row_to_record(row) for row in rows]
+                return [self._row_to_record(row) for row in rows]
 
     def get_accuracy_stats(self) -> Dict[str, Any]:
         """
@@ -344,68 +359,69 @@ class SentimentHistory:
         Returns:
             Dictionary with accuracy metrics
         """
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.row_factory = sqlite3.Row
 
-            # Overall stats
-            total = conn.execute("""
-                SELECT COUNT(*) as cnt FROM sentiment_history
-            """).fetchone()['cnt']
-
-            with_outcomes = conn.execute("""
-                SELECT COUNT(*) as cnt FROM sentiment_history
-                WHERE actual_move_pct IS NOT NULL
-            """).fetchone()['cnt']
-
-            # Prediction accuracy (only for bullish/bearish predictions)
-            correct = conn.execute("""
-                SELECT COUNT(*) as cnt FROM sentiment_history
-                WHERE prediction_correct = 1
-            """).fetchone()['cnt']
-
-            predictions_made = conn.execute("""
-                SELECT COUNT(*) as cnt FROM sentiment_history
-                WHERE prediction_correct IS NOT NULL
-            """).fetchone()['cnt']
-
-            # By sentiment direction
-            by_direction = {}
-            for direction in ['bullish', 'bearish', 'neutral']:
-                row = conn.execute("""
-                    SELECT
-                        COUNT(*) as total,
-                        SUM(CASE WHEN prediction_correct = 1 THEN 1 ELSE 0 END) as correct,
-                        AVG(actual_move_pct) as avg_move
-                    FROM sentiment_history
-                    WHERE sentiment_direction = ?
-                    AND actual_move_pct IS NOT NULL
-                """, (direction,)).fetchone()
-
-                by_direction[direction] = {
-                    'total': row['total'] or 0,
-                    'correct': row['correct'] or 0,
-                    'avg_move': row['avg_move']
-                }
-
-            # Trade outcomes
-            trade_stats = {}
-            for outcome in ['WIN', 'LOSS', 'SKIP']:
-                cnt = conn.execute("""
+                # Overall stats
+                total = conn.execute("""
                     SELECT COUNT(*) as cnt FROM sentiment_history
-                    WHERE trade_outcome = ?
-                """, (outcome,)).fetchone()['cnt']
-                trade_stats[outcome] = cnt
+                """).fetchone()['cnt']
 
-            return {
-                'total_records': total,
-                'with_outcomes': with_outcomes,
-                'pending_outcomes': total - with_outcomes,
-                'predictions_made': predictions_made,
-                'predictions_correct': correct,
-                'accuracy': correct / predictions_made if predictions_made > 0 else None,
-                'by_direction': by_direction,
-                'trade_outcomes': trade_stats
-            }
+                with_outcomes = conn.execute("""
+                    SELECT COUNT(*) as cnt FROM sentiment_history
+                    WHERE actual_move_pct IS NOT NULL
+                """).fetchone()['cnt']
+
+                # Prediction accuracy (only for bullish/bearish predictions)
+                correct = conn.execute("""
+                    SELECT COUNT(*) as cnt FROM sentiment_history
+                    WHERE prediction_correct = 1
+                """).fetchone()['cnt']
+
+                predictions_made = conn.execute("""
+                    SELECT COUNT(*) as cnt FROM sentiment_history
+                    WHERE prediction_correct IS NOT NULL
+                """).fetchone()['cnt']
+
+                # By sentiment direction
+                by_direction = {}
+                for direction in ['bullish', 'bearish', 'neutral']:
+                    row = conn.execute("""
+                        SELECT
+                            COUNT(*) as total,
+                            SUM(CASE WHEN prediction_correct = 1 THEN 1 ELSE 0 END) as correct,
+                            AVG(actual_move_pct) as avg_move
+                        FROM sentiment_history
+                        WHERE sentiment_direction = ?
+                        AND actual_move_pct IS NOT NULL
+                    """, (direction,)).fetchone()
+
+                    by_direction[direction] = {
+                        'total': row['total'] or 0,
+                        'correct': row['correct'] or 0,
+                        'avg_move': row['avg_move']
+                    }
+
+                # Trade outcomes
+                trade_stats = {}
+                for outcome in ['WIN', 'LOSS', 'SKIP']:
+                    cnt = conn.execute("""
+                        SELECT COUNT(*) as cnt FROM sentiment_history
+                        WHERE trade_outcome = ?
+                    """, (outcome,)).fetchone()['cnt']
+                    trade_stats[outcome] = cnt
+
+                return {
+                    'total_records': total,
+                    'with_outcomes': with_outcomes,
+                    'pending_outcomes': total - with_outcomes,
+                    'predictions_made': predictions_made,
+                    'predictions_correct': correct,
+                    'accuracy': correct / predictions_made if predictions_made > 0 else None,
+                    'by_direction': by_direction,
+                    'trade_outcomes': trade_stats
+                }
 
     def _row_to_record(self, row: sqlite3.Row) -> SentimentRecord:
         """Convert database row to SentimentRecord."""
@@ -414,7 +430,10 @@ class SentimentHistory:
             try:
                 direction = SentimentDirection(row['sentiment_direction'])
             except ValueError:
-                pass
+                logger.warning(
+                    f"Unknown sentiment_direction '{row['sentiment_direction']}' "
+                    f"for {row['ticker']} on {row['earnings_date']}, defaulting to UNKNOWN"
+                )
 
         return SentimentRecord(
             ticker=row['ticker'],
@@ -434,36 +453,37 @@ class SentimentHistory:
 
     def stats(self) -> Dict[str, Any]:
         """Get basic statistics about the history table."""
-        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-            conn.row_factory = sqlite3.Row
+        with _db_lock:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.row_factory = sqlite3.Row
 
-            row = conn.execute("""
-                SELECT
-                    COUNT(*) as total,
-                    COUNT(DISTINCT ticker) as unique_tickers,
-                    MIN(earnings_date) as earliest,
-                    MAX(earnings_date) as latest,
-                    SUM(CASE WHEN actual_move_pct IS NOT NULL THEN 1 ELSE 0 END) as with_outcomes
-                FROM sentiment_history
-            """).fetchone()
+                row = conn.execute("""
+                    SELECT
+                        COUNT(*) as total,
+                        COUNT(DISTINCT ticker) as unique_tickers,
+                        MIN(earnings_date) as earliest,
+                        MAX(earnings_date) as latest,
+                        SUM(CASE WHEN actual_move_pct IS NOT NULL THEN 1 ELSE 0 END) as with_outcomes
+                    FROM sentiment_history
+                """).fetchone()
 
-            by_source = {}
-            for src_row in conn.execute("""
-                SELECT source, COUNT(*) as cnt
-                FROM sentiment_history
-                GROUP BY source
-            """):
-                by_source[src_row['source']] = src_row['cnt']
+                by_source = {}
+                for src_row in conn.execute("""
+                    SELECT source, COUNT(*) as cnt
+                    FROM sentiment_history
+                    GROUP BY source
+                """):
+                    by_source[src_row['source']] = src_row['cnt']
 
-            return {
-                'total_records': row['total'],
-                'unique_tickers': row['unique_tickers'],
-                'earliest_date': row['earliest'],
-                'latest_date': row['latest'],
-                'with_outcomes': row['with_outcomes'],
-                'pending_outcomes': row['total'] - (row['with_outcomes'] or 0),
-                'by_source': by_source
-            }
+                return {
+                    'total_records': row['total'],
+                    'unique_tickers': row['unique_tickers'],
+                    'earliest_date': row['earliest'],
+                    'latest_date': row['latest'],
+                    'with_outcomes': row['with_outcomes'],
+                    'pending_outcomes': row['total'] - (row['with_outcomes'] or 0),
+                    'by_source': by_source
+                }
 
 
 # Convenience functions for slash commands

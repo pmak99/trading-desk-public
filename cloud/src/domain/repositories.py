@@ -209,7 +209,7 @@ class HistoricalMovesRepository:
         Returns dict mapping ticker to list of moves.
 
         Args:
-            tickers: List of stock symbols
+            tickers: List of stock symbols (empty list returns empty dict)
             limit: Max moves per ticker (1-100, default 12)
 
         Returns:
@@ -219,12 +219,17 @@ class HistoricalMovesRepository:
             moves = repo.get_moves_batch(["AAPL", "NVDA", "MSFT"])
             aapl_moves = moves.get("AAPL", [])
         """
+        # Early return for empty tickers list to avoid constructing
+        # invalid SQL with empty IN() clause
         if not tickers:
             return {}
 
         # Validate all tickers
         validated_tickers = [_normalize_ticker(t) for t in tickers]
         limit = validate_limit(limit)
+
+        if not validated_tickers:
+            return {}
 
         # Build placeholders for IN clause
         placeholders = ",".join("?" for _ in validated_tickers)
@@ -762,14 +767,24 @@ class VRPCacheRepository:
 
         Smart TTL:
         - Far (>3 days): 6 hours - options prices are stable
-        - Near (≤3 days): 1 hour - need fresher data as earnings approach
+        - Near (<=3 days): 1 hour - need fresher data as earnings approach
 
-        Uses Eastern Time (market timezone) for consistent behavior
-        across local development and Cloud Run (UTC).
+        Timezone Assumptions:
+        - All date comparisons use Eastern Time (US market timezone).
+        - earnings_date: stored as YYYY-MM-DD in ET (from Alpha Vantage/Finnhub,
+          which report dates in US market context).
+        - today_et(): returns current date in America/New_York timezone via
+          src.core.config, which uses pytz.timezone('US/Eastern').
+        - Cloud Run runs in UTC, but today_et() converts to ET so TTL
+          transitions happen at midnight ET, not midnight UTC. This ensures
+          a 3-day threshold is consistent regardless of deployment timezone.
+        - Cache expiry (expires_at) is also computed in ET via now_et() + timedelta.
         """
         try:
             from datetime import datetime
             from src.core.config import today_et
+            # Both dates are in ET context: earnings_date from DB (stored in ET),
+            # today_et() returns current date in Eastern Time
             earnings = datetime.strptime(earnings_date, "%Y-%m-%d").date()
             today = datetime.strptime(today_et(), "%Y-%m-%d").date()
             days_until = (earnings - today).days

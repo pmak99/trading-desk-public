@@ -64,11 +64,21 @@ def calculate_from_atm_chain(
     # Calculate straddle cost (call + put mid-prices)
     straddle_cost = call.mid + put.mid
 
-    # Validate stock price
+    # Validate stock price BEFORE division
     stock_price = chain.stock_price
     if stock_price.amount <= 0:
         return Err(
             AppError(ErrorCode.INVALID, "Invalid stock price <= 0")
+        )
+
+    # Validate straddle cost is positive before dividing
+    if straddle_cost.amount <= 0:
+        return Err(
+            AppError(
+                ErrorCode.INVALID,
+                f"Invalid straddle cost <= 0 at strike {atm_strike} "
+                f"(call mid: {call.mid}, put mid: {put.mid})",
+            )
         )
 
     # Calculate implied move percentage

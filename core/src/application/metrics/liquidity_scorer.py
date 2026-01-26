@@ -265,14 +265,16 @@ class LiquidityScorer:
         # Determine spread-based tier
         if spread_pct > self.max_spread_pct:  # >15%
             spread_tier = "REJECT"
-        elif spread_pct > self.warning_spread_pct:  # >12%
+        elif spread_pct >= self.warning_spread_pct:  # >=12%
             spread_tier = "WARNING"
-        elif spread_pct > self.good_spread_pct:  # >8%
+        elif spread_pct >= self.good_spread_pct:  # >=8%
             spread_tier = "GOOD"
-        else:  # <=8%
+        else:  # <8%
             spread_tier = "EXCELLENT"
 
-        # Final tier is the worse of the two
+        # Final tier is the worse of the two (normalize case for safety)
+        oi_tier = oi_tier.upper()
+        spread_tier = spread_tier.upper()
         tier_order = {"REJECT": 0, "WARNING": 1, "GOOD": 2, "EXCELLENT": 3}
         return min([oi_tier, spread_tier], key=lambda t: tier_order[t])
 
@@ -349,14 +351,16 @@ class LiquidityScorer:
         # Determine spread-based tier
         if spread_pct > self.max_spread_pct:  # >15%
             spread_tier = "REJECT"
-        elif spread_pct > self.warning_spread_pct:  # >12%
+        elif spread_pct >= self.warning_spread_pct:  # >=12%
             spread_tier = "WARNING"
-        elif spread_pct > self.good_spread_pct:  # >8%
+        elif spread_pct >= self.good_spread_pct:  # >=8%
             spread_tier = "GOOD"
-        else:  # <=8%
+        else:  # <8%
             spread_tier = "EXCELLENT"
 
-        # Final tier is the worse of the two
+        # Final tier is the worse of the two (normalize case for safety)
+        oi_tier = oi_tier.upper()
+        spread_tier = spread_tier.upper()
         tier_order = {"REJECT": 0, "WARNING": 1, "GOOD": 2, "EXCELLENT": 3}
         return min([oi_tier, spread_tier], key=lambda t: tier_order[t])
 
@@ -873,14 +877,14 @@ class LiquidityScorer:
             oi_tier = "EXCELLENT"
 
         # Determine spread-based tier
-        # Spread Tiers: REJECT (>15%), WARNING (>12%), GOOD (>8%), EXCELLENT (<=8%)
+        # Spread Tiers: REJECT (>15%), WARNING (>=12%), GOOD (>=8%), EXCELLENT (<8%)
         if max_spread > self.max_spread_pct:  # >15%
             spread_tier = "REJECT"
-        elif max_spread > self.warning_spread_pct:  # >12%
+        elif max_spread >= self.warning_spread_pct:  # >=12%
             spread_tier = "WARNING"
-        elif max_spread > self.good_spread_pct:  # >8%
+        elif max_spread >= self.good_spread_pct:  # >=8%
             spread_tier = "GOOD"
-        else:  # <=8%
+        else:  # <8%
             spread_tier = "EXCELLENT"
 
         # Final tier is the worse of the two

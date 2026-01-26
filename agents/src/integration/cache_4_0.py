@@ -3,10 +3,18 @@
 Provides access to sentiment cache and budget tracker without duplication.
 """
 
+import logging
 import sys
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+# Sentinel value for unknown/unparseable cache age.
+# Using float('inf') ensures stale-cache checks naturally trigger a refresh,
+# since any threshold comparison (e.g., age > 3.0) will be True.
+CACHE_AGE_UNKNOWN = float('inf')
 
 from ..utils.paths import MAIN_REPO, REPO_4_0
 
@@ -331,9 +339,11 @@ class Cache4_0:
                     age_seconds = (datetime.now() - cached_at).total_seconds()
                     return age_seconds / 3600.0
                 except (ValueError, TypeError):
-                    return None
+                    logger.debug(f"Could not parse cache timestamp for {ticker}: {cached_at_str}")
+                    return CACHE_AGE_UNKNOWN
 
             return None
-        except Exception:
+        except Exception as e:
             # Return None on database access failure - cache age is optional
+            logger.debug(f"Database error checking cache age for {ticker}: {e}")
             return None

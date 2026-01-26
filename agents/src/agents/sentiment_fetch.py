@@ -142,16 +142,20 @@ class SentimentFetchAgent:
                 ticker=ticker
             )
 
+    # Number of retries for transient API failures
+    _API_RETRY_COUNT = 1
+    _API_RETRY_DELAY_SECONDS = 2.0
+
     async def _fetch_via_api(
         self,
         ticker: str,
         earnings_date: str
     ) -> Dict[str, Any]:
         """
-        Fetch sentiment via Perplexity API.
+        Fetch sentiment via Perplexity API with retry for transient failures.
 
         Calls Perplexity API directly to get sentiment analysis
-        for the ticker's upcoming earnings.
+        for the ticker's upcoming earnings. Retries once on transient failure.
 
         Args:
             ticker: Stock ticker symbol
@@ -161,35 +165,45 @@ class SentimentFetchAgent:
             Raw sentiment data dict matching SentimentFetchResponse schema
 
         Raises:
-            Exception: If API call fails or response parsing fails
+            Exception: If API call fails after retries
         """
-        try:
-            # Call Perplexity API (async)
-            result = await self.perplexity.get_sentiment(ticker, earnings_date)
+        last_error = None
 
-            # Check if API call was successful
-            if not result.get('success'):
-                raise Exception(result.get('error', 'Unknown API error'))
+        for attempt in range(1 + self._API_RETRY_COUNT):
+            try:
+                # Call Perplexity API (async)
+                result = await self.perplexity.get_sentiment(ticker, earnings_date)
 
-            # Convert API response to sentiment data format
-            sentiment_data = {
-                'ticker': ticker,
-                'direction': result['direction'],
-                'score': result['score'],
-                'catalysts': result.get('tailwinds', '').split('\n') if result.get('tailwinds') else [],
-                'risks': result.get('headwinds', '').split('\n') if result.get('headwinds') else [],
-                'error': None
-            }
+                # Check if API call was successful
+                if not result.get('success'):
+                    raise Exception(result.get('error', 'Unknown API error'))
 
-            # Clean up lists (remove empty strings)
-            sentiment_data['catalysts'] = [c.strip() for c in sentiment_data['catalysts'] if c.strip()]
-            sentiment_data['risks'] = [r.strip() for r in sentiment_data['risks'] if r.strip()]
+                # Convert API response to sentiment data format
+                sentiment_data = {
+                    'ticker': ticker,
+                    'direction': result['direction'],
+                    'score': result['score'],
+                    'catalysts': result.get('tailwinds', '').split('\n') if result.get('tailwinds') else [],
+                    'risks': result.get('headwinds', '').split('\n') if result.get('headwinds') else [],
+                    'error': None
+                }
 
-            return sentiment_data
+                # Clean up lists (remove empty strings)
+                sentiment_data['catalysts'] = [c.strip() for c in sentiment_data['catalysts'] if c.strip()]
+                sentiment_data['risks'] = [r.strip() for r in sentiment_data['risks'] if r.strip()]
 
-        except Exception as e:
-            # Catch-all for API errors, network errors, etc.
-            raise Exception(f"Perplexity API call failed: {e}")
+                return sentiment_data
+
+            except Exception as e:
+                last_error = e
+                if attempt < self._API_RETRY_COUNT:
+                    logger.warning(
+                        f"Perplexity API attempt {attempt + 1} failed for {ticker}, "
+                        f"retrying in {self._API_RETRY_DELAY_SECONDS}s: {e}"
+                    )
+                    await asyncio.sleep(self._API_RETRY_DELAY_SECONDS)
+
+        raise Exception(f"Perplexity API call failed after {1 + self._API_RETRY_COUNT} attempts: {last_error}")
 
     def get_cached_sentiment(
         self,

@@ -125,18 +125,37 @@ class Settings:
 
     @property
     def tradier_api_key(self) -> str:
+        """Tradier API key. Empty string is treated as unconfigured."""
         self._load_secrets()
-        return self._secrets.get('TRADIER_API_KEY', '')
+        key = self._secrets.get('TRADIER_API_KEY', '')
+        # Empty string is as bad as None for API authentication
+        if not key or not key.strip():
+            import logging
+            logging.getLogger(__name__).warning("TRADIER_API_KEY not configured or empty")
+            return ''
+        return key.strip()
 
     @property
     def alpha_vantage_key(self) -> str:
+        """Alpha Vantage API key. Empty string is treated as unconfigured."""
         self._load_secrets()
-        return self._secrets.get('ALPHA_VANTAGE_KEY', '')
+        key = self._secrets.get('ALPHA_VANTAGE_KEY', '')
+        if not key or not key.strip():
+            import logging
+            logging.getLogger(__name__).warning("ALPHA_VANTAGE_KEY not configured or empty")
+            return ''
+        return key.strip()
 
     @property
     def perplexity_api_key(self) -> str:
+        """Perplexity API key. Empty string is treated as unconfigured."""
         self._load_secrets()
-        return self._secrets.get('PERPLEXITY_API_KEY', '')
+        key = self._secrets.get('PERPLEXITY_API_KEY', '')
+        if not key or not key.strip():
+            import logging
+            logging.getLogger(__name__).warning("PERPLEXITY_API_KEY not configured or empty")
+            return ''
+        return key.strip()
 
     @property
     def telegram_bot_token(self) -> str:
@@ -150,28 +169,56 @@ class Settings:
 
     @property
     def api_key(self) -> str:
+        """API key for authenticating requests. Empty string treated as unconfigured."""
         self._load_secrets()
-        return self._secrets.get('API_KEY', '')
+        key = self._secrets.get('API_KEY', '')
+        # Empty string is as bad as None for API authentication
+        return key.strip() if key else ''
 
     @property
     def telegram_webhook_secret(self) -> str:
+        """Telegram webhook secret. Empty string treated as unconfigured."""
         self._load_secrets()
-        return self._secrets.get('TELEGRAM_WEBHOOK_SECRET', '')
+        key = self._secrets.get('TELEGRAM_WEBHOOK_SECRET', '')
+        return key.strip() if key else ''
 
     @property
     def twelve_data_key(self) -> str:
+        """Twelve Data API key. Empty string is treated as unconfigured."""
         self._load_secrets()
-        return self._secrets.get('TWELVE_DATA_KEY', '')
+        key = self._secrets.get('TWELVE_DATA_KEY', '')
+        if not key or not key.strip():
+            import logging
+            logging.getLogger(__name__).warning("TWELVE_DATA_KEY not configured or empty")
+            return ''
+        return key.strip()
+
+    # Account size bounds (reasonable range for options trading)
+    ACCOUNT_SIZE_MIN = 1_000        # $1,000 minimum
+    ACCOUNT_SIZE_MAX = 10_000_000   # $10,000,000 maximum
+    ACCOUNT_SIZE_DEFAULT = 100_000  # $100,000 default
 
     @property
     def account_size(self) -> int:
-        """Get account size from secrets or environment (default 100k)."""
+        """Get account size from secrets or environment (default 100k).
+
+        Must be between $1,000 and $10,000,000. Values outside this range
+        are likely misconfiguration (e.g., cents instead of dollars, or
+        a typo adding extra zeros). Falls back to $100k default.
+        """
         self._load_secrets()
-        size_str = self._secrets.get('ACCOUNT_SIZE', '100000') if self._secrets else '100000'
+        size_str = self._secrets.get('ACCOUNT_SIZE', str(self.ACCOUNT_SIZE_DEFAULT)) if self._secrets else str(self.ACCOUNT_SIZE_DEFAULT)
         try:
-            return int(size_str)
+            size = int(size_str)
+            if size < self.ACCOUNT_SIZE_MIN or size > self.ACCOUNT_SIZE_MAX:
+                from .logging import log
+                log("error", "ACCOUNT_SIZE out of bounds, using default",
+                    size=size, min=self.ACCOUNT_SIZE_MIN, max=self.ACCOUNT_SIZE_MAX,
+                    default=self.ACCOUNT_SIZE_DEFAULT)
+                return self.ACCOUNT_SIZE_DEFAULT
+            return size
         except (ValueError, TypeError):
-            return 100000
+            return self.ACCOUNT_SIZE_DEFAULT
 
     @property
     def is_production(self) -> bool:

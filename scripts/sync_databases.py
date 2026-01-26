@@ -11,6 +11,7 @@ Also backs up local DB to Google Drive weekly.
 """
 
 import os
+import re
 import sys
 import shutil
 import sqlite3
@@ -25,7 +26,10 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 LOCAL_DB = PROJECT_ROOT / "2.0" / "data" / "ivcrush.db"
 GCS_BUCKET = "your-gcs-bucket"
 GCS_BLOB = "ivcrush.db"
-GDRIVE_BACKUP_DIR = Path.home() / "Library/CloudStorage/GoogleDrive-pmakwana99@gmail.com/My Drive/Backups/trading-desk"
+GDRIVE_BACKUP_DIR = Path(os.environ.get(
+    "GDRIVE_BACKUP_PATH",
+    str(Path.home() / "Library/CloudStorage/GoogleDrive-pmakwana99@gmail.com/My Drive/Backups/trading-desk")
+))
 
 
 def log(msg: str, level: str = "info"):
@@ -36,9 +40,22 @@ def log(msg: str, level: str = "info"):
     print(f"[{timestamp}] {icon} {msg}")
 
 
+def _validate_gcs_name(name: str) -> str:
+    """Validate GCS bucket/blob names contain only safe characters."""
+    if not re.match(r'^[a-zA-Z0-9._/-]+$', name):
+        raise ValueError(f"Invalid GCS name (unsafe characters): {name}")
+    return name
+
+
 def run_gsutil(args: list, check: bool = True) -> subprocess.CompletedProcess:
-    """Run gsutil command."""
-    cmd = ["gsutil"] + args
+    """Run gsutil command with list args (no shell=True)."""
+    # Validate that args are strings (prevent injection)
+    sanitized = []
+    for arg in args:
+        if not isinstance(arg, str):
+            raise TypeError(f"gsutil arg must be string, got {type(arg)}")
+        sanitized.append(arg)
+    cmd = ["gsutil"] + sanitized
     return subprocess.run(cmd, capture_output=True, text=True, check=check)
 
 
@@ -87,6 +104,8 @@ def sync_historical_moves(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Co
 
     # Records only in cloud -> add to local
     cloud_only = cloud_keys - local_keys
+    if not cloud_only and not (local_keys - cloud_keys):
+        return stats
     if cloud_only:
         placeholders = ",".join(["(?,?)"] * len(cloud_only))
         params = [item for pair in cloud_only for item in pair]
@@ -110,6 +129,8 @@ def sync_historical_moves(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Co
 
     # Records only in local -> add to cloud
     local_only = local_keys - cloud_keys
+    if not local_only:
+        return stats
     if local_only:
         placeholders = ",".join(["(?,?)"] * len(local_only))
         params = [item for pair in local_only for item in pair]
@@ -360,34 +381,46 @@ def main():
         local_conn = sqlite3.connect(str(LOCAL_DB))
         cloud_conn = sqlite3.connect(str(cloud_db_path))
 
-        # CRITICAL: Enable foreign key constraints
-        local_conn.execute("PRAGMA foreign_keys=ON")
-        cloud_conn.execute("PRAGMA foreign_keys=ON")
+        try:
+            # CRITICAL: Enable foreign key constraints
+            local_conn.execute("PRAGMA foreign_keys=ON")
+            cloud_conn.execute("PRAGMA foreign_keys=ON")
 
-        # Enable WAL mode for better concurrency
-        local_conn.execute("PRAGMA journal_mode=WAL")
-        cloud_conn.execute("PRAGMA journal_mode=WAL")
+            # Enable WAL mode for better concurrency
+            local_conn.execute("PRAGMA journal_mode=WAL")
+            cloud_conn.execute("PRAGMA journal_mode=WAL")
 
-        # Sync each table
-        log("Syncing historical_moves...")
-        hm_stats = sync_historical_moves(local_conn, cloud_conn)
-        log(f"  local +{hm_stats['local_added']}, cloud +{hm_stats['cloud_added']}")
+            # Sync each table
+            log("Syncing historical_moves...")
+            hm_stats = sync_historical_moves(local_conn, cloud_conn)
+            log(f"  local +{hm_stats['local_added']}, cloud +{hm_stats['cloud_added']}")
 
-        log("Syncing earnings_calendar...")
-        ec_stats = sync_earnings_calendar(local_conn, cloud_conn)
-        log(f"  local +{ec_stats['local_updated']}, cloud +{ec_stats['cloud_updated']}")
+            log("Syncing earnings_calendar...")
+            ec_stats = sync_earnings_calendar(local_conn, cloud_conn)
+            log(f"  local +{ec_stats['local_updated']}, cloud +{ec_stats['cloud_updated']}")
 
-        log("Syncing trade_journal...")
-        tj_stats = sync_trade_journal(local_conn, cloud_conn)
-        log(f"  local +{tj_stats['local_added']}, cloud +{tj_stats['cloud_added']}")
+            log("Syncing trade_journal...")
+            tj_stats = sync_trade_journal(local_conn, cloud_conn)
+            log(f"  local +{tj_stats['local_added']}, cloud +{tj_stats['cloud_added']}")
 
-        # Commit changes
-        local_conn.commit()
-        cloud_conn.commit()
-
-        # Close connections
-        local_conn.close()
-        cloud_conn.close()
+            # Commit changes
+            local_conn.commit()
+            cloud_conn.commit()
+        except Exception as e:
+            log(f"Sync failed, rolling back: {e}", "error")
+            try:
+                local_conn.rollback()
+            except Exception:
+                pass
+            try:
+                cloud_conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            # Close connections
+            local_conn.close()
+            cloud_conn.close()
 
         # Upload synced cloud DB back to GCS
         log("Uploading synced DB to GCS...")
