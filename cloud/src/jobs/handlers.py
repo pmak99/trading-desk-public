@@ -653,6 +653,7 @@ class JobRunner:
 
                 opportunities.append({
                     "ticker": ticker,
+                    "earnings_date": earnings_date,
                     "vrp_ratio": vrp_data["vrp_ratio"],
                     "score": final_score,
                     "direction": direction,
