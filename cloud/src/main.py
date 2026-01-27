@@ -1636,6 +1636,7 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
             ticker_data = [
                 {
                     "ticker": t["ticker"],
+                    "earnings_date": t.get("earnings_date", ""),
                     "vrp_ratio": t["vrp_ratio"],
                     "score": t["score"],
                     "direction": "NEUTRAL",
@@ -1735,6 +1736,7 @@ async def telegram_webhook(request: Request):
                 ticker_data = [
                     {
                         "ticker": t["ticker"],
+                        "earnings_date": t.get("earnings_date", ""),
                         "vrp_ratio": t["vrp_ratio"],
                         "score": t["score"],
                         "direction": t.get("direction", "NEUTRAL"),

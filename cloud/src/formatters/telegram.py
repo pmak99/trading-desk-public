@@ -59,7 +59,13 @@ def format_digest(
     Returns:
         HTML-formatted Telegram message
     """
-    # Parse date for display
+    # Check if any ticker has earnings_date for grouped mode
+    has_dates = any(t.get("earnings_date") for t in tickers)
+
+    if has_dates:
+        return _format_digest_grouped(tickers, budget_calls, budget_remaining)
+
+    # Fallback: single-date format (backward compatible)
     try:
         dt = datetime.strptime(date, "%Y-%m-%d")
         date_display = dt.strftime("%b %d")
@@ -74,6 +80,50 @@ def format_digest(
     for i, ticker_data in enumerate(tickers, 1):
         lines.append(format_ticker_line(ticker_data, i))
         lines.append("")
+
+    lines.append(f"Budget: {budget_calls}/40 calls | ${budget_remaining:.2f} left")
+
+    return "\n".join(lines)
+
+
+def _format_digest_grouped(
+    tickers: List[Dict[str, Any]],
+    budget_calls: int,
+    budget_remaining: float,
+) -> str:
+    """Format digest grouped by earnings_date with sub-headers."""
+    # Group by earnings_date
+    groups: dict[str, List[Dict[str, Any]]] = {}
+    for t in tickers:
+        ed = t.get("earnings_date", "")
+        groups.setdefault(ed, []).append(t)
+
+    # Sort groups chronologically
+    sorted_dates = sorted(groups.keys())
+
+    # Sort tickers within each group by score descending
+    for ed in sorted_dates:
+        groups[ed].sort(key=lambda t: t.get("score", 0), reverse=True)
+
+    lines = [
+        f"☀️ <b>Earnings Digest</b> ({len(tickers)} qualified)",
+        "",
+    ]
+
+    rank = 1
+    for ed in sorted_dates:
+        # Date sub-header
+        try:
+            dt = datetime.strptime(ed, "%Y-%m-%d")
+            date_label = dt.strftime("%b %d")
+        except ValueError:
+            date_label = ed
+        lines.append(f"📅 <b>{date_label}</b>")
+
+        for ticker_data in groups[ed]:
+            lines.append(format_ticker_line(ticker_data, rank))
+            lines.append("")
+            rank += 1
 
     lines.append(f"Budget: {budget_calls}/40 calls | ${budget_remaining:.2f} left")
 
