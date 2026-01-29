@@ -1,15 +1,19 @@
 """SectorFetchAgent - Fetches company sector/industry from Finnhub.
 
-This agent retrieves company profile data from Finnhub MCP server
+This agent retrieves company profile data from the Finnhub API
 and caches it in the ticker_metadata table.
 """
 
 from typing import Dict, Any, Optional
 import logging
+import os
+import requests
 
 from ..integration.ticker_metadata import TickerMetadataRepository
 
 logger = logging.getLogger(__name__)
+
+FINNHUB_BASE_URL = "https://finnhub.io/api/v1"
 
 
 class SectorFetchAgent:
@@ -82,18 +86,42 @@ class SectorFetchAgent:
 
     def _fetch_from_finnhub(self, ticker: str) -> Optional[Dict[str, Any]]:
         """
-        Fetch company profile from Finnhub.
+        Fetch company profile from Finnhub REST API.
 
-        Note: This is a placeholder. In production, this would call
-        the Finnhub MCP tool: mcp__finnhub__finnhub_stock_market_data
-
-        For now, returns None to trigger cache-only behavior.
-        The maintenance sector-sync command will populate the cache.
+        Returns:
+            Dict with name, sector, industry, market_cap or None on failure.
         """
-        # TODO: Implement Finnhub MCP call
-        # This will be called during maintenance sector-sync
-        logger.debug(f"Finnhub fetch for {ticker} - placeholder")
-        return None
+        api_key = os.environ.get('FINNHUB_API_KEY', '')
+        if not api_key:
+            logger.warning("FINNHUB_API_KEY not set, skipping fetch")
+            return None
+
+        try:
+            resp = requests.get(
+                f"{FINNHUB_BASE_URL}/stock/profile2",
+                params={"symbol": ticker, "token": api_key},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            if not data or not data.get('name'):
+                logger.debug(f"No Finnhub profile for {ticker}")
+                return None
+
+            industry = data.get('finnhubIndustry', 'Unknown')
+            sector = TickerMetadataRepository.map_industry_to_sector(industry)
+
+            return {
+                'name': data['name'],
+                'sector': sector,
+                'industry': industry,
+                'market_cap': data.get('marketCapitalization'),
+            }
+
+        except requests.RequestException as e:
+            logger.warning(f"Finnhub API error for {ticker}: {e}")
+            return None
 
     def fetch_batch(self, tickers: list, delay_seconds: float = 1.0) -> Dict[str, Any]:
         """
