@@ -247,12 +247,26 @@ def calculate_earnings_move(
         - Move = earnings_day close -> next_day open
 
     UNKNOWN:
-        - Try to infer from price action, default to BMO logic
+        - Infer from price action by comparing gap magnitudes
+        - If next-day gap > same-day gap, likely AMC
     """
     # Build price lookup by date
     price_map: Dict[date, DailyPrice] = {p.date: p for p in prices}
+    today = date.today()
 
     earnings_date = event.date
+
+    # Safety check: Don't process same-day AMC or UNKNOWN earnings
+    # The reaction day hasn't happened yet (or is incomplete intraday)
+    if earnings_date >= today:
+        if event.timing == EarningsTiming.AMC:
+            logger.warning(f"  ⏳ Skipping {earnings_date} - AMC earnings, reaction day not complete")
+            return None
+        elif event.timing == EarningsTiming.UNKNOWN:
+            logger.warning(f"  ⏳ Skipping {earnings_date} - UNKNOWN timing, wait for reaction day")
+            return None
+        # BMO on today is OK if market has closed, but we'll let it proceed
+        # and fail naturally if next-day data isn't available
 
     # Find trading days around earnings
     sorted_dates = sorted(price_map.keys())
@@ -279,7 +293,29 @@ def calculate_earnings_move(
     earnings_price = price_map[earnings_date]
 
     # Determine reaction day based on timing
-    if event.timing == EarningsTiming.AMC:
+    effective_timing = event.timing
+
+    # For UNKNOWN timing, infer from price action
+    if event.timing == EarningsTiming.UNKNOWN and earnings_idx < len(sorted_dates) - 1:
+        next_date = sorted_dates[earnings_idx + 1]
+        next_price = price_map[next_date]
+
+        # Calculate gap magnitude for both scenarios
+        # BMO scenario: prev_close -> earnings_open
+        bmo_gap = abs((earnings_price.open - prev_price.close) / prev_price.close * 100) if prev_price.close else 0
+        # AMC scenario: earnings_close -> next_open
+        amc_gap = abs((next_price.open - earnings_price.close) / earnings_price.close * 100) if earnings_price.close else 0
+
+        # If next-day gap is significantly larger (>2x), likely AMC
+        # Also if next-day gap > 3% and same-day gap < 1%, likely AMC
+        if amc_gap > bmo_gap * 2 or (amc_gap > 3.0 and bmo_gap < 1.0):
+            effective_timing = EarningsTiming.AMC
+            logger.info(f"  📊 Inferred AMC timing: same-day gap {bmo_gap:.1f}% vs next-day gap {amc_gap:.1f}%")
+        else:
+            effective_timing = EarningsTiming.BMO
+            logger.debug(f"  📊 Inferred BMO timing: same-day gap {bmo_gap:.1f}% vs next-day gap {amc_gap:.1f}%")
+
+    if effective_timing == EarningsTiming.AMC:
         # AMC: reaction is next trading day
         if earnings_idx >= len(sorted_dates) - 1:
             logger.warning(f"  No next day data for AMC earnings {earnings_date}")
@@ -295,7 +331,7 @@ def calculate_earnings_move(
         logger.debug(f"  AMC: {earnings_date} close ${reference_close:.2f} -> {next_date} open ${reaction_price.open:.2f}")
 
     else:
-        # BMO or UNKNOWN: reaction is earnings day
+        # BMO: reaction is earnings day
         reaction_price = earnings_price
 
         # For BMO: prev_close is prev_day close
@@ -321,7 +357,7 @@ def calculate_earnings_move(
     return EarningsMove(
         ticker=event.ticker,
         earnings_date=event.date,  # Original earnings date
-        timing=event.timing,
+        timing=effective_timing,  # Use inferred timing if UNKNOWN was resolved
         prev_close=reference_close,
         reaction_open=reaction_price.open,
         reaction_high=reaction_price.high,
