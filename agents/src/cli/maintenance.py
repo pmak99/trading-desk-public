@@ -512,20 +512,20 @@ def run_sector_sync():
         logger.info("  (Rate limited: 1 request/second for Finnhub)")
         logger.info("")
 
-        # Note: This is a placeholder. Real implementation would use
-        # the Finnhub MCP tool. For now, just log what would be fetched.
-        logger.info("  Note: Finnhub integration pending.")
-        logger.info("  Tickers needing data:")
-        for ticker in need_fetch[:10]:
-            logger.info(f"    - {ticker}")
-        if len(need_fetch) > 10:
-            logger.info(f"    ... and {len(need_fetch) - 10} more")
+        batch_result = agent.fetch_batch(need_fetch, delay_seconds=1.0)
+        fetched = batch_result['fetched_count']
+        errors = batch_result['errors']
+
+        logger.info(f"  Fetched: {fetched}")
+        if errors:
+            logger.info(f"  Not found: {len(errors)} ({', '.join(errors[:10])}{'...' if len(errors) > 10 else ''})")
 
         logger.info("")
         logger.info("[4/4] Summary:")
         logger.info(f"  Total tickers: {len(tickers)}")
-        logger.info(f"  Cached: {len(have_cached)}")
-        logger.info(f"  Pending Finnhub fetch: {len(need_fetch)}")
+        logger.info(f"  Already cached: {len(have_cached)}")
+        logger.info(f"  Newly fetched: {fetched}")
+        logger.info(f"  Not found: {len(errors)}")
         logger.info("")
         logger.info("=" * 60)
 
