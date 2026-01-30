@@ -9,8 +9,12 @@ Comprehensive health check for the Trading Desk database including:
 - Duplicate detection
 - Statistics currency
 - Performance metrics
+
+Usage:
+    python scripts/db_health_check.py [--db PATH] [--fix] [--verbose]
 """
 
+import argparse
 import sqlite3
 import sys
 from pathlib import Path
@@ -292,8 +296,40 @@ def print_results(checks: List[Tuple[str, Tuple[str, str]]], stats: Dict[str, An
 
 def main():
     """Run comprehensive database health check."""
+    parser = argparse.ArgumentParser(
+        description="Comprehensive health check for the Trading Desk database.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    python scripts/db_health_check.py                  # Check default database
+    python scripts/db_health_check.py --db ./test.db   # Check specific database
+    python scripts/db_health_check.py --verbose        # Detailed output
+
+Checks performed:
+    - SQLite integrity check (PRAGMA integrity_check)
+    - Foreign key constraint validation
+    - WAL mode verification
+    - Orphaned legs and strategies detection
+    - Duplicate historical moves detection
+    - NULL critical fields check
+    - Query statistics currency
+        """
+    )
+    parser.add_argument(
+        "--db", "-d",
+        type=Path,
+        default=None,
+        help="Path to database file (default: 2.0/data/ivcrush.db)"
+    )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Show detailed diagnostic output"
+    )
+    args = parser.parse_args()
+
     project_root = Path(__file__).parent.parent
-    db_path = project_root / "2.0" / "data" / "ivcrush.db"
+    db_path = args.db if args.db else project_root / "2.0" / "data" / "ivcrush.db"
 
     if not db_path.exists():
         print(f"ERROR: Database not found at {db_path}")
