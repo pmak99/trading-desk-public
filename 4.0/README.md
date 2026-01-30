@@ -9,6 +9,17 @@ AI-enhanced layer on top of 2.0's proven VRP system. Adds Perplexity-powered sen
 3. **Graceful Degradation** - Sentiment never blocks analysis; falls back to WebSearch
 4. **Cost-Conscious** - 40 calls/day budget, 3-hour TTL caching, free fallbacks
 
+## Strategy Performance (2025 Verified Data)
+
+| Strategy | Trades | Win Rate | Total P&L | Recommendation |
+|----------|-------:|:--------:|----------:|----------------|
+| **SINGLE** | 108 | **63.9%** | **+$103,390** | Preferred |
+| SPREAD | 86 | 52.3% | +$51,472 | Good |
+| STRANGLE | 6 | 33.3% | -$15,100 | Avoid |
+| IRON_CONDOR | 3 | 66.7% | -$126,429 | Caution |
+
+**Key insight:** SINGLE options outperform spreads in both win rate and total P&L.
+
 ## Architecture
 
 ```
@@ -61,55 +72,20 @@ AI-enhanced layer on top of 2.0's proven VRP system. Adds Perplexity-powered sen
 | 2 | Conflict (bullish skew + bearish sentiment) | Go neutral (hedge) |
 | 3 | Otherwise | Keep original skew bias |
 
-## Slash Commands
+## TRR Performance
 
-Available in Claude Code:
+| Level | Win Rate | P&L | Recommendation |
+|-------|:--------:|----:|----------------|
+| **LOW** (<1.5x) | **70.6%** | **+$52k** | Preferred |
+| NORMAL (1.5-2.5x) | 56.5% | -$38k | Standard |
+| HIGH (>2.5x) | 54.8% | -$123k | **Avoid** |
 
-### Discovery & Analysis
+## Critical Rules
 
-| Command | Purpose | API Cost |
-|---------|---------|----------|
-| `/whisper [DATE]` | Most anticipated earnings | ~3-8 calls |
-| `/analyze TICKER [DATE]` | Deep analysis with strategies | ~1 call |
-| `/scan DATE` | Scan all earnings on date | Free |
-| `/alert` | Today's high-VRP opportunities | ~3 calls |
-
-### System Operations
-
-| Command | Purpose | API Cost |
-|---------|---------|----------|
-| `/prime [DATE]` | Sync calendar + pre-cache sentiment | ~3-8 calls |
-| `/health` | System health check | Free |
-| `/maintenance [task]` | Backup, cleanup, sync | Free |
-
-### Data Collection
-
-| Command | Purpose | API Cost |
-|---------|---------|----------|
-| `/collect TICKER [DATE]` | Store sentiment for backtesting | ~1 call |
-| `/backfill TICKER DATE` | Record post-earnings outcome | Free |
-| `/backfill --pending` | Backfill all pending | Free |
-| `/backfill --stats` | Show prediction accuracy | Free |
-
-### Reporting
-
-| Command | Purpose | API Cost |
-|---------|---------|----------|
-| `/history TICKER` | Historical moves visualization | Free |
-| `/backtest [TICKER]` | Performance analysis | Free |
-| `/journal` | Parse Fidelity exports | Free |
-| `/export-report` | Export scan results | Free |
-
-## Daily Workflow
-
-```
-7:00 AM   /health              # Verify systems
-7:15 AM   /prime               # Sync calendar + pre-cache sentiment
-9:30 AM   /whisper             # Find opportunities (instant from cache)
-          /analyze NVDA        # Deep dive
-          Execute in Fidelity  # Human approval required
-Evening   /backfill --pending  # Record outcomes
-```
+1. **Prefer SINGLE options** - 64% vs 52% win rate vs spreads
+2. **Respect TRR limits** - LOW TRR: +$52k, HIGH TRR: -$123k
+3. **Never roll** - 0% success rate, always makes losses worse
+4. **Cut losses early** - don't try to "fix" losing trades
 
 ## Budget & Cost
 
@@ -118,7 +94,6 @@ Evening   /backfill --pending  # Record outcomes
 | Daily max | 40 calls |
 | Warning threshold | 32 calls (80%) |
 | Monthly budget | $5.00 |
-| Cost per call | ~$0.006 |
 
 ### Fallback Chain
 
@@ -142,8 +117,6 @@ Evening   /backfill --pending  # Record outcomes
 
 ## Structured Sentiment Format
 
-All queries return:
-
 ```
 Direction: [bullish/bearish/neutral]
 Score: [-1 to +1]
@@ -151,7 +124,7 @@ Catalysts: [2-3 bullets, max 10 words each]
 Risks: [1-2 bullets, max 10 words each]
 ```
 
-## Architecture
+## Directory Structure
 
 ```
 4.0/
@@ -164,25 +137,15 @@ Risks: [1-2 bullets, max 10 words each]
 │       └── sentiment_history.py  # Backtesting data
 ├── data/
 │   └── sentiment_cache.db        # SQLite cache + budget
-└── tests/                        # 186 tests
+└── tests/                        # 221 tests
 ```
 
 ## Testing
 
 ```bash
 cd 4.0
-../2.0/venv/bin/python -m pytest tests/ -v    # 186 tests
+../2.0/venv/bin/python -m pytest tests/ -v    # 221 tests
 ```
-
-Key test files:
-- `test_sentiment_direction.py` - 3-rule directional bias
-- `test_sentiment_cache.py` - Cache TTL, invalidation
-- `test_budget_tracker.py` - Budget enforcement
-- `test_sentiment_history.py` - Backtesting storage
-
-## TRR Warnings
-
-All discovery commands display warnings for HIGH tail risk tickers (TRR > 2.5x). These are limited to 50 contracts / $25k notional.
 
 ## Related Systems
 
