@@ -329,14 +329,62 @@ def sync_trade_journal(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Conne
 
 
 def sync_position_limits(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Connection) -> dict:
-    """Sync position_limits table (union strategy - newest updated_at wins on conflict)."""
+    """Sync position_limits table (union strategy - newest last_updated wins on conflict)."""
     stats = {"local_added": 0, "cloud_added": 0}
 
-    # Get all records from both
+    # Check if table exists in both databases
+    local_has_table = local_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='position_limits'"
+    ).fetchone() is not None
+
+    cloud_has_table = cloud_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='position_limits'"
+    ).fetchone() is not None
+
+    if not local_has_table and not cloud_has_table:
+        log("position_limits table doesn't exist in either database, skipping")
+        return stats
+
+    # Create table in cloud if missing (copy schema from local)
+    if local_has_table and not cloud_has_table:
+        cloud_conn.execute("""
+            CREATE TABLE IF NOT EXISTS position_limits (
+                ticker TEXT PRIMARY KEY,
+                max_contracts INTEGER DEFAULT 100,
+                max_notional REAL DEFAULT 50000,
+                tail_risk_ratio REAL,
+                tail_risk_level TEXT,
+                avg_move REAL,
+                max_move REAL,
+                num_quarters INTEGER,
+                notes TEXT,
+                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+    # Create table in local if missing (copy schema from cloud)
+    if cloud_has_table and not local_has_table:
+        local_conn.execute("""
+            CREATE TABLE IF NOT EXISTS position_limits (
+                ticker TEXT PRIMARY KEY,
+                max_contracts INTEGER DEFAULT 100,
+                max_notional REAL DEFAULT 50000,
+                tail_risk_ratio REAL,
+                tail_risk_level TEXT,
+                avg_move REAL,
+                max_move REAL,
+                num_quarters INTEGER,
+                notes TEXT,
+                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+    # Get all records from both (actual schema columns)
     local_records = {
         row[0]: row  # key by ticker
         for row in local_conn.execute("""
-            SELECT ticker, trr, position_limit, notional_limit, trr_level, updated_at
+            SELECT ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
+                   avg_move, max_move, num_quarters, notes, last_updated
             FROM position_limits
         """)
     }
@@ -344,7 +392,8 @@ def sync_position_limits(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Con
     cloud_records = {
         row[0]: row
         for row in cloud_conn.execute("""
-            SELECT ticker, trr, position_limit, notional_limit, trr_level, updated_at
+            SELECT ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
+                   avg_move, max_move, num_quarters, notes, last_updated
             FROM position_limits
         """)
     }
@@ -359,8 +408,9 @@ def sync_position_limits(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Con
             # Only in local -> add to cloud
             cloud_conn.execute("""
                 INSERT OR REPLACE INTO position_limits
-                (ticker, trr, position_limit, notional_limit, trr_level, updated_at)
-                VALUES (?,?,?,?,?,?)
+                (ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
+                 avg_move, max_move, num_quarters, notes, last_updated)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
             """, local_rec)
             stats["cloud_added"] += 1
 
@@ -368,28 +418,31 @@ def sync_position_limits(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Con
             # Only in cloud -> add to local
             local_conn.execute("""
                 INSERT OR REPLACE INTO position_limits
-                (ticker, trr, position_limit, notional_limit, trr_level, updated_at)
-                VALUES (?,?,?,?,?,?)
+                (ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
+                 avg_move, max_move, num_quarters, notes, last_updated)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
             """, cloud_rec)
             stats["local_added"] += 1
 
         elif local_rec and cloud_rec:
-            # Both exist - newest updated_at wins
-            local_updated = local_rec[5] or "1970-01-01"
-            cloud_updated = cloud_rec[5] or "1970-01-01"
+            # Both exist - newest last_updated wins
+            local_updated = local_rec[9] or "1970-01-01"
+            cloud_updated = cloud_rec[9] or "1970-01-01"
 
             if local_updated > cloud_updated:
                 cloud_conn.execute("""
                     INSERT OR REPLACE INTO position_limits
-                    (ticker, trr, position_limit, notional_limit, trr_level, updated_at)
-                    VALUES (?,?,?,?,?,?)
+                    (ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
+                     avg_move, max_move, num_quarters, notes, last_updated)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
                 """, local_rec)
                 stats["cloud_added"] += 1
             elif cloud_updated > local_updated:
                 local_conn.execute("""
                     INSERT OR REPLACE INTO position_limits
-                    (ticker, trr, position_limit, notional_limit, trr_level, updated_at)
-                    VALUES (?,?,?,?,?,?)
+                    (ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
+                     avg_move, max_move, num_quarters, notes, last_updated)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
                 """, cloud_rec)
                 stats["local_added"] += 1
 
