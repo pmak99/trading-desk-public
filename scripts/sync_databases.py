@@ -59,18 +59,45 @@ def run_gsutil(args: list, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, check=check)
 
 
-def download_cloud_db(dest: Path) -> bool:
-    """Download cloud DB from GCS."""
-    try:
-        result = run_gsutil(["cp", f"gs://{GCS_BUCKET}/{GCS_BLOB}", str(dest)])
-        if result.returncode == 0:
-            log(f"Downloaded cloud DB ({dest.stat().st_size / 1024 / 1024:.2f} MB)")
-            return True
-        log(f"Failed to download: {result.stderr}", "error")
-        return False
-    except Exception as e:
-        log(f"Download error: {e}", "error")
-        return False
+def download_cloud_db(dest: Path, max_retries: int = 3) -> bool:
+    """Download cloud DB from GCS with retry logic.
+
+    Args:
+        dest: Destination path for downloaded database
+        max_retries: Maximum number of retry attempts (default 3)
+
+    Returns:
+        True if download succeeded, False otherwise
+    """
+    import time
+
+    backoff_seconds = [5, 10, 30]  # Exponential backoff: 5s, 10s, 30s
+
+    for attempt in range(max_retries):
+        try:
+            result = run_gsutil(["cp", f"gs://{GCS_BUCKET}/{GCS_BLOB}", str(dest)])
+            if result.returncode == 0:
+                log(f"Downloaded cloud DB ({dest.stat().st_size / 1024 / 1024:.2f} MB)")
+                return True
+
+            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+
+            if attempt < max_retries - 1:
+                wait_time = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
+                log(f"Download attempt {attempt + 1} failed: {error_msg}. Retrying in {wait_time}s...", "warn")
+                time.sleep(wait_time)
+            else:
+                log(f"Download failed after {max_retries} attempts: {error_msg}", "error")
+
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait_time = backoff_seconds[min(attempt, len(backoff_seconds) - 1)]
+                log(f"Download attempt {attempt + 1} error: {e}. Retrying in {wait_time}s...", "warn")
+                time.sleep(wait_time)
+            else:
+                log(f"Download error after {max_retries} attempts: {e}", "error")
+
+    return False
 
 
 def upload_cloud_db(src: Path) -> bool:
@@ -301,6 +328,74 @@ def sync_trade_journal(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Conne
     return stats
 
 
+def sync_position_limits(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Connection) -> dict:
+    """Sync position_limits table (union strategy - newest updated_at wins on conflict)."""
+    stats = {"local_added": 0, "cloud_added": 0}
+
+    # Get all records from both
+    local_records = {
+        row[0]: row  # key by ticker
+        for row in local_conn.execute("""
+            SELECT ticker, trr, position_limit, notional_limit, trr_level, updated_at
+            FROM position_limits
+        """)
+    }
+
+    cloud_records = {
+        row[0]: row
+        for row in cloud_conn.execute("""
+            SELECT ticker, trr, position_limit, notional_limit, trr_level, updated_at
+            FROM position_limits
+        """)
+    }
+
+    all_tickers = set(local_records.keys()) | set(cloud_records.keys())
+
+    for ticker in all_tickers:
+        local_rec = local_records.get(ticker)
+        cloud_rec = cloud_records.get(ticker)
+
+        if local_rec and not cloud_rec:
+            # Only in local -> add to cloud
+            cloud_conn.execute("""
+                INSERT OR REPLACE INTO position_limits
+                (ticker, trr, position_limit, notional_limit, trr_level, updated_at)
+                VALUES (?,?,?,?,?,?)
+            """, local_rec)
+            stats["cloud_added"] += 1
+
+        elif cloud_rec and not local_rec:
+            # Only in cloud -> add to local
+            local_conn.execute("""
+                INSERT OR REPLACE INTO position_limits
+                (ticker, trr, position_limit, notional_limit, trr_level, updated_at)
+                VALUES (?,?,?,?,?,?)
+            """, cloud_rec)
+            stats["local_added"] += 1
+
+        elif local_rec and cloud_rec:
+            # Both exist - newest updated_at wins
+            local_updated = local_rec[5] or "1970-01-01"
+            cloud_updated = cloud_rec[5] or "1970-01-01"
+
+            if local_updated > cloud_updated:
+                cloud_conn.execute("""
+                    INSERT OR REPLACE INTO position_limits
+                    (ticker, trr, position_limit, notional_limit, trr_level, updated_at)
+                    VALUES (?,?,?,?,?,?)
+                """, local_rec)
+                stats["cloud_added"] += 1
+            elif cloud_updated > local_updated:
+                local_conn.execute("""
+                    INSERT OR REPLACE INTO position_limits
+                    (ticker, trr, position_limit, notional_limit, trr_level, updated_at)
+                    VALUES (?,?,?,?,?,?)
+                """, cloud_rec)
+                stats["local_added"] += 1
+
+    return stats
+
+
 def backup_to_gdrive(db_path: Path) -> bool:
     """
     Backup database to Google Drive with integrity verification.
@@ -403,6 +498,10 @@ def main():
             tj_stats = sync_trade_journal(local_conn, cloud_conn)
             log(f"  local +{tj_stats['local_added']}, cloud +{tj_stats['cloud_added']}")
 
+            log("Syncing position_limits...")
+            pl_stats = sync_position_limits(local_conn, cloud_conn)
+            log(f"  local +{pl_stats['local_added']}, cloud +{pl_stats['cloud_added']}")
+
             # Commit changes
             local_conn.commit()
             cloud_conn.commit()
@@ -438,7 +537,8 @@ def main():
         total_changes = (
             hm_stats['local_added'] + hm_stats['cloud_added'] +
             ec_stats['local_updated'] + ec_stats['cloud_updated'] +
-            tj_stats['local_added'] + tj_stats['cloud_added']
+            tj_stats['local_added'] + tj_stats['cloud_added'] +
+            pl_stats['local_added'] + pl_stats['cloud_added']
         )
         log(f"Sync complete! {total_changes} total changes", "success")
 

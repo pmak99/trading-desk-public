@@ -315,15 +315,13 @@ def parse_occ_symbol(symbol: str) -> Dict:
         except (IndexError, ValueError):
             pass
 
-        # Parse strike - OCC format has strike * 1000, but Fidelity sometimes uses direct
+        # Parse strike - OCC format always has strike * 1000 (8-digit right-padded)
+        # Examples: 00150000 = $150, 00620000 = $620, 06850000 = $6850
         try:
             strike_code = occ_match.group(4)
             strike_val = float(strike_code)
-            # If strike > 10000, it's likely OCC format (multiply by 1000)
-            if strike_val > 10000:
-                result['strike'] = strike_val / 1000
-            else:
-                result['strike'] = strike_val
+            # OCC format: always divide by 1000
+            result['strike'] = strike_val / 1000
         except (ValueError, TypeError):
             pass
 

@@ -139,7 +139,8 @@ class AnomalyDetectionAgent:
             days_until_earnings = (earnings_dt - datetime.now()).days
 
             # If earnings within 7 days and cache older than 24h
-            if days_until_earnings <= 7 and cache_age_hours > self.STALE_CACHE_HOURS:
+            # Note: cache_age_hours can be None if cache lookup fails
+            if days_until_earnings <= 7 and cache_age_hours is not None and cache_age_hours > self.STALE_CACHE_HOURS:
                 return {
                     'type': 'stale_data',
                     'severity': 'warning',

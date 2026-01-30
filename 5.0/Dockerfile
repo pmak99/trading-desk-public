@@ -6,9 +6,10 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (gcc for building, curl for healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first (for caching)
@@ -29,9 +30,9 @@ ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 EXPOSE 8080
 
-# Health check
+# Health check (use curl instead of Python for reliability)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8080/')" || exit 1
+    CMD curl -f http://localhost:8080/ || exit 1
 
 # Run the application
 CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
