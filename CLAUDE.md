@@ -14,7 +14,7 @@ Production quantitative options trading system focused on **IV Crush** strategy 
 4.0 AI Sentiment        ──→ Perplexity-powered sentiment layer
 2.0 Core Math Engine    ──→ VRP/strategy calculations (shared library)
 ────────────────────────────────────────────────────────────────────
-SQLite (ivcrush.db)     ──→ 16 tables, 6,165+ historical moves
+SQLite (ivcrush.db)     ──→ 17 tables, 6,165+ historical moves
 ```
 
 All subsystems import 2.0 as a shared library via `sys.path` injection. 4.0, 5.0, and 6.0 never duplicate 2.0's math.
