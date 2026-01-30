@@ -1,6 +1,6 @@
 # 2.0 Core Math Engine
 
-Production VRP calculations and strategy generation for IV Crush trading. This is the foundation that 4.0, 5.0, and 6.0 build upon.
+Production VRP calculations and strategy generation for IV Crush trading. This is the shared library that 4.0, 5.0, and 6.0 build upon.
 
 ## Quick Start
 
@@ -18,6 +18,7 @@ cp .env.example .env
 ./trade.sh scan 2026-01-20      # All earnings on date
 ./trade.sh whisper              # Most anticipated earnings
 ./trade.sh health               # System check
+./trade.sh sync-cloud           # Sync with cloud + backup
 ```
 
 ## Commands
@@ -25,11 +26,9 @@ cp .env.example .env
 | Command | Description |
 |---------|-------------|
 | `./trade.sh TICKER DATE` | Analyze single ticker |
-| `./trade.sh list TICKERS DATE` | Analyze multiple (comma-separated) |
 | `./trade.sh scan DATE` | Scan all earnings for date |
 | `./trade.sh whisper [DATE]` | Most anticipated earnings |
-| `./trade.sh sync [--dry-run]` | Refresh earnings calendar |
-| `./trade.sh sync-cloud` | Sync with cloud + backup |
+| `./trade.sh sync-cloud` | Sync with cloud + backup to GDrive |
 | `./trade.sh health` | System health check |
 
 ## VRP Calculation
@@ -38,8 +37,6 @@ cp .env.example .env
 VRP Ratio = Implied Move / Historical Mean Move
 ```
 
-The implied move comes from ATM straddle pricing via Tradier. Historical mean uses intraday moves (open-to-close on earnings day).
-
 | Tier | VRP Ratio | Action |
 |------|-----------|--------|
 | EXCELLENT | >= 1.8x | High confidence, full size |
@@ -47,40 +44,33 @@ The implied move comes from ATM straddle pricing via Tradier. Historical mean us
 | MARGINAL | >= 1.2x | Minimum edge, reduce size |
 | SKIP | < 1.2x | No edge |
 
-*BALANCED mode (default). Set `VRP_THRESHOLD_MODE=LEGACY` for 7x/4x/1.5x thresholds.*
+## Strategy Performance (2025 Verified Data)
 
-## Scoring Weights
+| Strategy | Trades | Win Rate | Total P&L | Recommendation |
+|----------|-------:|:--------:|----------:|----------------|
+| **SINGLE** | 108 | **63.9%** | **+$103,390** | Preferred |
+| SPREAD | 86 | 52.3% | +$51,472 | Good |
+| STRANGLE | 6 | 33.3% | -$15,100 | Avoid |
+| IRON_CONDOR | 3 | 66.7% | -$126,429 | Caution |
 
-| Factor | Weight | Description |
-|--------|--------|-------------|
-| VRP Edge | 55% | Core signal quality |
-| Move Difficulty | 25% | Easier moves score higher |
-| Liquidity Quality | 20% | OI and spread quality |
+**Key insight:** SINGLE options outperform spreads in both win rate and total P&L.
+
+## TRR Performance
+
+| Level | Win Rate | P&L | Recommendation |
+|-------|:--------:|----:|----------------|
+| **LOW** (<1.5x) | **70.6%** | **+$52k** | Preferred |
+| NORMAL (1.5-2.5x) | 56.5% | -$38k | Standard |
+| HIGH (>2.5x) | 54.8% | -$123k | **Avoid** |
 
 ## Liquidity Tiers
 
-| Tier | OI/Position | Spread | Score | Action |
-|------|-------------|--------|-------|--------|
-| EXCELLENT | >= 5x | <= 8% | 20 | Full size |
-| GOOD | 2-5x | 8-12% | 16 | Full size |
-| WARNING | 1-2x | 12-15% | 12 | Reduce size |
-| REJECT | < 1x | > 15% | 4 | Never trade |
-
-Final tier = worse of (OI tier, Spread tier)
-
-## Output Example
-
-```
-TRADEABLE OPPORTUNITY
-VRP Ratio: 2.26x -> EXCELLENT
-Implied Move: 8.00% | Historical Mean: 3.54%
-Liquidity Tier: EXCELLENT
-
-RECOMMENDED: BULL PUT SPREAD
-  Short $177.50P / Long $170.00P
-  Credit: $2.20 | Max Profit: $8,158 (37 contracts)
-  Probability: 69.1% | Theta: +$329/day
-```
+| Tier | OI/Position | Spread | Action |
+|------|-------------|--------|--------|
+| EXCELLENT | >= 5x | <= 8% | Full size |
+| GOOD | 2-5x | 8-12% | Full size |
+| WARNING | 1-2x | 12-15% | Reduce size |
+| REJECT | < 1x | > 15% | Never trade |
 
 ## Architecture
 
@@ -88,17 +78,14 @@ RECOMMENDED: BULL PUT SPREAD
 src/
 ├── domain/           # Value objects, protocols, enums
 │   ├── models.py     # TickerAnalysis, Strategy, Greeks
-│   ├── enums.py      # LiquidityTier, VRPRecommendation
-│   └── protocols.py  # Repository interfaces
+│   └── enums.py      # LiquidityTier, VRPRecommendation
 ├── application/      # Business logic
 │   ├── metrics/      # VRP calculator, liquidity scorer
-│   ├── services/     # Analyzer, strategy generator
 │   └── sizing/       # Kelly criterion position sizing
 ├── infrastructure/   # External integrations
 │   ├── tradier.py    # Options chains, Greeks
-│   ├── alphavantage.py  # Earnings calendar
-│   └── yahoo.py      # Price fallback
-└── config/           # Configuration, thresholds
+│   └── alphavantage.py  # Earnings calendar
+└── container.py      # Dependency injection
 ```
 
 ## Database
@@ -107,25 +94,27 @@ SQLite database at `data/ivcrush.db`:
 
 | Table | Records | Purpose |
 |-------|---------|---------|
-| historical_moves | 5,675 | Post-earnings price movements |
-| earnings_calendar | 6,305 | Upcoming earnings dates |
+| historical_moves | 6,165 | Post-earnings price movements |
+| strategies | 203 | Multi-leg strategy groupings |
 | trade_journal | 556 | Individual option legs |
-| strategies | 221 | Multi-leg strategy groupings |
-| position_limits | 417 | TRR-based position sizing limits |
+| position_limits | 417 | TRR-based position sizing |
 
-### Key Queries
+### Enhanced Strategies Schema
 
 ```sql
--- VRP analysis for ticker
-SELECT ticker, earnings_date, gap_move_pct, intraday_move_pct
-FROM historical_moves WHERE ticker = 'NVDA'
-ORDER BY earnings_date DESC LIMIT 12;
-
--- Strategy-level performance
-SELECT strategy_type, COUNT(*) trades,
-       ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) win_rate,
-       ROUND(SUM(gain_loss), 2) pnl
-FROM strategies GROUP BY strategy_type;
+CREATE TABLE strategies (
+    id INTEGER PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    strategy_type TEXT CHECK(strategy_type IN ('SINGLE', 'SPREAD', 'IRON_CONDOR', 'STRANGLE')),
+    gain_loss REAL,
+    is_winner BOOLEAN,
+    -- Trade tracking columns
+    trade_type TEXT CHECK(trade_type IN ('NEW', 'ROLL', 'REPAIR', 'ADJUSTMENT')),
+    parent_strategy_id INTEGER REFERENCES strategies(id),
+    campaign_id TEXT,
+    trr_at_entry REAL,
+    position_limit_at_entry INTEGER
+);
 ```
 
 ## Configuration
@@ -137,34 +126,18 @@ ALPHA_VANTAGE_KEY=xxx
 DB_PATH=data/ivcrush.db
 
 # Optional
-VRP_THRESHOLD_MODE=BALANCED   # CONSERVATIVE, BALANCED, AGGRESSIVE, LEGACY
+VRP_THRESHOLD_MODE=BALANCED   # CONSERVATIVE, BALANCED, AGGRESSIVE
 USE_KELLY_SIZING=true
 KELLY_FRACTION=0.25
 ```
 
-## API Priority
-
-1. **Tradier** - Options Greeks (IV, delta, theta, vega)
-2. **Alpha Vantage** - Earnings calendar
-3. **Yahoo Finance** - Price fallback only
-
 ## Testing
 
 ```bash
-./venv/bin/python -m pytest tests/ -v           # All 514 tests
+./venv/bin/python -m pytest tests/ -v           # All 690 tests
 ./venv/bin/python -m pytest tests/unit/ -v      # Unit tests only
 ./venv/bin/python -m pytest tests/ --cov=src    # With coverage
 ```
-
-Key test files:
-- `test_calculators.py` - VRP and implied move calculations
-- `test_liquidity_scorer.py` - 4-tier liquidity system
-- `test_kelly_sizing.py` - Position sizing
-- `test_consistency_enhanced.py` - Move pattern analysis
-
-## Freshness Validation
-
-When analyzing tickers with earnings <= 7 days away, the system validates cached dates against Alpha Vantage if cache is > 24h old. This catches date changes automatically.
 
 ## Related Systems
 
