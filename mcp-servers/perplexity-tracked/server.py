@@ -42,12 +42,17 @@ from perplexity_client import PerplexityClient, PerplexityResponse
 
 
 # Perplexity token pricing (per token, from invoice)
-PRICING = {
-    "sonar_output": 0.000001,      # $1/1M tokens
-    "sonar_pro_output": 0.000015,  # $15/1M tokens
-    "reasoning_pro": 0.000003,     # $3/1M tokens
-    "search_request": 0.005,       # $5/1000 requests (flat)
-}
+# Override via environment variables: PERPLEXITY_PRICE_SONAR_OUTPUT, etc.
+def _get_pricing() -> dict:
+    """Get pricing with environment variable overrides."""
+    return {
+        "sonar_output": float(os.environ.get("PERPLEXITY_PRICE_SONAR_OUTPUT", "0.000001")),       # $1/1M tokens
+        "sonar_pro_output": float(os.environ.get("PERPLEXITY_PRICE_SONAR_PRO_OUTPUT", "0.000015")),  # $15/1M tokens
+        "reasoning_pro": float(os.environ.get("PERPLEXITY_PRICE_REASONING_PRO", "0.000003")),     # $3/1M tokens
+        "search_request": float(os.environ.get("PERPLEXITY_PRICE_SEARCH_REQUEST", "0.005")),     # $5/1000 requests (flat)
+    }
+
+PRICING = _get_pricing()
 
 
 class BudgetLogger:
@@ -209,7 +214,7 @@ app = Server("perplexity-tracked")
 # Initialize client and logger (lazy, to allow env vars to be set)
 _client = None
 _logger = None
-_init_lock = threading.Lock()
+_init_lock = threading.RLock()  # RLock prevents potential deadlock if re-entrant
 
 
 def get_client() -> PerplexityClient:
