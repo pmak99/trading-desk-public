@@ -2,6 +2,17 @@
 
 Agent-based orchestration layer with parallel processing and intelligent automation. Coordinates multiple specialist agents working concurrently on top of the 2.0/4.0 stack.
 
+## Strategy Performance (2025 Verified Data)
+
+| Strategy | Trades | Win Rate | Total P&L | Recommendation |
+|----------|-------:|:--------:|----------:|----------------|
+| **SINGLE** | 108 | **~60-65%** | **strongest performer** | Preferred |
+| SPREAD | 86 | ~50-55% | positive | Good |
+| STRANGLE | 6 | ~33% | negative | Avoid |
+| IRON_CONDOR | 3 | ~67% | significant loss (sizing) | Caution |
+
+**Key insight:** SINGLE options outperform spreads in both win rate and total P&L.
+
 ## What 6.0 Adds
 
 | Feature | Before (4.0) | After (6.0) |
@@ -45,6 +56,32 @@ cd 6.0
 | `./agent.sh maintenance data-quality --fix` | Auto-fix safe issues |
 | `./agent.sh maintenance sector-sync` | Sync sector data from Finnhub |
 | `./agent.sh maintenance cache-cleanup` | Clear expired cache |
+
+## Critical Rules
+
+1. **Prefer SINGLE options** - 64% vs 52% win rate vs spreads
+2. **Respect TRR limits** - LOW TRR: strong profit, HIGH TRR: significant loss
+3. **Never roll** - 0% success rate, always makes losses worse
+4. **Never trade REJECT liquidity**
+5. **Cut losses early** - don't try to "fix" losing trades
+
+## TRR Performance
+
+| Level | Win Rate | P&L | Recommendation |
+|-------|:--------:|----:|----------------|
+| **LOW** (<1.5x) | **70.6%** | **strong profit** | Preferred |
+| NORMAL (1.5-2.5x) | 56.5% | moderate loss | Standard |
+| HIGH (>2.5x) | 54.8% | significant loss | **Avoid** |
+
+## Recommendation Logic
+
+| VRP | Liquidity | Action |
+|-----|-----------|--------|
+| >= 1.8x | EXCELLENT/GOOD | TRADE |
+| >= 1.4x | EXCELLENT/GOOD | TRADE_CAUTIOUSLY |
+| >= 1.4x | WARNING | TRADE_CAUTIOUSLY (reduce size) |
+| < 1.4x | Any | SKIP (insufficient VRP) |
+| Any | REJECT | SKIP (liquidity) |
 
 ## Architecture
 
@@ -98,47 +135,6 @@ cd 6.0
 | `/prime` (30 tickers) | ~10s | 9x faster than sequential |
 | `/whisper` (30 tickers) | ~90s | 2x faster than 4.0 |
 | `/analyze` (single) | ~60s | Full deep dive |
-
-## Agents
-
-### TickerAnalysisAgent
-
-Executes 2.0's full analysis for a single ticker. Returns VRP, liquidity, strategies, and TRR limits.
-
-### SentimentFetchAgent
-
-Fetches AI sentiment from Perplexity with budget protection. Validates responses before recording API calls.
-
-### HealthCheckAgent
-
-System monitoring: API connectivity, database health, budget status, data freshness.
-
-### ExplanationAgent
-
-Generates narrative reasoning for why VRP is elevated using Perplexity context.
-
-### AnomalyDetectionAgent
-
-Flags unusual situations:
-- Conflicting signals (excellent VRP + reject liquidity)
-- Missing historical data (< 4 quarters)
-- Extreme outliers (VRP > 20x)
-- Stale earnings dates
-
-### PatternRecognitionAgent
-
-Mines historical earnings patterns:
-- Directional bias (win/loss streaks)
-- Magnitude trends
-- Consistency metrics
-
-### SectorFetchAgent
-
-Fetches company profiles from Finnhub for real sector/industry data.
-
-### DataQualityAgent
-
-Detects and auto-fixes safe data issues (duplicates, missing sectors).
 
 ## Output Examples
 
@@ -234,13 +230,6 @@ cd 6.0
 ../2.0/venv/bin/python -m pytest tests/ -v    # 48 tests
 ```
 
-Key test files:
-- `test_whisper_live.py` - WhisperOrchestrator tests
-- `test_analyze_live.py` - AnalyzeOrchestrator tests
-- `test_maintenance_live.py` - MaintenanceOrchestrator tests
-- `test_pattern_recognition.py` - Historical patterns
-- `test_data_quality_agent.py` - Data quality fixes
-
 ## Integration with 2.0/4.0
 
 6.0 imports existing systems via sys.path injection:
@@ -255,18 +244,6 @@ class Container2_0:
 ```
 
 **Git Worktree Support:** All integration code handles worktrees correctly via `git rev-parse --git-common-dir`.
-
-## Troubleshooting
-
-**Empty catalysts/risks showing "- **"**
-- Cause: Malformed Perplexity response
-- Fix: AnalyzeOrchestrator filters invalid entries
-
-**Namespace collision between 6.0/src and 2.0/src**
-- Fix: Container2_0 clears cached imports before loading 2.0
-
-**Result type errors from 2.0**
-- Fix: Use `.is_err` (property, not method), unwrap `.value`
 
 ## Related Systems
 

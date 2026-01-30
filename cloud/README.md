@@ -4,6 +4,15 @@
 
 **Live Service:** https://your-cloud-run-url.run.app
 
+## Strategy Performance (2025 Verified Data)
+
+| Strategy | Trades | Win Rate | Total P&L | Recommendation |
+|----------|-------:|:--------:|----------:|----------------|
+| **SINGLE** | 108 | **~60-65%** | **strongest performer** | Preferred |
+| SPREAD | 86 | ~50-55% | positive | Good |
+| STRANGLE | 6 | ~33% | negative | Avoid |
+| IRON_CONDOR | 3 | ~67% | significant loss (sizing) | Caution |
+
 ## Features
 
 - **Automated Daily Workflow** - 12 scheduled jobs (pre-market prep, sentiment scan, digests)
@@ -62,17 +71,22 @@ docker compose up --build
 curl -H "X-API-Key: $API_KEY" "https://your-cloud-run-url.run.app/api/health"
 ```
 
-### Response Formats
+## Critical Rules
 
-Add `?format=cli` for terminal output, `?format=json` for raw data (default).
+1. **Prefer SINGLE options** - 64% vs 52% win rate vs spreads
+2. **Respect TRR limits** - LOW TRR: strong profit, HIGH TRR: significant loss
+3. **Never roll** - 0% success rate, always makes losses worse
+4. **Never trade REJECT liquidity**
+
+## TRR Performance
+
+| Level | Win Rate | P&L | Recommendation |
+|-------|:--------:|----:|----------------|
+| **LOW** (<1.5x) | **70.6%** | **strong profit** | Preferred |
+| NORMAL (1.5-2.5x) | 56.5% | moderate loss | Standard |
+| HIGH (>2.5x) | 54.8% | significant loss | **Avoid** |
 
 ## Telegram Bot
-
-### Setup
-
-1. Create bot via @BotFather on Telegram
-2. Get chat ID from `https://api.telegram.org/bot<TOKEN>/getUpdates`
-3. Configure in `.env`
 
 ### Commands
 
@@ -152,29 +166,6 @@ Add `?format=cli` for terminal output, `?format=json` for raw data (default).
 └── DESIGN.md                # Architecture details
 ```
 
-## Direction Determination
-
-Direction is determined by combining options skew analysis with AI sentiment using a 3-rule system:
-
-### Skew Analysis
-
-Polynomial-fitted IV skew from OTM options:
-
-| Slope | Bias |
-|-------|------|
-| > 150 | STRONG_BULLISH/BEARISH |
-| 80-150 | BULLISH/BEARISH |
-| 30-80 | WEAK_BULLISH/BEARISH |
-| <= 30 | NEUTRAL |
-
-### 3-Rule Direction Adjustment
-
-| Rule | Condition | Action |
-|------|-----------|--------|
-| 1 | Neutral skew + sentiment signal | Sentiment breaks tie |
-| 2 | Conflict (bullish skew + bearish sentiment) | Go neutral (hedge) |
-| 3 | Otherwise | Keep original skew bias |
-
 ## Performance Optimizations
 
 ### Parallel Ticker Analysis
@@ -193,36 +184,6 @@ MAX_CONCURRENT_ANALYSIS = 5  # Respects Tradier rate limits
 | <= 3 days | 1 hour | Rapid IV changes |
 
 **Impact:** 89% reduction in Tradier API calls
-
-### Batch Database Queries
-
-Uses window functions for per-ticker limiting:
-
-```sql
-SELECT * FROM (
-  SELECT *, ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY earnings_date DESC) as rn
-  FROM historical_moves WHERE ticker IN (...)
-) WHERE rn <= 12
-```
-
-**Impact:** 97% reduction in queries
-
-### Ticker Whitelist Filtering
-
-Alert jobs only process tickers from `historical_moves` table (429 tracked tickers). This filters out OTC/foreign stocks that:
-- Have unreliable price data
-- Don't have options (can't trade VRP strategy)
-
-| Job Type | Filter | Purpose |
-|----------|--------|---------|
-| Alert jobs | Whitelist | Clean alerts, only tracked tickers |
-| Recording jobs | `is_valid_ticker()` only | New tickers build history |
-
-**Alert jobs (use whitelist):** pre-market-prep, sentiment-scan, morning-digest, market-open-refresh, pre-trade-refresh, after-hours-check, evening-summary
-
-**Recording jobs (open to new tickers):** outcome-recorder, weekly-backfill
-
-New tickers get recorded by `outcome-recorder`, then appear in alerts after building 4+ quarters of history.
 
 ## Configuration
 
@@ -246,37 +207,22 @@ GOOGLE_CLOUD_PROJECT=your-gcp-project
 GCS_BUCKET=your-gcs-bucket
 ```
 
-### Secret Priority
-
-1. Individual env vars (local dev)
-2. SECRETS JSON blob (Docker/Cloud Run)
-3. GCP Secret Manager (production fallback)
-
 ## Testing
 
 ```bash
 cd 5.0
-../2.0/venv/bin/python -m pytest tests/ -v    # 293 tests
+../2.0/venv/bin/python -m pytest tests/ -v    # 308 tests
 ```
 
 ## Deployment
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for complete instructions.
 
-### Deploy Methods
-
-| Method | Command | Use Case |
-|--------|---------|----------|
-| **Quick (recommended)** | `gcloud run deploy --source .` | Fastest for manual deploys |
-| **Cloud Build (manual)** | `gcloud builds submit --substitutions=_TAG=$(git rev-parse --short HEAD)` | Uses cloudbuild.yaml |
-| **Cloud Build (trigger)** | Push to main branch | CI/CD automation |
-
-### Quick Deploy (Recommended)
+### Quick Deploy
 
 ```bash
 cd 5.0
 
-# Deploy directly from source (handles build + deploy)
 gcloud run deploy trading-desk \
   --source . \
   --region us-east1 \
@@ -284,25 +230,7 @@ gcloud run deploy trading-desk \
   --memory 512Mi \
   --set-secrets 'SECRETS=trading-desk-secrets:latest' \
   --set-env-vars 'GOOGLE_CLOUD_PROJECT=your-gcp-project,GCS_BUCKET=your-gcs-bucket'
-
-# IMPORTANT: Run calendar-sync after deployment (database is ephemeral)
-curl -X POST "https://your-cloud-run-url.run.app/dispatch?force=calendar-sync" \
-  -H "X-API-Key: $API_KEY"
 ```
-
-### Cloud Build Deploy
-
-```bash
-cd 5.0
-
-# Manual build with commit tag
-gcloud builds submit --substitutions=_TAG=$(git rev-parse --short HEAD)
-
-# Or just use 'manual' as the tag (default)
-gcloud builds submit
-```
-
-**Note:** Cloud Run instances use ephemeral SQLite. After each deployment, run `calendar-sync` to populate the earnings calendar from Alpha Vantage.
 
 ## Budget
 
