@@ -105,7 +105,6 @@ Trading Desk/
   6.0/            Agent orchestration (parallel Claude Code)
   scripts/        Root-level utilities and data pipelines
   docs/           Research docs, trade records
-  archive/        1.0 (deprecated), 3.0 (ML research - inconclusive)
 ```
 
 ## 2.0 - Core Math Engine
