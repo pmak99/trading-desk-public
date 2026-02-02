@@ -10,10 +10,13 @@ import re
 import os
 import hashlib
 import time
+import signal
+import threading
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Tuple
 from pathlib import Path
 from enum import Enum
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 import requests
@@ -181,9 +184,10 @@ class EarningsWhisperScraper:
 
     # Twitter scraping configuration
     TWITTER_URL = "https://twitter.com/eWhispers"
-    PAGE_LOAD_TIMEOUT_MS = 30000  # 30 seconds
-    TWEET_WAIT_TIMEOUT_MS = 10000  # 10 seconds
+    PAGE_LOAD_TIMEOUT_MS = 15000  # 15 seconds (reduced from 30)
+    TWEET_WAIT_TIMEOUT_MS = 8000  # 8 seconds (reduced from 10)
     MAX_TWEETS_TO_CHECK = 50
+    OVERALL_TIMEOUT_SECONDS = 30  # Total timeout for entire Twitter fetch operation
 
     # CSS selectors with fallbacks for robustness
     TWEET_SELECTORS = [
@@ -323,6 +327,7 @@ class EarningsWhisperScraper:
     ) -> Result[List[str], AppError]:
         """Try to fetch earnings for a specific week."""
         monday_str = monday.strftime('%Y-%m-%d')
+        week_end = monday + timedelta(days=6)
 
         # Check cache first (week-specific key)
         if self._cache:
@@ -335,10 +340,10 @@ class EarningsWhisperScraper:
 
         logger.info(f"Fetching earnings for week of {monday_str}")
 
-        # Try Twitter first (with circuit breaker)
+        # Try Twitter first (with circuit breaker + overall timeout)
         if self.twitter_available and not self._twitter_breaker.is_open():
             try:
-                result = self._twitter_breaker.call(self._fetch_from_twitter, monday)
+                result = self._fetch_twitter_with_timeout(monday)
                 if result.is_ok:
                     tickers = result.value
                     logger.info(f"✓ Retrieved {len(tickers)} tickers from Twitter")
@@ -350,11 +355,13 @@ class EarningsWhisperScraper:
                         logger.debug(f"Cached whisper tickers for week {monday_str}")
 
                     return result
-                logger.warning("Twitter fetch failed")
+                logger.warning(f"Twitter fetch failed: {result.error}")
             except Exception as e:
-                logger.warning(f"Twitter circuit breaker: {e}")
+                logger.warning(f"Twitter fetch exception: {e}")
+                # Record failure for circuit breaker
+                self._twitter_breaker._on_failure()
 
-        # Fallback to image
+        # Fallback to image if provided
         if fallback_image:
             logger.info(f"Using image fallback: {fallback_image}")
             result = self._parse_image(fallback_image)
@@ -370,11 +377,108 @@ class EarningsWhisperScraper:
 
                 return result
 
+        # Final fallback: Use database earnings calendar
+        logger.info(f"Using database fallback for week {monday_str}")
+        result = self._fetch_from_database(monday, week_end)
+        if result.is_ok:
+            tickers = result.value
+            logger.info(f"✓ Retrieved {len(tickers)} tickers from database")
+
+            # Cache the result (week-specific, shorter TTL for DB fallback)
+            if self._cache:
+                cache_key = f"whisper_tickers:{monday_str}"
+                self._cache.set(cache_key, tickers)
+                logger.debug(f"Cached database tickers for week {monday_str}")
+
+            return result
+
         return Result.Err(AppError(
             ErrorCode.EXTERNAL,
-            "All methods failed",
+            "All methods failed (Twitter, image, database)",
             context={"week_monday": monday.strftime("%Y-%m-%d")}
         ))
+
+    def _fetch_twitter_with_timeout(self, monday: datetime) -> Result[List[str], AppError]:
+        """Fetch from Twitter with an overall timeout to prevent hangs."""
+        def fetch_task():
+            return self._twitter_breaker.call(self._fetch_from_twitter, monday)
+
+        # Use ThreadPoolExecutor for timeout (works on all platforms)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(fetch_task)
+            try:
+                result = future.result(timeout=self.OVERALL_TIMEOUT_SECONDS)
+                return result
+            except FuturesTimeoutError:
+                logger.warning(f"Twitter fetch timed out after {self.OVERALL_TIMEOUT_SECONDS}s")
+                return Result.Err(AppError(
+                    ErrorCode.EXTERNAL,
+                    f"Twitter fetch timed out after {self.OVERALL_TIMEOUT_SECONDS} seconds"
+                ))
+            except Exception as e:
+                logger.warning(f"Twitter fetch failed: {e}")
+                return Result.Err(AppError(ErrorCode.EXTERNAL, str(e)))
+
+    def _fetch_from_database(
+        self,
+        monday: datetime,
+        week_end: datetime
+    ) -> Result[List[str], AppError]:
+        """Fallback: Fetch earnings from local database for the week.
+
+        This provides tickers with earnings during the target week, though without
+        the "most anticipated" filtering that Twitter provides.
+        """
+        try:
+            import sqlite3
+            from pathlib import Path
+
+            # Find database path
+            db_path = Path(__file__).parent.parent.parent.parent / "data" / "ivcrush.db"
+            if not db_path.exists():
+                return Result.Err(AppError(
+                    ErrorCode.NODATA,
+                    f"Database not found: {db_path}"
+                ))
+
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+
+            # Get tickers with earnings in the target week
+            # Order by historical move count (proxy for popularity/importance)
+            query = """
+                SELECT DISTINCT ec.ticker
+                FROM earnings_calendar ec
+                LEFT JOIN (
+                    SELECT ticker, COUNT(*) as move_count
+                    FROM historical_moves
+                    GROUP BY ticker
+                ) hm ON ec.ticker = hm.ticker
+                WHERE ec.earnings_date BETWEEN ? AND ?
+                ORDER BY COALESCE(hm.move_count, 0) DESC
+                LIMIT 30
+            """
+
+            cursor.execute(query, (
+                monday.strftime('%Y-%m-%d'),
+                week_end.strftime('%Y-%m-%d')
+            ))
+
+            tickers = [row[0] for row in cursor.fetchall()]
+            conn.close()
+
+            if not tickers:
+                return Result.Err(AppError(
+                    ErrorCode.NODATA,
+                    f"No earnings found in database for week {monday.strftime('%Y-%m-%d')}"
+                ))
+
+            logger.info(f"Database fallback: Found {len(tickers)} tickers with earnings")
+            return Result.Ok(tickers)
+
+        except Exception as e:
+            logger.error(f"Database fallback failed: {e}")
+            return Result.Err(AppError(ErrorCode.EXTERNAL, f"Database error: {e}"))
 
     def _fetch_from_twitter(self, week_monday: datetime) -> Result[List[str], AppError]:
         """Fetch from @eWhispers Twitter account using playwright browser automation (circuit breaker protected)."""
