@@ -12,8 +12,11 @@ from typing import Optional, Any
 
 from ..utils.paths import MAIN_REPO, REPO_2_0
 
-# Thread lock for container initialization (sys.path manipulation is not thread-safe)
+# Thread lock for container initialization AND sys.path manipulation
+# SECURITY FIX: sys.path manipulation is not thread-safe, so we protect
+# module-level operations with a lock acquired during module import
 _container_lock = threading.RLock()
+_path_init_lock = threading.RLock()
 
 # Add 2.0/ to Python path with highest priority
 # 2.0's code uses "from src.config..." imports, so it needs 2.0/ in path, not 2.0/src/
@@ -21,12 +24,16 @@ _main_repo = MAIN_REPO
 _2_0_dir = _main_repo / "2.0"
 _2_0_dir_str = str(_2_0_dir)
 
-# Remove if already in path (so we can re-insert at position 0)
-if _2_0_dir_str in sys.path:
-    sys.path.remove(_2_0_dir_str)
+# SECURITY FIX: Protect sys.path manipulation with lock to prevent race conditions
+with _path_init_lock:
+    # Remove if already in path (so we can re-insert at position 0)
+    if _2_0_dir_str in sys.path:
+        sys.path.remove(_2_0_dir_str)
 
-# Insert at position 0 for highest priority (before 6.0/src)
-sys.path.insert(0, _2_0_dir_str)
+    # Insert at position 0 for highest priority (before 6.0/src)
+    # Check again to prevent duplicate insertion
+    if _2_0_dir_str not in sys.path:
+        sys.path.insert(0, _2_0_dir_str)
 
 # Note: We don't import at module level to avoid namespace collision with 6.0/src
 # Imports happen inside __init__ after sys.path is properly configured
@@ -93,6 +100,7 @@ class Container2_0:
         _6_0_src_modules = {}
 
         with _container_lock:
+            init_error = None
             try:
                 # Clear cached imports of 'src' package to avoid using 6.0's cached version
                 # This is necessary because both 6.0 and 2.0 use 'src' as top-level package
@@ -111,6 +119,9 @@ class Container2_0:
                 # Import here to avoid namespace collision at module level
                 from src.container import get_container
                 self._container = get_container()
+            except Exception as e:
+                # SECURITY FIX: Capture exception to re-raise after cleanup
+                init_error = e
             finally:
                 # Restore 6.0/ paths after import
                 for p in _6_0_paths:
@@ -120,6 +131,10 @@ class Container2_0:
                 # Restore 6.0's src modules
                 for k, v in _6_0_src_modules.items():
                     sys.modules[k] = v
+
+            # Re-raise any initialization error after cleanup is complete
+            if init_error is not None:
+                raise init_error
 
     def analyze_ticker(
         self,

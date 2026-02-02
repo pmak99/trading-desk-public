@@ -249,7 +249,8 @@ backup_database() {
     fi
 
     # Sync to Google Drive (async, non-blocking)
-    local gdrive_backup_dir="${GDRIVE_BACKUP_PATH:-$HOME/Library/CloudStorage/GoogleDrive-pmakwana99@gmail.com/My Drive/Backups/trading-desk}"
+    # Set GDRIVE_BACKUP_PATH environment variable to your Google Drive backup directory
+    local gdrive_backup_dir="${GDRIVE_BACKUP_PATH:-$HOME/Library/CloudStorage/GoogleDrive/My Drive/Backups/trading-desk}"
     if [ -d "$gdrive_backup_dir" ]; then
         # Copy in background with verification
         local gdrive_dest="$gdrive_backup_dir/$(basename "$backup_file")"

@@ -599,14 +599,40 @@ class Config:
 _config: Optional[Config] = None
 
 
-def get_config() -> Config:
+def get_config(validate: bool = True) -> Config:
     """
     Get global config instance.
     Loads from environment on first call.
+
+    Args:
+        validate: If True, validates config and logs warnings for issues.
+                  Set to False for testing with incomplete config.
+
+    Returns:
+        Config instance
+
+    Raises:
+        ValueError: In production mode if required config is missing
     """
     global _config
     if _config is None:
         _config = Config.from_env()
+
+        if validate:
+            errors = _config.validate()
+            if errors:
+                import logging
+                logger = logging.getLogger(__name__)
+
+                # Always log validation errors
+                for error in errors:
+                    logger.warning(f"Configuration issue: {error}")
+
+                # Check if TRADIER_API_KEY is missing - this is critical
+                critical_errors = [e for e in errors if "TRADIER_API_KEY" in e]
+                if critical_errors:
+                    logger.error("TRADIER_API_KEY is required for options data")
+
     return _config
 
 

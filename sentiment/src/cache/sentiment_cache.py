@@ -29,17 +29,31 @@ class CachedSentiment:
 
     @property
     def is_expired(self) -> bool:
-        """Check if cache entry has expired (3 hour TTL)."""
-        # Use UTC for consistent timezone handling
+        """Check if cache entry has expired (3 hour TTL).
+
+        Note: Database stores cached_at as UTC ISO strings. When parsed,
+        datetime.fromisoformat() returns naive datetime for strings without
+        timezone suffix. We treat these naive datetimes as UTC since that's
+        how they were stored (via datetime.now(timezone.utc).isoformat()).
+        """
         now = datetime.now(timezone.utc)
-        cached_at_utc = self.cached_at.replace(tzinfo=timezone.utc) if self.cached_at.tzinfo is None else self.cached_at
+        # Naive datetimes from database are stored as UTC, so attach UTC timezone
+        # Aware datetimes are converted to UTC for comparison
+        if self.cached_at.tzinfo is None:
+            cached_at_utc = self.cached_at.replace(tzinfo=timezone.utc)
+        else:
+            cached_at_utc = self.cached_at.astimezone(timezone.utc)
         return now - cached_at_utc > timedelta(hours=3)
 
     @property
     def age_minutes(self) -> int:
         """Age of cache entry in minutes."""
         now = datetime.now(timezone.utc)
-        cached_at_utc = self.cached_at.replace(tzinfo=timezone.utc) if self.cached_at.tzinfo is None else self.cached_at
+        # Same timezone handling as is_expired
+        if self.cached_at.tzinfo is None:
+            cached_at_utc = self.cached_at.replace(tzinfo=timezone.utc)
+        else:
+            cached_at_utc = self.cached_at.astimezone(timezone.utc)
         return int((now - cached_at_utc).total_seconds() / 60)
 
 

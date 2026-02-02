@@ -26,9 +26,11 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 LOCAL_DB = PROJECT_ROOT / "2.0" / "data" / "ivcrush.db"
 GCS_BUCKET = "your-gcs-bucket"
 GCS_BLOB = "ivcrush.db"
+# Google Drive backup path - set via environment variable
+# Default uses generic GoogleDrive path without personal email
 GDRIVE_BACKUP_DIR = Path(os.environ.get(
     "GDRIVE_BACKUP_PATH",
-    str(Path.home() / "Library/CloudStorage/GoogleDrive-pmakwana99@gmail.com/My Drive/Backups/trading-desk")
+    str(Path.home() / "Library/CloudStorage/GoogleDrive/My Drive/Backups/trading-desk")
 ))
 
 
