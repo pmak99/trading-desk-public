@@ -288,5 +288,53 @@ class Settings:
             return os.path.join(tempfile.gettempdir(), 'ivcrush_test.db')
         return default_path
 
+    def validate_required_config(self) -> list[str]:
+        """Validate that required configuration is present.
+
+        Returns:
+            List of missing/invalid configuration errors.
+            Empty list means all required config is valid.
+
+        This should be called at startup to fail fast on misconfiguration.
+        """
+        errors = []
+
+        # Required API keys
+        if not self.tradier_api_key:
+            errors.append("TRADIER_API_KEY is required but not configured")
+        if not self.alpha_vantage_key:
+            errors.append("ALPHA_VANTAGE_KEY is required but not configured")
+
+        # Required for authentication
+        if not self.api_key:
+            errors.append("API_KEY is required for API authentication")
+
+        # Required for Telegram notifications
+        if not self.telegram_bot_token:
+            errors.append("TELEGRAM_BOT_TOKEN is required for notifications")
+        if not self.telegram_chat_id:
+            errors.append("TELEGRAM_CHAT_ID is required for notifications")
+        if not self.telegram_webhook_secret:
+            errors.append("TELEGRAM_WEBHOOK_SECRET is required for webhook security")
+
+        return errors
+
+    def validate_or_warn(self):
+        """Validate config and log warnings for missing optional config.
+
+        This is a gentler validation that logs warnings but doesn't fail.
+        Use validate_required_config() for strict startup validation.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Check optional but recommended config
+        if not self.perplexity_api_key:
+            logger.warning("PERPLEXITY_API_KEY not configured - sentiment analysis disabled")
+        if not self.twelve_data_key:
+            logger.warning("TWELVE_DATA_KEY not configured - historical backfill disabled")
+        if not self.grafana_graphite_url:
+            logger.info("Grafana metrics not configured (optional)")
+
 
 settings = Settings()

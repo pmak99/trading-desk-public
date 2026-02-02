@@ -16,6 +16,7 @@ from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Request, HTTPException, Depends, Header
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
+from fastapi.middleware.cors import CORSMiddleware
 import hmac
 
 from src.core.config import now_et, today_et, settings
@@ -118,6 +119,20 @@ async def lifespan(app: FastAPI):
 
     log("info", "Starting Trading Desk 5.0")
 
+    # SECURITY FIX: Validate required config at startup - fail fast on misconfiguration
+    config_errors = settings.validate_required_config()
+    if config_errors:
+        for error in config_errors:
+            log("error", f"Configuration error: {error}")
+        # In production, we want to fail fast. In development, we may allow partial operation.
+        if settings.is_production:
+            raise RuntimeError(f"Cannot start in production with missing config: {config_errors}")
+        else:
+            log("warn", "Starting with missing config (development mode) - some features may not work")
+
+    # Log warnings for optional but recommended config
+    settings.validate_or_warn()
+
     # Initialize all components
     state = AppState(
         job_manager=JobManager(db_path=settings.DB_PATH),
@@ -167,6 +182,36 @@ app = FastAPI(
     version="5.0.0",
     lifespan=lifespan,
 )
+
+# SECURITY: Add CORS middleware with restrictive settings
+# Currently no web frontend, so we deny all cross-origin requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[],  # No origins allowed - API-only service
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],  # Only methods we use
+    allow_headers=["X-API-Key", "Content-Type", "X-Request-ID"],
+    max_age=600,  # Cache preflight for 10 minutes
+)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+    # XSS protection (legacy browsers)
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    # HSTS - enforce HTTPS (Cloud Run provides TLS)
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # Content Security Policy - restrict resource loading
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    # Don't send referrer to external sites
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 def _get_state() -> AppState:
@@ -834,16 +879,25 @@ async def alerts_ingest(
     GCP Monitoring sends webhooks with:
     - Header: Authorization: Basic <base64(username:password)> or Bearer <token>
     - Body: JSON with incident details
+
+    SECURITY: Always requires authentication. Fails closed if API_KEY not configured.
     """
     import base64
     start_time = time.time()
 
-    # Verify auth (GCP Monitoring uses Basic auth for webhook_basicauth)
+    # SECURITY FIX: Always require authentication - fail closed if not configured
     expected_key = settings.api_key
-    if expected_key:
-        if not authorization:
-            log("warn", "Alert webhook missing auth header")
-            raise HTTPException(status_code=401, detail="Missing authorization")
+    if not expected_key:
+        # Fail closed: refuse to accept webhooks without API key configured
+        log("error", "API_KEY not configured - refusing alert webhook (fail closed)")
+        raise HTTPException(
+            status_code=503,
+            detail="Service misconfigured: API_KEY required for alert ingestion"
+        )
+
+    if not authorization:
+        log("warn", "Alert webhook missing auth header")
+        raise HTTPException(status_code=401, detail="Missing authorization")
 
         # Support both Basic and Bearer auth
         if authorization.startswith("Basic "):
