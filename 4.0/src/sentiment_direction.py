@@ -15,6 +15,17 @@ from typing import Optional
 from enum import Enum
 
 
+# Sentiment classification thresholds
+# These determine when a sentiment score is considered bullish/bearish vs neutral
+SENTIMENT_BULLISH_THRESHOLD = 0.2   # Score >= 0.2 is bullish
+SENTIMENT_BEARISH_THRESHOLD = -0.2  # Score <= -0.2 is bearish
+
+# Confidence calculation parameters
+# CONFIDENCE_DIVISOR: sentiment_strength = min(1.0, abs(score) / CONFIDENCE_DIVISOR)
+# At |score| = 0.6, sentiment_strength = 1.0 (max confidence from sentiment alone)
+CONFIDENCE_DIVISOR = 0.6
+
+
 class AdjustedBias(Enum):
     """Simplified bias for 4.0 (maps to 2.0 DirectionalBias)."""
     STRONG_BULLISH = "strong_bullish"
@@ -98,8 +109,8 @@ def _calculate_confidence(
     Returns:
         Confidence score between 0.0 and 1.0
     """
-    # Base confidence from sentiment strength (0 to 1, max at |0.6|)
-    sentiment_strength = min(1.0, abs(sentiment_score) / 0.6)
+    # Base confidence from sentiment strength (0 to 1, max at |CONFIDENCE_DIVISOR|)
+    sentiment_strength = min(1.0, abs(sentiment_score) / CONFIDENCE_DIVISOR)
 
     if rule == "both_neutral":
         # Both skew and sentiment are neutral - low confidence in any direction
@@ -165,9 +176,10 @@ def adjust_direction(
                 f"Must be one of: {valid_directions}"
             )
     else:
-        if sentiment_score >= 0.2:
+        # Use configurable thresholds for sentiment classification
+        if sentiment_score >= SENTIMENT_BULLISH_THRESHOLD:
             sent_dir = "bullish"
-        elif sentiment_score <= -0.2:
+        elif sentiment_score <= SENTIMENT_BEARISH_THRESHOLD:
             sent_dir = "bearish"
         else:
             sent_dir = "neutral"

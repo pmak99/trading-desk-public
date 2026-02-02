@@ -68,6 +68,52 @@ class BaseOrchestrator(ABC):
         # Track spawned agents
         self.spawned_agents: List[Dict[str, Any]] = []
 
+        # Track if cleanup has been called
+        self._cleaned_up = False
+
+    async def cleanup(self):
+        """
+        Clean up orchestrator resources.
+
+        Call this after orchestration is complete to release database connections,
+        HTTP clients, and other resources.
+
+        Example:
+            orchestrator = WhisperOrchestrator()
+            try:
+                result = await orchestrator.orchestrate()
+            finally:
+                await orchestrator.cleanup()
+
+        Or use as async context manager:
+            async with WhisperOrchestrator() as orchestrator:
+                result = await orchestrator.orchestrate()
+        """
+        if self._cleaned_up:
+            return
+
+        self._cleaned_up = True
+        logger.debug("Cleaning up orchestrator resources")
+
+        # Clean up cache_4_0 if it has a cleanup method
+        if hasattr(self.cache_4_0, 'cleanup'):
+            try:
+                self.cache_4_0.cleanup()
+            except Exception as e:
+                logger.warning(f"Error cleaning up cache_4_0: {e}")
+
+        # Clear spawned agents list to free memory
+        self.spawned_agents.clear()
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - ensures cleanup."""
+        await self.cleanup()
+        return False  # Don't suppress exceptions
+
     @abstractmethod
     async def orchestrate(self, *args, **kwargs) -> Dict[str, Any]:
         """

@@ -47,11 +47,21 @@ PRICING = {
 }
 
 # MCP operation cost estimates (for operations without token counts)
+# NOTE: These are empirical estimates based on typical response sizes observed
+# in production (January-February 2025). MCP tools don't return token counts,
+# so we estimate based on:
+# - perplexity_ask: Simple Q&A responses averaging ~200 output tokens
+# - perplexity_search: Fixed $0.005/request per Perplexity API pricing
+# - perplexity_research: Detailed analysis averaging ~500 tokens (sonar-pro model)
+# - perplexity_reason: Extended reasoning averaging ~4000 tokens
+#
+# ACCURACY: These estimates may vary ±50% from actual costs. Monitor monthly
+# invoice against budget tracker totals to adjust if needed.
 MCP_COST_ESTIMATES = {
-    "perplexity_ask": 0.001,      # ~200 sonar output tokens
-    "perplexity_search": 0.005,   # 1 search request
-    "perplexity_research": 0.008, # ~500 sonar-pro output tokens
-    "perplexity_reason": 0.012,   # ~4000 reasoning tokens
+    "perplexity_ask": 0.001,      # ~200 sonar output tokens @ $1/1M
+    "perplexity_search": 0.005,   # 1 search request (fixed fee)
+    "perplexity_research": 0.008, # ~500 sonar-pro output tokens @ $15/1M
+    "perplexity_reason": 0.012,   # ~4000 reasoning tokens @ $3/1M
 }
 
 # Token count bounds (sanity check to catch bugs)
@@ -135,18 +145,19 @@ class BudgetTracker:
                     )
                 """)
                 # Add token columns if they don't exist (migration for existing DBs)
-                try:
-                    conn.execute("ALTER TABLE api_budget ADD COLUMN output_tokens INTEGER DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass  # Column already exists
-                try:
-                    conn.execute("ALTER TABLE api_budget ADD COLUMN reasoning_tokens INTEGER DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE api_budget ADD COLUMN search_requests INTEGER DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass
+                # SECURITY FIX: Check error message to distinguish "column exists" from real errors
+                for column, default in [
+                    ("output_tokens", "INTEGER DEFAULT 0"),
+                    ("reasoning_tokens", "INTEGER DEFAULT 0"),
+                    ("search_requests", "INTEGER DEFAULT 0"),
+                ]:
+                    try:
+                        conn.execute(f"ALTER TABLE api_budget ADD COLUMN {column} {default}")
+                    except sqlite3.OperationalError as e:
+                        # Only ignore "duplicate column" errors, re-raise others
+                        if "duplicate column" not in str(e).lower():
+                            logger.error(f"Failed to add column {column}: {e}")
+                            raise
                 conn.commit()
 
     def _get_today(self) -> str:
