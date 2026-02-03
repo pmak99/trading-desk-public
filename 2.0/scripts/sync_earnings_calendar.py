@@ -21,7 +21,7 @@ Usage:
     python scripts/sync_earnings_calendar.py --horizon 6month
 
     # Check staleness only
-    python scripts/sync_earnings_calendar.py --check-staleness --threshold 7
+    python scripts/sync_earnings_calendar.py --check-staleness --threshold 14
 """
 
 import sys
@@ -50,6 +50,9 @@ logger = logging.getLogger(__name__)
 
 # Skip conflict validation for tickers validated within this threshold
 VALIDATION_SKIP_HOURS = 48
+
+# Data is considered stale if not updated within this threshold
+STALENESS_THRESHOLD_DAYS = 14
 
 
 def should_skip_validation(last_validated_at: datetime | None) -> bool:
@@ -144,7 +147,7 @@ def get_database_dates(
     return result
 
 
-def check_staleness(db_path: str, threshold_days: int = 7) -> List[Dict]:
+def check_staleness(db_path: str, threshold_days: int = STALENESS_THRESHOLD_DAYS) -> List[Dict]:
     """
     Check for stale earnings data.
 
@@ -367,7 +370,7 @@ def sync_earnings_calendar(
                         stats.errors += 1
             else:
                 # Date unchanged, but check if stale
-                if days_stale > 7:
+                if days_stale > STALENESS_THRESHOLD_DAYS:
                     # Check if we can skip validation (validated within 48 hours)
                     if should_skip_validation(last_validated_at):
                         hours_ago = (datetime.now() - last_validated_at).total_seconds() / 3600
@@ -497,8 +500,8 @@ def main():
         "--threshold",
         "-t",
         type=int,
-        default=7,
-        help="Staleness threshold in days (default: 7)",
+        default=STALENESS_THRESHOLD_DAYS,
+        help=f"Staleness threshold in days (default: {STALENESS_THRESHOLD_DAYS})",
     )
     parser.add_argument(
         "--log-level",
