@@ -24,11 +24,11 @@ Show progress updates as you work:
 [1/8] Checking current status...
 [2/8] Syncing DB with cloud (GCS) + Google Drive backup...
 [3/8] Creating local database backups...
-[4/8] Syncing earnings calendar...
-[5/8] Checking for sparse tickers...
-[6/8] Cleaning expired caches...
-[7/8] Validating data integrity...
-[8/8] Checking budget status...
+[4/8] Checking for sparse tickers...
+[5/8] Cleaning expired caches...
+[6/8] Validating data integrity...
+[7/8] Checking budget status...
+[8/8] Syncing stale earnings dates...
 ```
 
 ## Purpose
@@ -104,22 +104,7 @@ cp "$DB_FILE" "$BACKUP_DIR/sentiment_cache_${TIMESTAMP}.db"
 cd "$BACKUP_DIR" && ls -t *.db 2>/dev/null | tail -n +6 | xargs rm -f
 ```
 
-### Step 5: Sync Earnings Calendar (if running all or `sync`)
-
-Run the 2.0 sync command to refresh earnings dates from Alpha Vantage + Yahoo Finance:
-```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh sync
-```
-
-This discovers new earnings announcements and validates dates using cross-reference validation.
-
-Display progress:
-```
-  ✓ Calendar synced - 15 new earnings discovered
-  ✓ 3 date corrections applied
-```
-
-### Step 6: Backfill Missing Historical Data (if running all or `backfill`)
+### Step 5: Backfill Missing Historical Data (if running all or `backfill`)
 
 **6a. Find tickers with sparse data (<5 historical moves):**
 ```bash
@@ -140,7 +125,7 @@ Display progress:
   ○ No other tickers need backfill
 ```
 
-### Step 7: Cleanup Expired Caches (if running all or `cleanup`)
+### Step 6: Cleanup Expired Caches (if running all or `cleanup`)
 
 **7a. Remove expired sentiment cache entries (>24 hours old):**
 ```bash
@@ -160,7 +145,7 @@ sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/2.0/data/ivcrush.db "VACUU
 sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db "VACUUM;"
 ```
 
-### Step 8: Data Integrity Validation (if running all or `validate`)
+### Step 7: Data Integrity Validation (if running all or `validate`)
 
 **8a. Check for orphaned records:**
 ```bash
@@ -183,19 +168,34 @@ sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.d
    FROM sentiment_history;"
 ```
 
-### Step 9: Budget Reset Check
+### Step 8: Budget Reset Check
 
-**9a. Check if budget needs reset (new day):**
+**8a. Check if budget needs reset (new day):**
 ```bash
 sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
   "SELECT date, calls, cost FROM api_budget ORDER BY date DESC LIMIT 3;"
 ```
 
-**9b. Show monthly spend:**
+**8b. Show monthly spend:**
 ```bash
 sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
   "SELECT strftime('%Y-%m', date) as month, SUM(calls) as total_calls, SUM(cost) as total_cost
    FROM api_budget GROUP BY month ORDER BY month DESC LIMIT 3;"
+```
+
+### Step 9: Sync Stale Earnings Dates (if running all or `sync`)
+
+Run the 2.0 sync command to refresh earnings dates from Alpha Vantage + Yahoo Finance:
+```bash
+cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh sync
+```
+
+This discovers new earnings announcements and validates dates using cross-reference validation.
+
+Display progress:
+```
+  ✓ Calendar synced - 15 new earnings discovered
+  ✓ 3 date corrections applied
 ```
 
 ## Output Format
@@ -221,10 +221,6 @@ sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.d
    ✓ 4.0 database backed up → sentiment_cache_20251207_143022.db
    ✓ Pruned 2 old backups
 
-🔄 SYNC
-   ✓ Calendar synced - 15 new earnings discovered
-   ✓ 3 date corrections applied
-
 📈 BACKFILL
    ✓ SAIL - backfilled 10 moves (was 2)
    ✓ BLSH - backfilled 8 moves (was 1)
@@ -245,6 +241,10 @@ sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.d
    │ This week: 28 calls ($0.14)               │
    │ This month: 89 calls ($0.45 of $5.00)     │
    └────────────────────────────────────────────┘
+
+🔄 SYNC STALE DATES
+   ✓ Calendar synced - 15 new earnings discovered
+   ✓ 3 date corrections applied
 
 ══════════════════════════════════════════════════════
 ✅ MAINTENANCE COMPLETE
