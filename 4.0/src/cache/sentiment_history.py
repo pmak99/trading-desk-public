@@ -35,14 +35,21 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+_db_lock = threading.Lock()
+
 
 def _get_size_modifier(sentiment_score: float) -> float:
     """
-    Calculate contrarian position sizing modifier based on sentiment.
+    Calculate contrarian position sizing modifier.
 
-    Based on 2025 backtest analysis:
-    - Strong bullish (>=0.6) → larger moves observed → reduce size to 0.8
-    - Strong bearish (<=-0.6) → smaller moves (priced in) → increase size to 1.2
+    Uses same thresholds as sentiment_direction.get_size_modifier() to avoid
+    circular import issues. Constants are defined here to match:
+    - STRONG_BULLISH_THRESHOLD = 0.6
+    - STRONG_BEARISH_THRESHOLD = -0.6
+    - SIZE_MODIFIER_BULLISH = 0.8
+    - SIZE_MODIFIER_BEARISH = 1.2
+
+    CAUTION: Based on n=23 samples. Treat as hypothesis until n=50+.
     """
     if sentiment_score >= 0.6:
         return 0.8
@@ -50,7 +57,14 @@ def _get_size_modifier(sentiment_score: float) -> float:
         return 1.2
     return 1.0
 
-_db_lock = threading.Lock()
+
+# Single source of truth for sizing thresholds (imported by sentiment_direction.py)
+SIZING_THRESHOLDS = {
+    'strong_bullish': 0.6,
+    'strong_bearish': -0.6,
+    'modifier_bullish': 0.8,
+    'modifier_bearish': 1.2,
+}
 
 
 class SentimentDirection(Enum):
@@ -78,7 +92,7 @@ class SentimentRecord:
     actual_direction: Optional[str] = None  # UP/DOWN
     prediction_correct: Optional[bool] = None
     trade_outcome: Optional[str] = None  # WIN/LOSS/SKIP
-    # New fields for improved analysis (Jan 2026)
+    # New fields for improved analysis (Feb 2026)
     move_contained: Optional[bool] = None  # Did actual move stay within implied?
     trr_at_entry: Optional[float] = None  # Tail Risk Ratio for correlation
     size_modifier: float = 1.0  # Contrarian sizing (0.8 bullish, 1.2 bearish)
@@ -470,21 +484,18 @@ class SentimentHistory:
                 )
 
         # Handle new columns that may not exist in older databases
+        # Use explicit column check instead of broad exception handling
+        row_keys = row.keys()
         move_contained = None
         trr_at_entry = None
         size_modifier = 1.0
-        try:
+
+        if 'move_contained' in row_keys:
             move_contained = bool(row['move_contained']) if row['move_contained'] is not None else None
-        except (IndexError, KeyError):
-            pass
-        try:
+        if 'trr_at_entry' in row_keys:
             trr_at_entry = row['trr_at_entry']
-        except (IndexError, KeyError):
-            pass
-        try:
+        if 'size_modifier' in row_keys:
             size_modifier = row['size_modifier'] or 1.0
-        except (IndexError, KeyError):
-            pass
 
         return SentimentRecord(
             ticker=row['ticker'],

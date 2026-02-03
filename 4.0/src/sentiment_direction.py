@@ -87,6 +87,12 @@ def get_size_modifier(sentiment_score: float) -> float:
     - Strong bearish sentiment correlates with SMALLER moves (avg 3.69%)
       → Bad news priced in, increase position size
 
+    CAUTION: Based on n=23 samples (as of Feb 2026). The bullish average is
+    driven by 3 outliers (INTC -17%, ORCL -14.5%, MSFT -11.85%). Without
+    outliers, strong bullish avg is only 3.09%. Treat as HYPOTHESIS until
+    n=50+ samples collected. The HIGH_BULLISH_WARNING (>=0.7) for tail risk
+    IS validated (23% of strong bullish had >10% crashes).
+
     Args:
         sentiment_score: Sentiment score from -1.0 to +1.0
 
