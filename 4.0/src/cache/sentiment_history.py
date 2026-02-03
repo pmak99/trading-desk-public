@@ -35,6 +35,21 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+
+def _get_size_modifier(sentiment_score: float) -> float:
+    """
+    Calculate contrarian position sizing modifier based on sentiment.
+
+    Based on 2025 backtest analysis:
+    - Strong bullish (>=0.6) → larger moves observed → reduce size to 0.8
+    - Strong bearish (<=-0.6) → smaller moves (priced in) → increase size to 1.2
+    """
+    if sentiment_score >= 0.6:
+        return 0.8
+    elif sentiment_score <= -0.6:
+        return 1.2
+    return 1.0
+
 _db_lock = threading.Lock()
 
 
@@ -63,6 +78,10 @@ class SentimentRecord:
     actual_direction: Optional[str] = None  # UP/DOWN
     prediction_correct: Optional[bool] = None
     trade_outcome: Optional[str] = None  # WIN/LOSS/SKIP
+    # New fields for improved analysis (Jan 2026)
+    move_contained: Optional[bool] = None  # Did actual move stay within implied?
+    trr_at_entry: Optional[float] = None  # Tail Risk Ratio for correlation
+    size_modifier: float = 1.0  # Contrarian sizing (0.8 bullish, 1.2 bearish)
 
     @property
     def has_outcome(self) -> bool:
@@ -135,6 +154,9 @@ class SentimentHistory:
                         prediction_correct INTEGER,
                         trade_outcome TEXT,
                         updated_at TEXT,
+                        move_contained INTEGER,
+                        trr_at_entry REAL,
+                        size_modifier REAL DEFAULT 1.0,
                         PRIMARY KEY (ticker, earnings_date)
                     )
                 """)
@@ -194,16 +216,21 @@ class SentimentHistory:
 
         direction_str = sentiment_direction.value if sentiment_direction else SentimentDirection.UNKNOWN.value
 
+        # Calculate contrarian size modifier based on sentiment
+        size_mod = _get_size_modifier(sentiment_score) if sentiment_score is not None else 1.0
+
         with _db_lock:
             with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 conn.execute("""
                     INSERT OR REPLACE INTO sentiment_history
                     (ticker, earnings_date, collected_at, source, sentiment_text,
-                     sentiment_score, sentiment_direction, vrp_ratio, implied_move_pct, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     sentiment_score, sentiment_direction, vrp_ratio, implied_move_pct,
+                     size_modifier, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     ticker, earnings_date, now, source, sentiment_text,
-                    sentiment_score, direction_str, vrp_ratio, implied_move_pct, now
+                    sentiment_score, direction_str, vrp_ratio, implied_move_pct,
+                    size_mod, now
                 ))
                 conn.commit()
 
@@ -254,22 +281,28 @@ class SentimentHistory:
 
         with _db_lock:
             with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
-                # Get existing record to check prediction
+                # Get existing record to check prediction and implied move
                 row = conn.execute("""
-                    SELECT sentiment_direction FROM sentiment_history
+                    SELECT sentiment_direction, implied_move_pct FROM sentiment_history
                     WHERE ticker = ? AND earnings_date = ?
                 """, (ticker, earnings_date)).fetchone()
 
                 if not row:
                     return False
 
-                # Calculate if prediction was correct
+                # Calculate if prediction was correct (direction)
                 sentiment_dir = row[0]
+                implied_move = row[1]
                 prediction_correct = None
                 if sentiment_dir in ("bullish", "bearish"):
                     predicted_up = sentiment_dir == "bullish"
                     actual_up = actual_direction == "UP"
                     prediction_correct = 1 if predicted_up == actual_up else 0
+
+                # Calculate move_contained (magnitude) - what actually matters for IV crush
+                move_contained = None
+                if implied_move is not None:
+                    move_contained = 1 if abs(actual_move_pct) <= implied_move else 0
 
                 conn.execute("""
                     UPDATE sentiment_history
@@ -277,11 +310,12 @@ class SentimentHistory:
                         actual_direction = ?,
                         prediction_correct = ?,
                         trade_outcome = ?,
+                        move_contained = ?,
                         updated_at = ?
                     WHERE ticker = ? AND earnings_date = ?
                 """, (
                     actual_move_pct, actual_direction, prediction_correct,
-                    trade_outcome, now, ticker, earnings_date
+                    trade_outcome, move_contained, now, ticker, earnings_date
                 ))
                 conn.commit()
                 return True
@@ -435,6 +469,23 @@ class SentimentHistory:
                     f"for {row['ticker']} on {row['earnings_date']}, defaulting to UNKNOWN"
                 )
 
+        # Handle new columns that may not exist in older databases
+        move_contained = None
+        trr_at_entry = None
+        size_modifier = 1.0
+        try:
+            move_contained = bool(row['move_contained']) if row['move_contained'] is not None else None
+        except (IndexError, KeyError):
+            pass
+        try:
+            trr_at_entry = row['trr_at_entry']
+        except (IndexError, KeyError):
+            pass
+        try:
+            size_modifier = row['size_modifier'] or 1.0
+        except (IndexError, KeyError):
+            pass
+
         return SentimentRecord(
             ticker=row['ticker'],
             earnings_date=row['earnings_date'],
@@ -448,7 +499,10 @@ class SentimentHistory:
             actual_move_pct=row['actual_move_pct'],
             actual_direction=row['actual_direction'],
             prediction_correct=bool(row['prediction_correct']) if row['prediction_correct'] is not None else None,
-            trade_outcome=row['trade_outcome']
+            trade_outcome=row['trade_outcome'],
+            move_contained=move_contained,
+            trr_at_entry=trr_at_entry,
+            size_modifier=size_modifier,
         )
 
     def stats(self) -> Dict[str, Any]:

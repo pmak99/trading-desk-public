@@ -8,6 +8,10 @@ Rules:
 1. Neutral skew + sentiment → sentiment breaks tie
 2. Conflict (bullish skew + bearish sentiment) → go neutral (hedge)
 3. Otherwise → keep skew bias
+
+Position Sizing (contrarian signal based on 2025 backtest data):
+- Strong bullish sentiment correlates with LARGER moves (reduce size)
+- Strong bearish sentiment correlates with SMALLER moves (increase size)
 """
 
 from dataclasses import dataclass
@@ -24,6 +28,15 @@ SENTIMENT_BEARISH_THRESHOLD = -0.2  # Score <= -0.2 is bearish
 # CONFIDENCE_DIVISOR: sentiment_strength = min(1.0, abs(score) / CONFIDENCE_DIVISOR)
 # At |score| = 0.6, sentiment_strength = 1.0 (max confidence from sentiment alone)
 CONFIDENCE_DIVISOR = 0.6
+
+# Contrarian position sizing thresholds (based on 2025 backtest analysis)
+# Strong bullish → larger moves observed → reduce position size
+# Strong bearish → smaller moves observed (priced in) → increase position size
+STRONG_BULLISH_THRESHOLD = 0.6   # Score >= 0.6 triggers size reduction
+STRONG_BEARISH_THRESHOLD = -0.6  # Score <= -0.6 triggers size increase
+SIZE_MODIFIER_BULLISH = 0.8      # 20% size reduction for strong bullish
+SIZE_MODIFIER_BEARISH = 1.2      # 20% size increase for strong bearish
+HIGH_BULLISH_WARNING_THRESHOLD = 0.7  # Score >= 0.7 triggers warning
 
 
 class AdjustedBias(Enum):
@@ -49,6 +62,7 @@ class DirectionAdjustment:
     adjusted_bias: AdjustedBias
     rule_applied: str
     confidence: float  # 0-1, higher = more confident in adjustment
+    size_modifier: float = 1.0  # Contrarian sizing: 0.8 for strong bullish, 1.2 for strong bearish
 
     @property
     def changed(self) -> bool:
@@ -56,6 +70,34 @@ class DirectionAdjustment:
         # Normalize original for proper comparison
         original_normalized = normalize_skew_bias(self.original_bias)
         return original_normalized != self.adjusted_bias.value
+
+    @property
+    def high_bullish_warning(self) -> bool:
+        """Flag when sentiment is very bullish - correlates with larger moves."""
+        return self.sentiment_score >= HIGH_BULLISH_WARNING_THRESHOLD
+
+
+def get_size_modifier(sentiment_score: float) -> float:
+    """
+    Calculate contrarian position sizing modifier based on sentiment.
+
+    Based on 2025 backtest analysis:
+    - Strong bullish sentiment correlates with LARGER moves (avg 5.47%)
+      → Reduce position size to limit risk
+    - Strong bearish sentiment correlates with SMALLER moves (avg 3.69%)
+      → Bad news priced in, increase position size
+
+    Args:
+        sentiment_score: Sentiment score from -1.0 to +1.0
+
+    Returns:
+        Size modifier: 0.8 for strong bullish, 1.2 for strong bearish, 1.0 otherwise
+    """
+    if sentiment_score >= STRONG_BULLISH_THRESHOLD:
+        return SIZE_MODIFIER_BULLISH
+    elif sentiment_score <= STRONG_BEARISH_THRESHOLD:
+        return SIZE_MODIFIER_BEARISH
+    return 1.0
 
 
 def normalize_skew_bias(skew_bias: str) -> str:
@@ -202,6 +244,7 @@ def adjust_direction(
             adjusted_bias=adjusted,
             rule_applied=rule,
             confidence=_calculate_confidence(sentiment_score, rule, sent_dir, original),
+            size_modifier=get_size_modifier(sentiment_score),
         )
 
     # RULE 2: Conflict → go neutral (hedge)
@@ -217,6 +260,7 @@ def adjust_direction(
             adjusted_bias=AdjustedBias.NEUTRAL,
             rule_applied=rule,
             confidence=_calculate_confidence(sentiment_score, rule, sent_dir, original),
+            size_modifier=get_size_modifier(sentiment_score),
         )
 
     # RULE 3: Otherwise keep skew bias
@@ -235,6 +279,7 @@ def adjust_direction(
         adjusted_bias=bias_map.get(original, AdjustedBias.NEUTRAL),
         rule_applied=rule,
         confidence=_calculate_confidence(sentiment_score, rule, sent_dir, original),
+        size_modifier=get_size_modifier(sentiment_score),
     )
 
 
@@ -243,12 +288,29 @@ def format_adjustment(adj: DirectionAdjustment) -> str:
     arrow = "→" if adj.changed else "="
     change_indicator = " (CHANGED)" if adj.changed else ""
 
+    # Build size modifier display
+    if adj.size_modifier < 1.0:
+        size_display = f"  Size Modifier: {adj.size_modifier:.0%} (reduce - high bullish = larger moves)\n"
+    elif adj.size_modifier > 1.0:
+        size_display = f"  Size Modifier: {adj.size_modifier:.0%} (increase - bearish = priced in)\n"
+    else:
+        size_display = ""
+
+    # High bullish warning
+    warning = ""
+    if adj.high_bullish_warning:
+        warning = (
+            "\n  ⚠️  HIGH BULLISH WARNING: Strong bullish sentiment (≥0.7)\n"
+            "      correlates with LARGER moves. Consider reduced sizing."
+        )
+
     return (
         f"Direction: {adj.original_bias} {arrow} {adj.adjusted_bias.value.upper()}{change_indicator}\n"
         f"  Sentiment: {adj.sentiment_score:+.2f}\n"
         f"  Rule: {adj.rule_applied}\n"
-        f"  Confidence: {adj.confidence:.0%}"
-    )
+        f"  Confidence: {adj.confidence:.0%}\n"
+        f"{size_display}{warning}"
+    ).rstrip()
 
 
 # Convenience function for quick adjustment
