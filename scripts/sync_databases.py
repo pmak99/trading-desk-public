@@ -26,12 +26,27 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 LOCAL_DB = PROJECT_ROOT / "2.0" / "data" / "ivcrush.db"
 GCS_BUCKET = "your-gcs-bucket"
 GCS_BLOB = "ivcrush.db"
-# Google Drive backup path - set via environment variable
-# Default uses generic GoogleDrive path without personal email
-GDRIVE_BACKUP_DIR = Path(os.environ.get(
-    "GDRIVE_BACKUP_PATH",
-    str(Path.home() / "Library/CloudStorage/GoogleDrive/My Drive/Backups/trading-desk")
-))
+# Google Drive backup path - auto-detect or use environment variable
+def _find_gdrive_backup_dir() -> Path:
+    """Find Google Drive backup directory, handling email-suffixed mount points."""
+    if "GDRIVE_BACKUP_PATH" in os.environ:
+        return Path(os.environ["GDRIVE_BACKUP_PATH"])
+
+    cloud_storage = Path.home() / "Library/CloudStorage"
+    if not cloud_storage.exists():
+        return cloud_storage / "GoogleDrive/My Drive/Backups/trading-desk"
+
+    # Find any GoogleDrive* folder (handles GoogleDrive-email@example.com format)
+    for item in cloud_storage.iterdir():
+        if item.is_dir() and item.name.startswith("GoogleDrive"):
+            backup_path = item / "My Drive/Backups/trading-desk"
+            if backup_path.exists():
+                return backup_path
+
+    # Fallback to generic path
+    return cloud_storage / "GoogleDrive/My Drive/Backups/trading-desk"
+
+GDRIVE_BACKUP_DIR = _find_gdrive_backup_dir()
 
 
 def log(msg: str, level: str = "info"):
