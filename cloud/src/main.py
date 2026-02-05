@@ -1346,7 +1346,8 @@ async def _analyze_single_ticker(
     vrp_cache,
     semaphore: asyncio.Semaphore,
     prefetched_moves: Optional[List[Dict[str, Any]]] = None,
-    filter_mode: str = "filter"
+    filter_mode: str = "filter",
+    fresh: bool = False
 ) -> Optional[Dict[str, Any]]:
     """
     Analyze a single ticker for VRP opportunity.
@@ -1359,6 +1360,7 @@ async def _analyze_single_ticker(
     Args:
         filter_mode: "filter" to return None for non-weekly tickers (default),
                      "warn" to include ticker with warning
+        fresh: If True, bypass VRP and sentiment caches (fetch fresh data)
     """
     async with semaphore:
         try:
@@ -1377,7 +1379,8 @@ async def _analyze_single_ticker(
             historical_avg = sum(historical_pcts) / len(historical_pcts)
 
             # Check VRP cache first (reduces Tradier API calls by ~89%)
-            cached_vrp = vrp_cache.get_vrp(ticker, earnings_date)
+            # Skip cache if fresh=True (Telegram requests real-time data)
+            cached_vrp = None if fresh else vrp_cache.get_vrp(ticker, earnings_date)
             has_weekly_options = True  # Default: permissive on error
             weekly_reason = ""
             if cached_vrp:
@@ -1466,7 +1469,8 @@ async def _analyze_single_ticker(
             # Get cached sentiment if available and use get_direction for consistency
             # Note: skew analysis not available in whisper (would require extra API calls)
             # so we pass skew_bias=None to let sentiment drive direction
-            sentiment = sentiment_cache.get_sentiment(ticker, earnings_date)
+            # Skip cache if fresh=True (Telegram requests real-time data)
+            sentiment = None if fresh else sentiment_cache.get_sentiment(ticker, earnings_date)
             sentiment_score = sentiment.get("score") if sentiment else None
             sentiment_direction = sentiment.get("direction") if sentiment else None
             direction = get_direction(
@@ -1519,7 +1523,8 @@ async def _analyze_single_ticker(
 async def _scan_tickers_for_whisper(
     upcoming: List[Dict],
     repo,
-    tradier
+    tradier,
+    fresh: bool = False
 ) -> List[Dict[str, Any]]:
     """
     Scan tickers for VRP opportunities using parallel execution.
@@ -1536,6 +1541,9 @@ async def _scan_tickers_for_whisper(
     Target: 60s → 15s for 30 tickers.
 
     Extracted for asyncio.wait_for timeout support.
+
+    Args:
+        fresh: If True, bypass VRP and sentiment caches (for Telegram real-time requests)
     """
     sentiment_cache = get_sentiment_cache()
     vrp_cache = get_vrp_cache()
@@ -1577,7 +1585,8 @@ async def _scan_tickers_for_whisper(
                 sentiment_cache=sentiment_cache,
                 vrp_cache=vrp_cache,
                 semaphore=semaphore,
-                prefetched_moves=prefetched_moves
+                prefetched_moves=prefetched_moves,
+                fresh=fresh
             )
         )
         tasks.append(task)
@@ -1620,12 +1629,11 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
     Most anticipated earnings - find high-VRP opportunities.
 
     Scans upcoming earnings and returns qualified tickers sorted by score.
-    VRP data is always fetched fresh from Tradier options chains.
 
     Args:
-        fresh: Reserved for consistency (VRP already fetched fresh each call)
+        fresh: If True, bypass VRP and sentiment caches (for Telegram real-time requests)
     """
-    log("info", "Whisper request", date=date)
+    log("info", "Whisper request", date=date, fresh=fresh)
     start_time = time.time()
 
     try:
@@ -1656,7 +1664,7 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
         scan_errors = 0
         try:
             results, scan_errors = await asyncio.wait_for(
-                _scan_tickers_for_whisper(upcoming, repo, tradier),
+                _scan_tickers_for_whisper(upcoming, repo, tradier, fresh=fresh),
                 timeout=MAX_SCAN_TIME_SECONDS
             )
         except asyncio.TimeoutError:
@@ -1670,6 +1678,45 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
 
         # Get budget info
         budget = get_budget_tracker()
+
+        # If fresh=True, fetch real-time sentiment for top 5 tickers
+        # This provides up-to-date direction for Telegram requests
+        if fresh and results:
+            perplexity = get_perplexity()
+            cache = get_sentiment_cache()
+            top_n = min(5, len(results))
+
+            for i in range(top_n):
+                ticker = results[i]["ticker"]
+                earnings_date = results[i]["earnings_date"]
+
+                # Check budget before each call
+                if not budget.can_call("perplexity"):
+                    log("warn", "Budget exhausted during fresh sentiment fetch",
+                        fetched=i, remaining=top_n-i)
+                    break
+
+                try:
+                    sentiment_data = await perplexity.get_sentiment(ticker, earnings_date)
+                    if sentiment_data and not sentiment_data.get("error"):
+                        # Cache for future requests
+                        cache.save_sentiment(ticker, earnings_date, sentiment_data)
+
+                        # Update direction using fresh sentiment
+                        direction = get_direction(
+                            skew_bias=None,  # No skew in whisper
+                            sentiment_score=sentiment_data.get("score"),
+                            sentiment_direction=sentiment_data.get("direction"),
+                        )
+                        results[i]["direction"] = direction
+                        results[i]["sentiment_score"] = sentiment_data.get("score", 0)
+                        log("debug", "Fresh sentiment fetched",
+                            ticker=ticker, direction=direction,
+                            score=sentiment_data.get("score"))
+                except Exception as e:
+                    log("warn", "Failed to fetch fresh sentiment",
+                        ticker=ticker, error=type(e).__name__)
+
         summary = budget.get_summary("perplexity")
 
         response = {
