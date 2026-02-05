@@ -354,16 +354,8 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 'details': 'See anomalies section for details'
             }
 
-        # Check liquidity
+        # Check VRP and liquidity (RELAXED Feb 2026 - REJECT allowed but penalized)
         liquidity_tier = ticker_result.get('liquidity_tier', 'REJECT')
-        if liquidity_tier == 'REJECT':
-            return {
-                'action': 'DO_NOT_TRADE',
-                'reason': 'REJECT liquidity tier',
-                'details': 'Insufficient liquidity for safe execution'
-            }
-
-        # Check VRP
         vrp_ratio = ticker_result.get('vrp_ratio', 0)
         recommendation = ticker_result.get('recommendation', 'SKIP')
 
@@ -373,16 +365,22 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 'reason': f'{recommendation} VRP ({vrp_ratio:.2f}x) + {liquidity_tier} liquidity',
                 'details': 'Strong opportunity with acceptable risk'
             }
+        elif vrp_ratio >= 1.8 and liquidity_tier in ['WARNING', 'REJECT']:
+            return {
+                'action': 'TRADE_CAUTIOUSLY',
+                'reason': f'{recommendation} VRP ({vrp_ratio:.2f}x) + {liquidity_tier} liquidity',
+                'details': 'Strong VRP but reduce position size due to liquidity'
+            }
         elif vrp_ratio >= 1.4 and liquidity_tier in ['EXCELLENT', 'GOOD']:
             return {
                 'action': 'TRADE_CAUTIOUSLY',
                 'reason': f'{recommendation} VRP ({vrp_ratio:.2f}x) + {liquidity_tier} liquidity',
                 'details': 'Moderate opportunity - consider reduced position size'
             }
-        elif vrp_ratio >= 1.4 and liquidity_tier == 'WARNING':
+        elif vrp_ratio >= 1.4 and liquidity_tier in ['WARNING', 'REJECT']:
             return {
                 'action': 'TRADE_CAUTIOUSLY',
-                'reason': f'{recommendation} VRP ({vrp_ratio:.2f}x) + WARNING liquidity',
+                'reason': f'{recommendation} VRP ({vrp_ratio:.2f}x) + {liquidity_tier} liquidity',
                 'details': 'Reduce position size due to liquidity constraints'
             }
         elif vrp_ratio < 1.4:
@@ -394,8 +392,8 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         else:
             return {
                 'action': 'SKIP',
-                'reason': f'{liquidity_tier} liquidity despite {recommendation} VRP ({vrp_ratio:.2f}x)',
-                'details': 'Liquidity does not support safe execution'
+                'reason': f'VRP {vrp_ratio:.2f}x insufficient',
+                'details': 'No sufficient edge detected'
             }
 
     def format_results(self, result: Dict[str, Any]) -> str:

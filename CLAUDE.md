@@ -41,14 +41,14 @@ VRP Ratio = Implied Move / Historical Mean Move
 
 **4.0 Sentiment Modifier:** `4.0 Score = 2.0 Score x (1 + modifier)`
 
-## 4-Tier Liquidity System
+## 4-Tier Liquidity System (Relaxed Feb 2026)
 
 | Tier | OI/Position | Spread | Score Pts | Action |
 |------|-------------|--------|-----------|--------|
-| **EXCELLENT** | >=5x | <=8% | 20 | Full size |
-| **GOOD** | 2-5x | 8-12% | 16 | Full size |
-| **WARNING** | 1-2x | 12-15% | 12 | Reduce size |
-| **REJECT** | <1x | >15% | 4 | Do not trade |
+| **EXCELLENT** | >=5x | <=12% | 20 | Full size |
+| **GOOD** | 2-5x | 12-18% | 16 | Full size |
+| **WARNING** | 1-2x | 18-25% | 12 | Reduce size |
+| **REJECT** | <1x | >25% | 4 | Reduce size (allowed) |
 
 ## Tail Risk Ratio (TRR)
 
@@ -87,7 +87,7 @@ TRR = Max Historical Move / Average Historical Move
 
 ## Critical Rules
 
-1. **Never trade REJECT liquidity** - learned from $27k WDAY/ZS/SYM loss
+1. **Reduce size for REJECT liquidity** - thresholds relaxed Feb 2026, still penalized in scoring
 2. **Prefer SINGLE options** over spreads - 64% vs 52% win rate
 3. **Respect TRR limits** - HIGH TRR lost $123k, LOW TRR made $52k
 4. **Never roll losing positions** - 0% success rate, -$129k total
@@ -238,7 +238,7 @@ cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 48 tests
 ## When Analyzing Trades
 
 1. Check TRR level - prefer LOW, avoid HIGH
-2. Check liquidity tier - REJECT = no-trade
+2. Check liquidity tier - REJECT = reduce size (allowed but penalized)
 3. Verify VRP >= 1.4x minimum, >= 1.8x preferred
 4. **Prefer SINGLE options** over spreads
 5. If trade goes wrong: **cut the loss, don't roll**

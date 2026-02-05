@@ -341,9 +341,10 @@ class WhisperOrchestrator(BaseOrchestrator):
 
         # Check 2: Portfolio risk using configured thresholds
         # Note: Individual TRR limits are enforced by TickerAnalysisAgent
+        # RELAXED Feb 2026: Include all tiers in notional calculation
         total_notional = sum(
             self.DEFAULT_POSITION_NOTIONAL for r in results
-            if r.get('liquidity_tier') in ['EXCELLENT', 'GOOD']
+            if r.get('liquidity_tier') in ['EXCELLENT', 'GOOD', 'WARNING', 'REJECT']
         )
         max_recommended = self.MAX_PORTFOLIO_NOTIONAL
 
