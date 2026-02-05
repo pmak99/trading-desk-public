@@ -55,7 +55,7 @@ idna==3.11
 six==1.17.0
 multitasking==0.0.12
 frozendict==2.4.7
-packaging==25.0
+packaging==26.0
 platformdirs==4.5.1
 pluggy==1.6.0
 iniconfig==2.3.0
