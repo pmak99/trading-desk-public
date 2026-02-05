@@ -631,9 +631,18 @@ except sqlite3.OperationalError:
 ## Quick Reference
 
 ```bash
-# Redeploy
+# Recommended: Use deploy script
+./deploy.sh              # Full deploy with DB sync from 2.0
+./deploy.sh --quick      # Code-only deploy (faster, no DB sync)
+./deploy.sh --help       # Show usage
+
+# Manual redeploy (without DB sync)
 gcloud builds submit --tag gcr.io/your-gcp-project/trading-desk
 gcloud run deploy trading-desk --image gcr.io/your-gcp-project/trading-desk --region us-east1
+
+# Sync database manually
+cp ../2.0/data/ivcrush.db data/ivcrush.db
+gsutil cp data/ivcrush.db gs://your-gcs-bucket/ivcrush.db
 
 # Update secrets
 gcloud secrets versions add trading-desk-secrets --data-file=/tmp/new-secrets.json
