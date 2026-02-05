@@ -3,20 +3,20 @@ Liquidity tier classification.
 
 Ported from 2.0/src/application/metrics/liquidity_scorer.py with simplified interface.
 
-4-Tier System (from CLAUDE.md):
-- EXCELLENT: OI >= 5x position, spread <= 8%
-- GOOD: OI 2-5x position, spread 8-12%
-- WARNING: OI 1-2x position, spread 12-15%
-- REJECT: OI < 1x position, spread > 15%
+4-Tier System (RELAXED Feb 2026):
+- EXCELLENT: OI >= 5x position, spread <= 12%
+- GOOD: OI 2-5x position, spread 12-18%
+- WARNING: OI 1-2x position, spread 18-25%
+- REJECT: OI < 1x position, spread > 25%
 
 Final tier = worse of (OI tier, Spread tier)
 """
 
-# Spread thresholds
-SPREAD_EXCELLENT = 8.0   # <= 8%
-SPREAD_GOOD = 12.0       # <= 12%
-SPREAD_WARNING = 15.0    # <= 15%
-# > 15% = REJECT
+# Spread thresholds (RELAXED Feb 2026)
+SPREAD_EXCELLENT = 12.0   # <= 12%
+SPREAD_GOOD = 18.0        # <= 18%
+SPREAD_WARNING = 25.0     # <= 25%
+# > 25% = REJECT
 
 TIER_ORDER = {"REJECT": 0, "WARNING": 1, "GOOD": 2, "EXCELLENT": 3}
 

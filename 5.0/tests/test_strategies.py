@@ -47,7 +47,7 @@ def test_generate_iron_condor_neutral():
     assert ic is not None
 
 def test_reject_liquidity_no_strategies():
-    """REJECT liquidity returns empty list."""
+    """REJECT liquidity still generates strategies (relaxed Feb 2026)."""
     strategies = generate_strategies(
         ticker="NVDA",
         price=135.0,
@@ -55,7 +55,8 @@ def test_reject_liquidity_no_strategies():
         direction="BULLISH",
         liquidity_tier="REJECT"
     )
-    assert strategies == []
+    # REJECT now allowed but penalized in scoring
+    assert len(strategies) > 0
 
 def test_strategy_has_required_fields():
     """Strategy has all required fields."""

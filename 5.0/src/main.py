@@ -1269,7 +1269,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
         # Account size from environment or default (configurable)
         account_size = settings.account_size
         position_size = 0
-        if strategies and liquidity_tier != "REJECT":
+        if strategies:  # REJECT liquidity allowed but penalized in scoring (Feb 2026)
             top_strategy = strategies[0]
             position_size = calculate_position_size(
                 account_value=account_size,
