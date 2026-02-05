@@ -14,7 +14,7 @@ Complete walkthrough for deploying the autopilot system to GCP with Telegram not
 
 ## Security
 
-All API endpoints are protected by API key authentication.
+All API endpoints are protected by API key authentication. All endpoints are rate limited to 60 requests/minute per IP.
 
 | Endpoint | Auth Method | Description |
 |----------|-------------|-------------|

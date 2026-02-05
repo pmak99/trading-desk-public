@@ -34,8 +34,11 @@ CONFIDENCE_DIVISOR = 0.6
 # Strong bearish → smaller moves observed (priced in) → increase position size
 STRONG_BULLISH_THRESHOLD = 0.6   # Score >= 0.6 triggers size reduction
 STRONG_BEARISH_THRESHOLD = -0.6  # Score <= -0.6 triggers size increase
-SIZE_MODIFIER_BULLISH = 0.8      # 20% size reduction for strong bullish
-SIZE_MODIFIER_BEARISH = 1.2      # 20% size increase for strong bearish
+# NOTE: Contrarian sizing is based on only n=23 samples (as of Feb 2026).
+# Capped at 10% adjustment (was 20%) until sample size reaches n=50+.
+# Revisit when more data is available to determine if larger adjustments are warranted.
+SIZE_MODIFIER_BULLISH = 0.9      # 10% size reduction for strong bullish
+SIZE_MODIFIER_BEARISH = 1.1      # 10% size increase for strong bearish
 HIGH_BULLISH_WARNING_THRESHOLD = 0.7  # Score >= 0.7 triggers warning
 
 
@@ -62,7 +65,7 @@ class DirectionAdjustment:
     adjusted_bias: AdjustedBias
     rule_applied: str
     confidence: float  # 0-1, higher = more confident in adjustment
-    size_modifier: float = 1.0  # Contrarian sizing: 0.8 for strong bullish, 1.2 for strong bearish
+    size_modifier: float = 1.0  # Contrarian sizing: 0.9 for strong bullish, 1.1 for strong bearish
 
     @property
     def changed(self) -> bool:
@@ -97,7 +100,7 @@ def get_size_modifier(sentiment_score: float) -> float:
         sentiment_score: Sentiment score from -1.0 to +1.0
 
     Returns:
-        Size modifier: 0.8 for strong bullish, 1.2 for strong bearish, 1.0 otherwise
+        Size modifier: 0.9 for strong bullish, 1.1 for strong bearish, 1.0 otherwise
     """
     if sentiment_score >= STRONG_BULLISH_THRESHOLD:
         return SIZE_MODIFIER_BULLISH

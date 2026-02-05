@@ -169,7 +169,7 @@ class PatternRecognitionAgent:
         # Validate with schema
         try:
             validated = PatternResult(**result)
-            return validated.dict()
+            return validated.model_dump()
         except Exception as e:
             logger.error(f"Schema validation error: {e}")
             return result

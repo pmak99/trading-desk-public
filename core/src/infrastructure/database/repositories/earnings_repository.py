@@ -141,11 +141,17 @@ class EarningsRepository(BaseRepository):
         Get all earnings in next N days.
 
         Args:
-            days_ahead: Number of days to look ahead
+            days_ahead: Number of days to look ahead (must be >= 0)
 
         Returns:
             Result with list of (ticker, date) tuples
         """
+        if days_ahead < 0:
+            return Err(AppError(
+                ErrorCode.INVALID,
+                f"days_ahead must be non-negative, got {days_ahead}"
+            ))
+
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()

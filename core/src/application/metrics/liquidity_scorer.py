@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, Any
 from src.domain.types import OptionQuote, OptionChain, Money, Strike
 from src.utils.market_hours import is_market_open, get_market_status
+from src.config.config import ThresholdsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -81,29 +82,32 @@ class LiquidityScorer:
 
     def __init__(
         self,
-        # OI thresholds (4-tier)
-        min_oi: int = 50,  # REJECT below this
-        warning_oi: int = 100,  # WARNING tier threshold (1-2x position)
-        good_oi: int = 500,  # GOOD tier threshold (2-5x position)
-        excellent_oi: int = 1000,  # EXCELLENT tier threshold (>=5x position)
+        # OI thresholds (4-tier) - defaults match config.py ThresholdsConfig
+        min_oi: int = 10,  # REJECT below this (config: liquidity_reject_min_oi)
+        warning_oi: int = 50,  # WARNING tier threshold (config: liquidity_warning_min_oi)
+        good_oi: int = 100,  # GOOD tier threshold (config: liquidity_good_min_oi)
+        excellent_oi: int = 200,  # EXCELLENT tier threshold (config: liquidity_excellent_min_oi)
         # Volume thresholds
-        min_volume: int = 20,
+        min_volume: int = 0,  # config: liquidity_reject_min_volume
         good_volume: int = 100,
         excellent_volume: int = 250,
-        # Spread thresholds (4-tier)
-        max_spread_pct: float = 15.0,  # REJECT threshold - spread > 15%
-        warning_spread_pct: float = 12.0,  # WARNING threshold - spread > 12%
-        good_spread_pct: float = 8.0,  # GOOD threshold - spread > 8%
-        excellent_spread_pct: float = 5.0,  # EXCELLENT threshold - spread <= 8%
+        # Spread thresholds (4-tier) - defaults match config.py ThresholdsConfig
+        max_spread_pct: float = 25.0,  # REJECT threshold - spread > 25% (config: liquidity_reject_max_spread_pct)
+        warning_spread_pct: float = 18.0,  # WARNING threshold - spread > 18% (config: liquidity_warning_max_spread_pct)
+        good_spread_pct: float = 12.0,  # GOOD threshold - spread > 12% (config: liquidity_good_max_spread_pct)
+        excellent_spread_pct: float = 12.0,  # EXCELLENT threshold - spread <= 12% (config: liquidity_excellent_max_spread_pct)
     ):
         """
         Initialize liquidity scorer with 4-tier thresholds.
 
-        4-Tier System:
-        - EXCELLENT: OI >= excellent_oi, spread <= good_spread_pct (8%)
-        - GOOD: OI >= good_oi, spread <= warning_spread_pct (12%)
-        - WARNING: OI >= warning_oi, spread <= max_spread_pct (15%)
-        - REJECT: Below WARNING thresholds
+        Defaults match config.py ThresholdsConfig (single source of truth).
+        Use from_config() classmethod to construct from a ThresholdsConfig instance.
+
+        4-Tier System (from CLAUDE.md):
+        - EXCELLENT: OI >= 5x position (excellent_oi), spread <= 12%
+        - GOOD: OI 2-5x position (good_oi to excellent_oi), spread 12-18%
+        - WARNING: OI 1-2x position (warning_oi to good_oi), spread 18-25%
+        - REJECT: OI < 1x position (below min_oi), spread > 25%
 
         Args:
             min_oi: Minimum OI for REJECT tier
@@ -113,10 +117,10 @@ class LiquidityScorer:
             min_volume: Minimum acceptable volume
             good_volume: Good volume threshold
             excellent_volume: Excellent volume threshold
-            max_spread_pct: REJECT threshold (spread > 15%)
-            warning_spread_pct: WARNING threshold (spread > 12%)
-            good_spread_pct: GOOD threshold (spread > 8%)
-            excellent_spread_pct: EXCELLENT threshold (spread <= 8%)
+            max_spread_pct: REJECT threshold (spread > 25%)
+            warning_spread_pct: WARNING threshold (spread > 18%)
+            good_spread_pct: GOOD threshold (spread > 12%)
+            excellent_spread_pct: EXCELLENT threshold (spread <= 12%)
         """
         self.min_oi = min_oi
         self.warning_oi = warning_oi
@@ -135,6 +139,31 @@ class LiquidityScorer:
         self.volume_weight = 0.30
         self.spread_weight = 0.25
         self.depth_weight = 0.05
+
+    @classmethod
+    def from_config(cls, config: ThresholdsConfig) -> 'LiquidityScorer':
+        """
+        Construct LiquidityScorer from ThresholdsConfig (single source of truth).
+
+        Args:
+            config: ThresholdsConfig instance from config.py
+
+        Returns:
+            LiquidityScorer with thresholds matching config
+        """
+        return cls(
+            min_oi=config.liquidity_reject_min_oi,
+            warning_oi=config.liquidity_warning_min_oi,
+            good_oi=config.liquidity_good_min_oi,
+            excellent_oi=config.liquidity_excellent_min_oi,
+            min_volume=config.liquidity_reject_min_volume,
+            good_volume=config.liquidity_reject_min_volume,  # No separate good_volume in config
+            excellent_volume=config.liquidity_excellent_min_volume,
+            max_spread_pct=config.liquidity_reject_max_spread_pct,
+            warning_spread_pct=config.liquidity_warning_max_spread_pct,
+            good_spread_pct=config.liquidity_good_max_spread_pct,
+            excellent_spread_pct=config.liquidity_excellent_max_spread_pct,
+        )
 
     def calculate_spread_pct(self, option: OptionQuote) -> float:
         """
@@ -235,10 +264,10 @@ class LiquidityScorer:
         This is the single source of truth for tier classification across all modes.
 
         4-Tier System (from CLAUDE.md):
-        - EXCELLENT: OI >= 5x position (excellent_oi), spread <= 8%
-        - GOOD:      OI 2-5x position (good_oi to excellent_oi), spread 8-12%
-        - WARNING:   OI 1-2x position (warning_oi to good_oi), spread 12-15%
-        - REJECT:    OI < 1x position (below warning_oi), spread > 15%
+        - EXCELLENT: OI >= 5x position (excellent_oi), spread <= 12%
+        - GOOD:      OI 2-5x position (good_oi to excellent_oi), spread 12-18%
+        - WARNING:   OI 1-2x position (warning_oi to good_oi), spread 18-25%
+        - REJECT:    OI < 1x position (below min_oi), spread > 25%
 
         Final tier = worse of (OI tier, Spread tier)
 
@@ -263,13 +292,13 @@ class LiquidityScorer:
             oi_tier = "EXCELLENT"
 
         # Determine spread-based tier
-        if spread_pct > self.max_spread_pct:  # >15%
+        if spread_pct > self.max_spread_pct:  # >25%
             spread_tier = "REJECT"
-        elif spread_pct >= self.warning_spread_pct:  # >=12%
+        elif spread_pct >= self.warning_spread_pct:  # >=18%
             spread_tier = "WARNING"
-        elif spread_pct >= self.good_spread_pct:  # >=8%
+        elif spread_pct >= self.good_spread_pct:  # >=12%
             spread_tier = "GOOD"
-        else:  # <8%
+        else:  # <12%
             spread_tier = "EXCELLENT"
 
         # Final tier is the worse of the two (normalize case for safety)
@@ -322,10 +351,10 @@ class LiquidityScorer:
         This prevents false REJECT classifications during weekends/after-hours.
 
         4-Tier System (from CLAUDE.md):
-        - EXCELLENT: OI >= excellent_oi, spread <= 8%
-        - GOOD:      OI >= good_oi, spread <= 12%
-        - WARNING:   OI >= warning_oi, spread <= 15%
-        - REJECT:    OI < warning_oi or spread > 15%
+        - EXCELLENT: OI >= excellent_oi, spread <= 12%
+        - GOOD:      OI >= good_oi, spread 12-18%
+        - WARNING:   OI >= warning_oi, spread 18-25%
+        - REJECT:    OI < min_oi or spread > 25%
 
         Final tier = worse of (OI tier, Spread tier)
 
@@ -349,13 +378,13 @@ class LiquidityScorer:
             oi_tier = "EXCELLENT"
 
         # Determine spread-based tier
-        if spread_pct > self.max_spread_pct:  # >15%
+        if spread_pct > self.max_spread_pct:  # >25%
             spread_tier = "REJECT"
-        elif spread_pct >= self.warning_spread_pct:  # >=12%
+        elif spread_pct >= self.warning_spread_pct:  # >=18%
             spread_tier = "WARNING"
-        elif spread_pct >= self.good_spread_pct:  # >=8%
+        elif spread_pct >= self.good_spread_pct:  # >=12%
             spread_tier = "GOOD"
-        else:  # <8%
+        else:  # <12%
             spread_tier = "EXCELLENT"
 
         # Final tier is the worse of the two (normalize case for safety)
@@ -862,7 +891,7 @@ class LiquidityScorer:
 
         # Classify tier using dynamic thresholds
         # OI Tiers: REJECT (<1x), WARNING (1-2x), GOOD (2-5x), EXCELLENT (>=5x)
-        # Spread Tiers: REJECT (>15%), WARNING (>12%), GOOD (>8%), EXCELLENT (<=8%)
+        # Spread Tiers: REJECT (>25%), WARNING (>=18%), GOOD (>=12%), EXCELLENT (<12%)
         #
         # Final tier = worse of (OI tier, Spread tier)
 
@@ -877,14 +906,14 @@ class LiquidityScorer:
             oi_tier = "EXCELLENT"
 
         # Determine spread-based tier
-        # Spread Tiers: REJECT (>15%), WARNING (>=12%), GOOD (>=8%), EXCELLENT (<8%)
-        if max_spread > self.max_spread_pct:  # >15%
+        # Spread Tiers: REJECT (>25%), WARNING (>=18%), GOOD (>=12%), EXCELLENT (<12%)
+        if max_spread > self.max_spread_pct:  # >25%
             spread_tier = "REJECT"
-        elif max_spread >= self.warning_spread_pct:  # >=12%
+        elif max_spread >= self.warning_spread_pct:  # >=18%
             spread_tier = "WARNING"
-        elif max_spread >= self.good_spread_pct:  # >=8%
+        elif max_spread >= self.good_spread_pct:  # >=12%
             spread_tier = "GOOD"
-        else:  # <8%
+        else:  # <12%
             spread_tier = "EXCELLENT"
 
         # Final tier is the worse of the two

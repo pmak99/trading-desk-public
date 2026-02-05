@@ -23,6 +23,7 @@ Schema:
     )
 """
 
+import os
 import re
 import sqlite3
 import threading
@@ -46,15 +47,16 @@ def _get_size_modifier(sentiment_score: float) -> float:
     circular import issues. Constants are defined here to match:
     - STRONG_BULLISH_THRESHOLD = 0.6
     - STRONG_BEARISH_THRESHOLD = -0.6
-    - SIZE_MODIFIER_BULLISH = 0.8
-    - SIZE_MODIFIER_BEARISH = 1.2
+    - SIZE_MODIFIER_BULLISH = 0.9
+    - SIZE_MODIFIER_BEARISH = 1.1
 
-    CAUTION: Based on n=23 samples. Treat as hypothesis until n=50+.
+    CAUTION: Based on n=23 samples. Capped at 10% adjustment (was 20%)
+    until n=50+ samples collected. Treat as hypothesis.
     """
     if sentiment_score >= 0.6:
-        return 0.8
+        return 0.9
     elif sentiment_score <= -0.6:
-        return 1.2
+        return 1.1
     return 1.0
 
 
@@ -62,8 +64,8 @@ def _get_size_modifier(sentiment_score: float) -> float:
 SIZING_THRESHOLDS = {
     'strong_bullish': 0.6,
     'strong_bearish': -0.6,
-    'modifier_bullish': 0.8,
-    'modifier_bearish': 1.2,
+    'modifier_bullish': 0.9,
+    'modifier_bearish': 1.1,
 }
 
 
@@ -140,9 +142,19 @@ class SentimentHistory:
     VALID_TRADE_OUTCOMES = {"WIN", "LOSS", "SKIP"}  # Valid trade_outcome values
 
     def __init__(self, db_path: Optional[Path] = None):
-        """Initialize history with optional custom database path."""
+        """Initialize history with optional custom database path.
+
+        Path resolution order:
+        1. Explicit db_path argument
+        2. SENTIMENT_DB_PATH environment variable
+        3. Default: <4.0>/data/sentiment_cache.db (relative to module location)
+        """
         if db_path is None:
-            db_path = Path(__file__).parent.parent.parent / "data" / "sentiment_cache.db"
+            env_path = os.environ.get("SENTIMENT_DB_PATH")
+            if env_path:
+                db_path = Path(env_path)
+            else:
+                db_path = Path(__file__).parent.parent.parent / "data" / "sentiment_cache.db"
 
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -215,7 +227,7 @@ class SentimentHistory:
             raise ValueError(f"Invalid source '{source}'. Must be one of: {self.VALID_SOURCES}")
 
         ticker = ticker.upper()
-        if not ticker or not re.match(r'^[A-Z]{1,5}$', ticker):
+        if not ticker or not re.match(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$', ticker):
             raise ValueError(f"Invalid ticker format: {ticker}")
         now = datetime.now(timezone.utc).isoformat()
 
@@ -223,7 +235,7 @@ class SentimentHistory:
         if sentiment_direction is None and sentiment_score is not None:
             if sentiment_score >= 0.2:
                 sentiment_direction = SentimentDirection.BULLISH
-            elif sentiment_score < -0.2:
+            elif sentiment_score <= -0.2:
                 sentiment_direction = SentimentDirection.BEARISH
             else:
                 sentiment_direction = SentimentDirection.NEUTRAL
@@ -313,7 +325,12 @@ class SentimentHistory:
                     actual_up = actual_direction == "UP"
                     prediction_correct = 1 if predicted_up == actual_up else 0
 
-                # Calculate move_contained (magnitude) - what actually matters for IV crush
+                # Calculate move_contained (magnitude only) - what actually matters for IV crush.
+                # NOTE: Known simplification - this compares magnitude only, ignoring direction.
+                # e.g., if implied_move is 5% up and actual is 5% down, this still counts as
+                # "contained." This is intentional: IV crush strategies (straddles/strangles)
+                # are direction-agnostic and profit when the absolute move stays within the
+                # implied range, regardless of which direction the stock moved.
                 move_contained = None
                 if implied_move is not None:
                     move_contained = 1 if abs(actual_move_pct) <= implied_move else 0

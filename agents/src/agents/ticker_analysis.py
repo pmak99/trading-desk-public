@@ -138,7 +138,7 @@ class TickerAnalysisAgent:
 
             # Validate response schema
             validated = TickerAnalysisResponse(**response_data)
-            return validated.dict()
+            return validated.model_dump()
 
         except Exception as e:
             # Return error response

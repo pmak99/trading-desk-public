@@ -58,6 +58,24 @@ US_MARKET_HOLIDAYS = {
     (2026, 12, 25), # Christmas
 }
 
+# Last year with defined holidays
+_MAX_HOLIDAY_YEAR = max(year for year, _, _ in US_MARKET_HOLIDAYS)
+
+
+def _check_holiday_staleness() -> None:
+    """Log a warning if the current year exceeds the last defined holiday year."""
+    current_year = datetime.now(ET).year
+    if current_year > _MAX_HOLIDAY_YEAR:
+        logger.warning(
+            f"Market holidays are only defined through {_MAX_HOLIDAY_YEAR}, "
+            f"but current year is {current_year}. Holiday checks may be inaccurate. "
+            f"Update US_MARKET_HOLIDAYS in market_hours.py with {current_year} holidays."
+        )
+
+
+# Check once at import time
+_check_holiday_staleness()
+
 
 def is_market_open(dt: datetime = None) -> bool:
     """

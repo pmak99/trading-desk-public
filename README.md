@@ -86,7 +86,7 @@ VRP Ratio = Implied Move / Historical Mean Move
 1. **Prefer SINGLE options** - 64% vs 52% win rate vs spreads
 2. **Respect TRR limits** - LOW TRR: +$52k, HIGH TRR: -$123k
 3. **Never roll** - 0% success rate, always makes losses worse
-4. **Never trade REJECT liquidity**
+4. **Reduce size for REJECT liquidity** - allowed but penalized in scoring
 5. **Cut losses early** - don't try to "fix" losing trades
 
 ## Database

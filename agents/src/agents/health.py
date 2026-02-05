@@ -75,7 +75,7 @@ class HealthCheckAgent:
 
             # Validate with schema
             validated = HealthCheckResponse(**response_data)
-            return validated.dict()
+            return validated.model_dump()
 
         except Exception as e:
             # Return unhealthy status on error

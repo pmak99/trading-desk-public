@@ -24,6 +24,7 @@ Limits:
 - Hard stop: At 100% (graceful degradation to WebSearch)
 """
 
+import os
 import sqlite3
 import threading
 import logging
@@ -121,9 +122,19 @@ class BudgetTracker:
     COST_PER_CALL_ESTIMATE = 0.006  # ~$0.006 per sonar call (includes $0.005 request fee)
 
     def __init__(self, db_path: Optional[Path] = None):
-        """Initialize tracker with optional custom database path."""
+        """Initialize tracker with optional custom database path.
+
+        Path resolution order:
+        1. Explicit db_path argument
+        2. SENTIMENT_DB_PATH environment variable
+        3. Default: <4.0>/data/sentiment_cache.db (relative to module location)
+        """
         if db_path is None:
-            db_path = Path(__file__).parent.parent.parent / "data" / "sentiment_cache.db"
+            env_path = os.environ.get("SENTIMENT_DB_PATH")
+            if env_path:
+                db_path = Path(env_path)
+            else:
+                db_path = Path(__file__).parent.parent.parent / "data" / "sentiment_cache.db"
 
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -145,14 +156,17 @@ class BudgetTracker:
                     )
                 """)
                 # Add token columns if they don't exist (migration for existing DBs)
-                # SECURITY FIX: Check error message to distinguish "column exists" from real errors
-                for column, default in [
-                    ("output_tokens", "INTEGER DEFAULT 0"),
-                    ("reasoning_tokens", "INTEGER DEFAULT 0"),
-                    ("search_requests", "INTEGER DEFAULT 0"),
-                ]:
+                # Use a whitelist of allowed column definitions to avoid SQL injection.
+                # DDL statements (ALTER TABLE) cannot use parameterized queries for
+                # column names/types, so we validate against an explicit whitelist.
+                _ALLOWED_MIGRATIONS = {
+                    "output_tokens": "ALTER TABLE api_budget ADD COLUMN output_tokens INTEGER DEFAULT 0",
+                    "reasoning_tokens": "ALTER TABLE api_budget ADD COLUMN reasoning_tokens INTEGER DEFAULT 0",
+                    "search_requests": "ALTER TABLE api_budget ADD COLUMN search_requests INTEGER DEFAULT 0",
+                }
+                for column, sql in _ALLOWED_MIGRATIONS.items():
                     try:
-                        conn.execute(f"ALTER TABLE api_budget ADD COLUMN {column} {default}")
+                        conn.execute(sql)
                     except sqlite3.OperationalError as e:
                         # Only ignore "duplicate column" errors, re-raise others
                         if "duplicate column" not in str(e).lower():
