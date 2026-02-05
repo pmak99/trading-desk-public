@@ -184,6 +184,7 @@ All jobs follow consistent error handling patterns:
 4. **Telegram error handling**: Capture and log Telegram send failures separately
 5. **Metrics recording**: Duration and counts recorded for all jobs
 6. **Duplicate detection**: Backfill jobs skip already-recorded earnings
+7. **Job timeout**: 300-second timeout per job via `asyncio.wait_for()` prevents indefinite blocking
 
 ## On-Demand Commands
 
@@ -290,6 +291,10 @@ def db_write_lock():
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
 ```
+
+### Atomic GCS Writes
+
+Database downloads use an atomic write pattern: data is written to a `.tmp` file first, then renamed to the final path via `shutil.move()`. This prevents partial/corrupt writes if the download fails midway.
 
 ### Read-Only Pattern for Telegram
 

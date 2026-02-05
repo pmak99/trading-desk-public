@@ -62,7 +62,7 @@ cd 6.0
 1. **Prefer SINGLE options** - 64% vs 52% win rate vs spreads
 2. **Respect TRR limits** - LOW TRR: +$52k, HIGH TRR: -$123k
 3. **Never roll** - 0% success rate, always makes losses worse
-4. **Never trade REJECT liquidity**
+4. **Reduce size for REJECT liquidity** - allowed but penalized in scoring
 5. **Cut losses early** - don't try to "fix" losing trades
 
 ## TRR Performance
@@ -81,7 +81,7 @@ cd 6.0
 | >= 1.4x | EXCELLENT/GOOD | TRADE_CAUTIOUSLY |
 | >= 1.4x | WARNING | TRADE_CAUTIOUSLY (reduce size) |
 | < 1.4x | Any | SKIP (insufficient VRP) |
-| Any | REJECT | SKIP (liquidity) |
+| Any | REJECT | TRADE_CAUTIOUSLY (reduce size) |
 
 ## Architecture
 

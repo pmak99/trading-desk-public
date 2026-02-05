@@ -8,6 +8,7 @@ Cache Key Format: sentiment:{TICKER}:{YYYY-MM-DD}:{SOURCE}
 TTL: 3 hours (10800 seconds)
 """
 
+import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -81,9 +82,19 @@ class SentimentCache:
     VALID_SOURCES = {"perplexity", "websearch"}
 
     def __init__(self, db_path: Optional[Path] = None):
-        """Initialize cache with optional custom database path."""
+        """Initialize cache with optional custom database path.
+
+        Path resolution order:
+        1. Explicit db_path argument
+        2. SENTIMENT_DB_PATH environment variable
+        3. Default: <4.0>/data/sentiment_cache.db (relative to module location)
+        """
         if db_path is None:
-            db_path = Path(__file__).parent.parent.parent / "data" / "sentiment_cache.db"
+            env_path = os.environ.get("SENTIMENT_DB_PATH")
+            if env_path:
+                db_path = Path(env_path)
+            else:
+                db_path = Path(__file__).parent.parent.parent / "data" / "sentiment_cache.db"
 
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

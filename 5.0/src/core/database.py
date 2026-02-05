@@ -45,13 +45,20 @@ class DatabaseSync:
 
     def download(self) -> str:
         """
-        Download database from GCS.
+        Download database from GCS using atomic write pattern.
+
+        Downloads to a temporary file first, validates integrity, then
+        renames to the final path. This prevents partial writes from
+        leaving a corrupted database on failure.
 
         Returns:
             Local path to downloaded database
         """
         bucket = self._client.bucket(self.bucket_name)
         blob = bucket.blob(self.blob_name)
+
+        # Download to temp file first (atomic write pattern)
+        temp_download_path = self.local_path.with_suffix('.db.tmp')
 
         try:
             # Get current metadata with timeout to avoid hanging on network issues
@@ -65,18 +72,42 @@ class DatabaseSync:
                     generation=self._generation, type=type(self._generation).__name__)
                 self._generation = None
             blob.download_to_filename(
-                str(self.local_path),
+                str(temp_download_path),
                 timeout=self.DOWNLOAD_TIMEOUT
             )
 
-            # Validate database integrity after download
-            self._validate_integrity()
+            # Validate database integrity BEFORE moving to final path
+            conn = sqlite3.connect(str(temp_download_path))
+            try:
+                cursor = conn.execute("PRAGMA integrity_check")
+                result = cursor.fetchone()[0]
+                if result != "ok":
+                    raise DatabaseCorruptedError(
+                        f"Database integrity check failed: {result}"
+                    )
+            finally:
+                conn.close()
+
+            # Atomic rename: temp -> final (same filesystem guarantees atomicity)
+            shutil.move(str(temp_download_path), str(self.local_path))
 
             log("info", "Database downloaded", generation=self._generation)
         except DatabaseCorruptedError:
+            # Clean up temp file on corruption
+            if temp_download_path.exists():
+                try:
+                    temp_download_path.unlink()
+                except OSError:
+                    pass
             # Re-raise corruption errors - don't swallow them
             raise
         except Exception as e:
+            # Clean up temp file on any failure
+            if temp_download_path.exists():
+                try:
+                    temp_download_path.unlink()
+                except OSError:
+                    pass
             error_msg = str(e).lower()
             if 'forbidden' in error_msg or '403' in error_msg or 'unauthorized' in error_msg or '401' in error_msg:
                 log("critical", "GCS authentication failed", error=type(e).__name__)

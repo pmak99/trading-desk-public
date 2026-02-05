@@ -217,7 +217,7 @@ class BaseAgent:
         if schema is not None:
             try:
                 validated = schema(**data)
-                return validated.dict()
+                return validated.model_dump()
             except ValidationError as e:
                 raise ValueError(f"Validation failed: {e}") from e
 

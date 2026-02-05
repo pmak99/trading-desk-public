@@ -43,24 +43,23 @@ class PositionLimitsRepository:
             # }
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT ticker, tail_risk_ratio, tail_risk_level,
-                       max_contracts, max_notional, avg_move, max_move
-                FROM position_limits
-                WHERE ticker = ?
-            """, (ticker.upper(),))
+                cursor.execute("""
+                    SELECT ticker, tail_risk_ratio, tail_risk_level,
+                           max_contracts, max_notional, avg_move, max_move
+                    FROM position_limits
+                    WHERE ticker = ?
+                """, (ticker.upper(),))
 
-            row = cursor.fetchone()
-            conn.close()
+                row = cursor.fetchone()
 
-            if row is None:
-                return None
+                if row is None:
+                    return None
 
-            return dict(row)
+                return dict(row)
 
         except Exception as e:
             return None
@@ -68,22 +67,21 @@ class PositionLimitsRepository:
     def get_all_high_risk(self) -> list:
         """Get all tickers with HIGH tail risk."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT ticker, tail_risk_ratio, tail_risk_level,
-                       max_contracts, max_notional, avg_move, max_move
-                FROM position_limits
-                WHERE tail_risk_level = 'HIGH'
-                ORDER BY tail_risk_ratio DESC
-            """)
+                cursor.execute("""
+                    SELECT ticker, tail_risk_ratio, tail_risk_level,
+                           max_contracts, max_notional, avg_move, max_move
+                    FROM position_limits
+                    WHERE tail_risk_level = 'HIGH'
+                    ORDER BY tail_risk_ratio DESC
+                """)
 
-            rows = cursor.fetchall()
-            conn.close()
+                rows = cursor.fetchall()
 
-            return [dict(row) for row in rows]
+                return [dict(row) for row in rows]
 
         except Exception:
             return []

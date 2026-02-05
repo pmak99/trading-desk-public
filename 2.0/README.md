@@ -67,10 +67,10 @@ VRP Ratio = Implied Move / Historical Mean Move
 
 | Tier | OI/Position | Spread | Action |
 |------|-------------|--------|--------|
-| EXCELLENT | >= 5x | <= 8% | Full size |
-| GOOD | 2-5x | 8-12% | Full size |
-| WARNING | 1-2x | 12-15% | Reduce size |
-| REJECT | < 1x | > 15% | Never trade |
+| EXCELLENT | >= 5x | <= 12% | Full size |
+| GOOD | 2-5x | 12-18% | Full size |
+| WARNING | 1-2x | 18-25% | Reduce size |
+| REJECT | < 1x | > 25% | Reduce size (allowed) |
 
 ## Architecture
 

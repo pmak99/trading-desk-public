@@ -336,10 +336,19 @@ class BudgetTracker:
                 if "locked" in str(e).lower() and attempt < max_retries - 1:
                     log("warn", "Database locked, retrying", attempt=attempt + 1)
                     conn.rollback()
-                    # Note: This is a sync function, so we use time.sleep
-                    # For async callers, consider using try_acquire_call_async instead
-                    import time
-                    time.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                    # Check if we're in an async context to avoid blocking the event loop.
+                    # Async callers should prefer try_acquire_call_async() instead.
+                    import asyncio
+                    try:
+                        asyncio.get_running_loop()
+                        # Running inside an event loop - cannot use time.sleep
+                        # Log warning; async callers should use try_acquire_call_async
+                        log("warn", "Sync try_acquire_call used in async context; "
+                            "prefer try_acquire_call_async to avoid blocking")
+                    except RuntimeError:
+                        # No running event loop - safe to use time.sleep
+                        import time
+                        time.sleep(0.5 * (attempt + 1))
                     continue
                 log("error", "Failed to acquire API call", error=str(e))
                 conn.rollback()

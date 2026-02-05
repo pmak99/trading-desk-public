@@ -4,7 +4,7 @@ Validates JSON responses from agents to ensure type safety and consistency.
 """
 
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class AgentResponse(BaseModel):
@@ -28,13 +28,15 @@ class TickerAnalysisResponse(BaseModel):
     weekly_reason: Optional[str] = None  # Explanation of weekly options status
     error: Optional[str] = None
 
-    @validator('recommendation')
+    @field_validator('recommendation')
+    @classmethod
     def validate_recommendation(cls, v):
         if v is not None and v not in ['EXCELLENT', 'GOOD', 'MARGINAL', 'SKIP']:
             raise ValueError(f'Invalid recommendation: {v}')
         return v
 
-    @validator('liquidity_tier')
+    @field_validator('liquidity_tier')
+    @classmethod
     def validate_liquidity_tier(cls, v):
         if v is not None and v not in ['EXCELLENT', 'GOOD', 'WARNING', 'REJECT']:
             raise ValueError(f'Invalid liquidity tier: {v}')
@@ -54,13 +56,15 @@ class ExplanationResponse(BaseModel):
     historical_context: str = ""
     win_probability: Optional[float] = None
 
-    @validator('key_factors')
+    @field_validator('key_factors')
+    @classmethod
     def validate_key_factors(cls, v):
         if len(v) > 5:
             raise ValueError('Too many key factors (max 5)')
         return v
 
-    @validator('win_probability')
+    @field_validator('win_probability')
+    @classmethod
     def validate_win_probability(cls, v):
         if v is not None and (v < 0 or v > 1):
             raise ValueError('Win probability must be between 0 and 1')
@@ -73,13 +77,15 @@ class AnomalyDetail(BaseModel):
     severity: str
     message: str
 
-    @validator('severity')
+    @field_validator('severity')
+    @classmethod
     def validate_severity(cls, v):
         if v not in ['warning', 'critical']:
             raise ValueError(f'Invalid severity: {v}')
         return v
 
-    @validator('type')
+    @field_validator('type')
+    @classmethod
     def validate_type(cls, v):
         valid_types = [
             'stale_data', 'missing_data', 'extreme_outlier',
@@ -96,7 +102,8 @@ class AnomalyDetectionResponse(BaseModel):
     anomalies: List[AnomalyDetail] = Field(default_factory=list)
     recommendation: str
 
-    @validator('recommendation')
+    @field_validator('recommendation')
+    @classmethod
     def validate_recommendation(cls, v):
         if v not in ['TRADE', 'DO_NOT_TRADE', 'REDUCE_SIZE']:
             raise ValueError(f'Invalid recommendation: {v}')
@@ -120,7 +127,8 @@ class APIHealthStatus(BaseModel):
     remaining_calls: Optional[int] = None
     error: Optional[str] = None
 
-    @validator('status')
+    @field_validator('status')
+    @classmethod
     def validate_status(cls, v):
         if v not in ['ok', 'error']:
             raise ValueError(f'Invalid status: {v}')
@@ -135,7 +143,8 @@ class DatabaseHealthStatus(BaseModel):
     earnings_calendar: Optional[int] = None
     error: Optional[str] = None
 
-    @validator('status')
+    @field_validator('status')
+    @classmethod
     def validate_status(cls, v):
         if v not in ['ok', 'error']:
             raise ValueError(f'Invalid status: {v}')
@@ -169,25 +178,29 @@ class SentimentFetchResponse(BaseModel):
     risks: List[str] = Field(default_factory=list)
     error: Optional[str] = None
 
-    @validator('direction')
+    @field_validator('direction')
+    @classmethod
     def validate_direction(cls, v):
         if v is not None and v not in ['bullish', 'bearish', 'neutral']:
             raise ValueError(f'Invalid direction: {v}')
         return v
 
-    @validator('score')
+    @field_validator('score')
+    @classmethod
     def validate_score(cls, v):
         if v is not None and not (-1.0 <= v <= 1.0):
             raise ValueError(f'Score must be between -1.0 and 1.0: {v}')
         return v
 
-    @validator('catalysts')
+    @field_validator('catalysts')
+    @classmethod
     def validate_catalysts(cls, v):
         if len(v) > 5:
             raise ValueError('Too many catalysts (max 5)')
         return v
 
-    @validator('risks')
+    @field_validator('risks')
+    @classmethod
     def validate_risks(cls, v):
         if len(v) > 3:
             raise ValueError('Too many risks (max 3)')
@@ -206,7 +219,8 @@ class HealthCheckResponse(BaseModel):
     database: DatabaseHealthStatus
     budget: BudgetStatus
 
-    @validator('status')
+    @field_validator('status')
+    @classmethod
     def validate_status(cls, v):
         if v not in ['healthy', 'degraded', 'unhealthy']:
             raise ValueError(f'Invalid status: {v}')
@@ -228,7 +242,8 @@ class PositionLimits(BaseModel):
     avg_move: float
     max_move: float
 
-    @validator('tail_risk_level')
+    @field_validator('tail_risk_level')
+    @classmethod
     def validate_tail_risk_level(cls, v):
         if v not in ['LOW', 'NORMAL', 'HIGH']:
             raise ValueError(f'Invalid tail_risk_level: {v}')
@@ -274,19 +289,22 @@ class PatternResult(BaseModel):
     fade_pct: Optional[float] = None
     recent_moves: Optional[List[Dict[str, Any]]] = None
 
-    @validator('directional_bias')
+    @field_validator('directional_bias')
+    @classmethod
     def validate_directional_bias(cls, v):
         if v is not None and v not in ['BULLISH', 'BEARISH', 'NEUTRAL']:
             raise ValueError(f'Invalid directional_bias: {v}')
         return v
 
-    @validator('streak_direction')
+    @field_validator('streak_direction')
+    @classmethod
     def validate_streak_direction(cls, v):
         if v not in ['UP', 'DOWN']:
             raise ValueError(f'Invalid streak_direction: {v}')
         return v
 
-    @validator('magnitude_trend')
+    @field_validator('magnitude_trend')
+    @classmethod
     def validate_magnitude_trend(cls, v):
         if v is not None and v not in ['EXPANDING', 'CONTRACTING', 'STABLE']:
             raise ValueError(f'Invalid magnitude_trend: {v}')

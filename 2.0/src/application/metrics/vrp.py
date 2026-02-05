@@ -150,6 +150,23 @@ class VRPCalculator:
                 )
             )
 
+        # Guard against near-zero mean_move to avoid numerical instability
+        if mean_move < 1e-10:
+            logger.warning(
+                f"{ticker}: mean_move ({mean_move}) is near zero, "
+                f"returning 0.0 VRP ratio to avoid division instability"
+            )
+            result = VRPResult(
+                ticker=ticker,
+                expiration=expiration,
+                implied_move_pct=implied_move.implied_move_pct,
+                historical_mean_move_pct=Percentage(mean_move),
+                vrp_ratio=0.0,
+                edge_score=0.0,
+                recommendation=Recommendation.SKIP,
+            )
+            return Ok(result)
+
         # Calculate VRP ratio
         implied_pct = float(implied_move.implied_move_pct.value)
         vrp_ratio = implied_pct / mean_move

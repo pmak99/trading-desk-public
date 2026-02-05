@@ -80,7 +80,7 @@ class SentimentFetchAgent:
                     try:
                         # Validate cached data with schema
                         validated = SentimentFetchResponse(**cached)
-                        return validated.dict()
+                        return validated.model_dump()
                     except Exception as e:
                         # Cache corruption - log and treat as cache miss
                         logger.warning(f"Invalid cached data for {ticker}, refetching: {e}")
@@ -122,7 +122,7 @@ class SentimentFetchAgent:
             self.cache.cache_sentiment(ticker, earnings_date, sentiment_data)
 
             # Return dict with success field (property not included by default)
-            result = validated.dict()
+            result = validated.model_dump()
             result['success'] = validated.success
             return result
 

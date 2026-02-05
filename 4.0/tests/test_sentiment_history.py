@@ -834,9 +834,9 @@ class TestEdgeCases:
     def test_sentiment_score_boundaries(self, temp_history):
         """Should handle boundary sentiment scores.
 
-        Boundary convention: >= for lower bounds, < for upper bounds.
+        Symmetric boundary convention: >= 0.2 is bullish, <= -0.2 is bearish.
         - score >= 0.2 → BULLISH (0.2 is bullish)
-        - score < -0.2 → BEARISH (-0.2 is neutral, not bearish)
+        - score <= -0.2 → BEARISH (-0.2 is bearish, symmetric with bullish)
         """
         # Exactly at threshold
         temp_history.record_sentiment("AA", "2025-12-01", "perplexity", "Test",
@@ -849,8 +849,8 @@ class TestEdgeCases:
 
         # At exactly 0.2, bullish (>= 0.2 is lower bound of bullish)
         assert r1.sentiment_direction == SentimentDirection.BULLISH
-        # At exactly -0.2, neutral (< -0.2 is upper bound of bearish, exclusive)
-        assert r2.sentiment_direction == SentimentDirection.NEUTRAL
+        # At exactly -0.2, bearish (<= -0.2, symmetric with bullish threshold)
+        assert r2.sentiment_direction == SentimentDirection.BEARISH
 
     def test_unknown_direction_in_database(self, temp_history):
         """Should handle unknown direction values gracefully."""

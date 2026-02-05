@@ -168,10 +168,14 @@ class OptionQuote:
 
     @property
     def is_liquid(self) -> bool:
-        """Basic liquidity check."""
+        """Basic liquidity check.
+
+        Uses open interest and bid-ask spread as primary gates.
+        Volume is NOT a hard requirement because it can be 0 during
+        after-hours/pre-market when the system runs 24/7 on Cloud Run.
+        """
         return (
             self.open_interest > 0
-            and self.volume > 0  # Must have actual volume, not just >= 0
             and self.spread_pct < 50.0
             and self.bid.amount > 0
         )

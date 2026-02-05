@@ -249,11 +249,15 @@ class ConnectionPool:
 
 # Global connection pool (initialized by container)
 _global_pool: Optional[ConnectionPool] = None
+_global_pool_lock = threading.Lock()
 
 
 def get_pool(db_path: Optional[Path] = None) -> ConnectionPool:
     """
     Get global connection pool (singleton pattern).
+
+    Thread-safe: uses a lock to prevent race conditions during
+    initialization when multiple threads call get_pool() simultaneously.
 
     Args:
         db_path: Database path (only needed for first call)
@@ -267,10 +271,13 @@ def get_pool(db_path: Optional[Path] = None) -> ConnectionPool:
     global _global_pool
 
     if _global_pool is None:
-        if db_path is None:
-            raise RuntimeError("Connection pool not initialized (provide db_path)")
+        with _global_pool_lock:
+            # Double-checked locking: re-check after acquiring lock
+            if _global_pool is None:
+                if db_path is None:
+                    raise RuntimeError("Connection pool not initialized (provide db_path)")
 
-        _global_pool = ConnectionPool(db_path)
+                _global_pool = ConnectionPool(db_path)
 
     return _global_pool
 
@@ -279,6 +286,7 @@ def close_global_pool() -> None:
     """Close global connection pool."""
     global _global_pool
 
-    if _global_pool:
-        _global_pool.close_all()
-        _global_pool = None
+    with _global_pool_lock:
+        if _global_pool:
+            _global_pool.close_all()
+            _global_pool = None

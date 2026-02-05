@@ -140,6 +140,8 @@ cd 2.0/
 | `/api/scan?date=2026-01-15` | Scan date |
 | `/api/health` | System health |
 
+**Rate Limiting:** 60 requests/minute per IP (in-memory sliding window).
+
 ## 6.0 - Agent Orchestration
 
 ```bash

@@ -125,7 +125,7 @@ class AnomalyDetectionAgent:
 
         # Validate with schema
         validated = AnomalyDetectionResponse(**response_data)
-        return validated.dict()
+        return validated.model_dump()
 
     def _check_stale_data(
         self,

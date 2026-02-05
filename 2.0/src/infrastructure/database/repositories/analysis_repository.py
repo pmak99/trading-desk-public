@@ -64,99 +64,105 @@ class AnalysisRepository(ResilientRepository):
         """
         try:
             with self._get_connection() as conn:
-                cursor = conn.cursor()
+                try:
+                    cursor = conn.cursor()
 
-                # Extract key metrics
-                vrp_ratio = analysis.vrp.vrp_ratio
-                implied_move = float(analysis.implied_move.implied_move_pct.value)
-                historical_mean = float(analysis.vrp.historical_mean_move_pct.value)
+                    # Extract key metrics
+                    vrp_ratio = analysis.vrp.vrp_ratio
+                    implied_move = float(analysis.implied_move.implied_move_pct.value)
+                    historical_mean = float(analysis.vrp.historical_mean_move_pct.value)
 
-                # Market conditions
-                vix_level = None
-                vix_regime = None
-                if market_conditions:
-                    vix_level = float(market_conditions.vix_level.value)
-                    vix_regime = market_conditions.regime
+                    # Market conditions
+                    vix_level = None
+                    vix_regime = None
+                    if market_conditions:
+                        vix_level = float(market_conditions.vix_level.value)
+                        vix_regime = market_conditions.regime
 
-                # Strategy info
-                strategy_type = None
-                strategy_score = None
-                strategy_pop = None
-                strategy_rr = None
-                contracts = None
-                if selected_strategy:
-                    strategy_type = selected_strategy.strategy_type.value
-                    strategy_score = selected_strategy.overall_score
-                    strategy_pop = selected_strategy.probability_of_profit
-                    strategy_rr = selected_strategy.reward_risk_ratio
-                    contracts = selected_strategy.contracts
+                    # Strategy info
+                    strategy_type = None
+                    strategy_score = None
+                    strategy_pop = None
+                    strategy_rr = None
+                    contracts = None
+                    if selected_strategy:
+                        strategy_type = selected_strategy.strategy_type.value
+                        strategy_score = selected_strategy.overall_score
+                        strategy_pop = selected_strategy.probability_of_profit
+                        strategy_rr = selected_strategy.reward_risk_ratio
+                        contracts = selected_strategy.contracts
 
-                # Consistency metrics
-                consistency_score = None
-                if analysis.consistency:
-                    consistency_score = analysis.consistency.consistency_score
+                    # Consistency metrics
+                    consistency_score = None
+                    if analysis.consistency:
+                        consistency_score = analysis.consistency.consistency_score
 
-                cursor.execute(
-                    """
-                    INSERT INTO analysis_log (
-                        timestamp,
-                        ticker,
-                        earnings_date,
-                        expiration,
+                    cursor.execute(
+                        """
+                        INSERT INTO analysis_log (
+                            timestamp,
+                            ticker,
+                            earnings_date,
+                            expiration,
 
-                        -- Core metrics
-                        implied_move_pct,
-                        historical_mean_pct,
-                        vrp_ratio,
-                        recommendation,
-                        confidence,
+                            -- Core metrics
+                            implied_move_pct,
+                            historical_mean_pct,
+                            vrp_ratio,
+                            recommendation,
+                            confidence,
 
-                        -- Consistency
-                        consistency_score,
+                            -- Consistency
+                            consistency_score,
 
-                        -- Market conditions
-                        vix_level,
-                        vix_regime,
+                            -- Market conditions
+                            vix_level,
+                            vix_regime,
 
-                        -- Strategy selected
-                        strategy_type,
-                        strategy_score,
-                        strategy_pop,
-                        strategy_rr,
-                        contracts,
+                            -- Strategy selected
+                            strategy_type,
+                            strategy_score,
+                            strategy_pop,
+                            strategy_rr,
+                            contracts,
 
-                        -- Additional context
-                        raw_analysis
+                            -- Additional context
+                            raw_analysis
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            datetime.now().isoformat(),
+                            analysis.ticker,
+                            analysis.earnings_date.isoformat(),
+                            analysis.expiration.isoformat(),
+                            implied_move,
+                            historical_mean,
+                            vrp_ratio,
+                            analysis.recommendation.value,
+                            analysis.confidence,
+                            consistency_score,
+                            vix_level,
+                            vix_regime,
+                            strategy_type,
+                            strategy_score,
+                            strategy_pop,
+                            strategy_rr,
+                            contracts,
+                            self._serialize_analysis(analysis),
+                        ),
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        datetime.now().isoformat(),
-                        analysis.ticker,
-                        analysis.earnings_date.isoformat(),
-                        analysis.expiration.isoformat(),
-                        implied_move,
-                        historical_mean,
-                        vrp_ratio,
-                        analysis.recommendation.value,
-                        analysis.confidence,
-                        consistency_score,
-                        vix_level,
-                        vix_regime,
-                        strategy_type,
-                        strategy_score,
-                        strategy_pop,
-                        strategy_rr,
-                        contracts,
-                        self._serialize_analysis(analysis),
-                    ),
-                )
 
-                conn.commit()
-                logger.debug(f"Logged analysis for {analysis.ticker} to database")
+                    conn.commit()
+                    logger.debug(f"Logged analysis for {analysis.ticker} to database")
 
-                # Reset failure count on success (inherited from ResilientRepository)
-                self._record_success()
+                    # Reset failure count on success (inherited from ResilientRepository)
+                    self._record_success()
+
+                except Exception:
+                    # Rollback on any failure to prevent partial writes
+                    conn.rollback()
+                    raise
 
         except Exception as e:
             # Record failure using inherited method
