@@ -65,10 +65,7 @@ def generate_strategies(
     Returns:
         List of Strategy objects, sorted by POP descending
     """
-    # Never trade REJECT liquidity
-    if liquidity_tier == "REJECT":
-        return []
-
+    # Note: REJECT liquidity allowed but penalized in scoring (Feb 2026 relaxation)
     strategies = []
     implied_move = price * (implied_move_pct / 100)
 

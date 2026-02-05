@@ -23,12 +23,12 @@ WEIGHT_LIQUIDITY = 0.20
 # With BALANCED thresholds (1.8x = EXCELLENT), 7x is exceptional
 VRP_MAX_RATIO = 7.0
 
-# Liquidity tier scores
+# Liquidity tier scores (RELAXED Feb 2026)
 LIQUIDITY_SCORES = {
     "EXCELLENT": 100,
     "GOOD": 80,
-    "WARNING": 50,
-    "REJECT": 20,
+    "WARNING": 60,
+    "REJECT": 20,  # Still penalized but strategies allowed
 }
 
 
