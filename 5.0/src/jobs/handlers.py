@@ -13,7 +13,9 @@ Implied Move Calculation:
 """
 
 import asyncio
+import shutil
 import sqlite3
+from pathlib import Path
 from typing import Dict, Any, List
 from datetime import timedelta
 
@@ -1619,7 +1621,7 @@ class JobRunner:
     async def _calendar_sync(self) -> Dict[str, Any]:
         """
         Calendar sync (Sunday 04:00 ET).
-        Sync earnings calendar from Alpha Vantage.
+        Sync earnings calendar from Alpha Vantage and upload to GCS.
         """
         start_time = asyncio.get_event_loop().time()
 
@@ -1636,13 +1638,29 @@ class JobRunner:
             repo = HistoricalMovesRepository(settings.DB_PATH)
             upserted = repo.upsert_earnings_calendar(earnings)
 
+            # Upload updated database to GCS for persistence across Cloud Run instances
+            gcs_uploaded = False
+            if settings.gcs_bucket:
+                try:
+                    sync = DatabaseSync(bucket_name=settings.gcs_bucket)
+                    db_path = Path(settings.DB_PATH)
+                    shutil.copy(str(db_path), str(sync.local_path))
+                    gcs_uploaded = sync.upload()
+                    if gcs_uploaded:
+                        log("info", "Calendar sync uploaded to GCS", bucket=settings.gcs_bucket)
+                    else:
+                        log("warn", "GCS upload conflict during calendar sync")
+                except Exception as gcs_err:
+                    log("warn", "Failed to upload calendar sync to GCS",
+                        error=type(gcs_err).__name__)
+
             # Record metrics
             duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
             metrics.record("ivcrush.job.duration", duration_ms, {"job": "calendar_sync"})
             metrics.gauge("ivcrush.job.earnings_synced", upserted, {"job": "calendar_sync"})
 
-            log("info", "Calendar sync complete", fetched=len(earnings), upserted=upserted)
-            return {"status": "success", "fetched": len(earnings), "synced": upserted}
+            log("info", "Calendar sync complete", fetched=len(earnings), upserted=upserted, gcs=gcs_uploaded)
+            return {"status": "success", "fetched": len(earnings), "synced": upserted, "gcs_uploaded": gcs_uploaded}
         except Exception as e:
             log("error", "Calendar sync failed", error=str(e), job="calendar_sync")
             return {"status": "error", "error": str(e)}
