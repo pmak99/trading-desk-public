@@ -20,6 +20,17 @@ cd "$SCRIPT_DIR"
 QUICK_MODE=false
 if [[ "$1" == "--quick" ]]; then
     QUICK_MODE=true
+elif [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    echo "Usage: ./deploy.sh [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --quick    Skip database sync (faster deploys)"
+    echo "  --help     Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  ./deploy.sh          # Full deploy with DB sync"
+    echo "  ./deploy.sh --quick  # Code-only deploy"
+    exit 0
 fi
 
 echo "============================================================"
@@ -46,9 +57,10 @@ if [[ "$QUICK_MODE" == false ]]; then
     cp "$SOURCE_DB" "$TARGET_DB"
     echo "  Copied: $SOURCE_DB -> $TARGET_DB"
 
-    # Show RDDT quarters as sanity check
-    RDDT_COUNT=$(sqlite3 "$TARGET_DB" "SELECT COUNT(*) FROM historical_moves WHERE ticker = 'RDDT'" 2>/dev/null || echo "0")
-    echo "  RDDT quarters: $RDDT_COUNT"
+    # Show record counts as sanity check
+    TOTAL_MOVES=$(sqlite3 "$TARGET_DB" "SELECT COUNT(*) FROM historical_moves" 2>/dev/null || echo "0")
+    TOTAL_TICKERS=$(sqlite3 "$TARGET_DB" "SELECT COUNT(DISTINCT ticker) FROM historical_moves" 2>/dev/null || echo "0")
+    echo "  Historical moves: $TOTAL_MOVES records, $TOTAL_TICKERS tickers"
 
     # Step 2: Upload to GCS
     echo ""
@@ -84,13 +96,13 @@ SERVICE_URL=$(gcloud run services describe "$SERVICE" \
 
 echo "  Service URL: $SERVICE_URL"
 
-# Quick health check
-echo "  Testing health endpoint..."
-HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "$SERVICE_URL/")
+# Quick health check (root endpoint, no auth required)
+echo "  Testing connectivity..."
+HEALTH=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$SERVICE_URL/")
 if [[ "$HEALTH" == "200" ]]; then
-    echo "  Health check: OK"
+    echo "  Connectivity: OK"
 else
-    echo "  Health check: WARNING (HTTP $HEALTH)"
+    echo "  Connectivity: WARNING (HTTP $HEALTH)"
 fi
 
 echo ""
