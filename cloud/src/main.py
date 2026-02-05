@@ -4,6 +4,7 @@ FastAPI application entry point.
 """
 
 import asyncio
+import collections
 import re
 import time
 import uuid
@@ -22,6 +23,7 @@ import hmac
 from src.core.config import now_et, today_et, settings
 from src.core.logging import log, set_request_id
 from src.core.database import DatabaseSync
+from src.domain.repositories import cleanup_all_pools
 
 
 def _mask_sensitive(text: str) -> str:
@@ -77,6 +79,63 @@ from src.integrations import (
 )
 from src.formatters.telegram import format_ticker_line, format_digest, format_alert
 from src.formatters.cli import format_digest_cli, format_analyze_cli
+
+
+class InMemoryRateLimiter:
+    """
+    Simple in-memory rate limiter using sliding window per IP.
+
+    Tracks request timestamps per IP address and enforces a maximum
+    number of requests within a rolling time window.
+
+    Not suitable for multi-instance deployments (each instance has its own state),
+    but sufficient for single Cloud Run instance protection against abuse.
+    """
+
+    def __init__(self, max_requests: int = 60, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        # IP -> deque of request timestamps
+        self._requests: Dict[str, collections.deque] = {}
+        self._lock = asyncio.Lock()
+
+    async def is_allowed(self, client_ip: str) -> bool:
+        """Check if a request from client_ip is allowed."""
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+
+        async with self._lock:
+            if client_ip not in self._requests:
+                self._requests[client_ip] = collections.deque()
+
+            dq = self._requests[client_ip]
+
+            # Remove expired timestamps
+            while dq and dq[0] < cutoff:
+                dq.popleft()
+
+            if len(dq) >= self.max_requests:
+                return False
+
+            dq.append(now)
+            return True
+
+    async def cleanup_stale(self):
+        """Remove entries for IPs with no recent requests."""
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+
+        async with self._lock:
+            stale_ips = [
+                ip for ip, dq in self._requests.items()
+                if not dq or dq[-1] < cutoff
+            ]
+            for ip in stale_ips:
+                del self._requests[ip]
+
+
+# Global rate limiter instance (60 requests per minute per IP)
+_rate_limiter = InMemoryRateLimiter(max_requests=60, window_seconds=60)
 
 
 @dataclass
@@ -143,11 +202,14 @@ async def lifespan(app: FastAPI):
             db_sync = DatabaseSync(bucket_name=settings.gcs_bucket)
             gcs_db_path = db_sync.download()
 
-            # Copy GCS database to expected path
+            # Copy GCS database to expected path using atomic write pattern
+            # Write to temp file first, then rename to avoid partial writes on failure
             import shutil
             from pathlib import Path
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(gcs_db_path, db_path)
+            temp_db_path = db_path + ".tmp"
+            shutil.copy(gcs_db_path, temp_db_path)
+            shutil.move(temp_db_path, db_path)
             log("info", "Database downloaded from GCS", path=db_path)
         except Exception as e:
             log("warn", "Failed to download DB from GCS, using bundled DB",
@@ -190,6 +252,10 @@ async def lifespan(app: FastAPI):
     if state.twelvedata:
         await state.twelvedata.close()
 
+    # Close database connection pools
+    cleanup_all_pools()
+    log("info", "Database connection pools closed")
+
     # Shutdown metrics thread pool
     metrics.shutdown()
 
@@ -213,6 +279,26 @@ app.add_middleware(
     allow_headers=["X-API-Key", "Content-Type", "X-Request-ID"],
     max_age=600,  # Cache preflight for 10 minutes
 )
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Rate limit requests by client IP (60 req/min per IP)."""
+    # Extract client IP (Cloud Run sets X-Forwarded-For)
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+    else:
+        client_ip = request.client.host if request.client else "unknown"
+
+    if not await _rate_limiter.is_allowed(client_ip):
+        log("warn", "Rate limit exceeded", client_ip=client_ip)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Too many requests. Limit: 60 per minute."},
+            headers={"Retry-After": "60"},
+        )
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -919,26 +1005,26 @@ async def alerts_ingest(
         log("warn", "Alert webhook missing auth header")
         raise HTTPException(status_code=401, detail="Missing authorization")
 
-        # Support both Basic and Bearer auth
-        if authorization.startswith("Basic "):
-            try:
-                decoded = base64.b64decode(authorization[6:]).decode("utf-8")
-                # Format: username:password
-                _, password = decoded.split(":", 1)
-                if not hmac.compare_digest(password, expected_key):
-                    log("warn", "Alert webhook invalid password")
-                    raise HTTPException(status_code=403, detail="Invalid credentials")
-            except Exception as e:
-                log("warn", "Alert webhook Basic auth decode failed", error=type(e).__name__)
-                raise HTTPException(status_code=401, detail="Invalid authorization format")
-        elif authorization.startswith("Bearer "):
-            token = authorization[7:]
-            if not hmac.compare_digest(token, expected_key):
-                log("warn", "Alert webhook invalid token")
-                raise HTTPException(status_code=403, detail="Invalid token")
-        else:
-            log("warn", "Alert webhook invalid auth format")
+    # Support both Basic and Bearer auth
+    if authorization.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(authorization[6:]).decode("utf-8")
+            # Format: username:password
+            _, password = decoded.split(":", 1)
+            if not hmac.compare_digest(password, expected_key):
+                log("warn", "Alert webhook invalid password")
+                raise HTTPException(status_code=403, detail="Invalid credentials")
+        except Exception as e:
+            log("warn", "Alert webhook Basic auth decode failed", error=type(e).__name__)
             raise HTTPException(status_code=401, detail="Invalid authorization format")
+    elif authorization.startswith("Bearer "):
+        token = authorization[7:]
+        if not hmac.compare_digest(token, expected_key):
+            log("warn", "Alert webhook invalid token")
+            raise HTTPException(status_code=403, detail="Invalid token")
+    else:
+        log("warn", "Alert webhook invalid auth format")
+        raise HTTPException(status_code=401, detail="Invalid authorization format")
 
     try:
         body = await request.json()

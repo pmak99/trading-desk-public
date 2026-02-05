@@ -242,11 +242,18 @@ class JobRunner:
             log("error", "Unknown job", job=job_name)
             return {"status": "error", "error": f"Unknown job: {job_name}"}
 
+        # Job execution timeout (5 minutes) to prevent indefinite blocking
+        JOB_TIMEOUT_SECONDS = 300
+
         try:
             log("info", "Starting job", job=job_name)
-            result = await handler()
+            result = await asyncio.wait_for(handler(), timeout=JOB_TIMEOUT_SECONDS)
             log("info", "Job completed", job=job_name, result=result)
             return result
+        except asyncio.TimeoutError:
+            log("error", "Job timed out", job=job_name, timeout_seconds=JOB_TIMEOUT_SECONDS)
+            metrics.count("ivcrush.job.timeout", {"job": job_name})
+            return {"status": "error", "error": f"Job timed out after {JOB_TIMEOUT_SECONDS}s"}
         except Exception as e:
             import traceback
             tb = traceback.format_exc()

@@ -76,7 +76,7 @@ curl -H "X-API-Key: $API_KEY" "https://your-cloud-run-url.run.app/api/health"
 1. **Prefer SINGLE options** - 64% vs 52% win rate vs spreads
 2. **Respect TRR limits** - LOW TRR: strong profit, HIGH TRR: significant loss
 3. **Never roll** - 0% success rate, always makes losses worse
-4. **Never trade REJECT liquidity**
+4. **Reduce size for REJECT liquidity** - allowed but penalized in scoring
 
 ## TRR Performance
 

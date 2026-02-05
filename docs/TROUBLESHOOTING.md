@@ -69,9 +69,9 @@ ERROR - Invalid ticker format: '123'. Tickers must contain only letters
 ERROR - Invalid ticker format: 'TOOLONG'. Tickers must be 1-5 characters
 ```
 
-**Cause**: Ticker doesn't match expected format
+**Cause**: Ticker doesn't match expected format (1-5 uppercase letters, optionally followed by a dot and 1-2 uppercase letters)
 
-**Valid Examples**: AAPL, MSFT, GOOGL, META, NVDA
+**Valid Examples**: AAPL, MSFT, GOOGL, META, NVDA, BRK.B, BF.A
 
 **Invalid Examples**: 123, AAPL Inc, A-B, TOOLONGTICKER
 
