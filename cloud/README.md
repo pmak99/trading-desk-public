@@ -161,6 +161,7 @@ curl -H "X-API-Key: $API_KEY" "https://your-cloud-run-url.run.app/api/health"
 │   └── jobs/                # Scheduled job implementations
 ├── terraform/               # GCP infrastructure
 ├── data/ivcrush.db          # SQLite database (gitignored)
+├── deploy.sh                # Deploy script (syncs DB + deploys)
 ├── Dockerfile
 ├── DEPLOYMENT.md            # Full deployment guide
 └── DESIGN.md                # Architecture details
@@ -223,6 +224,12 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for complete instructions.
 ```bash
 cd 5.0
 
+# Recommended: Use deploy script (syncs database automatically)
+./deploy.sh              # Full deploy with DB sync
+./deploy.sh --quick      # Code-only deploy (faster)
+./deploy.sh --help       # Show usage
+
+# Manual deploy (without DB sync)
 gcloud run deploy trading-desk \
   --source . \
   --region us-east1 \
