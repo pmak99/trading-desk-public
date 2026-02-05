@@ -21,6 +21,7 @@ import hmac
 
 from src.core.config import now_et, today_et, settings
 from src.core.logging import log, set_request_id
+from src.core.database import DatabaseSync
 
 
 def _mask_sensitive(text: str) -> str:
@@ -132,6 +133,25 @@ async def lifespan(app: FastAPI):
 
     # Log warnings for optional but recommended config
     settings.validate_or_warn()
+
+    # Download latest database from GCS at startup (persistent storage)
+    # This ensures Cloud Run instances start with the most recent data
+    db_path = settings.DB_PATH
+    if settings.is_production and settings.gcs_bucket:
+        try:
+            log("info", "Downloading database from GCS", bucket=settings.gcs_bucket)
+            db_sync = DatabaseSync(bucket_name=settings.gcs_bucket)
+            gcs_db_path = db_sync.download()
+
+            # Copy GCS database to expected path
+            import shutil
+            from pathlib import Path
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(gcs_db_path, db_path)
+            log("info", "Database downloaded from GCS", path=db_path)
+        except Exception as e:
+            log("warn", "Failed to download DB from GCS, using bundled DB",
+                error=type(e).__name__, message=str(e)[:100])
 
     # Initialize all components
     state = AppState(
