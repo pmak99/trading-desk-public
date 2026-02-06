@@ -13,6 +13,7 @@ Key fix: Handles BMO vs AMC timing correctly:
 Usage:
     python scripts/backfill_historical.py MU ORCL AVGO
     python scripts/backfill_historical.py --file tickers.txt --start-date 2025-01-01
+    python scripts/backfill_historical.py ARM COHR LITE --discover --start-date 2023-01-01
 """
 
 import sys
@@ -154,6 +155,102 @@ def get_db_earnings(
     except Exception as e:
         logger.error(f"Error reading earnings from DB: {e}")
         return []
+
+
+def discover_earnings_from_yahoo(
+    ticker: str,
+    db_path: Path,
+    start_date: Optional[date] = None,
+) -> int:
+    """
+    Discover historical earnings dates from Yahoo Finance and insert into earnings_calendar.
+
+    Yahoo Finance's earnings_dates DataFrame includes historical earnings with timestamps
+    that indicate BMO vs AMC timing. Dates with Reported EPS (not NaN) are confirmed past events.
+
+    Args:
+        ticker: Stock symbol
+        db_path: Path to database
+        start_date: Only insert dates on or after this date
+
+    Returns:
+        Number of new dates inserted
+    """
+    try:
+        import yfinance as yf
+    except ImportError:
+        logger.error("yfinance not installed - run: pip install yfinance")
+        return 0
+
+    try:
+        t = yf.Ticker(ticker)
+        ed = t.earnings_dates
+
+        if ed is None or ed.empty:
+            logger.warning(f"  No Yahoo Finance earnings_dates for {ticker}")
+            return 0
+
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        cursor = conn.cursor()
+
+        import math
+
+        inserted = 0
+        for idx, row in ed.iterrows():
+            # Skip future/unconfirmed dates (no Reported EPS)
+            reported_eps = row.get("Reported EPS")
+            if reported_eps is None:
+                continue
+            try:
+                if math.isnan(reported_eps):
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+            # Parse date from timezone-aware index
+            earnings_dt = idx.to_pydatetime()
+            earnings_d = earnings_dt.date()
+
+            # Apply start_date filter
+            if start_date and earnings_d < start_date:
+                continue
+
+            # Determine timing from hour
+            hour = earnings_dt.hour
+            if hour < 10:  # Before 10 AM = BMO
+                timing = "BMO"
+            elif hour >= 16:  # 4 PM or later = AMC
+                timing = "AMC"
+            else:
+                timing = ""  # UNKNOWN
+
+            # Insert if not already present
+            cursor.execute(
+                "SELECT 1 FROM earnings_calendar WHERE ticker = ? AND earnings_date = ?",
+                (ticker, str(earnings_d)),
+            )
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    """INSERT INTO earnings_calendar (ticker, earnings_date, timing, confirmed)
+                       VALUES (?, ?, ?, 1)""",
+                    (ticker, str(earnings_d), timing),
+                )
+                inserted += 1
+                logger.info(f"  📅 Discovered: {earnings_d} {timing or 'UNKNOWN'}")
+
+        conn.commit()
+        conn.close()
+
+        if inserted > 0:
+            logger.info(f"  ✓ Yahoo Finance: discovered {inserted} new earnings dates for {ticker}")
+        else:
+            logger.info(f"  Yahoo Finance: no new dates to add for {ticker}")
+
+        return inserted
+
+    except Exception as e:
+        logger.error(f"  Yahoo Finance discovery error for {ticker}: {e}")
+        return 0
 
 
 def get_twelve_data_prices(
@@ -420,9 +517,17 @@ def backfill_ticker(
     db_path: Path,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    force_discover: bool = False,
 ) -> int:
     """
     Backfill historical moves for a single ticker.
+
+    Args:
+        ticker: Stock symbol
+        db_path: Path to database
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+        force_discover: Force Yahoo Finance discovery even if enough events exist
 
     Returns:
         Number of moves saved
@@ -435,8 +540,16 @@ def backfill_ticker(
     logger.info(f"📅 Fetching earnings dates from database...")
     events = get_db_earnings(ticker, db_path, start_date, end_date)
 
+    # Auto-discover from Yahoo Finance when insufficient data or forced
+    if force_discover or len(events) < 4:
+        reason = "forced" if force_discover else f"only {len(events)} events in DB"
+        logger.info(f"🔍 Discovering earnings from Yahoo Finance ({reason})...")
+        discovered = discover_earnings_from_yahoo(ticker, db_path, start_date)
+        if discovered > 0:
+            events = get_db_earnings(ticker, db_path, start_date, end_date)
+
     if not events:
-        logger.warning(f"No earnings found for {ticker} in database")
+        logger.warning(f"No earnings found for {ticker} in database or Yahoo Finance")
         return 0
 
     logger.info(f"✓ Found {len(events)} earnings events")
@@ -504,11 +617,15 @@ Examples:
     # Backfill from file
     python scripts/backfill_historical.py --file tickers.txt --start-date 2025-01-01
 
+    # Discover earnings from Yahoo Finance (for tickers with insufficient history)
+    python scripts/backfill_historical.py ARM COHR LITE --discover --start-date 2023-01-01
+
 Environment variables required:
     TWELVE_DATA_KEY     - Twelve Data API key for price history (free: 800 calls/day)
 
 Data sources:
     - Earnings dates/timing: reads from earnings_calendar table in database
+    - Yahoo Finance: auto-discovers historical dates when < 4 events in DB (or --discover flag)
     - Price history: Twelve Data time_series API
         """,
     )
@@ -539,6 +656,11 @@ Data sources:
         type=str,
         default="data/ivcrush.db",
         help="Path to database file (default: data/ivcrush.db)",
+    )
+    parser.add_argument(
+        "--discover",
+        action="store_true",
+        help="Force Yahoo Finance discovery of historical earnings dates for all tickers",
     )
     parser.add_argument(
         "--log-level",
@@ -624,6 +746,7 @@ Data sources:
                 db_path,
                 start_date=start_date,
                 end_date=end_date,
+                force_discover=args.discover,
             )
             total_moves += moves
 
