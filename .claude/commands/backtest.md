@@ -1,6 +1,6 @@
 # Backtest Performance Analysis
 
-Analyze trading performance with AI-powered insights and recommendations.
+Analyze trading performance from the strategies database with insights and recommendations.
 
 ## Arguments
 $ARGUMENTS (format: [TICKER] - optional)
@@ -15,20 +15,13 @@ Examples:
 - This is an analysis command - execute autonomously
 
 ## Progress Display
-Show progress updates as you work:
 ```
-[1/4] Loading trade journal data...
-[2/4] Calculating performance metrics...
-[3/4] Analyzing by VRP/liquidity tier...
-[4/4] Generating AI insights...
+[1/5] Loading strategy data from database...
+[2/5] Calculating overall performance metrics...
+[3/5] Breaking down by strategy type and TRR...
+[4/5] Analyzing trade types (NEW/REPAIR/ROLL)...
+[5/5] Generating insights and recommendations...
 ```
-
-## Purpose
-Review trading performance to identify:
-- Win rate by VRP tier
-- Best/worst performing tickers
-- Strategy type effectiveness
-- Lessons from losses
 
 ## Step-by-Step Instructions
 
@@ -36,187 +29,209 @@ Review trading performance to identify:
 - If ticker provided, filter to that ticker
 - If no ticker, analyze all trades
 
-### Step 2: Run Backtest Report Script
-Execute the backtest script:
+### Step 2: Query Strategy Performance
+
+**Overall metrics:**
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk && python scripts/backtest_report.py $TICKER
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT COUNT(*) as trades,
+          ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
+          ROUND(SUM(gain_loss), 0) as total_pnl,
+          ROUND(AVG(CASE WHEN is_winner THEN gain_loss END), 0) as avg_win,
+          ROUND(AVG(CASE WHEN NOT is_winner THEN gain_loss END), 0) as avg_loss,
+          ROUND(MAX(gain_loss), 0) as largest_win,
+          ROUND(MIN(gain_loss), 0) as largest_loss
+   FROM strategies
+   WHERE 1=1 $TICKER_FILTER;"
 ```
 
-If script doesn't exist or fails, query the trade journal directly:
-```bash
-# Check for trade journal in 4.0/data/
-ls /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/*.json 2>/dev/null
+Replace `$TICKER_FILTER` with `AND symbol = 'TICKER'` if ticker provided.
 
-# Or query historical trades from any available source
+**By strategy type:**
+```bash
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT strategy_type,
+          COUNT(*) as trades,
+          ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
+          ROUND(SUM(gain_loss), 0) as total_pnl,
+          ROUND(AVG(gain_loss), 0) as avg_pnl
+   FROM strategies
+   WHERE 1=1 $TICKER_FILTER
+   GROUP BY strategy_type
+   ORDER BY total_pnl DESC;"
 ```
 
-### Step 3: Calculate Performance Metrics
-From trade data, compute:
+**By TRR level (if trr_at_entry populated):**
+```bash
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT CASE
+            WHEN trr_at_entry > 2.5 THEN 'HIGH'
+            WHEN trr_at_entry >= 1.5 THEN 'NORMAL'
+            WHEN trr_at_entry IS NOT NULL THEN 'LOW'
+            ELSE 'UNKNOWN'
+          END as trr_level,
+          COUNT(*) as trades,
+          ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
+          ROUND(SUM(gain_loss), 0) as total_pnl
+   FROM strategies
+   WHERE 1=1 $TICKER_FILTER
+   GROUP BY trr_level
+   ORDER BY total_pnl DESC;"
+```
 
-**Overall Metrics:**
-- Total trades
-- Win rate (%)
-- Total P&L ($)
-- Average win ($)
-- Average loss ($)
-- Profit factor (gross wins / gross losses)
-- Largest win / loss
+**By trade type (NEW/REPAIR/ROLL):**
+```bash
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT COALESCE(trade_type, 'NEW') as trade_type,
+          COUNT(*) as trades,
+          ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
+          ROUND(SUM(gain_loss), 0) as total_pnl
+   FROM strategies
+   WHERE 1=1 $TICKER_FILTER
+   GROUP BY trade_type
+   ORDER BY total_pnl DESC;"
+```
 
-**By VRP Tier (BALANCED mode):**
-- EXCELLENT (≥1.8x): Win rate, avg P&L
-- GOOD (≥1.4x): Win rate, avg P&L
-- MARGINAL (≥1.2x): Win rate, avg P&L
-- SKIP (<1.2x): Win rate, avg P&L (should be 0 trades)
+**Top/bottom tickers:**
+```bash
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT symbol, COUNT(*) as trades,
+          ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
+          ROUND(SUM(gain_loss), 0) as total_pnl,
+          ROUND(AVG(gain_loss), 0) as avg_pnl
+   FROM strategies
+   GROUP BY symbol
+   HAVING trades >= 2
+   ORDER BY total_pnl DESC
+   LIMIT 5;"
+```
 
-**By Liquidity Tier:**
-- EXCELLENT: Win rate, avg P&L
-- WARNING: Win rate, avg P&L
-- REJECT: Win rate, avg P&L (should be 0 trades)
+```bash
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT symbol, COUNT(*) as trades,
+          ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
+          ROUND(SUM(gain_loss), 0) as total_pnl,
+          ROUND(AVG(gain_loss), 0) as avg_pnl
+   FROM strategies
+   GROUP BY symbol
+   HAVING trades >= 2
+   ORDER BY total_pnl ASC
+   LIMIT 5;"
+```
 
-**By Strategy Type:**
-- Iron Condors: Win rate, avg P&L
-- Spreads: Win rate, avg P&L
-- Naked options: Win rate, avg P&L
-- Strangles: Win rate, avg P&L
+**Campaign analysis (linked trades):**
+```bash
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT campaign_id, SUM(gain_loss) as total,
+          GROUP_CONCAT(trade_type || ': $' || ROUND(gain_loss, 0)) as chain
+   FROM strategies
+   WHERE campaign_id IS NOT NULL $TICKER_FILTER
+   GROUP BY campaign_id
+   ORDER BY total
+   LIMIT 10;"
+```
+
+### Step 3: Run Backtest Report Script (if available)
+```bash
+"$PROJECT_ROOT/2.0/venv/bin/python" "$PROJECT_ROOT/scripts/backtest_report.py" $TICKER 2>/dev/null
+```
+
+If script fails or doesn't produce output, use the DB queries above (they contain all the data needed).
 
 ### Step 4: AI Performance Analysis
-Using Claude's built-in analysis (no MCP cost):
 
-1. **Edge Validation**
-   - Does higher VRP correlate with better results?
-   - Are the VRP thresholds (1.8x EXCELLENT, 1.4x GOOD) appropriate?
+Using Claude's built-in analysis (no MCP cost), provide insights on:
 
-2. **Liquidity Impact**
-   - Are WARNING tier trades underperforming?
-   - Any REJECT tier violations to flag?
-
-3. **Strategy Effectiveness**
-   - Which strategy types work best?
-   - Any strategies to avoid?
-
-4. **Ticker Patterns**
-   - Best performing tickers (consistent winners)
-   - Worst performing tickers (avoid list)
-   - Any sector patterns?
-
-5. **Loss Analysis**
-   - Common causes of losses
-   - Avoidable vs unavoidable losses
-   - Lessons to apply
-
-6. **Recommendations**
-   - Actionable improvements
-   - Risk management suggestions
-   - Position sizing adjustments
+1. **Edge Validation** - Does higher VRP correlate with better results?
+2. **Strategy Effectiveness** - SINGLE (64% win) vs SPREAD (52% win) vs others
+3. **TRR Impact** - HIGH TRR lost $123k in 2025, LOW TRR made $52k
+4. **Trade Type Analysis** - NEW vs REPAIR vs ROLL performance
+5. **Campaign Analysis** - Repairs reduce loss but rarely save campaigns. Rolls always lose.
+6. **Actionable Recommendations**
 
 ## Output Format
 
 ```
-══════════════════════════════════════════════════════
+==============================================================
 BACKTEST REPORT {[TICKER] or "ALL TRADES"}
-══════════════════════════════════════════════════════
+==============================================================
 
-📊 OVERALL PERFORMANCE
-┌────────────────────┬───────────────┐
-│ Metric             │ Value         │
-├────────────────────┼───────────────┤
-│ Total Trades       │ {N}           │
-│ Win Rate           │ {X.X}%        │
-│ Total P&L          │ ${X,XXX}      │
-│ Average Win        │ ${XXX}        │
-│ Average Loss       │ -${XXX}       │
-│ Profit Factor      │ {X.XX}        │
-│ Largest Win        │ ${X,XXX}      │
-│ Largest Loss       │ -${X,XXX}     │
-└────────────────────┴───────────────┘
+OVERALL PERFORMANCE
+  Total Trades:   {N}
+  Win Rate:       {X.X}%
+  Total P&L:      ${X,XXX}
+  Average Win:    ${XXX}
+  Average Loss:   -${XXX}
+  Profit Factor:  {X.XX}
+  Largest Win:    ${X,XXX}
+  Largest Loss:   -${X,XXX}
 
-📈 PERFORMANCE BY VRP TIER
-┌──────────────┬────────┬──────────┬───────────┐
-│ VRP Tier     │ Trades │ Win Rate │ Avg P&L   │
-├──────────────┼────────┼──────────┼───────────┤
-│ EXCELLENT ⭐ │ {N}    │ {X}%     │ ${XXX}    │
-│ GOOD ✓       │ {N}    │ {X}%     │ ${XXX}    │
-│ MARGINAL ○   │ {N}    │ {X}%     │ ${XXX}    │
-│ SKIP ✗       │ {N}    │ {X}%     │ ${XXX}    │
-└──────────────┴────────┴──────────┴───────────┘
+BY STRATEGY TYPE
+  Strategy      Trades  Win Rate  Total P&L  Avg P&L
+  SINGLE        {N}     {X}%      ${X,XXX}   ${XXX}
+  SPREAD        {N}     {X}%      ${X,XXX}   ${XXX}
+  STRANGLE      {N}     {X}%      ${X,XXX}   ${XXX}
+  IRON_CONDOR   {N}     {X}%      ${X,XXX}   ${XXX}
 
-💧 PERFORMANCE BY LIQUIDITY
-┌──────────────┬────────┬──────────┬───────────┐
-│ Liquidity    │ Trades │ Win Rate │ Avg P&L   │
-├──────────────┼────────┼──────────┼───────────┤
-│ EXCELLENT    │ {N}    │ {X}%     │ ${XXX}    │
-│ WARNING ⚠️   │ {N}    │ {X}%     │ ${XXX}    │
-│ REJECT 🚫    │ {N}    │ {X}%     │ ${XXX}    │
-└──────────────┴────────┴──────────┴───────────┘
+BY TRR LEVEL
+  Level    Trades  Win Rate  Total P&L
+  HIGH     {N}     {X}%      -${X,XXX}
+  NORMAL   {N}     {X}%      -${X,XXX}
+  LOW      {N}     {X}%      +${X,XXX}
 
-📋 PERFORMANCE BY STRATEGY
-┌──────────────┬────────┬──────────┬───────────┐
-│ Strategy     │ Trades │ Win Rate │ Avg P&L   │
-├──────────────┼────────┼──────────┼───────────┤
-│ Iron Condor  │ {N}    │ {X}%     │ ${XXX}    │
-│ Put Spread   │ {N}    │ {X}%     │ ${XXX}    │
-│ Call Spread  │ {N}    │ {X}%     │ ${XXX}    │
-│ Naked Put    │ {N}    │ {X}%     │ ${XXX}    │
-│ Strangle     │ {N}    │ {X}%     │ ${XXX}    │
-└──────────────┴────────┴──────────┴───────────┘
+BY TRADE TYPE
+  Type      Trades  Win Rate  Total P&L
+  NEW       {N}     {X}%      ${X,XXX}
+  REPAIR    {N}     {X}%      ${X,XXX}
+  ROLL      {N}     {X}%      -${X,XXX}
 
-🏆 TOP PERFORMERS (Best Avg P&L)
-1. {TICKER} - {N} trades, {X}% win rate, ${XXX} avg
-2. {TICKER} - {N} trades, {X}% win rate, ${XXX} avg
-3. {TICKER} - {N} trades, {X}% win rate, ${XXX} avg
+TOP 5 PERFORMERS (by total P&L)
+  1. {TICKER} - {N} trades, {X}% win rate, ${X,XXX} total
+  2. ...
 
-⚠️ UNDERPERFORMERS (Worst Avg P&L)
-1. {TICKER} - {N} trades, {X}% win rate, -${XXX} avg
-2. {TICKER} - {N} trades, {X}% win rate, -${XXX} avg
-3. {TICKER} - {N} trades, {X}% win rate, -${XXX} avg
+BOTTOM 5 PERFORMERS
+  1. {TICKER} - {N} trades, {X}% win rate, -${X,XXX} total
+  2. ...
 
-🧠 AI ANALYSIS & INSIGHTS
+AI ANALYSIS & INSIGHTS
 
-**Edge Validation:**
-{Analysis of VRP correlation with results}
+Edge Validation:
+  {Analysis of strategy type and TRR correlation}
 
-**Liquidity Impact:**
-{Analysis of liquidity tier performance}
-[If REJECT trades exist: 🚫 WARNING: {N} trades in REJECT liquidity
- These should have been skipped. Total loss: -${XXX}]
+Key Lessons:
+  - SINGLE options outperform spreads (64% vs 52% win rate)
+  - LOW TRR tickers most profitable, HIGH TRR lost $123k
+  - Repairs reduce loss but rarely save campaigns
+  - Rolls always make things worse (0% success rate)
 
-**Strategy Effectiveness:**
-{Which strategies work best for your trading style}
+Recommendations:
+  1. {Specific improvement based on data}
+  2. {Specific improvement based on data}
+  3. {Specific improvement based on data}
 
-**Key Lessons from Losses:**
-• {Lesson 1}
-• {Lesson 2}
-• {Lesson 3}
-
-**Actionable Recommendations:**
-1. {Specific improvement}
-2. {Specific improvement}
-3. {Specific improvement}
-
-══════════════════════════════════════════════════════
+==============================================================
 ```
 
 ## No Data Output
 
 ```
-══════════════════════════════════════════════════════
+==============================================================
 BACKTEST REPORT
-══════════════════════════════════════════════════════
+==============================================================
 
-❌ NO TRADE DATA FOUND
+NO TRADE DATA FOUND
 
-No trade journal data available for analysis.
+No strategy data available for analysis.
 
 To populate trade history:
-1. Run `/journal` to parse Fidelity statements
-2. Or manually add trades to journal
+  1. Run /journal to parse Fidelity statements
+  2. Or add trades to the strategies table
 
-Once you have trade data, run `/backtest` again.
-
-══════════════════════════════════════════════════════
+Once you have trade data, run /backtest again.
+==============================================================
 ```
 
 ## Cost Control
 - No Perplexity calls (uses Claude's built-in analysis)
-- Local data query only
+- Database queries only
 - AI insights generated in-context

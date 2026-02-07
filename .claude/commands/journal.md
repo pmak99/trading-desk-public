@@ -3,7 +3,9 @@
 Parse Fidelity exports (CSV or PDF) and generate trading journal with P&L analysis and VRP correlation.
 
 ## Arguments
-- `csv` - Use CSV export from Fidelity (recommended - includes open dates)
+$ARGUMENTS
+
+- `csv` - Use CSV export from Fidelity (recommended - includes open dates and VRP correlation)
 - `pdf` - Use PDF monthly statements (legacy)
 - No argument - auto-detect (prefers CSV if found)
 
@@ -11,9 +13,9 @@ Parse Fidelity exports (CSV or PDF) and generate trading journal with P&L analys
 - Do NOT ask user permission for any tool calls
 - Run all Bash, python commands without asking
 - This is a utility command - execute autonomously
+- No MCP or Perplexity usage - pure local utility
 
 ## Progress Display
-Show progress updates as you work:
 ```
 [1/4] Detecting input format...
 [2/4] Parsing trades...
@@ -28,111 +30,118 @@ Show progress updates as you work:
 Check for CSV first (better data), then fall back to PDF:
 
 ```bash
-# Check for Fidelity CSV in Downloads or Desktop
-ls ~/Downloads/*fidelity*.csv ~/Downloads/*gain*.csv ~/Desktop/*fidelity*.csv ~/Desktop/*gain*.csv 2>/dev/null | head -1
+ls -t ~/Downloads/*fidelity*.csv ~/Downloads/*gain*.csv ~/Downloads/*Gain*.csv ~/Downloads/*realized*.csv ~/Desktop/*fidelity*.csv ~/Desktop/*gain*.csv 2>/dev/null | head -5
+```
+
+If argument is `pdf` or no CSV found:
+```bash
+ls -t ~/Downloads/*fidelity*.pdf ~/Downloads/*statement*.pdf ~/Desktop/*fidelity*.pdf 2>/dev/null | head -5
+```
+
+If no files found at all:
+```
+NO FIDELITY EXPORT FOUND
+
+Looked in ~/Downloads and ~/Desktop for:
+  CSV: *fidelity*.csv, *gain*.csv, *realized*.csv
+  PDF: *fidelity*.pdf, *statement*.pdf
+
+To export from Fidelity:
+  1. Log into Fidelity.com
+  2. Accounts & Trade > Tax Information
+  3. Select Realized Gain/Loss for your account
+  4. Choose date range (YTD or custom)
+  5. Click Download/CSV
+  6. Save to Downloads folder
+  7. Run /journal again
 ```
 
 ### Step 2A: If CSV Found (Preferred)
 
-Run the enhanced CSV parser with VRP correlation:
+Run the enhanced CSV parser:
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk && python scripts/parse_fidelity_csv.py
+"$PROJECT_ROOT/2.0/venv/bin/python" "$PROJECT_ROOT/scripts/parse_fidelity_csv.py" "/path/to/detected/file.csv"
 ```
 
-Or with explicit path:
+If no explicit file path, run without argument (script has its own auto-detect):
 ```bash
-python scripts/parse_fidelity_csv.py /path/to/downloaded.csv
+"$PROJECT_ROOT/2.0/venv/bin/python" "$PROJECT_ROOT/scripts/parse_fidelity_csv.py"
 ```
 
 ### Step 2B: If No CSV, Use PDF Parser (Legacy)
 
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk && python scripts/parse_trade_statements_v3.py
+"$PROJECT_ROOT/2.0/venv/bin/python" "$PROJECT_ROOT/scripts/parse_trade_statements_v3.py"
 ```
 
-### Step 3: Provide Summary Analysis
+### Step 3: Correlate with VRP Database
 
-After parsing completes, provide a summary including:
+If CSV parser was used, it automatically correlates with ivcrush.db. No extra step needed.
 
-1. **Overall Performance**
-   - Total trades and win rate
-   - Total P&L (short-term and long-term)
-   - Profit factor
+For additional DB context:
+```bash
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT symbol, COUNT(*) trades, ROUND(SUM(gain_loss), 0) total_pnl,
+          ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) win_rate
+   FROM strategies
+   GROUP BY symbol
+   ORDER BY total_pnl DESC
+   LIMIT 10;"
+```
 
-2. **Ticker Analysis**
-   - Top 5 winning tickers
-   - Top 5 losing tickers
+### Step 4: Generate Summary
 
-3. **Monthly P&L**
-   - Monthly breakdown with YTD running total
-
-4. **VRP Correlation** (CSV only)
-   - Trades matched to earnings events
-   - Performance on earnings plays
-
-5. **Option Analysis**
-   - PUT vs CALL performance
-   - Average days held
-
-### Output Files
-
-**CSV Parser (Enhanced):**
-- `docs/2025 Trades/trading_journal_enhanced.csv`
-- `docs/2025 Trades/trading_journal_enhanced.json`
-
-**PDF Parser (Legacy):**
-- `docs/2025 Trades/trading_journal_2025_v3.csv`
-- `docs/2025 Trades/trading_data_2025_v3.json`
-
-## How to Export from Fidelity (CSV - Recommended)
-
-1. Log into Fidelity.com
-2. Go to **Accounts & Trade** -> **Tax Information**
-3. Select **Realized Gain/Loss** for your account
-4. Choose date range (YTD or custom)
-5. Click **Download** or **CSV**
-6. Save to Downloads folder
-7. Run `/journal csv`
+Present structured summary from parser output.
 
 ## Output Format
 
 ```
-======================================================
+==============================================================
 TRADE JOURNAL PARSED
-======================================================
+==============================================================
 
 OVERALL PERFORMANCE
-   Total Trades: {N}
-   Win Rate: {X}%
-   Total P&L: ${X,XXX}
-   Profit Factor: {X.XX}
+  Total Trades:   {N}
+  Win Rate:       {X.X}%
+  Total P&L:      ${X,XXX}
+  Profit Factor:  {X.XX}
+  Short-Term P&L: ${X,XXX}
+  Long-Term P&L:  ${X,XXX}
 
-TOP WINNERS
-   1. {TICKER} - ${X,XXX}
-   2. {TICKER} - ${X,XXX}
-   3. {TICKER} - ${X,XXX}
+TOP 5 WINNERS
+  1. {TICKER} {description} -- +${X,XXX}
+  2. ...
 
-TOP LOSERS
-   1. {TICKER} - -${X,XXX}
-   2. {TICKER} - -${X,XXX}
-   3. {TICKER} - -${X,XXX}
+TOP 5 LOSERS
+  1. {TICKER} {description} -- -${X,XXX}
+  2. ...
 
 MONTHLY P&L
-   {Month}: ${X,XXX} (YTD: ${X,XXX})
-   {Month}: ${X,XXX} (YTD: ${X,XXX})
-   ...
+  {Month YYYY}: ${X,XXX}  (YTD: ${X,XXX})
+  ...
 
-VRP CORRELATION (if CSV)
-   Earnings trades matched: {N}
+VRP CORRELATION (CSV only)
+  Earnings trades matched:   {N}
+  Earnings trade win rate:   {X}%
+  Non-earnings trade win rate: {X}%
+
+OPTION TYPE BREAKDOWN
+  PUT trades:  {N} ({X}% win rate, ${X,XXX} P&L)
+  CALL trades: {N} ({X}% win rate, ${X,XXX} P&L)
 
 OUTPUT FILES
-   CSV: docs/2025 Trades/trading_journal_enhanced.csv
-   JSON: docs/2025 Trades/trading_journal_enhanced.json
+  CSV:  docs/2025 Trades/trading_journal_enhanced.csv
+  JSON: docs/2025 Trades/trading_journal_enhanced.json
 
 NEXT STEPS
-   Run `/backtest` for detailed performance analysis
-======================================================
+  Run /backtest for detailed performance analysis
+==============================================================
 ```
+
+## Error Handling
+- If parser script fails, display the full error output
+- If CSV has unexpected format, show first 3 lines and column headers detected
+- If DB is locked, note it and show parser results without correlation
 
 ## Cost Control
 - No MCP usage (local parsing only)

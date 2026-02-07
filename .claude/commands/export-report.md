@@ -1,98 +1,127 @@
-# Export Trading Report (Excel/CSV Export Skill)
+# Export Trading Report
 
-Generate formatted trading reports and export scan results to spreadsheets.
+Generate formatted trading reports and export scan results to spreadsheets (CSV/JSON).
+
+## Arguments
+$ARGUMENTS (optional: scan | journal | performance | TICKER)
+
+Examples:
+- `/export-report` - Export today's scan results
+- `/export-report scan` - Export today's scan to CSV/JSON
+- `/export-report journal` - Export trade journal summary
+- `/export-report performance` - Export performance summary
+- `/export-report NVDA` - Export all NVDA trades
 
 ## Tool Permissions
 - Do NOT ask user permission for any tool calls
-- Run all Bash, python, Read commands without asking
+- Run all Bash, python, sqlite3, Read commands without asking
 - This is a utility command - execute autonomously
 
 ## Progress Display
-Show progress updates as you work:
 ```
-[1/3] Running scan and capturing output...
-[2/3] Parsing and formatting data...
-[3/3] Writing export files...
+[1/3] Gathering data...
+[2/3] Formatting and exporting...
+[3/3] Writing output files...
 ```
 
-## Quick Export
+## Step-by-Step Instructions
 
-Export today's scan results to CSV:
+### Mode 1: Export Scan Results (default or `scan`)
 
+**Run scan and pipe to export script:**
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh scan $(date +%Y-%m-%d) 2>&1 | python ../scripts/export_scan_results.py
+cd "$PROJECT_ROOT/2.0" && ./trade.sh scan $(date +%Y-%m-%d) 2>&1 | "$PROJECT_ROOT/2.0/venv/bin/python" "$PROJECT_ROOT/scripts/export_scan_results.py"
 ```
 
-Output files will be in `docs/scan_exports/`:
+Output files in `2.0/docs/scan_exports/`:
 - `scan_YYYYMMDD.csv` - CSV format
 - `scan_YYYYMMDD.json` - JSON format
 
-## Available Export Types
+**CSV columns:** ticker, scan_date, vrp_ratio, vrp_tier, implied_move_pct, historical_mean_pct, liquidity_tier, edge_score, tradeable, recommended_strategy, pop, overall_score
 
-### 1. Export Scan Results to CSV
-After running a scan, export the results:
+### Mode 2: Export Trade Journal (`journal`)
 
+Query strategies database and format:
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh scan $(date +%Y-%m-%d) 2>&1 | tee /tmp/scan_output.txt
+sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT symbol, strategy_type, acquired_date, sale_date, days_held,
+          gain_loss, is_winner, trade_type, campaign_id, trr_at_entry
+   FROM strategies
+   ORDER BY sale_date DESC;"
 ```
 
-Then parse and format into CSV with columns:
-- Ticker, Earnings Date, VRP Ratio, VRP Tier
-- Implied Move %, Historical Mean Move %
-- Liquidity Tier, Recommended Strategy
-- POP, Reward/Risk, Overall Score
-
-### 2. Export Trade Journal to Excel Format
-Read the existing journal and create formatted output:
-
+Save output to a timestamped file:
 ```bash
-cat "$PROJECT_ROOT/docs/2025 Trades/trading_journal_2025_v3.csv"
+sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT symbol, strategy_type, acquired_date, sale_date, days_held,
+          gain_loss, is_winner, trade_type, campaign_id, trr_at_entry
+   FROM strategies
+   ORDER BY sale_date DESC;" > "$PROJECT_ROOT/2.0/docs/scan_exports/strategies_$(date +%Y%m%d).csv"
 ```
 
-### 3. Generate Performance Summary Report
+### Mode 3: Export Performance Summary (`performance`)
 
-Read the JSON data for detailed analysis:
-
+Generate a comprehensive performance CSV:
 ```bash
-cat "$PROJECT_ROOT/docs/2025 Trades/trading_data_2025_v3.json"
+sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT symbol,
+          strategy_type,
+          COUNT(*) as trades,
+          ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
+          ROUND(SUM(gain_loss), 0) as total_pnl,
+          ROUND(AVG(gain_loss), 0) as avg_pnl,
+          ROUND(AVG(CASE WHEN is_winner THEN gain_loss END), 0) as avg_win,
+          ROUND(AVG(CASE WHEN NOT is_winner THEN gain_loss END), 0) as avg_loss
+   FROM strategies
+   GROUP BY symbol, strategy_type
+   ORDER BY total_pnl DESC;" > "$PROJECT_ROOT/2.0/docs/scan_exports/performance_$(date +%Y%m%d).csv"
 ```
 
-## Report Templates
+### Mode 4: Export Ticker Report (`TICKER`)
 
-### Weekly Performance Report
-Generate a report with:
-- Week's closed trades
-- Net P&L for the week
-- Win rate
-- Top winner and biggest loser
-- Running YTD total
+Export all trades for a specific ticker:
+```bash
+TICKER=$(echo "$RAW" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-### Monthly Performance Report
-Generate a report with:
-- All trades closed in the month
-- P&L by ticker
-- Strategy breakdown (spreads vs naked options)
-- Comparison to previous month
-- YTD cumulative performance
+sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT s.symbol, s.strategy_type, s.acquired_date, s.sale_date,
+          s.gain_loss, s.is_winner, s.trade_type, s.campaign_id,
+          tj.option_type, tj.strike, tj.expiration, tj.cost_basis, tj.proceeds
+   FROM strategies s
+   LEFT JOIN trade_journal tj ON tj.strategy_id = s.id
+   WHERE s.symbol='$TICKER'
+   ORDER BY s.sale_date DESC;" > "$PROJECT_ROOT/2.0/docs/scan_exports/${TICKER}_trades_$(date +%Y%m%d).csv"
+```
 
-### Ticker Analysis Report
-For a specific ticker, show:
-- All historical trades
-- Total P&L from that ticker
-- Win rate for that ticker
-- Average hold time
-- Best and worst trade
+Also query historical moves:
+```bash
+sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT * FROM historical_moves
+   WHERE ticker='$TICKER'
+   ORDER BY earnings_date DESC;" > "$PROJECT_ROOT/2.0/docs/scan_exports/${TICKER}_history_$(date +%Y%m%d).csv"
+```
 
-## Export Formats
+## Output Format
 
-When user requests export, generate the data in requested format:
-- **CSV**: Comma-separated, Excel-compatible
-- **JSON**: Structured data for programmatic use
-- **Markdown Table**: For documentation/notes
+```
+==============================================================
+EXPORT REPORT
+==============================================================
 
-## Usage Examples
+Export Type: {scan/journal/performance/TICKER}
 
-"Export this week's trades to CSV"
-"Generate a monthly report for November 2025"
-"Show me all NVDA trades in spreadsheet format"
-"Create a YTD performance summary"
+FILES GENERATED:
+  CSV:  2.0/docs/scan_exports/{filename}.csv
+  JSON: 2.0/docs/scan_exports/{filename}.json (if applicable)
+
+SUMMARY:
+  Records exported: {N}
+  {Mode-specific summary}
+
+The files are ready in the scan_exports directory.
+==============================================================
+```
+
+## Cost Control
+- No MCP usage (local data only)
+- Database queries and file writes only

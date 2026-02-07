@@ -1,6 +1,6 @@
 # System Health Check
 
-Verify all MCP connections and system dependencies before trading.
+Verify all connections and system dependencies before trading.
 
 ## Tool Permissions
 - Do NOT ask user permission for any tool calls
@@ -8,110 +8,129 @@ Verify all MCP connections and system dependencies before trading.
 - This is a diagnostic command - execute autonomously
 
 ## Progress Display
-Show progress updates as you work:
 ```
-[1/5] Checking market status (Alpaca)...
+[1/5] Checking market day status...
 [2/5] Testing MCP server connectivity...
 [3/5] Running 2.0 system health...
 [4/5] Checking Perplexity budget...
 [5/5] Checking sentiment cache stats...
 ```
 
-## Purpose
-Run `/health` before any trading session to:
-- Identify MCP failures BEFORE they break commands
-- Check market status (open/closed) for VRP calculation validity
-- Confirm API budgets and rate limits
-
 ## Step-by-Step Instructions
 
-### 1. Check Market Status
-Use Alpaca MCP to check if market is open:
+### Step 1: Check Market Day Status
+```bash
+# Simple weekday/weekend/time check
+date '+%Y-%m-%d %A %H:%M %Z'
 ```
-mcp__alpaca__alpaca_get_clock
-```
-Report: Market open/closed, time until next open/close.
 
-### 2. Check MCP Server Connectivity
+Determine status:
+- Weekend (Sat/Sun): "CLOSED - Weekend"
+- Weekday before 9:30 AM ET: "Pre-market"
+- Weekday 9:30 AM - 4:00 PM ET: "Market Open"
+- Weekday after 4:00 PM ET: "After-hours"
 
-Test each MCP server with a lightweight call:
+### Step 2: Check MCP Server Connectivity
+
+Test each available MCP server with a lightweight call. If any MCP fails, show the error but continue.
 
 **Finnhub** (free, 60/min limit):
 ```
 mcp__finnhub__finnhub_stock_market_data with operation="quote" and symbol="SPY"
 ```
 
-**Alpha Vantage** (free):
-```
-mcp__alphavantage__MARKET_STATUS
-```
+**Perplexity** (do NOT test with an actual call - just report budget status):
+- Check budget DB instead of making a live call
 
-**Alpaca** (free):
-```
-mcp__alpaca__alpaca_get_account
-```
-
-**Memory** (free):
+**Memory**:
 ```
 mcp__memory__read_graph
 ```
 
-### 3. Check 2.0 System Health
-Run the 2.0 health check:
+**NOTE:** Do NOT call mcp__alpaca or mcp__alphavantage - they may not be available as MCP servers. If either errors, skip silently.
+
+### Step 3: Check 2.0 System Health
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh health
+cd "$PROJECT_ROOT/2.0" && ./trade.sh health
 ```
 
 This verifies:
 - Database connectivity (ivcrush.db)
 - Tradier API health
 - Alpha Vantage API health
+- Historical data counts
 
-### 4. Check Perplexity Budget
-Read the budget tracker database to show:
-- Calls today vs limit (40/day)
-- Cost today
-- Monthly spend vs $5 budget
+### Step 4: Check Perplexity Budget
+```bash
+sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+  "SELECT date, calls, cost FROM api_budget ORDER BY date DESC LIMIT 5;"
+```
 
-Query: `sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db "SELECT * FROM api_budget ORDER BY date DESC LIMIT 5;"`
+Also show monthly totals:
+```bash
+sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+  "SELECT strftime('%Y-%m', date) as month, SUM(calls) as total_calls,
+          ROUND(SUM(cost), 2) as total_cost
+   FROM api_budget GROUP BY month ORDER BY month DESC LIMIT 3;"
+```
 
-If table doesn't exist yet, report "Budget tracking not initialized (first run)".
+If table doesn't exist: report "Budget tracking not initialized (first run)".
 
-### 5. Check Sentiment Cache Stats
-Query: `sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db "SELECT source, COUNT(*) as count FROM sentiment_cache GROUP BY source;"`
+### Step 5: Check Sentiment Cache Stats
+```bash
+sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+  "SELECT source, COUNT(*) as count FROM sentiment_cache GROUP BY source;"
+```
+
+Also check DB sizes:
+```bash
+ls -lh "$PROJECT_ROOT/2.0/data/ivcrush.db"
+ls -lh "$PROJECT_ROOT/4.0/data/sentiment_cache.db"
+```
+
+Record counts:
+```bash
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT COUNT(*) FROM historical_moves;"
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT COUNT(*) FROM earnings_calendar WHERE earnings_date >= date('now');"
+```
 
 ## Output Format
 
 ```
-🏥 SYSTEM HEALTH CHECK
-══════════════════════════════════════════════════════
+==============================================================
+SYSTEM HEALTH CHECK
+==============================================================
 
 Market Status:
-  ⏰ [OPEN/CLOSED] - [Time until close/open]
-  [If closed: "⚠️ VRP calculations use prior close data"]
+  [OPEN/CLOSED] - [Time info]
+  [If closed: "VRP calculations use prior close data"]
 
 MCP Servers:
-  ✓/✗ Finnhub        [Connected/Error message]
-  ✓/✗ Alpha Vantage  [Connected/Error message]
-  ✓/✗ Alpaca         [Connected (paper/live account)]
-  ✓/✗ Memory         [Connected (X entities)]
-  ✓/✗ Perplexity     [Connected/Not tested - use sparingly]
+  [check/x] Finnhub        [Connected - SPY $XXX.XX / Error message]
+  [check/x] Memory         [Connected (X entities) / Error message]
+  [info]    Perplexity     [Budget checked below - not tested live]
 
 2.0 System:
-  ✓/✗ Database       [X historical records]
-  ✓/✗ Tradier API    [Healthy/Error]
-  ✓/✗ Alpha Vantage  [Healthy/Error]
+  [check/x] Database       [X historical records, Y upcoming earnings]
+  [check/x] Tradier API    [Healthy/Error]
+  [check/x] Alpha Vantage  [Healthy/Error]
 
 Budget (Perplexity):
-  📊 Today: X/40 calls ($X.XX spent)
-  📊 Month: X calls ($X.XX of $5.00)
+  Today: X/40 calls ($X.XX spent)
+  Month: X calls ($X.XX of $5.00)
   [WARNING if > 80% daily usage (32+ calls)]
 
-Sentiment Cache:
-  📦 Cached entries: X (perplexity: Y, websearch: Z)
+Database:
+  2.0 ivcrush.db:          X.X MB (X,XXX historical moves)
+  4.0 sentiment_cache.db:  X KB (X cached entries)
 
-Overall: ✓ ALL SYSTEMS OPERATIONAL / ⚠️ ISSUES DETECTED
-══════════════════════════════════════════════════════
+Sentiment Cache:
+  Cached entries: X (perplexity: Y, websearch: Z)
+
+Overall: [check] ALL SYSTEMS OPERATIONAL / [warning] ISSUES DETECTED
+==============================================================
 ```
 
 ## Error Handling
