@@ -231,7 +231,7 @@ class SentimentHistory:
             raise ValueError(f"Invalid ticker format: {ticker}")
         now = datetime.now(timezone.utc).isoformat()
 
-        # Auto-detect direction from score if not provided
+        # Step 1: Auto-detect direction from score if not provided
         if sentiment_direction is None and sentiment_score is not None:
             if sentiment_score >= 0.2:
                 sentiment_direction = SentimentDirection.BULLISH
@@ -240,9 +240,18 @@ class SentimentHistory:
             else:
                 sentiment_direction = SentimentDirection.NEUTRAL
 
+        # Auto-detect score from direction if score not provided but direction is known
+        if sentiment_score is None and sentiment_direction is not None:
+            if sentiment_direction == SentimentDirection.BULLISH:
+                sentiment_score = 0.3
+            elif sentiment_direction == SentimentDirection.BEARISH:
+                sentiment_score = -0.3
+            else:
+                sentiment_score = 0.0
+
         direction_str = sentiment_direction.value if sentiment_direction else SentimentDirection.UNKNOWN.value
 
-        # Calculate contrarian size modifier based on sentiment
+        # Step 2: Calculate contrarian size modifier AFTER all auto-detection is complete
         size_mod = _get_size_modifier(sentiment_score) if sentiment_score is not None else 1.0
 
         with _db_lock:

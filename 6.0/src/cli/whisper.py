@@ -44,26 +44,24 @@ async def main():
         print("Date range: Next 5 days")
     print()
 
-    # Create orchestrator
-    orchestrator = WhisperOrchestrator()
-
-    # Execute
+    # Execute with async context manager to ensure cleanup
     try:
-        result = await orchestrator.orchestrate(
-            start_date=start_date,
-            end_date=end_date,
-            limit=10
-        )
+        async with WhisperOrchestrator() as orchestrator:
+            result = await orchestrator.orchestrate(
+                start_date=start_date,
+                end_date=end_date,
+                limit=10
+            )
 
-        # Format and print results
-        output = orchestrator.format_results(result)
-        print(output)
+            # Format and print results
+            output = orchestrator.format_results(result)
+            print(output)
 
-        # Return exit code
-        if result.get('success'):
-            sys.exit(0)
-        else:
-            sys.exit(1)
+            # Return exit code
+            if result.get('success'):
+                sys.exit(0)
+            else:
+                sys.exit(1)
 
     except Exception as e:
         print(f"\nError: {e}")

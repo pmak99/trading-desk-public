@@ -205,12 +205,7 @@ class WhisperOrchestrator(BaseOrchestrator):
                         generate_strategies=False  # Skip strategies in whisper
                     )
             except asyncio.CancelledError:
-                # Ensure cancellation propagates cleanly (semaphore released by async with)
-                return {
-                    'ticker': ticker,
-                    'error': 'Analysis cancelled',
-                    'success': False
-                }
+                raise  # Propagate cancellation properly
 
         # Build analysis tasks with concurrency control
         tasks = []

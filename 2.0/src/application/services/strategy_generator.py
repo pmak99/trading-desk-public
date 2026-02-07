@@ -1271,6 +1271,9 @@ class StrategyGenerator:
         # Base position: How many contracts fit in risk budget
         # This gives maximum possible position based on capital
         capital = self.config.risk_budget_per_trade
+        if float(max_loss.amount) <= 0:
+            logger.warning("max_loss.amount <= 0 in Kelly sizing, returning minimum contracts")
+            return self.config.kelly_min_contracts
         base_contracts = capital / float(max_loss.amount)
 
         # Calculate quality scaling factor based on POP

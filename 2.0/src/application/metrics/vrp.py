@@ -151,7 +151,7 @@ class VRPCalculator:
             )
 
         # Guard against near-zero mean_move to avoid numerical instability
-        if mean_move < 1e-10:
+        if mean_move < 1e-6:
             logger.warning(
                 f"{ticker}: mean_move ({mean_move}) is near zero, "
                 f"returning 0.0 VRP ratio to avoid division instability"

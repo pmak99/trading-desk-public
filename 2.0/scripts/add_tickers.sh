@@ -21,6 +21,12 @@ cd "$(dirname "$0")/.."
 add_ticker() {
     local ticker="$1"
 
+    # Validate ticker format (1-5 uppercase letters, optional .XX suffix)
+    if ! echo "$ticker" | grep -qE '^[A-Z]{1,5}(\.[A-Z]{1,2})?$'; then
+        echo "Error: Invalid ticker format: $ticker" >&2
+        return 1
+    fi
+
     # Check if already exists
     count=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM earnings_calendar WHERE ticker = '$ticker' AND earnings_date >= date('now')")
 
@@ -39,6 +45,11 @@ if [ "$1" = "--file" ]; then
     # Read from file
     while read -r ticker; do
         [ -z "$ticker" ] && continue
+        # Validate ticker format (1-5 uppercase letters, optional .XX suffix)
+        if ! echo "$ticker" | grep -qE '^[A-Z]{1,5}(\.[A-Z]{1,2})?$'; then
+            echo "Error: Invalid ticker format: $ticker" >&2
+            continue
+        fi
         add_ticker "$ticker"
     done < "$2"
 elif [ "$1" = "--stdin" ]; then
@@ -47,6 +58,11 @@ elif [ "$1" = "--stdin" ]; then
         for ticker in "${TICKERS[@]}"; do
             ticker=$(echo "$ticker" | xargs)  # Trim whitespace
             [ -z "$ticker" ] && continue
+            # Validate ticker format (1-5 uppercase letters, optional .XX suffix)
+            if ! echo "$ticker" | grep -qE '^[A-Z]{1,5}(\.[A-Z]{1,2})?$'; then
+                echo "Error: Invalid ticker format: $ticker" >&2
+                continue
+            fi
             add_ticker "$ticker"
         done
     done

@@ -45,26 +45,24 @@ async def main():
         print(f"Date range: Next {days_ahead} days")
     print()
 
-    # Create orchestrator
-    orchestrator = PrimeOrchestrator()
-
-    # Execute
+    # Execute with async context manager to ensure cleanup
     try:
-        result = await orchestrator.orchestrate(
-            start_date=start_date,
-            end_date=end_date,
-            days_ahead=days_ahead
-        )
+        async with PrimeOrchestrator() as orchestrator:
+            result = await orchestrator.orchestrate(
+                start_date=start_date,
+                end_date=end_date,
+                days_ahead=days_ahead
+            )
 
-        # Format and print results
-        output = orchestrator.format_results(result)
-        print(output)
+            # Format and print results
+            output = orchestrator.format_results(result)
+            print(output)
 
-        # Return exit code
-        if result.get('success'):
-            sys.exit(0)
-        else:
-            sys.exit(1)
+            # Return exit code
+            if result.get('success'):
+                sys.exit(0)
+            else:
+                sys.exit(1)
 
     except Exception as e:
         print(f"\nError: {e}")

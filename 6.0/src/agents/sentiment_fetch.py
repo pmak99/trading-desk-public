@@ -115,11 +115,9 @@ class SentimentFetchAgent:
             # This ensures we only track successful, valid responses
             validated = SentimentFetchResponse(**sentiment_data)
 
-            # Only record API call after successful validation
-            self.cache.record_call(cost=0.006)
-
-            # Cache the validated result
+            # Cache first, then record budget (only after successful cache write)
             self.cache.cache_sentiment(ticker, earnings_date, sentiment_data)
+            self.cache.record_call(cost=0.006)
 
             # Return dict with success field (property not included by default)
             result = validated.model_dump()

@@ -45,6 +45,11 @@ steps:
           --region us-east1 \
           --platform managed \
           --allow-unauthenticated \
+          # SECURITY: --allow-unauthenticated is required because Telegram webhooks
+          # need public HTTP access to POST /telegram. All sensitive endpoints
+          # enforce API key authentication at the application level (verify_api_key).
+          # The Telegram webhook validates X-Telegram-Bot-Api-Secret-Token header.
+          # See src/main.py: verify_api_key() and verify_telegram_secret().
           --memory 512Mi \
           --cpu 1 \
           --min-instances 0 \

@@ -206,22 +206,21 @@ class Cache4_0:
         import sqlite3
         cache_db = _main_repo / "4.0" / "data" / "sentiment_cache.db"
 
-        conn = sqlite3.connect(str(cache_db))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(cache_db)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        # Total entries
-        cursor.execute("SELECT COUNT(*) FROM sentiment_cache")
-        total_entries = cursor.fetchone()[0]
+            # Total entries
+            cursor.execute("SELECT COUNT(*) FROM sentiment_cache")
+            total_entries = cursor.fetchone()[0]
 
-        # Stale entries (>3 hours old)
-        cutoff_time = datetime.now() - timedelta(hours=3)
-        cursor.execute(
-            "SELECT COUNT(*) FROM sentiment_cache WHERE cached_at < ?",
-            (cutoff_time.isoformat(),)
-        )
-        stale_entries = cursor.fetchone()[0]
-
-        conn.close()
+            # Stale entries (>3 hours old)
+            cutoff_time = datetime.now() - timedelta(hours=3)
+            cursor.execute(
+                "SELECT COUNT(*) FROM sentiment_cache WHERE cached_at < ?",
+                (cutoff_time.isoformat(),)
+            )
+            stale_entries = cursor.fetchone()[0]
 
         # Note: Hit rate tracking not yet implemented in 4.0's cache
         # Would require tracking cache hits/misses in sentiment_cache
@@ -249,18 +248,18 @@ class Cache4_0:
         import sqlite3
         cache_db = _main_repo / "4.0" / "data" / "sentiment_cache.db"
 
-        conn = sqlite3.connect(str(cache_db))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(cache_db)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        # Delete old entries
-        cursor.execute(
-            "DELETE FROM sentiment_cache WHERE cached_at < ?",
-            (cutoff_time.isoformat(),)
-        )
+            # Delete old entries
+            cursor.execute(
+                "DELETE FROM sentiment_cache WHERE cached_at < ?",
+                (cutoff_time.isoformat(),)
+            )
 
-        deleted_count = cursor.rowcount
-        conn.commit()
-        conn.close()
+            deleted_count = cursor.rowcount
+            conn.commit()
 
         return deleted_count
 
@@ -281,19 +280,19 @@ class Cache4_0:
         import sqlite3
         budget_db = _main_repo / "4.0" / "data" / "perplexity_budget.db"
 
-        conn = sqlite3.connect(str(budget_db))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(budget_db)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        # Delete old entries (use date field for filtering)
-        cutoff_date_str = cutoff_date.strftime('%Y-%m-%d')
-        cursor.execute(
-            "DELETE FROM api_budget WHERE date < ?",
-            (cutoff_date_str,)
-        )
+            # Delete old entries (use date field for filtering)
+            cutoff_date_str = cutoff_date.strftime('%Y-%m-%d')
+            cursor.execute(
+                "DELETE FROM api_budget WHERE date < ?",
+                (cutoff_date_str,)
+            )
 
-        deleted_count = cursor.rowcount
-        conn.commit()
-        conn.close()
+            deleted_count = cursor.rowcount
+            conn.commit()
 
         return deleted_count
 
@@ -317,16 +316,16 @@ class Cache4_0:
         cache_db = _main_repo / "4.0" / "data" / "sentiment_cache.db"
 
         try:
-            conn = sqlite3.connect(str(cache_db))
-            cursor = conn.cursor()
+            with sqlite3.connect(str(cache_db)) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
 
-            cursor.execute(
-                "SELECT cached_at FROM sentiment_cache WHERE ticker = ? AND earnings_date = ?",
-                (ticker.upper(), earnings_date)
-            )
+                cursor.execute(
+                    "SELECT cached_at FROM sentiment_cache WHERE ticker = ? AND earnings_date = ?",
+                    (ticker.upper(), earnings_date)
+                )
 
-            row = cursor.fetchone()
-            conn.close()
+                row = cursor.fetchone()
 
             if row and row[0]:
                 cached_at_str = row[0]

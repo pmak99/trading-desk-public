@@ -6,6 +6,7 @@ Makes the entire system testable by allowing easy mocking.
 """
 
 import logging
+import threading
 from functools import wraps
 from pathlib import Path
 from typing import Optional
@@ -573,6 +574,7 @@ class Container:
 # ============================================================================
 
 _container: Optional[Container] = None
+_container_lock = threading.Lock()
 
 
 def get_container() -> Container:
@@ -581,12 +583,15 @@ def get_container() -> Container:
 
     Loads from environment on first call.
     Use this in CLI scripts for convenience.
+    Thread-safe via double-checked locking.
 
     For testing, create Container instances directly.
     """
     global _container
     if _container is None:
-        _container = Container.create_from_env()
+        with _container_lock:
+            if _container is None:
+                _container = Container.create_from_env()
     return _container
 
 
@@ -595,8 +600,10 @@ def reset_container() -> None:
     Reset global container (useful for testing).
 
     Closes connection pool if exists.
+    Thread-safe via lock.
     """
     global _container
-    if _container and _container._db_pool:
-        _container._db_pool.close_all()
-    _container = None
+    with _container_lock:
+        if _container and _container._db_pool:
+            _container._db_pool.close_all()
+        _container = None

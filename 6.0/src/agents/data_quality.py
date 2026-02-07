@@ -105,18 +105,18 @@ class DataQualityAgent:
     def _find_duplicates(self) -> List[Dict]:
         """Find duplicate historical_moves entries."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT ticker, earnings_date, COUNT(*) as cnt
-                FROM historical_moves
-                GROUP BY ticker, earnings_date
-                HAVING cnt > 1
-            """)
+                cursor.execute("""
+                    SELECT ticker, earnings_date, COUNT(*) as cnt
+                    FROM historical_moves
+                    GROUP BY ticker, earnings_date
+                    HAVING cnt > 1
+                """)
 
-            rows = cursor.fetchall()
-            conn.close()
+                rows = cursor.fetchall()
 
             return [{'ticker': r[0], 'date': r[1], 'count': r[2]} for r in rows]
 
@@ -126,19 +126,19 @@ class DataQualityAgent:
     def _find_insufficient_data(self) -> List[Dict]:
         """Find tickers with <4 quarters of data."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT ticker, COUNT(*) as quarters
-                FROM historical_moves
-                GROUP BY ticker
-                HAVING quarters < 4
-                ORDER BY quarters ASC
-            """)
+                cursor.execute("""
+                    SELECT ticker, COUNT(*) as quarters
+                    FROM historical_moves
+                    GROUP BY ticker
+                    HAVING quarters < 4
+                    ORDER BY quarters ASC
+                """)
 
-            rows = cursor.fetchall()
-            conn.close()
+                rows = cursor.fetchall()
 
             return [{'ticker': r[0], 'quarters': r[1]} for r in rows]
 
@@ -148,18 +148,18 @@ class DataQualityAgent:
     def _find_outliers(self) -> List[Dict]:
         """Find extreme outlier moves (>50%)."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT ticker, earnings_date, gap_move_pct
-                FROM historical_moves
-                WHERE ABS(gap_move_pct) > 50
-                ORDER BY ABS(gap_move_pct) DESC
-            """)
+                cursor.execute("""
+                    SELECT ticker, earnings_date, gap_move_pct
+                    FROM historical_moves
+                    WHERE ABS(gap_move_pct) > 50
+                    ORDER BY ABS(gap_move_pct) DESC
+                """)
 
-            rows = cursor.fetchall()
-            conn.close()
+                rows = cursor.fetchall()
 
             return [{'ticker': r[0], 'date': r[1], 'move': r[2]} for r in rows]
 
@@ -181,22 +181,22 @@ class DataQualityAgent:
     def _fix_duplicates(self) -> int:
         """Remove duplicate historical_moves entries (keep newest)."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
 
-            # Delete duplicates, keeping the row with highest rowid
-            cursor.execute("""
-                DELETE FROM historical_moves
-                WHERE rowid NOT IN (
-                    SELECT MAX(rowid)
-                    FROM historical_moves
-                    GROUP BY ticker, earnings_date
-                )
-            """)
+                # Delete duplicates, keeping the row with highest rowid
+                cursor.execute("""
+                    DELETE FROM historical_moves
+                    WHERE rowid NOT IN (
+                        SELECT MAX(rowid)
+                        FROM historical_moves
+                        GROUP BY ticker, earnings_date
+                    )
+                """)
 
-            deleted = cursor.rowcount
-            conn.commit()
-            conn.close()
+                deleted = cursor.rowcount
+                conn.commit()
 
             return deleted
 

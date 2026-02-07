@@ -252,7 +252,7 @@ backup_database() {
     # Set GDRIVE_BACKUP_PATH environment variable to your Google Drive backup directory
     local gdrive_backup_dir="${GDRIVE_BACKUP_PATH:-$HOME/Library/CloudStorage/GoogleDrive/My Drive/Backups/trading-desk}"
     if [ -d "$gdrive_backup_dir" ]; then
-        # Copy in background with verification
+        # Copy with verification
         local gdrive_dest="$gdrive_backup_dir/$(basename "$backup_file")"
         (
             if cp "$backup_file" "$gdrive_backup_dir/" 2>/dev/null; then
@@ -264,6 +264,8 @@ backup_database() {
                 echo -e "${YELLOW}Warning: Google Drive backup copy failed${NC}" >&2
             fi
         ) &
+        GDRIVE_PID=$!
+        wait $GDRIVE_PID || echo -e "${YELLOW}Warning: Google Drive backup may not have completed${NC}" >&2
     fi
 
     # Cleanup old backups (keep last N days)

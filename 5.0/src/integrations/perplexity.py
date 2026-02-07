@@ -185,6 +185,10 @@ class PerplexityClient:
                 reason=f"Budget exhausted before fetching sentiment for {ticker}"
             )
 
+        # Validate ticker format to prevent prompt injection
+        if not re.match(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$', ticker.upper()):
+            raise ValueError(f"Invalid ticker format: {ticker}")
+
         log("info", "Fetching sentiment", ticker=ticker, date=earnings_date)
 
         prompt = f"""For {ticker} earnings on {earnings_date}, respond ONLY in this format:

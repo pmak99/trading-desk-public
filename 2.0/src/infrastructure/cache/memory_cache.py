@@ -82,8 +82,8 @@ class MemoryCache:
             ttl: Optional custom TTL in seconds
         """
         with self._lock:
-            # Enforce max size (simple LRU: remove oldest)
-            if len(self._cache) >= self.max_size and key not in self._cache:
+            # Enforce max size (simple LRU: remove oldest entries until under limit)
+            while len(self._cache) >= self.max_size and key not in self._cache:
                 self._evict_oldest()
 
             self._cache[key] = value

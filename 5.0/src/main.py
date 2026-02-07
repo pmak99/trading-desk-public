@@ -241,9 +241,28 @@ async def lifespan(app: FastAPI):
     app.state.services = state
     _app_state = state
 
+    # Warn if Telegram webhook secret is not configured
+    if settings.telegram_bot_token and not settings.telegram_webhook_secret:
+        log("error", "TELEGRAM_WEBHOOK_SECRET not configured - Telegram bot will reject all webhooks")
+
     log("info", "All services initialized")
 
+    # Start background task for rate limiter cleanup (prevents memory leak from stale IPs)
+    async def _rate_limiter_cleanup():
+        while True:
+            await asyncio.sleep(300)  # Every 5 minutes
+            await _rate_limiter.cleanup_stale()
+
+    cleanup_task = asyncio.create_task(_rate_limiter_cleanup())
+
     yield  # Application runs here
+
+    # Cancel the cleanup task on shutdown
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
 
     # Cleanup on shutdown
     log("info", "Shutting down Trading Desk 5.0")
@@ -1435,7 +1454,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
 
 
 # Scan timeout for whisper endpoint to avoid Cloud Run timeout
-MAX_SCAN_TIME_SECONDS = 60
+MAX_SCAN_TIME_SECONDS = 120
 
 # Concurrency limit for parallel ticker analysis (ported from 6.0)
 # Prevents database connection pool exhaustion and API rate limiting
@@ -1630,7 +1649,8 @@ async def _scan_tickers_for_whisper(
     upcoming: List[Dict],
     repo,
     tradier,
-    fresh: bool = False
+    fresh: bool = False,
+    partial_results: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Scan tickers for VRP opportunities using parallel execution.
@@ -1647,13 +1667,21 @@ async def _scan_tickers_for_whisper(
     Target: 60s → 15s for 30 tickers.
 
     Extracted for asyncio.wait_for timeout support.
+    Results are accumulated into partial_results list as tasks complete,
+    so on timeout the caller can still access completed results.
 
     Args:
         fresh: If True, bypass VRP and sentiment caches (for Telegram real-time requests)
+        partial_results: Shared list that accumulates results as tasks complete.
+                        On timeout, this list contains all results completed before timeout.
     """
     sentiment_cache = get_sentiment_cache()
     vrp_cache = get_vrp_cache()
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_ANALYSIS)
+
+    # Use provided list or create new one
+    if partial_results is None:
+        partial_results = []
 
     # Filter out invalid tickers (e.g., COF-PI preferred stocks, warrants)
     # These don't have options and can't be analyzed for IV crush
@@ -1717,16 +1745,15 @@ async def _scan_tickers_for_whisper(
             "errors": str(error_count), "total": str(total_tasks)
         })
 
-    # Filter out None results and exceptions
-    results = []
+    # Filter out None results and exceptions, accumulate into shared list
     for result in results_raw:
         if isinstance(result, Exception):
             log("warning", "Task failed with exception", error=str(result))
             continue
         if result is not None:
-            results.append(result)
+            partial_results.append(result)
 
-    return results, error_count
+    return partial_results, error_count
 
 
 @app.get("/api/whisper")
@@ -1768,16 +1795,22 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
         log("debug", "Fetched upcoming earnings from database", count=len(upcoming), dates=target_dates)
 
         scan_errors = 0
+        # Shared list accumulates results as tasks complete
+        # On timeout, this list contains all results completed before timeout
+        partial_results = []
         try:
             results, scan_errors = await asyncio.wait_for(
-                _scan_tickers_for_whisper(upcoming, repo, tradier, fresh=fresh),
+                _scan_tickers_for_whisper(upcoming, repo, tradier, fresh=fresh,
+                                         partial_results=partial_results),
                 timeout=MAX_SCAN_TIME_SECONDS
             )
         except asyncio.TimeoutError:
-            log("warn", "Whisper scan timed out", timeout_seconds=MAX_SCAN_TIME_SECONDS)
+            log("warn", "Whisper scan timed out, using partial results",
+                timeout_seconds=MAX_SCAN_TIME_SECONDS,
+                partial_count=len(partial_results))
             metrics.count("ivcrush.whisper.timeout", {"reason": "scan_timeout"})
-            # Return empty results on timeout - better than hanging
-            results = []
+            # Use whatever results completed before the timeout
+            results = partial_results
 
         # Sort by score descending
         results.sort(key=lambda x: x["score"], reverse=True)

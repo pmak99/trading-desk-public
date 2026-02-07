@@ -201,7 +201,7 @@ class TestSentimentCache:
 
     def test_get_returns_none_for_missing(self, temp_cache):
         """Should return None for non-existent entry."""
-        result = temp_cache.get("MISSING", "2025-12-09")
+        result = temp_cache.get("XYZ", "2025-12-09")
         assert result is None
 
     def test_get_uppercases_ticker(self, temp_cache):
@@ -219,10 +219,10 @@ class TestSentimentCache:
                 INSERT INTO sentiment_cache
                 (ticker, date, source, sentiment, cached_at)
                 VALUES (?, ?, ?, ?, ?)
-            """, ("EXPIRED", "2025-12-09", "perplexity", "Old data", old_time))
+            """, ("XPRD", "2025-12-09", "perplexity", "Old data", old_time))
             conn.commit()
 
-        result = temp_cache.get("EXPIRED", "2025-12-09")
+        result = temp_cache.get("XPRD", "2025-12-09")
         assert result is None
 
     def test_get_prefers_perplexity_over_websearch(self, temp_cache):

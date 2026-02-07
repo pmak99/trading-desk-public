@@ -38,7 +38,11 @@ fi
 # 2.0 loaded last so its paths take priority
 for ENV_FILE in "${MAIN_REPO}/5.0/.env" "${MAIN_REPO}/2.0/.env" "${SCRIPT_DIR}/.env"; do
     if [ -f "$ENV_FILE" ]; then
-        # Export variables from .env file (skip comments and empty lines)
+        # Validate .env contains only VAR=VALUE lines (no commands)
+        if grep -qvE '^\s*(#.*|[A-Za-z_][A-Za-z0-9_]*=.*|)\s*$' "$ENV_FILE"; then
+            echo "WARNING: $ENV_FILE contains non-variable lines, skipping" >&2
+            continue
+        fi
         set -a  # Auto-export all variables
         source "$ENV_FILE" 2>/dev/null || true
         set +a

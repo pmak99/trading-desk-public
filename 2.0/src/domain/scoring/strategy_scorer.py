@@ -568,6 +568,8 @@ class StrategyScorer:
             return 1.0
 
         # Calculate profit zone as percentage of stock price
+        if stock_price_estimate <= 0:
+            return 1.0
         profit_zone_pct = (profit_zone_width / stock_price_estimate) * 100
 
         # Get implied move percentage (one-sided: up OR down)
@@ -580,6 +582,8 @@ class StrategyScorer:
         # Calculate ratio: profit zone / total expected range
         # If ratio > 1.0, profit zone is wider than expected range (good)
         # If ratio < 1.0, profit zone is narrower than expected range (bad)
+        if total_expected_range_pct <= 0:
+            return 1.0
         zone_to_move_ratio = profit_zone_pct / total_expected_range_pct
 
         # Apply penalty based on ratio

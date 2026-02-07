@@ -176,8 +176,8 @@ class DatabaseSync:
             return True
 
         except PreconditionFailed:
-            log("error", "Database upload conflict - another instance wrote first")
-            return False
+            log("error", "Database upload conflict - another instance wrote first, local changes may be lost")
+            raise DatabaseSyncConflictError("Upload conflict - another instance modified the database")
         except Exception as e:
             error_msg = str(e).lower()
             if 'forbidden' in error_msg or '403' in error_msg or 'unauthorized' in error_msg or '401' in error_msg:
@@ -219,50 +219,20 @@ class DatabaseContext:
         return self.conn
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Close connection AFTER all retry logic (fix for connection leak)
         try:
             if exc_type is None:
-                # Try upload with retries on conflict
-                for attempt in range(self.max_retries):
-                    if self.sync.upload():
-                        return  # Success
-
-                    # Conflict detected - another instance wrote first
-                    old_generation = self.sync._generation
-                    log("warn", "GCS conflict detected",
-                        attempt=attempt + 1,
-                        expected_generation=old_generation)
-
-                    # Download to get new generation for potential retry
-                    self.sync.download()
-                    new_generation = self.sync._generation
-
-                    # Verify generation actually changed (sanity check)
-                    if new_generation == old_generation:
-                        log("error", "Generation unchanged after conflict - possible corruption",
-                            generation=new_generation)
-                        raise DatabaseSyncConflictError(
-                            f"Database conflict but generation unchanged ({new_generation}). "
-                            "Possible database corruption or GCS issue."
-                        )
-
-                    # After download, our local changes are LOST because the file
-                    # was replaced. We cannot simply retry upload - the caller must
-                    # re-read and re-apply their changes. Raise immediately.
-                    raise DatabaseSyncConflictError(
-                        f"Database sync conflict after {attempt + 1} attempt(s). "
-                        f"Generation changed from {old_generation} to {new_generation}. "
-                        "Caller should re-read data and retry operation."
-                    )
-
-                # Should not reach here, but handle edge case
-                raise DatabaseSyncConflictError(
-                    f"Database sync failed after {self.max_retries} retries"
-                )
+                # Close connection BEFORE upload to flush all writes
+                if self.conn:
+                    self.conn.close()
+                    self.conn = None
+                # Upload raises DatabaseSyncConflictError on conflict
+                # (no longer silently returns False)
+                self.sync.upload()
         finally:
-            # Always close connection, even if retries fail
+            # Close connection if still open (error path)
             if self.conn:
                 self.conn.close()
+                self.conn = None
             # Clean up temp file to avoid disk space leaks
             if self.sync.local_path.exists():
                 try:

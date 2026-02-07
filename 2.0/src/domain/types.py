@@ -160,7 +160,7 @@ class OptionQuote:
     @property
     def spread_pct(self) -> float:
         """Spread as percentage of mid price."""
-        if not self.bid or not self.ask or self.bid.amount <= 0 or self.ask.amount <= 0:
+        if not self.bid or not self.ask or self.bid.amount < 0.01 or self.ask.amount < 0.01:
             return 100.0
         if self.mid.amount == 0:
             return 100.0
