@@ -49,40 +49,22 @@ from src.domain.implied_move import (
 from src.domain.direction import get_direction
 from src.formatters.telegram import format_digest
 
-
-# Configuration constants for job limits
-# These can be overridden via environment variables if needed
-MAX_PRE_MARKET_TICKERS = 30  # Max tickers to evaluate in pre-market prep
-MAX_PRIME_CANDIDATES = 40  # Max candidates to consider for priming
-MAX_PRIME_CALLS = 15  # Max Perplexity API calls during prime
-MAX_DIGEST_CANDIDATES = 40  # Max candidates to consider for digest
-MAX_BACKFILL_TICKERS = 60  # Max tickers to backfill in weekly job
-MAX_OUTCOME_TICKERS = 30  # Max tickers to record outcomes for same-day earnings
-RATE_LIMIT_DELAY = 0.5  # Seconds between API calls
-RATE_LIMIT_BATCH_SIZE = 5  # API calls before adding delay
-
-
-def filter_to_tracked_tickers(
-    earnings: List[Dict[str, Any]],
-    tracked_tickers: set
-) -> List[Dict[str, Any]]:
-    """
-    Filter earnings list to only include tickers with historical moves data.
-
-    This is the most reliable way to filter out OTC/foreign stocks because:
-    1. If a ticker is in historical_moves, we have VRP data for it
-    2. These are tickers we've explicitly tracked and can analyze
-    3. No false positives (legitimate tickers won't be filtered)
-    4. No false negatives (untraceable tickers won't slip through)
-
-    Args:
-        earnings: List of earnings dicts from Alpha Vantage (with 'symbol' key)
-        tracked_tickers: Set of ticker symbols from historical_moves table
-
-    Returns:
-        Filtered list containing only tracked tickers
-    """
-    return [e for e in earnings if e["symbol"] in tracked_tickers]
+# Import base class and re-export constants/utilities so existing imports still work
+from src.jobs.base import (
+    BaseJobHandler,
+    filter_to_tracked_tickers,
+    MAX_PRE_MARKET_TICKERS,
+    MAX_PRIME_CANDIDATES,
+    MAX_PRIME_CALLS,
+    MAX_DIGEST_CANDIDATES,
+    MAX_BACKFILL_TICKERS,
+    MAX_OUTCOME_TICKERS,
+    RATE_LIMIT_DELAY,
+    RATE_LIMIT_BATCH_SIZE,
+    PRE_MARKET_ALERT_THRESHOLD,
+    AFTER_HOURS_ALERT_THRESHOLD,
+    TRADIER_CALLS_PER_TICKER,
+)
 
 
 async def fetch_earnings_with_db_fallback(
@@ -118,13 +100,6 @@ async def fetch_earnings_with_db_fallback(
         log("error", "Alpha Vantage failed, using DB fallback", error=str(e), days=days)
         return repo.get_upcoming_earnings(today_et(), days)
 
-# Alert thresholds
-PRE_MARKET_ALERT_THRESHOLD = 0.5  # Alert if pre-market move > 50% of historical avg
-AFTER_HOURS_ALERT_THRESHOLD = 1.0  # Only track after-hours moves > 1%
-
-# API calls per ticker when fetching real implied move (quote + expirations + chain)
-TRADIER_CALLS_PER_TICKER = 3
-
 
 def _parse_price_history(closes: dict) -> List[tuple]:
     """
@@ -159,7 +134,7 @@ def _parse_price_history(closes: dict) -> List[tuple]:
     return price_data
 
 
-class JobRunner:
+class JobRunner(BaseJobHandler):
     """Runs scheduled jobs with proper error handling."""
 
     def __init__(self):
@@ -265,30 +240,19 @@ class JobRunner:
         Pre-market prep (05:30 ET).
         Fetch today's earnings and calculate VRP for each.
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = self._start_timer()
         today = today_et()
 
         # Get earnings for today and next few days
-        earnings = await self.alphavantage.get_earnings_calendar()
-
-        # Validate API response
+        earnings = await self._fetch_earnings("pre_market_prep")
         if not earnings:
-            log("warn", "Empty earnings calendar from Alpha Vantage")
-            metrics.count("ivcrush.job.api_empty", {"job": "pre_market_prep", "api": "alphavantage"})
             return {"status": "warning", "tickers_found": 0, "earnings_dates": [], "note": "Empty calendar from API"}
 
         # Filter to upcoming earnings
-        target_dates = [today]
-        for i in range(1, 4):
-            future = (now_et() + timedelta(days=i)).strftime("%Y-%m-%d")
-            target_dates.append(future)
-
-        upcoming = [e for e in earnings if e["report_date"] in target_dates]
+        upcoming, target_dates = self._upcoming_earnings(earnings, days=4)
 
         # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
-        repo = HistoricalMovesRepository(settings.DB_PATH)
-        tracked_tickers = repo.get_tracked_tickers()
-        upcoming = filter_to_tracked_tickers(upcoming, tracked_tickers)
+        upcoming, repo = self._filter_tracked(upcoming)
 
         # Log truncation if limit exceeded
         if len(upcoming) > MAX_PRE_MARKET_TICKERS:
@@ -310,8 +274,7 @@ class JobRunner:
 
                 # Rate limiting for Tradier API calls
                 api_calls += 1
-                if api_calls % RATE_LIMIT_BATCH_SIZE == 0:
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
+                await self._rate_limit_tick(api_calls)
 
                 # Get current price from Tradier (more reliable than Yahoo after hours)
                 quote = await self.tradier.get_quote(ticker)
@@ -332,16 +295,14 @@ class JobRunner:
                     ticker=ticker, error=str(ex), job="pre_market_prep")
 
         # Record metrics
-        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-        metrics.record("ivcrush.job.duration", duration_ms, {"job": "pre_market_prep"})
+        self._record_duration(start_time, "pre_market_prep")
         metrics.gauge("ivcrush.job.tickers_processed", len(results), {"job": "pre_market_prep"})
 
-        return {
-            "status": "success",
-            "tickers_found": len(results),
-            "earnings_dates": target_dates,
-            "failed_tickers": failed_tickers if failed_tickers else None,
-        }
+        return self._build_result(
+            failed_tickers=failed_tickers if failed_tickers else None,
+            tickers_found=len(results),
+            earnings_dates=target_dates,
+        )
 
     async def _sentiment_scan(self) -> Dict[str, Any]:
         """
@@ -352,29 +313,17 @@ class JobRunner:
         to calculate accurate VRP ratios for selecting which tickers to prime.
         Falls back to estimate only if options data unavailable.
         """
-        start_time = asyncio.get_event_loop().time()
-        today = today_et()
+        start_time = self._start_timer()
 
         # Get earnings for today and next few days
-        earnings = await self.alphavantage.get_earnings_calendar()
-
-        # Validate API response
+        earnings = await self._fetch_earnings("sentiment_scan")
         if not earnings:
-            log("warn", "Empty earnings calendar from Alpha Vantage", job="sentiment_scan")
-            metrics.count("ivcrush.job.api_empty", {"job": "sentiment_scan", "api": "alphavantage"})
             return {"status": "warning", "candidates": 0, "primed": 0, "note": "Empty calendar from API"}
 
-        target_dates = [today]
-        for i in range(1, 4):
-            future = (now_et() + timedelta(days=i)).strftime("%Y-%m-%d")
-            target_dates.append(future)
-
-        upcoming = [e for e in earnings if e["report_date"] in target_dates]
+        upcoming, target_dates = self._upcoming_earnings(earnings, days=4)
 
         # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
-        repo = HistoricalMovesRepository(settings.DB_PATH)
-        tracked_tickers = repo.get_tracked_tickers()
-        upcoming = filter_to_tracked_tickers(upcoming, tracked_tickers)
+        upcoming, repo = self._filter_tracked(upcoming)
 
         # Log truncation if limit exceeded
         if len(upcoming) > MAX_PRIME_CANDIDATES:
@@ -399,43 +348,21 @@ class JobRunner:
                 if cache.get_sentiment(ticker, earnings_date):
                     continue
 
-                # Check VRP threshold
-                moves = repo.get_moves(ticker)
-                if len(moves) < 4:
+                # Evaluate VRP using base class pipeline
+                vrp_result = await self._evaluate_vrp(repo, ticker, earnings_date, api_calls)
+                if vrp_result is None:
                     continue
 
-                historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
-                if not historical_pcts:
-                    continue
-
-                historical_avg = sum(historical_pcts) / len(historical_pcts)
-
-                # Rate limiting for Tradier API calls (3 calls per ticker)
-                api_calls += TRADIER_CALLS_PER_TICKER
-                if api_calls % (RATE_LIMIT_BATCH_SIZE * TRADIER_CALLS_PER_TICKER) == 0:
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
-
-                # Fetch real implied move from Tradier options chain
-                im_result = await fetch_real_implied_move(
-                    self.tradier, ticker, earnings_date
-                )
-                implied_move_pct, used_real = get_implied_move_with_fallback(
-                    im_result, historical_avg
-                )
-                if used_real:
+                api_calls = vrp_result["api_calls"]
+                if vrp_result["used_real"]:
                     real_implied_count += 1
 
-                vrp_data = calculate_vrp(
-                    implied_move_pct=implied_move_pct,
-                    historical_moves=historical_pcts,
-                )
-
                 # Only prime tickers with VRP >= discovery threshold
-                if vrp_data.get("vrp_ratio", 0) >= settings.VRP_DISCOVERY:
+                if vrp_result["vrp_data"].get("vrp_ratio", 0) >= settings.VRP_DISCOVERY:
                     candidates.append({
                         "ticker": ticker,
                         "earnings_date": earnings_date,
-                        "vrp_ratio": vrp_data["vrp_ratio"],
+                        "vrp_ratio": vrp_result["vrp_data"]["vrp_ratio"],
                     })
             except Exception as ex:
                 failed_tickers.append(ticker)
@@ -485,8 +412,7 @@ class JobRunner:
                     ticker=c["ticker"], error=str(ex), job="sentiment_scan")
 
         # Record metrics
-        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-        metrics.record("ivcrush.job.duration", duration_ms, {"job": "sentiment_scan"})
+        self._record_duration(start_time, "sentiment_scan")
         metrics.gauge("ivcrush.job.candidates", len(candidates), {"job": "sentiment_scan"})
         metrics.gauge("ivcrush.job.primed", primed, {"job": "sentiment_scan"})
 
@@ -515,7 +441,7 @@ class JobRunner:
         Note: GOOD liquidity is assumed during screening. Actual liquidity
         must be verified via Tradier before placing any trades.
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = self._start_timer()
         today = today_et()
 
         # Get earnings for today and next few days
@@ -530,29 +456,22 @@ class JobRunner:
             # Still send a notification about the empty calendar
             try:
                 await self.telegram.send_message(
-                    f"📋 <b>Trading Desk Digest: {today}</b>\n\n⚠️ Earnings calendar unavailable."
+                    f"\U0001f4cb <b>Trading Desk Digest: {today}</b>\n\n\u26a0\ufe0f Earnings calendar unavailable."
                 )
             except Exception as tg_err:
                 log("error", "Failed to send Telegram notification", error=str(tg_err))
             return {"status": "warning", "opportunities": 0, "sent": False, "note": "Empty calendar from API"}
 
-        target_dates = [today]
-        for i in range(1, 4):
-            future = (now_et() + timedelta(days=i)).strftime("%Y-%m-%d")
-            target_dates.append(future)
-
-        upcoming = [e for e in earnings if e["report_date"] in target_dates]
+        upcoming, target_dates = self._upcoming_earnings(earnings, days=4)
         log("debug", "Filtered by date",
             job="morning_digest", target_dates=target_dates,
             before=len(earnings), after=len(upcoming))
 
         # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
-        repo = HistoricalMovesRepository(settings.DB_PATH)
-        tracked_tickers = repo.get_tracked_tickers()
         before_filter = len(upcoming)
-        upcoming = filter_to_tracked_tickers(upcoming, tracked_tickers)
+        upcoming, repo = self._filter_tracked(upcoming)
         log("debug", "Filtered by tracked tickers",
-            job="morning_digest", tracked_count=len(tracked_tickers),
+            job="morning_digest", tracked_count=len(repo.get_tracked_tickers()),
             before=before_filter, after=len(upcoming))
 
         # Log truncation if limit exceeded
@@ -574,31 +493,18 @@ class JobRunner:
             earnings_date = e["report_date"]
 
             try:
-                # Get historical data for VRP
-                moves = repo.get_moves(ticker)
-                if len(moves) < 4:
+                # Evaluate VRP using base class pipeline
+                vrp_result = await self._evaluate_vrp(repo, ticker, earnings_date, api_calls)
+                if vrp_result is None:
                     continue
 
-                historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
-                if not historical_pcts:
-                    continue
-
-                historical_avg = sum(historical_pcts) / len(historical_pcts)
-
-                # Rate limiting for Tradier API calls (3 calls per ticker)
-                api_calls += TRADIER_CALLS_PER_TICKER
-                if api_calls % (RATE_LIMIT_BATCH_SIZE * TRADIER_CALLS_PER_TICKER) == 0:
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
-
-                # Fetch real implied move from Tradier options chain
-                im_result = await fetch_real_implied_move(
-                    self.tradier, ticker, earnings_date
-                )
-                implied_move_pct, used_real = get_implied_move_with_fallback(
-                    im_result, historical_avg
-                )
-                if used_real:
+                api_calls = vrp_result["api_calls"]
+                if vrp_result["used_real"]:
                     real_implied_count += 1
+
+                vrp_data = vrp_result["vrp_data"]
+                im_result = vrp_result["im_result"]
+                implied_move_pct = vrp_result["implied_move_pct"]
 
                 # Filter out tickers without weekly options if configured
                 if settings.require_weekly_options and not im_result.get("has_weekly_options", True):
@@ -606,11 +512,6 @@ class JobRunner:
                         ticker=ticker, reason=im_result.get("weekly_reason", ""),
                         job="morning_digest")
                     continue
-
-                vrp_data = calculate_vrp(
-                    implied_move_pct=implied_move_pct,
-                    historical_moves=historical_pcts,
-                )
 
                 # Apply VRP discovery threshold
                 if vrp_data.get("vrp_ratio", 0) < settings.VRP_DISCOVERY:
@@ -670,7 +571,7 @@ class JobRunner:
                     "headwinds": headwinds,
                     "strategy": strategy_name,
                     "credit": credit,
-                    "real_data": used_real,  # Track if we used real options data
+                    "real_data": vrp_result["used_real"],  # Track if we used real options data
                 })
 
             except Exception as ex:
@@ -710,22 +611,16 @@ class JobRunner:
                 error=telegram_error, opportunities=len(opportunities), job="morning_digest")
 
         # Record metrics
-        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-        metrics.record("ivcrush.job.duration", duration_ms, {"job": "morning_digest"})
+        self._record_duration(start_time, "morning_digest")
         metrics.tickers_qualified(len(opportunities))
 
-        result = {
-            "status": "success",
-            "opportunities": len(opportunities),
-            "sent": sent,
-        }
-        if telegram_error:
-            result["telegram_error"] = telegram_error
-        if failed_tickers:
-            result["failed_tickers"] = failed_tickers
-            metrics.gauge("ivcrush.job.tickers_failed", len(failed_tickers), {"job": "morning_digest"})
-
-        return result
+        return self._build_result(
+            failed_tickers=failed_tickers if failed_tickers else None,
+            telegram_error=telegram_error,
+            job_name="morning_digest",
+            opportunities=len(opportunities),
+            sent=sent,
+        )
 
     async def _market_open_refresh(self) -> Dict[str, Any]:
         """
@@ -733,24 +628,19 @@ class JobRunner:
         Refresh prices for today's earnings tickers after market opens.
         Sends alert if any high-VRP ticker has significant pre-market movement.
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = self._start_timer()
         today = today_et()
 
         # Get earnings for today
-        earnings = await self.alphavantage.get_earnings_calendar()
-
+        earnings = await self._fetch_earnings("market_open_refresh")
         if not earnings:
-            log("warn", "Empty earnings calendar", job="market_open_refresh")
-            metrics.count("ivcrush.job.api_empty", {"job": "market_open_refresh", "api": "alphavantage"})
             return {"status": "warning", "refreshed": 0, "note": "Empty calendar from API"}
 
         # Filter to today's earnings only
-        todays_earnings = [e for e in earnings if e["report_date"] == today]
+        todays_earnings = self._todays_earnings(earnings)
 
         # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
-        repo = HistoricalMovesRepository(settings.DB_PATH)
-        tracked_tickers = repo.get_tracked_tickers()
-        todays_earnings = filter_to_tracked_tickers(todays_earnings, tracked_tickers)
+        todays_earnings, repo = self._filter_tracked(todays_earnings)
 
         if not todays_earnings:
             log("info", "No earnings today", job="market_open_refresh")
@@ -767,8 +657,7 @@ class JobRunner:
             try:
                 # Rate limiting
                 api_calls += 1
-                if api_calls % RATE_LIMIT_BATCH_SIZE == 0:
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
+                await self._rate_limit_tick(api_calls)
 
                 # Get current price from Tradier (more reliable than Yahoo)
                 quote = await self.tradier.get_quote(ticker)
@@ -780,26 +669,23 @@ class JobRunner:
                 refreshed += 1
 
                 # Check historical average to detect significant pre-market moves
-                moves = repo.get_moves(ticker)
-                if len(moves) >= 4:
-                    historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
-                    if historical_pcts:
-                        historical_avg = sum(historical_pcts) / len(historical_pcts)
-                        # If we have a previous close, check pre-market move
-                        history = await self.twelvedata.get_stock_history(ticker, period="5d", interval="1d")
-                        if history and "Close" in history:
-                            closes = list(history["Close"].values())
-                            if len(closes) >= 2 and closes[-2]:
-                                prev_close = closes[-2]
-                                pre_market_move = abs((price - prev_close) / prev_close * 100)
-                                # Alert if pre-market move exceeds threshold of historical avg
-                                if pre_market_move > historical_avg * PRE_MARKET_ALERT_THRESHOLD:
-                                    significant_moves.append({
-                                        "ticker": ticker,
-                                        "pre_market_move": round(pre_market_move, 2),
-                                        "historical_avg": round(historical_avg, 2),
-                                        "current_price": round(price, 2),
-                                    })
+                pcts, historical_avg = self._get_historical_pcts(repo, ticker)
+                if pcts is not None:
+                    # If we have a previous close, check pre-market move
+                    history = await self.twelvedata.get_stock_history(ticker, period="5d", interval="1d")
+                    if history and "Close" in history:
+                        closes = list(history["Close"].values())
+                        if len(closes) >= 2 and closes[-2]:
+                            prev_close = closes[-2]
+                            pre_market_move = abs((price - prev_close) / prev_close * 100)
+                            # Alert if pre-market move exceeds threshold of historical avg
+                            if pre_market_move > historical_avg * PRE_MARKET_ALERT_THRESHOLD:
+                                significant_moves.append({
+                                    "ticker": ticker,
+                                    "pre_market_move": round(pre_market_move, 2),
+                                    "historical_avg": round(historical_avg, 2),
+                                    "current_price": round(price, 2),
+                                })
 
             except Exception as ex:
                 failed_tickers.append(ticker)
@@ -810,10 +696,10 @@ class JobRunner:
         telegram_error = None
         if significant_moves:
             try:
-                msg_lines = [f"⚡ <b>Market Open Alert ({today})</b>\n"]
+                msg_lines = [f"\u26a1 <b>Market Open Alert ({today})</b>\n"]
                 for move in significant_moves[:5]:
                     msg_lines.append(
-                        f"• <b>{move['ticker']}</b>: {move['pre_market_move']}% pre-market "
+                        f"\u2022 <b>{move['ticker']}</b>: {move['pre_market_move']}% pre-market "
                         f"(avg: {move['historical_avg']}%)"
                     )
                 await self.telegram.send_message("\n".join(msg_lines))
@@ -822,21 +708,16 @@ class JobRunner:
                 log("error", "Failed to send market open alert", error=telegram_error)
 
         # Record metrics
-        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-        metrics.record("ivcrush.job.duration", duration_ms, {"job": "market_open_refresh"})
+        self._record_duration(start_time, "market_open_refresh")
         metrics.gauge("ivcrush.job.tickers_refreshed", refreshed, {"job": "market_open_refresh"})
 
-        result = {
-            "status": "success",
-            "refreshed": refreshed,
-            "significant_moves": len(significant_moves),
-        }
-        if telegram_error:
-            result["telegram_error"] = telegram_error
-        if failed_tickers:
-            result["failed_tickers"] = failed_tickers
-            metrics.gauge("ivcrush.job.tickers_failed", len(failed_tickers), {"job": "market_open_refresh"})
-        return result
+        return self._build_result(
+            failed_tickers=failed_tickers if failed_tickers else None,
+            telegram_error=telegram_error,
+            job_name="market_open_refresh",
+            refreshed=refreshed,
+            significant_moves=len(significant_moves),
+        )
 
     async def _pre_trade_refresh(self) -> Dict[str, Any]:
         """
@@ -844,24 +725,19 @@ class JobRunner:
         Final refresh before typical 2:30-3:30 PM trade window.
         Re-validates VRP with current IV and sends actionable alert.
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = self._start_timer()
         today = today_et()
 
         # Get earnings for today (AMC - after market close)
-        earnings = await self.alphavantage.get_earnings_calendar()
-
+        earnings = await self._fetch_earnings("pre_trade_refresh")
         if not earnings:
-            log("warn", "Empty earnings calendar", job="pre_trade_refresh")
-            metrics.count("ivcrush.job.api_empty", {"job": "pre_trade_refresh", "api": "alphavantage"})
             return {"status": "warning", "candidates": 0, "note": "Empty calendar from API"}
 
         # Filter to today's AMC earnings (tradeable now)
-        todays_earnings = [e for e in earnings if e["report_date"] == today]
+        todays_earnings = self._todays_earnings(earnings)
 
         # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
-        repo = HistoricalMovesRepository(settings.DB_PATH)
-        tracked_tickers = repo.get_tracked_tickers()
-        todays_earnings = filter_to_tracked_tickers(todays_earnings, tracked_tickers)
+        todays_earnings, repo = self._filter_tracked(todays_earnings)
 
         if not todays_earnings:
             log("info", "No earnings today", job="pre_trade_refresh")
@@ -876,29 +752,15 @@ class JobRunner:
         for e in todays_earnings[:MAX_PRE_MARKET_TICKERS]:
             ticker = e["symbol"]
             try:
-                # Rate limiting for Tradier API calls (3 calls per ticker for implied move)
-                api_calls += TRADIER_CALLS_PER_TICKER
-                if api_calls % (RATE_LIMIT_BATCH_SIZE * TRADIER_CALLS_PER_TICKER) == 0:
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
-
-                # Get historical moves for VRP calc
-                moves = repo.get_moves(ticker)
-                if len(moves) < 4:
+                # Evaluate VRP using base class pipeline
+                vrp_result = await self._evaluate_vrp(repo, ticker, today, api_calls)
+                if vrp_result is None:
                     continue
 
-                historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
-                if not historical_pcts:
-                    continue
-
-                historical_avg = sum(historical_pcts) / len(historical_pcts)
-
-                # Fetch real implied move from Tradier options chain
-                im_result = await fetch_real_implied_move(
-                    self.tradier, ticker, today
-                )
-                implied_move_pct, _ = get_implied_move_with_fallback(
-                    im_result, historical_avg
-                )
+                api_calls = vrp_result["api_calls"]
+                vrp_data = vrp_result["vrp_data"]
+                im_result = vrp_result["im_result"]
+                implied_move_pct = vrp_result["implied_move_pct"]
 
                 # Filter out tickers without weekly options if configured
                 if settings.require_weekly_options and not im_result.get("has_weekly_options", True):
@@ -906,11 +768,6 @@ class JobRunner:
                         ticker=ticker, reason=im_result.get("weekly_reason", ""),
                         job="pre_trade_refresh")
                     continue
-
-                vrp_data = calculate_vrp(
-                    implied_move_pct=implied_move_pct,
-                    historical_moves=historical_pcts,
-                )
 
                 if vrp_data.get("vrp_ratio", 0) < settings.VRP_DISCOVERY:
                     continue
@@ -949,36 +806,31 @@ class JobRunner:
         telegram_error = None
         if candidates:
             try:
-                msg_lines = [f"🎯 <b>Pre-Trade Alert ({today} 2:30 PM)</b>\n"]
+                msg_lines = [f"\U0001f3af <b>Pre-Trade Alert ({today} 2:30 PM)</b>\n"]
                 msg_lines.append("Top opportunities for AMC earnings:\n")
                 for c in candidates[:5]:
-                    emoji = "🟢" if c["direction"] == "BULLISH" else "🔴" if c["direction"] == "BEARISH" else "⚪"
+                    emoji = "\U0001f7e2" if c["direction"] == "BULLISH" else "\U0001f534" if c["direction"] == "BEARISH" else "\u26aa"
                     msg_lines.append(
                         f"{emoji} <b>{c['ticker']}</b>: VRP {c['vrp_ratio']}x ({c['tier']}) "
-                        f"| ±{c['implied_move']}% | ${c['price'] or 'N/A'}"
+                        f"| \u00b1{c['implied_move']}% | ${c['price'] or 'N/A'}"
                     )
-                msg_lines.append("\n⚠️ Verify liquidity before trading")
+                msg_lines.append("\n\u26a0\ufe0f Verify liquidity before trading")
                 await self.telegram.send_message("\n".join(msg_lines))
             except Exception as tg_err:
                 telegram_error = str(tg_err)
                 log("error", "Failed to send pre-trade alert", error=telegram_error)
 
         # Record metrics
-        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-        metrics.record("ivcrush.job.duration", duration_ms, {"job": "pre_trade_refresh"})
+        self._record_duration(start_time, "pre_trade_refresh")
         metrics.gauge("ivcrush.job.candidates", len(candidates), {"job": "pre_trade_refresh"})
 
-        result = {
-            "status": "success",
-            "candidates": len(candidates),
-            "top_tickers": [c["ticker"] for c in candidates[:5]],
-        }
-        if telegram_error:
-            result["telegram_error"] = telegram_error
-        if failed_tickers:
-            result["failed_tickers"] = failed_tickers
-            metrics.gauge("ivcrush.job.tickers_failed", len(failed_tickers), {"job": "pre_trade_refresh"})
-        return result
+        return self._build_result(
+            failed_tickers=failed_tickers if failed_tickers else None,
+            telegram_error=telegram_error,
+            job_name="pre_trade_refresh",
+            candidates=len(candidates),
+            top_tickers=[c["ticker"] for c in candidates[:5]],
+        )
 
     async def _after_hours_check(self) -> Dict[str, Any]:
         """
@@ -986,24 +838,19 @@ class JobRunner:
         Check for after-market-close earnings announcements.
         Alerts about earnings that just reported and their initial moves.
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = self._start_timer()
         today = today_et()
 
         # Get earnings for today
-        earnings = await self.alphavantage.get_earnings_calendar()
-
+        earnings = await self._fetch_earnings("after_hours_check")
         if not earnings:
-            log("warn", "Empty earnings calendar", job="after_hours_check")
-            metrics.count("ivcrush.job.api_empty", {"job": "after_hours_check", "api": "alphavantage"})
             return {"status": "warning", "checked": 0, "note": "Empty calendar from API"}
 
         # Filter to today's earnings
-        todays_earnings = [e for e in earnings if e["report_date"] == today]
+        todays_earnings = self._todays_earnings(earnings)
 
         # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
-        repo = HistoricalMovesRepository(settings.DB_PATH)
-        tracked_tickers = repo.get_tracked_tickers()
-        todays_earnings = filter_to_tracked_tickers(todays_earnings, tracked_tickers)
+        todays_earnings, repo = self._filter_tracked(todays_earnings)
 
         if not todays_earnings:
             log("info", "No earnings today", job="after_hours_check")
@@ -1020,8 +867,7 @@ class JobRunner:
             try:
                 # Rate limiting
                 api_calls += 1
-                if api_calls % RATE_LIMIT_BATCH_SIZE == 0:
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
+                await self._rate_limit_tick(api_calls)
 
                 # Get current after-hours quote from Tradier (more reliable than Yahoo)
                 quote = await self.tradier.get_quote(ticker)
@@ -1067,12 +913,7 @@ class JobRunner:
                 ah_move_pct = ((price - regular_close) / regular_close) * 100
 
                 # Get historical avg for context
-                moves = repo.get_moves(ticker)
-                historical_avg = None
-                if len(moves) >= 4:
-                    historical_pcts = [abs(m["intraday_move_pct"]) for m in moves if m.get("intraday_move_pct")]
-                    if historical_pcts:
-                        historical_avg = sum(historical_pcts) / len(historical_pcts)
+                pcts, historical_avg = self._get_historical_pcts(repo, ticker)
 
                 # Only track if move exceeds threshold
                 if abs(ah_move_pct) > AFTER_HOURS_ALERT_THRESHOLD:
@@ -1097,16 +938,16 @@ class JobRunner:
         telegram_error = None
         if reported:
             try:
-                msg_lines = [f"📊 <b>After-Hours Earnings ({today})</b>\n"]
+                msg_lines = [f"\U0001f4ca <b>After-Hours Earnings ({today})</b>\n"]
                 for r in reported[:10]:
-                    direction = "📈" if r["ah_move"] > 0 else "📉"
+                    direction = "\U0001f4c8" if r["ah_move"] > 0 else "\U0001f4c9"
                     move_str = f"+{r['ah_move']}%" if r["ah_move"] > 0 else f"{r['ah_move']}%"
                     context = ""
                     if r["historical_avg"]:
                         if r["beat_expected"]:
-                            context = f" (within ±{r['historical_avg']}% avg)"
+                            context = f" (within \u00b1{r['historical_avg']}% avg)"
                         else:
-                            context = f" (exceeded ±{r['historical_avg']}% avg)"
+                            context = f" (exceeded \u00b1{r['historical_avg']}% avg)"
                     msg_lines.append(f"{direction} <b>{r['ticker']}</b>: {move_str}{context}")
                 await self.telegram.send_message("\n".join(msg_lines))
             except Exception as tg_err:
@@ -1114,23 +955,18 @@ class JobRunner:
                 log("error", "Failed to send after-hours alert", error=telegram_error)
 
         # Record metrics
-        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-        metrics.record("ivcrush.job.duration", duration_ms, {"job": "after_hours_check"})
+        self._record_duration(start_time, "after_hours_check")
         metrics.gauge("ivcrush.job.tickers_checked", checked, {"job": "after_hours_check"})
         metrics.gauge("ivcrush.job.earnings_reported", len(reported), {"job": "after_hours_check"})
 
-        result = {
-            "status": "success",
-            "checked": checked,
-            "reported": len(reported),
-            "moves": [{k: v for k, v in r.items() if k in ["ticker", "ah_move"]} for r in reported[:5]],
-        }
-        if telegram_error:
-            result["telegram_error"] = telegram_error
-        if failed_tickers:
-            result["failed_tickers"] = failed_tickers
-            metrics.gauge("ivcrush.job.tickers_failed", len(failed_tickers), {"job": "after_hours_check"})
-        return result
+        return self._build_result(
+            failed_tickers=failed_tickers if failed_tickers else None,
+            telegram_error=telegram_error,
+            job_name="after_hours_check",
+            checked=checked,
+            reported=len(reported),
+            moves=[{k: v for k, v in r.items() if k in ["ticker", "ah_move"]} for r in reported[:5]],
+        )
 
     async def _outcome_recorder(self) -> Dict[str, Any]:
         """
@@ -1139,9 +975,9 @@ class JobRunner:
 
         BMO/AMC Timing Logic:
             - BMO (Before Market Open): Reaction happens ON earnings day
-              Record: prev_day_close → earnings_day_close
+              Record: prev_day_close -> earnings_day_close
             - AMC (After Market Close): Reaction happens NEXT trading day
-              Record: earnings_day_close → next_day_close
+              Record: earnings_day_close -> next_day_close
 
         This job processes:
             1. Today's BMO earnings (reaction already happened today)
@@ -1149,7 +985,7 @@ class JobRunner:
         """
         from datetime import datetime
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = self._start_timer()
         today = today_et()
         yesterday = (now_et() - timedelta(days=1)).strftime("%Y-%m-%d")
         repo = HistoricalMovesRepository(settings.DB_PATH)
@@ -1230,8 +1066,7 @@ class JobRunner:
 
                 # Rate limiting
                 api_calls += 1
-                if api_calls % RATE_LIMIT_BATCH_SIZE == 0:
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
+                await self._rate_limit_tick(api_calls)
 
                 # Get historical prices
                 history = await self.twelvedata.get_stock_history(ticker, period="5d", interval="1d")
@@ -1284,8 +1119,7 @@ class JobRunner:
                     ticker=ticker, error=str(ex), job="outcome_recorder")
 
         # Record metrics
-        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-        metrics.record("ivcrush.job.duration", duration_ms, {"job": "outcome_recorder"})
+        self._record_duration(start_time, "outcome_recorder")
         metrics.gauge("ivcrush.job.outcomes_recorded", recorded, {"job": "outcome_recorder"})
 
         log("info", "Outcome recording complete",
@@ -1307,7 +1141,7 @@ class JobRunner:
         Evening summary (20:00 ET).
         Send end-of-day summary only if there were earnings today.
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = self._start_timer()
         today = today_et()
 
         # Check if there were any earnings today worth summarizing
@@ -1339,10 +1173,10 @@ class JobRunner:
                         })
 
                 if recorded_moves:
-                    msg_lines = [f"📊 <b>Trading Desk Summary: {today}</b>\n"]
+                    msg_lines = [f"\U0001f4ca <b>Trading Desk Summary: {today}</b>\n"]
                     msg_lines.append(f"Tracked {len(todays_earnings)} earnings today:\n")
                     for m in sorted(recorded_moves, key=lambda x: abs(x["move"]), reverse=True)[:5]:
-                        direction = "📈" if m["move"] > 0 else "📉"
+                        direction = "\U0001f4c8" if m["move"] > 0 else "\U0001f4c9"
                         move_str = f"+{m['move']:.1f}%" if m["move"] > 0 else f"{m['move']:.1f}%"
                         msg_lines.append(f"{direction} <b>{m['ticker']}</b>: {move_str}")
                     sent = await self.telegram.send_message("\n".join(msg_lines))
@@ -1355,8 +1189,7 @@ class JobRunner:
                     error=telegram_error, job="evening_summary")
 
         # Record metrics
-        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-        metrics.record("ivcrush.job.duration", duration_ms, {"job": "evening_summary"})
+        self._record_duration(start_time, "evening_summary")
 
         result = {"status": "success", "sent": sent, "earnings_today": len(todays_earnings)}
         if telegram_error:
@@ -1370,13 +1203,13 @@ class JobRunner:
 
         BMO/AMC Timing Logic:
             - BMO (Before Market Open): Reaction happens ON earnings day
-              Record: prev_day_close → earnings_day_close
+              Record: prev_day_close -> earnings_day_close
             - AMC (After Market Close): Reaction happens NEXT trading day
-              Record: earnings_day_close → next_day_close
+              Record: earnings_day_close -> next_day_close
         """
         from datetime import datetime
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = self._start_timer()
         repo = HistoricalMovesRepository(settings.DB_PATH)
         backfilled = 0
         skipped_duplicate = 0
@@ -1432,8 +1265,7 @@ class JobRunner:
 
                 # Rate limiting
                 api_calls += 1
-                if api_calls % RATE_LIMIT_BATCH_SIZE == 0:
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
+                await self._rate_limit_tick(api_calls)
 
                 # Get historical prices around earnings
                 history = await self.twelvedata.get_stock_history(ticker, period="1mo", interval="1d")
@@ -1511,8 +1343,7 @@ class JobRunner:
                     ticker=ticker, earnings_date=earnings_date, error=str(ex), job="weekly_backfill")
 
         # Record metrics
-        duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-        metrics.record("ivcrush.job.duration", duration_ms, {"job": "weekly_backfill"})
+        self._record_duration(start_time, "weekly_backfill")
         metrics.gauge("ivcrush.job.backfilled", backfilled, {"job": "weekly_backfill"})
         metrics.gauge("ivcrush.job.errors", len(failed_tickers), {"job": "weekly_backfill"})
 
@@ -1535,7 +1366,7 @@ class JobRunner:
         Weekly backup (Sunday 03:00 ET).
         Backup database to GCS after integrity check.
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = self._start_timer()
 
         try:
             import shutil
@@ -1586,8 +1417,7 @@ class JobRunner:
             success = sync.upload()
 
             # Record metrics
-            duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-            metrics.record("ivcrush.job.duration", duration_ms, {"job": "weekly_backup"})
+            self._record_duration(start_time, "weekly_backup")
 
             if success:
                 log("info", "Weekly backup complete", blob=backup_blob_name)
@@ -1608,15 +1438,14 @@ class JobRunner:
         Weekly cleanup (Sunday 03:30 ET).
         Clean expired cache entries.
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = self._start_timer()
 
         try:
             cache = SentimentCacheRepository(settings.DB_PATH)
             cleared = cache.clear_expired()
 
             # Record metrics
-            duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-            metrics.record("ivcrush.job.duration", duration_ms, {"job": "weekly_cleanup"})
+            self._record_duration(start_time, "weekly_cleanup")
             metrics.gauge("ivcrush.job.cache_cleared", cleared, {"job": "weekly_cleanup"})
 
             log("info", "Weekly cleanup complete", cleared=cleared)
@@ -1630,15 +1459,11 @@ class JobRunner:
         Calendar sync (Sunday 04:00 ET).
         Sync earnings calendar from Alpha Vantage and upload to GCS.
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = self._start_timer()
 
         try:
-            earnings = await self.alphavantage.get_earnings_calendar(horizon="3month")
-
-            # Validate API response
+            earnings = await self._fetch_earnings("calendar_sync", horizon="3month")
             if not earnings:
-                log("warn", "Empty earnings calendar from Alpha Vantage", job="calendar_sync")
-                metrics.count("ivcrush.job.api_empty", {"job": "calendar_sync", "api": "alphavantage"})
                 return {"status": "warning", "synced": 0, "note": "Empty calendar from API"}
 
             # Actually store the earnings to the database
@@ -1662,8 +1487,7 @@ class JobRunner:
                         error=type(gcs_err).__name__)
 
             # Record metrics
-            duration_ms = (asyncio.get_event_loop().time() - start_time) * 1000
-            metrics.record("ivcrush.job.duration", duration_ms, {"job": "calendar_sync"})
+            self._record_duration(start_time, "calendar_sync")
             metrics.gauge("ivcrush.job.earnings_synced", upserted, {"job": "calendar_sync"})
 
             log("info", "Calendar sync complete", fetched=len(earnings), upserted=upserted, gcs=gcs_uploaded)
