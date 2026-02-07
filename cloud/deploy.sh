@@ -73,6 +73,13 @@ else
     echo "[2/4] Skipping GCS upload (--quick mode)"
 fi
 
+# Copy shared module into 5.0/ build context
+echo ""
+echo "Copying common/ module into build context..."
+rm -rf "$SCRIPT_DIR/common"
+cp -r "$ROOT_DIR/common" "$SCRIPT_DIR/common"
+echo "  Copied: $ROOT_DIR/common -> $SCRIPT_DIR/common"
+
 # Step 3: Deploy to Cloud Run
 echo ""
 echo "[3/4] Deploying to Cloud Run..."

@@ -2,17 +2,20 @@
 VRP (Volatility Risk Premium) Calculator.
 
 Ported from 2.0/src/application/metrics/vrp.py with simplified interface.
+Thresholds imported from common/constants.py.
 """
 
+import sys
+from pathlib import Path
 from typing import List, Dict, Any
 import statistics
 
-# Thresholds - BALANCED mode (matching 2.0 default)
-# See CLAUDE.md for threshold explanation
-VRP_EXCELLENT = 1.8
-VRP_GOOD = 1.4
-VRP_MARGINAL = 1.2
-MIN_QUARTERS = 4
+# Ensure common/ is importable
+_root = str(Path(__file__).resolve().parent.parent.parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+from common.constants import VRP_EXCELLENT, VRP_GOOD, VRP_MARGINAL, MIN_QUARTERS  # noqa: E402
 
 
 def get_vrp_tier(vrp_ratio: float) -> str:

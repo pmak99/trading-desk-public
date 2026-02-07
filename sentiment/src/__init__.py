@@ -12,6 +12,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Add Trading Desk root to Python path for common/ access
+_root = str(Path(__file__).resolve().parent.parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
 # Add 2.0/src to Python path - stay in sync with 2.0
 _2_0_src = Path(__file__).parent.parent.parent / "2.0" / "src"
 if _2_0_src.exists():

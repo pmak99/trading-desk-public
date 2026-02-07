@@ -2,34 +2,35 @@
 Composite scoring system for IV Crush 5.0.
 
 2.0 Score = VRP (55%) + Move Difficulty (25%) + Liquidity (20%)
-4.0 Score = 2.0 Score × (1 + Sentiment Modifier)
+4.0 Score = 2.0 Score x (1 + Sentiment Modifier)
 
-Sentiment Modifiers:
-- Strong Bullish (>= +0.6): +12%
-- Bullish (+0.2 to +0.6): +7%
-- Neutral (-0.2 to +0.2): 0%
-- Bearish (-0.6 to -0.2): -7%
-- Strong Bearish (<= -0.6): -12%
+Weights and thresholds imported from common/constants.py.
 """
 
+import sys
+from pathlib import Path
 from typing import Dict, Any
 
-# Scoring weights
-WEIGHT_VRP = 0.55
-WEIGHT_MOVE = 0.25
-WEIGHT_LIQUIDITY = 0.20
+# Ensure common/ is importable
+_root = str(Path(__file__).resolve().parent.parent.parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
 
-# VRP normalization: ratio at which VRP component reaches max score (100)
-# With BALANCED thresholds (1.8x = EXCELLENT), 7x is exceptional
-VRP_MAX_RATIO = 7.0
-
-# Liquidity tier scores (RELAXED Feb 2026)
-LIQUIDITY_SCORES = {
-    "EXCELLENT": 100,
-    "GOOD": 80,
-    "WARNING": 60,
-    "REJECT": 20,  # Still penalized but strategies allowed
-}
+from common.constants import (  # noqa: E402
+    WEIGHT_VRP,
+    WEIGHT_MOVE,
+    WEIGHT_LIQUIDITY,
+    VRP_MAX_RATIO,
+    LIQUIDITY_SCORES,
+    SENTIMENT_STRONG_BULLISH_THRESHOLD,
+    SENTIMENT_BULLISH_THRESHOLD,
+    SENTIMENT_BEARISH_THRESHOLD,
+    SENTIMENT_STRONG_BEARISH_THRESHOLD,
+    SENTIMENT_MODIFIER_STRONG_BULLISH,
+    SENTIMENT_MODIFIER_BULLISH,
+    SENTIMENT_MODIFIER_BEARISH,
+    SENTIMENT_MODIFIER_STRONG_BEARISH,
+)
 
 
 def calculate_score(
@@ -94,14 +95,14 @@ def apply_sentiment_modifier(
         Modified score (4.0 score), clamped to 0-100
     """
     # Determine modifier based on sentiment strength
-    if sentiment_score >= 0.6:
-        modifier = 0.12  # Strong bullish
-    elif sentiment_score >= 0.2:
-        modifier = 0.07  # Bullish
-    elif sentiment_score <= -0.6:
-        modifier = -0.12  # Strong bearish
-    elif sentiment_score <= -0.2:
-        modifier = -0.07  # Bearish
+    if sentiment_score >= SENTIMENT_STRONG_BULLISH_THRESHOLD:
+        modifier = SENTIMENT_MODIFIER_STRONG_BULLISH
+    elif sentiment_score >= SENTIMENT_BULLISH_THRESHOLD:
+        modifier = SENTIMENT_MODIFIER_BULLISH
+    elif sentiment_score <= SENTIMENT_STRONG_BEARISH_THRESHOLD:
+        modifier = SENTIMENT_MODIFIER_STRONG_BEARISH
+    elif sentiment_score <= SENTIMENT_BEARISH_THRESHOLD:
+        modifier = SENTIMENT_MODIFIER_BEARISH
     else:
         modifier = 0.0  # Neutral
 

@@ -16,6 +16,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy shared module (copied from root by deploy.sh)
+COPY common/ ./common/
+
 # Copy application code
 COPY src/ ./src/
 

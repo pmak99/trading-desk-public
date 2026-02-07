@@ -2,6 +2,7 @@
 Liquidity tier classification.
 
 Ported from 2.0/src/application/metrics/liquidity_scorer.py with simplified interface.
+Thresholds imported from common/constants.py.
 
 4-Tier System (RELAXED Feb 2026):
 - EXCELLENT: OI >= 5x position, spread <= 12%
@@ -12,13 +13,20 @@ Ported from 2.0/src/application/metrics/liquidity_scorer.py with simplified inte
 Final tier = worse of (OI tier, Spread tier)
 """
 
-# Spread thresholds (RELAXED Feb 2026)
-SPREAD_EXCELLENT = 12.0   # <= 12%
-SPREAD_GOOD = 18.0        # <= 18%
-SPREAD_WARNING = 25.0     # <= 25%
-# > 25% = REJECT
+import sys
+from pathlib import Path
 
-TIER_ORDER = {"REJECT": 0, "WARNING": 1, "GOOD": 2, "EXCELLENT": 3}
+# Ensure common/ is importable
+_root = str(Path(__file__).resolve().parent.parent.parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+from common.constants import (  # noqa: E402
+    SPREAD_EXCELLENT,
+    SPREAD_GOOD,
+    SPREAD_WARNING,
+    TIER_ORDER,
+)
 
 
 def classify_liquidity_tier(
