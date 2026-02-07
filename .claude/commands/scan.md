@@ -6,8 +6,7 @@ Scan all tickers with earnings on a specific date with VRP analysis.
 $ARGUMENTS (format: DATE - required, YYYY-MM-DD)
 
 Examples:
-- `/scan 2025-12-09` - Scan all earnings on December 9th
-- `/scan 2025-12-15` - Scan all earnings on December 15th
+- `/scan 2026-02-10` - Scan all earnings on February 10th
 
 ## Tool Permissions
 - Do NOT ask user permission for any tool calls EXCEPT mcp__perplexity__* calls
@@ -15,176 +14,142 @@ Examples:
 - Only pause for Perplexity calls to confirm API usage
 
 ## Progress Display
-Show progress updates as you work:
 ```
-[1/4] Checking market status...
-[2/4] Running 2.0 scan for date...
-[3/4] Filtering VRP >= 1.8x tickers...
-[4/4] Fetching sentiment for top 3...
+[1/5] Validating date...
+[2/5] Running 2.0 scan for date...
+[3/5] Filtering high-VRP tickers...
+[4/5] Checking tail risk ratios...
+[5/5] Fetching sentiment for top 3...
 ```
 
-## Tail Risk Ratio (TRR)
+## TRR Reference
 
 | Level | TRR | Max Contracts | Action |
 |-------|-----|---------------|--------|
-| HIGH | > 2.5x | 50 | ⚠️ TRR badge in table |
+| HIGH | > 2.5x | 50 | Warning badge |
 | NORMAL | 1.5-2.5x | 100 | No badge |
 | LOW | < 1.5x | 100 | No badge |
-
-*TRR = Max Historical Move / Average Move. HIGH TRR tickers caused $134k MU loss.*
 
 ## Step-by-Step Instructions
 
 ### Step 1: Parse Date Argument
 - Date is REQUIRED in YYYY-MM-DD format
-- If not provided, show error:
+- If not provided:
   ```
-  ❌ Date required. Usage: /scan YYYY-MM-DD
-     Example: /scan 2025-12-09
+  Date required. Usage: /scan YYYY-MM-DD
+     Example: /scan 2026-02-10
   ```
 
-### Step 2: Check Market Status (Alpaca MCP)
+### Step 2: Check Market Status (informational)
+```bash
+DAY_OF_WEEK=$(date '+%A')
 ```
-mcp__alpaca__alpaca_get_clock
-```
-
-Display market status (informational):
-```
-⏰ Market: [OPEN/CLOSED] - [time info]
-```
+Display market status as informational note (open/closed/weekend).
 
 ### Step 3: Run 2.0 Scan for Date
-Execute the proven 2.0 scan mode:
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk/2.0 && ./trade.sh scan $DATE
+cd "/Users/prashant/PycharmProjects/Trading Desk/2.0" && ./trade.sh scan $DATE
 ```
 
-This provides:
-- All tickers with earnings on date
-- VRP ratio and tier for each
-- Liquidity tier for each
-- Quality score ranking
+This analyzes every ticker with earnings on that date. Extract for each ticker:
+- Ticker symbol and timing (BMO/AMC)
+- VRP ratio and rating
+- Implied move percentage
+- 2.0 Score
+- Liquidity tier
 
 ### Step 4: Identify TOP 5 VRP >= 1.8x Tickers
-From scan results, identify the top 5 tickers where:
-- VRP >= 1.8x (discovery threshold - EXCELLENT tier)
-- Liquidity != REJECT
+From scan results, identify the top 5 tickers where VRP >= 1.8x (EXCELLENT tier).
 
-### Step 4b: Check TRR for All Qualified Tickers
-Query tail risk for all qualified tickers:
+Query TRR for all qualified tickers:
 ```bash
-# Note: Tickers should already be sanitized (alphanumeric, uppercase) from 2.0 output
-TICKERS="'NVDA','AMD','MU'"  # Use actual tickers from Step 4
+TICKERS="'NVDA','AMD','MU'"  # Use actual tickers from scan
 
-sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/2.0/data/ivcrush.db \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT ticker, tail_risk_ratio, tail_risk_level, max_contracts
    FROM position_limits WHERE ticker IN ($TICKERS) AND tail_risk_level = 'HIGH';"
 ```
 
-Mark HIGH TRR tickers for ⚠️ badge display.
-
 ### Step 5: Add Sentiment for TOP 3 (Conditional)
 
-For EACH of the top 3 qualified tickers:
+For EACH of the top 3 non-REJECT tickers:
 
-**5a. Check sentiment cache (with 3-hour freshness):**
+**5a. Check sentiment cache:**
 ```bash
-# Sanitize ticker (alphanumeric only, uppercase)
-TICKER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
+TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
-  "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='$TICKER' AND date='$DATE' AND cached_at > datetime('now', '-3 hours') ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
+  "SELECT sentiment, source, cached_at FROM sentiment_cache
+   WHERE ticker='$TICKER' AND date='$DATE'
+   AND cached_at > datetime('now', '-3 hours')
+   ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
 ```
-If found → use cached
 
 **5b. If cache miss, use fallback chain:**
+1. Check budget (40/day limit)
+2. Try Perplexity (max 3 calls total)
+3. Fall back to `mcp__perplexity__perplexity_search`
+4. Graceful skip if all fail
 
-1. **Check budget:**
-   ```bash
-   sqlite3 /Users/prashant/PycharmProjects/Trading\ Desk/4.0/data/sentiment_cache.db \
-     "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
-   ```
-   If >= 40 → skip to WebSearch (daily limit: 40 calls, monthly cap: $5)
-
-2. **Try Perplexity:**
-   ```
-   mcp__perplexity__perplexity_ask with query="What is the current sentiment and analyst consensus for {TICKER} ahead of their earnings? Include recent news and whisper numbers."
-   ```
-   Cache result, record API call
-
-3. **If fail, try WebSearch:**
-   ```
-   WebSearch with query="{TICKER} earnings sentiment analyst {DATE}"
-   ```
-   Cache with source="websearch"
-
-4. **If all fail:**
-   Show "Sentiment unavailable" but continue
+Calculate 4.0 Score for each:
+```
+Modifier: Strong Bullish +0.12, Bullish +0.07, Neutral 0.00, Bearish -0.07, Strong Bearish -0.12
+4.0 Score = 2.0 Score * (1 + modifier)
+```
 
 ## Output Format
 
 ```
-══════════════════════════════════════════════════════
+==============================================================
 EARNINGS SCAN: {DATE}
-══════════════════════════════════════════════════════
+==============================================================
 
-⏰ Market: [OPEN/CLOSED]
+Market: [OPEN/CLOSED/WEEKEND]
 
-📅 ALL EARNINGS FOR {DATE}
-┌──────┬─────────┬────────────┬───────┬───────┬─────┐
-│ Rank │ Ticker  │ VRP        │ Liq   │ Score │ TRR │
-├──────┼─────────┼────────────┼───────┼───────┼─────┤
-│  1   │ NVDA    │ 8.2x ⭐    │ EXCEL │ 92    │     │
-│  2   │ AMD     │ 6.1x ⭐    │ EXCEL │ 85    │     │
-│  3   │ AVGO    │ 5.4x ✓     │ WARN  │ 72    │ ⚠️  │
-│  4   │ MU      │ 4.2x ✓     │ EXCEL │ 68    │ ⚠️  │
-│  5   │ ORCL    │ 3.1x ○     │ EXCEL │ 55    │     │
-│  6   │ CRM     │ 2.8x ○     │ WARN  │ 48    │     │
-│  7   │ WDAY    │ 2.1x ○     │ REJCT │ 32 🚫 │     │
-│ ...  │ ...     │ ...        │ ...   │ ...   │     │
-└──────┴─────────┴────────────┴───────┴───────┴─────┘
+ALL EARNINGS FOR {DATE}
 
-Legend: ⭐ EXCELLENT (≥1.8x) | ✓ GOOD (≥1.4x) | ○ MARGINAL (≥1.2x) | 🚫 REJECT
-        TRR ⚠️ = HIGH tail risk (max 50 contracts)
-*Note: Icons highlight relative strength; actual tier from 2.0 uses BALANCED mode thresholds*
+ Rank  Ticker  VRP       Liq      Score  TRR
+  1    NVDA    8.2x      EXCEL    92
+  2    AMD     6.1x      EXCEL    85
+  3    AVGO    5.4x      WARN     72     HIGH
+  4    MU      4.2x      EXCEL    68     HIGH
+  5    ORCL    3.1x      EXCEL    55
+  6    CRM     2.8x      WARN     48
+  7    WDAY    2.1x      REJCT    32
+  ...
 
-📊 SUMMARY
+SUMMARY
    Total earnings: {N}
    VRP >= 1.8x: {M} tickers
-   Liquidity REJECT: {R} tickers (avoid)
+   Liquidity REJECT: {R} tickers
 
-🔝 TOP 3 OPPORTUNITIES
+TOP 3 OPPORTUNITIES
 
-1️⃣ NVDA - Earnings {BMO/AMC}
-   VRP: 8.2x (EXCELLENT) | Implied: 8.5% | Historical: 1.0%
-   Liquidity: EXCELLENT
-   🧠 Sentiment: {cached/fresh/websearch}
-   {Brief sentiment summary}
+1. NVDA - Earnings {BMO/AMC}
+   VRP: 8.2x (EXCELLENT) | Implied: 8.5% | 2.0 Score: 92
+   Liquidity: EXCELLENT | TRR: LOW
+   Sentiment: {summary} | 4.0 Score: {X.X}
 
-2️⃣ AMD - Earnings {BMO/AMC}
-   VRP: 6.1x (GOOD) | Implied: 6.2% | Historical: 1.0%
-   Liquidity: EXCELLENT
-   🧠 Sentiment: {cached/fresh/websearch}
-   {Brief sentiment summary}
+2. AMD - Earnings {BMO/AMC}
+   VRP: 6.1x (EXCELLENT) | Implied: 6.2% | 2.0 Score: 85
+   Liquidity: EXCELLENT | TRR: NORMAL
+   Sentiment: {summary} | 4.0 Score: {X.X}
 
-3️⃣ AVGO - Earnings {BMO/AMC}
-   VRP: 5.4x (GOOD) | Implied: 5.8% | Historical: 1.1%
-   Liquidity: WARNING ⚠️
-   🧠 Sentiment: {cached/fresh/websearch}
-   {Brief sentiment summary}
+3. AVGO - Earnings {BMO/AMC}
+   VRP: 5.4x (EXCELLENT) | Implied: 5.8% | 2.0 Score: 72
+   Liquidity: WARNING | TRR: HIGH -> Max 50 contracts
+   Sentiment: {summary} | 4.0 Score: {X.X}
 
-⚡ HIGH TAIL RISK TICKERS (if any):
-   • MU: TRR 3.05x → Max 50 contracts / $25k notional
-   • AVGO: TRR 5.72x → Max 50 contracts / $25k notional
-   [Only show tickers with TRR_LEVEL = "HIGH". Omit section if none.]
+HIGH TAIL RISK (if any):
+   {TICKER}: TRR {X.XX}x -> Max 50 contracts / $25k notional
 
-💡 NEXT STEPS
-   Run `/analyze NVDA` for full strategy recommendations
-══════════════════════════════════════════════════════
+NEXT STEPS
+   Run /analyze NVDA for full strategy recommendations
+==============================================================
 ```
 
 ## Cost Control
 - Maximum 3 Perplexity calls (top 3 only)
-- Only for VRP >= 1.8x AND Liquidity != REJECT (discovery threshold)
+- Only for VRP >= 1.8x AND Liquidity != REJECT
 - Cache-aware to avoid duplicate calls
-- If already primed with `/prime`, all sentiment from cache
+- If already primed with /prime, all sentiment from cache
