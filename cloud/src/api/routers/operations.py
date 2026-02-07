@@ -154,8 +154,8 @@ async def prime(date: str = None, _: bool = Depends(verify_api_key)):
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_error("prime", duration_ms)
-        log("error", "Prime failed", error=_mask_sensitive(str(e)))
-        raise HTTPException(500, f"Prime failed: {_mask_sensitive(str(e))}")
+        log("error", "Prime failed", error=type(e).__name__, details=_mask_sensitive(str(e)))
+        raise HTTPException(500, "Prime failed")
 
 
 @router.get("/api/budget")

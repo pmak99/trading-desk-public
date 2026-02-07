@@ -565,8 +565,8 @@ async def scan(date: str, format: str = "json", _: bool = Depends(verify_api_key
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_error("scan", duration_ms)
-        log("error", "Scan failed", date=date, error=_mask_sensitive(str(e)))
-        raise HTTPException(500, f"Scan failed: {_mask_sensitive(str(e))}")
+        log("error", "Scan failed", date=date, error=type(e).__name__, details=_mask_sensitive(str(e)))
+        raise HTTPException(500, "Scan failed")
 
 
 @router.get("/analyze")
@@ -918,8 +918,8 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_error("analyze", duration_ms)
-        log("error", "Analyze failed", ticker=ticker, error=_mask_sensitive(str(e)))
-        raise HTTPException(500, f"Analysis failed: {_mask_sensitive(str(e))}")
+        log("error", "Analyze failed", ticker=ticker, error=type(e).__name__, details=_mask_sensitive(str(e)))
+        raise HTTPException(500, "Analysis failed")
 
 
 @router.get("/whisper")
@@ -1078,5 +1078,5 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_error("whisper", duration_ms)
-        log("error", "Whisper failed", error=_mask_sensitive(str(e)))
-        raise HTTPException(500, f"Whisper failed: {_mask_sensitive(str(e))}")
+        log("error", "Whisper failed", error=type(e).__name__, details=_mask_sensitive(str(e)))
+        raise HTTPException(500, "Whisper failed")

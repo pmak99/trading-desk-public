@@ -61,14 +61,14 @@ def validate_ticker(ticker: str) -> bool:
     Check if a ticker symbol is valid.
 
     Args:
-        ticker: Ticker symbol to validate (should be uppercase)
+        ticker: Ticker symbol to validate (case-insensitive)
 
     Returns:
         True if valid, False otherwise
     """
     if not ticker:
         return False
-    return bool(TICKER_PATTERN.match(ticker))
+    return bool(TICKER_PATTERN.match(ticker.upper().strip()))
 
 
 def normalize_ticker(ticker: str) -> str:

@@ -307,8 +307,11 @@ class MigrationManager:
                 elif migration.version == 5:
                     self._apply_migration_005(cursor)
                 else:
-                    # Standard SQL execution
-                    cursor.executescript(migration.sql_up)
+                    # Execute statements individually (safer than executescript)
+                    for statement in migration.sql_up.split(';'):
+                        statement = statement.strip()
+                        if statement and not statement.startswith('--'):
+                            cursor.execute(statement)
 
                 # Record migration in schema_migrations
                 cursor.execute(
@@ -533,8 +536,11 @@ class MigrationManager:
             try:
                 cursor = conn.cursor()
 
-                # Execute rollback SQL
-                cursor.executescript(migration.sql_down)
+                # Execute rollback statements individually (safer than executescript)
+                for statement in migration.sql_down.split(';'):
+                    statement = statement.strip()
+                    if statement and not statement.startswith('--'):
+                        cursor.execute(statement)
 
                 # Remove migration record
                 cursor.execute(

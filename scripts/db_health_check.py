@@ -204,10 +204,11 @@ def get_database_stats(db_path: Path) -> Dict[str, Any]:
         'tables': {}
     }
 
-    # Get row counts for main tables
-    for table in ['historical_moves', 'trade_journal', 'strategies', 'earnings_calendar']:
+    # Get row counts for main tables (whitelist only — no dynamic input)
+    ALLOWED_TABLES = frozenset(['historical_moves', 'trade_journal', 'strategies', 'earnings_calendar'])
+    for table in ALLOWED_TABLES:
         try:
-            count = cursor.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
+            count = cursor.execute(f'SELECT COUNT(*) FROM [{table}]').fetchone()[0]
             stats['tables'][table] = count
         except sqlite3.OperationalError:
             stats['tables'][table] = None  # Table doesn't exist

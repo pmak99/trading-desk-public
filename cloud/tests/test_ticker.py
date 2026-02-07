@@ -32,10 +32,10 @@ class TestValidateTicker:
         assert validate_ticker("") is False
         assert validate_ticker(None) is False
 
-    def test_invalid_lowercase_ticker(self):
-        """Lowercase tickers are invalid (caller should uppercase first)."""
-        assert validate_ticker("aapl") is False
-        assert validate_ticker("Aapl") is False
+    def test_lowercase_ticker_accepted(self):
+        """Lowercase tickers are accepted (validate_ticker normalizes case)."""
+        assert validate_ticker("aapl") is True
+        assert validate_ticker("Aapl") is True
 
     def test_invalid_too_long(self):
         """Tickers over 5 chars are invalid."""

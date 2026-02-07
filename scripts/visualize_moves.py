@@ -180,8 +180,13 @@ def main():
     if len(sys.argv) > 2:
         try:
             implied_move = float(sys.argv[2])
-        except ValueError:
-            print(f"Error: Invalid implied move '{sys.argv[2]}'. Must be a number.")
+            import math
+            if math.isnan(implied_move) or math.isinf(implied_move):
+                raise ValueError("must be a finite number")
+            if not (0.01 <= implied_move <= 200.0):
+                raise ValueError("must be between 0.01 and 200.0")
+        except ValueError as e:
+            print(f"Error: Invalid implied move '{sys.argv[2]}': {e}")
             sys.exit(1)
 
     analyze_ticker(ticker, implied_move)
