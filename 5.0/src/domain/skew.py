@@ -3,44 +3,22 @@ Skew analyzer for directional bias detection.
 
 Simplified port from 2.0/src/application/metrics/skew_enhanced.py.
 Analyzes put/call IV skew to determine market directional bias.
+DirectionalBias enum imported from common/enums.py.
 """
 
+import sys
+from pathlib import Path
 from dataclasses import dataclass
-from enum import Enum
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 
+# Ensure common/ is importable
+_root = str(Path(__file__).resolve().parent.parent.parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+from common.enums import DirectionalBias  # noqa: E402
 from src.core.logging import log
-
-
-class DirectionalBias(Enum):
-    """
-    Market directional bias from skew analysis (7-level scale).
-
-    Positive slope (calls expensive) = bullish speculation
-    Negative slope (puts expensive) = bearish protection demand
-    """
-    STRONG_BULLISH = "strong_bullish"
-    BULLISH = "bullish"
-    WEAK_BULLISH = "weak_bullish"
-    NEUTRAL = "neutral"
-    WEAK_BEARISH = "weak_bearish"
-    BEARISH = "bearish"
-    STRONG_BEARISH = "strong_bearish"
-
-    def is_bullish(self) -> bool:
-        return self in {
-            DirectionalBias.WEAK_BULLISH,
-            DirectionalBias.BULLISH,
-            DirectionalBias.STRONG_BULLISH,
-        }
-
-    def is_bearish(self) -> bool:
-        return self in {
-            DirectionalBias.WEAK_BEARISH,
-            DirectionalBias.BEARISH,
-            DirectionalBias.STRONG_BEARISH,
-        }
 
 
 @dataclass

@@ -2,53 +2,44 @@
 Configuration and timezone handling for IV Crush 5.0.
 
 CRITICAL: All times are Eastern Time (ET). Cloud Run defaults to UTC.
+Timezone utilities imported from common/timezone.py.
+VRP thresholds imported from common/constants.py.
 """
 
 import os
+import sys
 import json
+from pathlib import Path
 from datetime import datetime
 from typing import Optional
-import pytz
 
-MARKET_TZ = pytz.timezone('America/New_York')
+# Ensure common/ is importable
+_root = str(Path(__file__).resolve().parent.parent.parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
 
-def now_et() -> datetime:
-    """Get current time in Eastern timezone."""
-    return datetime.now(MARKET_TZ)
-
-def today_et() -> str:
-    """Get today's date in Eastern as YYYY-MM-DD."""
-    return now_et().strftime('%Y-%m-%d')
-
-# Market half-days (close at 1 PM ET)
-HALF_DAYS = {
-    "2025-07-03",   # Day before July 4th
-    "2025-11-28",   # Day after Thanksgiving
-    "2025-12-24",   # Christmas Eve
-    "2026-07-02",   # Day before July 4th (2026)
-    "2026-11-27",   # Day after Thanksgiving (2026)
-    "2026-12-24",   # Christmas Eve (2026)
-}
-
-def is_half_day(date_str: str = None) -> bool:
-    """Check if a date is a market half-day."""
-    if date_str is None:
-        date_str = today_et()
-    return date_str in HALF_DAYS
+from common.timezone import MARKET_TZ, now_et, today_et, HALF_DAYS, is_half_day  # noqa: E402
+from common.constants import (  # noqa: E402
+    VRP_EXCELLENT as _VRP_EXCELLENT,
+    VRP_GOOD as _VRP_GOOD,
+    VRP_MARGINAL as _VRP_MARGINAL,
+    PERPLEXITY_DAILY_LIMIT as _PERPLEXITY_DAILY_LIMIT,
+    PERPLEXITY_MONTHLY_BUDGET as _PERPLEXITY_MONTHLY_BUDGET,
+)
 
 
 class Settings:
     """Application settings."""
 
-    # VRP thresholds - BALANCED mode (matching 2.0 default)
-    VRP_EXCELLENT = 1.8
-    VRP_GOOD = 1.4
-    VRP_MARGINAL = 1.2
-    VRP_DISCOVERY = 1.8  # Aligned with EXCELLENT tier - triggers alerts on high-confidence opportunities
+    # VRP thresholds - BALANCED mode (from common/constants.py)
+    VRP_EXCELLENT = _VRP_EXCELLENT
+    VRP_GOOD = _VRP_GOOD
+    VRP_MARGINAL = _VRP_MARGINAL
+    VRP_DISCOVERY = _VRP_EXCELLENT  # Aligned with EXCELLENT tier
 
-    # API budget limits
-    PERPLEXITY_DAILY_LIMIT = 40
-    PERPLEXITY_MONTHLY_BUDGET = 5.00
+    # API budget limits (from common/constants.py)
+    PERPLEXITY_DAILY_LIMIT = _PERPLEXITY_DAILY_LIMIT
+    PERPLEXITY_MONTHLY_BUDGET = _PERPLEXITY_MONTHLY_BUDGET
 
     # Cache TTLs (hours)
     CACHE_TTL_PRE_MARKET = 8

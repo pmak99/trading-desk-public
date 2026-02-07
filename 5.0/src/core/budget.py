@@ -4,34 +4,35 @@ API budget tracker for rate-limited services.
 Tracks daily calls, tokens, and monthly spend against configured limits.
 Prevents exceeding Perplexity's 40 calls/day, $5/month budget.
 
-Token-Based Pricing (from actual Perplexity invoice January 2025):
-- sonar output: $0.000001/token (1M tokens = $1)
-- sonar-pro output: $0.000015/token (1M tokens = $15)
-- reasoning-pro: $0.000003/token (1M tokens = $3)
-- Search API: $0.005/request (flat fee)
+Pricing constants imported from common/budget_constants.py.
 """
 
+import sys
 import sqlite3
+from pathlib import Path
 from datetime import datetime, date
 from typing import Dict, Any, Optional
 
-from .config import today_et, now_et, settings
-from .logging import log
+# Ensure common/ is importable
+_root = str(Path(__file__).resolve().parent.parent.parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
 
+from common.budget_constants import (  # noqa: E402
+    PRICING,
+    MAX_TOKENS_PER_CALL,
+    VALID_SERVICES,
+    VALID_MODELS,
+    validate_token_counts,
+    calculate_token_cost,
+)
+from common.constants import PERPLEXITY_COST_PER_CALL_ESTIMATE  # noqa: E402
 
-# Perplexity token pricing (per token, from invoice)
-PRICING = {
-    "sonar_output": 0.000001,      # $1/1M tokens
-    "sonar_pro_output": 0.000015,  # $15/1M tokens
-    "reasoning_pro": 0.000003,     # $3/1M tokens
-    "search_request": 0.005,       # $5/1000 requests (flat)
-}
+from .config import today_et, now_et, settings  # noqa: E402
+from .logging import log  # noqa: E402
 
 # Default cost estimate when token data unavailable
-DEFAULT_COST_ESTIMATE = 0.006
-
-# Token count bounds (sanity check to catch bugs)
-MAX_TOKENS_PER_CALL = 10_000_000  # 10M tokens max per call (very generous limit)
+DEFAULT_COST_ESTIMATE = PERPLEXITY_COST_PER_CALL_ESTIMATE
 
 
 class BudgetExhausted(Exception):
@@ -88,28 +89,8 @@ class BudgetTracker:
         reasoning_tokens: int,
         search_requests: int
     ) -> None:
-        """
-        Validate token counts are within reasonable bounds.
-
-        Args:
-            output_tokens: Number of output tokens
-            reasoning_tokens: Number of reasoning tokens
-            search_requests: Number of search requests
-
-        Raises:
-            ValueError: If any count is negative or exceeds MAX_TOKENS_PER_CALL
-        """
-        for name, value in [
-            ("output_tokens", output_tokens),
-            ("reasoning_tokens", reasoning_tokens),
-            ("search_requests", search_requests),
-        ]:
-            if not isinstance(value, int):
-                raise ValueError(f"{name} must be an integer, got: {type(value).__name__}")
-            if value < 0:
-                raise ValueError(f"{name} cannot be negative, got: {value}")
-            if value > MAX_TOKENS_PER_CALL:
-                raise ValueError(f"{name} exceeds maximum ({MAX_TOKENS_PER_CALL}), got: {value}")
+        """Validate token counts. Delegates to common/budget_constants."""
+        validate_token_counts(output_tokens, reasoning_tokens, search_requests)
 
     def record_call(
         self,
@@ -140,7 +121,6 @@ class BudgetTracker:
             ValueError: If service is not a recognized service name
         """
         # Validate service parameter
-        VALID_SERVICES = {"perplexity"}
         if service not in VALID_SERVICES:
             raise ValueError(f"Invalid service: {service}")
 
@@ -213,21 +193,11 @@ class BudgetTracker:
             ValueError: If model is not a recognized model name
         """
         # Validate model name
-        VALID_MODELS = {"sonar", "sonar-pro", "reasoning-pro"}
         if model not in VALID_MODELS:
             raise ValueError(f"Invalid model: {model}. Must be one of: {', '.join(sorted(VALID_MODELS))}")
 
-        # Calculate cost from tokens
-        cost = 0.0
-        if output_tokens > 0:
-            if model == "sonar-pro":
-                cost += output_tokens * PRICING["sonar_pro_output"]
-            else:
-                cost += output_tokens * PRICING["sonar_output"]
-        if reasoning_tokens > 0:
-            cost += reasoning_tokens * PRICING["reasoning_pro"]
-        if search_requests > 0:
-            cost += search_requests * PRICING["search_request"]
+        # Calculate cost from tokens using shared pricing
+        cost = calculate_token_cost(output_tokens, reasoning_tokens, search_requests, model)
 
         # Record with token breakdown
         self.record_call(
