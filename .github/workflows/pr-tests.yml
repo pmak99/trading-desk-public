@@ -58,3 +58,26 @@ jobs:
         echo "  - 4.0: AI sentiment layer"
         echo "  - 5.0: Cloud autopilot"
         echo "  - 6.0: Agent orchestration"
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scanning
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+
+  dependency-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt pip-audit
+      - name: Check for vulnerabilities
+        run: pip-audit

@@ -9,9 +9,10 @@ TTL: 3 hours (10800 seconds)
 """
 
 import os
+import re
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, date as date_class, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
@@ -120,14 +121,32 @@ class SentimentCache:
                 """)
                 conn.commit()
 
-    def get(self, ticker: str, date: str) -> Optional[CachedSentiment]:
+    def get(self, ticker: str, date: str, earnings_date: str = None) -> Optional[CachedSentiment]:
         """
         Get cached sentiment for ticker on date.
 
         Returns the newest non-expired entry, preferring perplexity over websearch.
-        Returns None if no valid cache entry exists.
+        Returns None if no valid cache entry exists or if earnings have already passed.
+
+        Args:
+            ticker: Stock ticker (will be uppercased and validated)
+            date: Date string (YYYY-MM-DD format)
+            earnings_date: Optional earnings date; if passed, cached sentiment is
+                          invalidated after earnings occur to force fresh fetch.
         """
         ticker = ticker.upper()
+        if not ticker or not re.match(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$', ticker):
+            raise ValueError(f"Invalid ticker format: {ticker}")
+
+        # If earnings date has passed, don't return cached pre-earnings sentiment
+        if earnings_date:
+            try:
+                ed = datetime.strptime(earnings_date, '%Y-%m-%d').date() if isinstance(earnings_date, str) else earnings_date
+                if ed < date_class.today():
+                    # Earnings already happened, cached sentiment is stale
+                    return None
+            except (ValueError, TypeError):
+                pass
 
         with _db_lock:
             with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
@@ -175,6 +194,8 @@ class SentimentCache:
             raise ValueError(f"Invalid source '{source}'. Must be one of: {self.VALID_SOURCES}")
 
         ticker = ticker.upper()
+        if not ticker or not re.match(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$', ticker):
+            raise ValueError(f"Invalid ticker format: {ticker}")
         # Use UTC for consistent timezone handling
         cached_at = datetime.now(timezone.utc).isoformat()
 

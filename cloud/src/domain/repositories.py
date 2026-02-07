@@ -75,7 +75,7 @@ def validate_days(days: int) -> int:
 class ConnectionPool:
     """Simple SQLite connection pool for better performance."""
 
-    def __init__(self, db_path: str, max_connections: int = 5):
+    def __init__(self, db_path: str, max_connections: int = 15):
         self.db_path = db_path
         self._pool: Queue = Queue(maxsize=max_connections)
         self._max = max_connections
@@ -750,6 +750,8 @@ class VRPCacheRepository:
                     price REAL,
                     expiration TEXT,
                     used_real_data INTEGER,
+                    has_weekly_options INTEGER DEFAULT 1,
+                    weekly_reason TEXT DEFAULT '',
                     created_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL,
                     UNIQUE(ticker, earnings_date)
@@ -759,6 +761,15 @@ class VRPCacheRepository:
                 CREATE INDEX IF NOT EXISTS idx_vrp_ticker_date
                 ON vrp_cache(ticker, earnings_date)
             """)
+            # Migration: add columns to existing tables
+            try:
+                conn.execute("ALTER TABLE vrp_cache ADD COLUMN has_weekly_options INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                conn.execute("ALTER TABLE vrp_cache ADD COLUMN weekly_reason TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             conn.commit()
 
     def _calculate_ttl_hours(self, earnings_date: str) -> int:
@@ -815,6 +826,7 @@ class VRPCacheRepository:
                 """
                 SELECT ticker, earnings_date, implied_move_pct, vrp_ratio, vrp_tier,
                        historical_mean, price, expiration, used_real_data,
+                       has_weekly_options, weekly_reason,
                        created_at, expires_at
                 FROM vrp_cache
                 WHERE ticker = ? AND earnings_date = ?
@@ -834,6 +846,8 @@ class VRPCacheRepository:
                     "price": row["price"],
                     "expiration": row["expiration"],
                     "used_real_data": bool(row["used_real_data"]),
+                    "has_weekly_options": bool(row["has_weekly_options"]) if row["has_weekly_options"] is not None else True,
+                    "weekly_reason": row["weekly_reason"] or "",
                     "from_cache": True,
                 }
             return None
@@ -867,8 +881,9 @@ class VRPCacheRepository:
                     INSERT OR REPLACE INTO vrp_cache
                     (ticker, earnings_date, implied_move_pct, vrp_ratio, vrp_tier,
                      historical_mean, price, expiration, used_real_data,
+                     has_weekly_options, weekly_reason,
                      created_at, expires_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'),
                             datetime('now', '+' || ? || ' hours'))
                     """,
                     (
@@ -881,6 +896,8 @@ class VRPCacheRepository:
                         vrp_data.get("price"),
                         vrp_data.get("expiration"),
                         1 if vrp_data.get("used_real_data") else 0,
+                        1 if vrp_data.get("has_weekly_options", True) else 0,
+                        vrp_data.get("weekly_reason", ""),
                         ttl_hours,
                     )
                 )

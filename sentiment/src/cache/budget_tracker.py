@@ -69,6 +69,19 @@ MCP_COST_ESTIMATES = {
 MAX_TOKENS_PER_CALL = 10_000_000  # 10M tokens max per call (very generous limit)
 
 
+class BudgetExhaustedError(Exception):
+    """Raised when the API budget is exhausted and no more calls can be made."""
+
+    def __init__(self, calls_today: int, max_calls: int, message: str = None):
+        self.calls_today = calls_today
+        self.max_calls = max_calls
+        self.message = message or (
+            f"Daily budget exhausted ({calls_today}/{max_calls} calls). "
+            "Use WebSearch fallback."
+        )
+        super().__init__(self.message)
+
+
 class BudgetStatus(Enum):
     """Budget status levels."""
     OK = "ok"           # Under 80%
@@ -164,14 +177,12 @@ class BudgetTracker:
                     "reasoning_tokens": "ALTER TABLE api_budget ADD COLUMN reasoning_tokens INTEGER DEFAULT 0",
                     "search_requests": "ALTER TABLE api_budget ADD COLUMN search_requests INTEGER DEFAULT 0",
                 }
+                # Check existing columns via PRAGMA to avoid fragile string matching
+                cursor = conn.execute("PRAGMA table_info(api_budget)")
+                existing_columns = {row[1] for row in cursor.fetchall()}
                 for column, sql in _ALLOWED_MIGRATIONS.items():
-                    try:
+                    if column not in existing_columns:
                         conn.execute(sql)
-                    except sqlite3.OperationalError as e:
-                        # Only ignore "duplicate column" errors, re-raise others
-                        if "duplicate column" not in str(e).lower():
-                            logger.error(f"Failed to add column {column}: {e}")
-                            raise
                 conn.commit()
 
     def _get_today(self) -> str:
@@ -190,6 +201,44 @@ class BudgetTracker:
         """Check if we can make another API call today."""
         info = self.get_info()
         return info.status != BudgetStatus.EXHAUSTED
+
+    def require_budget(self) -> None:
+        """Raise BudgetExhaustedError if budget is exhausted.
+
+        Convenience method for callers who want exception-based flow control
+        instead of checking can_call() return value.
+
+        Raises:
+            BudgetExhaustedError: If daily budget is exhausted.
+        """
+        info = self.get_info()
+        if info.status == BudgetStatus.EXHAUSTED:
+            raise BudgetExhaustedError(
+                calls_today=info.calls_today,
+                max_calls=self.MAX_DAILY_CALLS,
+            )
+
+    def get_budget_status(self) -> dict:
+        """Return budget status with remaining calls and whether fallback is needed.
+
+        Returns:
+            Dictionary with keys:
+                - can_call: bool - whether another call is allowed
+                - status: str - "ok", "warning", or "exhausted"
+                - calls_today: int - number of calls made today
+                - calls_remaining: int - calls left today
+                - cost_today: float - total cost today
+                - needs_fallback: bool - True if caller should use WebSearch
+        """
+        info = self.get_info()
+        return {
+            "can_call": info.status != BudgetStatus.EXHAUSTED,
+            "status": info.status.value,
+            "calls_today": info.calls_today,
+            "calls_remaining": info.calls_remaining,
+            "cost_today": info.cost_today,
+            "needs_fallback": info.status == BudgetStatus.EXHAUSTED,
+        }
 
     def should_warn(self) -> bool:
         """Check if we should warn user about budget."""

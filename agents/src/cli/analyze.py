@@ -41,32 +41,30 @@ async def main():
         print("Earnings date: Auto-detect")
     print()
 
-    # Create orchestrator
-    orchestrator = AnalyzeOrchestrator()
-
-    # Execute
+    # Execute with async context manager to ensure cleanup
     try:
-        result = await orchestrator.orchestrate(
-            ticker=ticker,
-            earnings_date=earnings_date
-        )
+        async with AnalyzeOrchestrator() as orchestrator:
+            result = await orchestrator.orchestrate(
+                ticker=ticker,
+                earnings_date=earnings_date
+            )
 
-        # Format and print results
-        output = orchestrator.format_results(result)
-        print(output)
+            # Format and print results
+            output = orchestrator.format_results(result)
+            print(output)
 
-        # Return exit code
-        if result.get('success'):
-            recommendation = result.get('recommendation', {})
-            action = recommendation.get('action', 'SKIP')
+            # Return exit code
+            if result.get('success'):
+                recommendation = result.get('recommendation', {})
+                action = recommendation.get('action', 'SKIP')
 
-            # Exit 0 for tradeable recommendations, 1 for skip/do-not-trade
-            if action in ('TRADE', 'TRADE_CAUTIOUSLY'):
-                sys.exit(0)
+                # Exit 0 for tradeable recommendations, 1 for skip/do-not-trade
+                if action in ('TRADE', 'TRADE_CAUTIOUSLY'):
+                    sys.exit(0)
+                else:
+                    sys.exit(1)
             else:
                 sys.exit(1)
-        else:
-            sys.exit(1)
 
     except Exception as e:
         print(f"\nError: {e}")

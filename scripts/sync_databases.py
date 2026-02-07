@@ -555,6 +555,10 @@ def main():
             local_conn.execute("PRAGMA journal_mode=WAL")
             cloud_conn.execute("PRAGMA journal_mode=WAL")
 
+            # Wrap all syncs in explicit transactions for atomicity
+            local_conn.execute("BEGIN TRANSACTION")
+            cloud_conn.execute("BEGIN TRANSACTION")
+
             # Sync each table
             log("Syncing historical_moves...")
             hm_stats = sync_historical_moves(local_conn, cloud_conn)

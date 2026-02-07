@@ -77,6 +77,11 @@ src/data/cache/
 5.0/data/
 *.db
 
+# Database files - catch-all pattern (prevent ivcrush.db from any directory)
+**/ivcrush.db
+**/ivcrush.db-journal
+**/ivcrush.db-wal
+
 # Jupyter
 .ipynb_checkpoints
 

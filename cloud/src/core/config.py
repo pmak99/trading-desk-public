@@ -194,17 +194,18 @@ class Settings:
         return key.strip()
 
     # Account size bounds (reasonable range for options trading)
-    ACCOUNT_SIZE_MIN = 1_000        # $1,000 minimum
-    ACCOUNT_SIZE_MAX = 10_000_000   # $10,000,000 maximum
-    ACCOUNT_SIZE_DEFAULT = 100_000  # $100,000 default
+    ACCOUNT_SIZE_MIN = 1_000          # $1,000 minimum
+    ACCOUNT_SIZE_MAX = 100_000_000    # $100,000,000 maximum
+    ACCOUNT_SIZE_DEFAULT = 100_000    # $100,000 default
 
     @property
     def account_size(self) -> int:
         """Get account size from secrets or environment (default 100k).
 
-        Must be between $1,000 and $10,000,000. Values outside this range
+        Must be between $1,000 and $100,000,000. Values outside this range
         are likely misconfiguration (e.g., cents instead of dollars, or
         a typo adding extra zeros). Falls back to $100k default.
+        Values above $10M log a warning but are accepted.
         """
         self._load_secrets()
         size_str = self._secrets.get('ACCOUNT_SIZE', str(self.ACCOUNT_SIZE_DEFAULT)) if self._secrets else str(self.ACCOUNT_SIZE_DEFAULT)
@@ -216,6 +217,10 @@ class Settings:
                     size=size, min=self.ACCOUNT_SIZE_MIN, max=self.ACCOUNT_SIZE_MAX,
                     default=self.ACCOUNT_SIZE_DEFAULT)
                 return self.ACCOUNT_SIZE_DEFAULT
+            if size > 10_000_000:
+                from .logging import log
+                log("warn", "ACCOUNT_SIZE above $10M - verify this is intentional",
+                    size=size)
             return size
         except (ValueError, TypeError):
             return self.ACCOUNT_SIZE_DEFAULT

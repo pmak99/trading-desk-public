@@ -53,19 +53,18 @@ class TickerMetadataRepository:
     def get_metadata(self, ticker: str) -> Optional[Dict[str, Any]]:
         """Get metadata for a ticker."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT ticker, company_name, sector, industry,
-                       market_cap, updated_at
-                FROM ticker_metadata
-                WHERE ticker = ?
-            """, (ticker.upper(),))
+                cursor.execute("""
+                    SELECT ticker, company_name, sector, industry,
+                           market_cap, updated_at
+                    FROM ticker_metadata
+                    WHERE ticker = ?
+                """, (ticker.upper(),))
 
-            row = cursor.fetchone()
-            conn.close()
+                row = cursor.fetchone()
 
             if row is None:
                 logger.debug(f"No metadata found for ticker {ticker}")
@@ -94,24 +93,24 @@ class TickerMetadataRepository:
     ) -> bool:
         """Save or update ticker metadata."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                INSERT OR REPLACE INTO ticker_metadata
-                (ticker, company_name, sector, industry, market_cap, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                ticker.upper(),
-                company_name,
-                sector,
-                industry,
-                market_cap,
-                datetime.now().isoformat()
-            ))
+                cursor.execute("""
+                    INSERT OR REPLACE INTO ticker_metadata
+                    (ticker, company_name, sector, industry, market_cap, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    ticker.upper(),
+                    company_name,
+                    sector,
+                    industry,
+                    market_cap,
+                    datetime.now().isoformat()
+                ))
 
-            conn.commit()
-            conn.close()
+                conn.commit()
             return True
 
         except Exception as e:
@@ -121,11 +120,11 @@ class TickerMetadataRepository:
     def delete_metadata(self, ticker: str) -> bool:
         """Delete ticker metadata (for testing)."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM ticker_metadata WHERE ticker = ?", (ticker.upper(),))
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM ticker_metadata WHERE ticker = ?", (ticker.upper(),))
+                conn.commit()
             return True
         except Exception as e:
             logger.debug(f"Error deleting metadata for {ticker}: {e}")
@@ -134,18 +133,17 @@ class TickerMetadataRepository:
     def get_by_sector(self, sector: str) -> List[Dict[str, Any]]:
         """Get all tickers in a sector."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT ticker, company_name, sector, industry, market_cap
-                FROM ticker_metadata
-                WHERE sector = ?
-            """, (sector,))
+                cursor.execute("""
+                    SELECT ticker, company_name, sector, industry, market_cap
+                    FROM ticker_metadata
+                    WHERE sector = ?
+                """, (sector,))
 
-            rows = cursor.fetchall()
-            conn.close()
+                rows = cursor.fetchall()
 
             return [dict(row) for row in rows]
 

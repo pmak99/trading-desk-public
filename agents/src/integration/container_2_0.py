@@ -12,11 +12,8 @@ from typing import Optional, Any
 
 from ..utils.paths import MAIN_REPO, REPO_2_0
 
-# Thread lock for container initialization AND sys.path manipulation
-# SECURITY FIX: sys.path manipulation is not thread-safe, so we protect
-# module-level operations with a lock acquired during module import
+# Thread lock for container initialization
 _container_lock = threading.RLock()
-_path_init_lock = threading.RLock()
 
 # Add 2.0/ to Python path with highest priority
 # 2.0's code uses "from src.config..." imports, so it needs 2.0/ in path, not 2.0/src/
@@ -24,16 +21,26 @@ _main_repo = MAIN_REPO
 _2_0_dir = _main_repo / "2.0"
 _2_0_dir_str = str(_2_0_dir)
 
-# SECURITY FIX: Protect sys.path manipulation with lock to prevent race conditions
-with _path_init_lock:
-    # Remove if already in path (so we can re-insert at position 0)
-    if _2_0_dir_str in sys.path:
-        sys.path.remove(_2_0_dir_str)
+# Double-checked locking for thread-safe sys.path initialization
+_paths_initialized = False
+_path_init_lock = threading.Lock()
 
-    # Insert at position 0 for highest priority (before 6.0/src)
-    # Check again to prevent duplicate insertion
-    if _2_0_dir_str not in sys.path:
+
+def _ensure_paths():
+    """Ensure 2.0/ is in sys.path exactly once, thread-safe."""
+    global _paths_initialized
+    if _paths_initialized:
+        return
+    with _path_init_lock:
+        if _paths_initialized:
+            return
+        # Remove if already in path (so we can re-insert at position 0)
+        if _2_0_dir_str in sys.path:
+            sys.path.remove(_2_0_dir_str)
+        # Insert at position 0 for highest priority (before 6.0/src)
         sys.path.insert(0, _2_0_dir_str)
+        _paths_initialized = True
+
 
 # Note: We don't import at module level to avoid namespace collision with 6.0/src
 # Imports happen inside __init__ after sys.path is properly configured
@@ -57,6 +64,7 @@ class Container2_0:
 
     def __init__(self):
         """Initialize container with 2.0's Config."""
+        _ensure_paths()
         # Import here to avoid namespace collision at module level
         from src.config.config import Config
 
@@ -83,6 +91,7 @@ class Container2_0:
 
     def _initialize_container(self):
         """Initialize the 2.0 container (called under lock)."""
+        _ensure_paths()
         # Critical: Remove 6.0/ from sys.path temporarily to avoid namespace collision
         # Both 6.0 and 2.0 use 'src' as top-level package, causing import conflicts
         _6_0_paths = [p for p in sys.path if '6.0' in p]
