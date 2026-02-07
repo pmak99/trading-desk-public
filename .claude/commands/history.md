@@ -1,6 +1,6 @@
 # Historical Earnings Analysis
 
-Visualize historical earnings moves with AI pattern analysis.
+Visualize historical earnings moves with statistical analysis and pattern insights.
 
 ## Arguments
 $ARGUMENTS (format: TICKER - required)
@@ -15,195 +15,159 @@ Examples:
 - This is a visualization command - execute autonomously
 
 ## Progress Display
-Show progress updates as you work:
 ```
 [1/4] Fetching historical earnings data...
 [2/4] Calculating statistics...
-[3/4] Generating visualization...
+[3/4] Checking position limits and TRR...
 [4/4] Analyzing patterns...
 ```
-
-## Purpose
-Understand a ticker's earnings behavior before trading:
-- How consistent are the moves?
-- Directional bias (UP vs DOWN)?
-- Any seasonal patterns?
-- Notable outliers?
 
 ## Step-by-Step Instructions
 
 ### Step 1: Parse Ticker Argument
 - Ticker is REQUIRED
-- If not provided, show error:
+- If not provided:
   ```
-  ❌ Ticker required. Usage: /history TICKER
+  Ticker required. Usage: /history TICKER
      Example: /history NVDA
   ```
 
-### Step 2: Run Visualization Script
-Execute the visualization script:
-```bash
-cd $PROJECT_ROOT && python scripts/visualize_moves.py $TICKER
-```
+Sanitize: `TICKER=$(echo "$RAW" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')`
 
-If script doesn't exist, query database directly:
+### Step 2: Query Historical Moves
 ```bash
-sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
-  "SELECT earnings_date, intraday_move_pct, gap_move_pct,
-          CASE WHEN gap_move_pct >= 0 THEN 'UP' ELSE 'DOWN' END as direction
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT earnings_date,
+          ROUND(gap_move_pct, 2) as gap_move,
+          ROUND(close_move_pct, 2) as close_move,
+          ROUND(intraday_move_pct, 2) as intraday,
+          CASE WHEN close_move_pct >= 0 THEN 'UP' ELSE 'DOWN' END as direction
    FROM historical_moves
    WHERE ticker='$TICKER'
-   ORDER BY earnings_date DESC
-   LIMIT 20;"
+   ORDER BY earnings_date DESC;"
 ```
 
-### Step 3: Calculate Statistics
-From the historical data, compute:
-- **Mean Move:** Average absolute move %
-- **Median Move:** Middle value (more robust to outliers)
-- **Std Dev:** Consistency measure
-- **Max Move:** Largest historical move
-- **Min Move:** Smallest historical move
-- **Up %:** Percentage of moves that went UP
-- **Down %:** Percentage of moves that went DOWN
-
-### Step 4: AI Pattern Analysis
-Using Claude's built-in analysis (no MCP cost), identify:
-
-1. **Directional Bias**
-   - Strong UP bias (>65% up moves)
-   - Strong DOWN bias (>65% down moves)
-   - Neutral (40-60% either direction)
-
-2. **Move Consistency**
-   - Tight: Std Dev < 1.5% (predictable)
-   - Moderate: Std Dev 1.5-3%
-   - Volatile: Std Dev > 3% (unpredictable)
-
-3. **Seasonal Patterns**
-   - Q4 earnings tend to be larger?
-   - January effect?
-   - Any recurring patterns?
-
-4. **Notable Outliers**
-   - Any moves > 2 standard deviations?
-   - What caused them? (if determinable)
-
-5. **Trend Analysis**
-   - Are moves getting larger or smaller over time?
-   - Recent vs historical behavior
-
-### Step 5: Trading Implications
-Based on analysis, provide implications:
-- Strategy suggestions (bullish/bearish/neutral)
-- Position sizing guidance
-- Risk warnings
-
-## Output Format
-
+If no data:
 ```
-══════════════════════════════════════════════════════
-HISTORICAL EARNINGS: {TICKER}
-══════════════════════════════════════════════════════
-
-📊 EARNINGS MOVE HISTORY (Last {N} quarters)
-
-    │
- +8%├────────────────█─────────
-    │                █
- +6%├──────█─────────█─────────
-    │      █         █    █
- +4%├──█───█───█─────█────█────
-    │  █   █   █  █  █    █  █
- +2%├──█───█───█──█──█────█──█─
-    │  █   █   █  █  █    █  █
-  0%├──────────────────────────
-    │     █         █
- -2%├─────█─────────█──────────
-    │     █
- -4%├─────█────────────────────
-    └─────────────────────────→
-      Q1  Q2  Q3  Q4  Q1  Q2  Q3
-
-📈 STATISTICS
-┌────────────────┬───────────┐
-│ Metric         │ Value     │
-├────────────────┼───────────┤
-│ Mean Move      │ {X.X}%    │
-│ Median Move    │ {X.X}%    │
-│ Std Deviation  │ {X.X}%    │
-│ Max Move       │ +{X.X}%   │
-│ Min Move       │ -{X.X}%   │
-│ Data Points    │ {N}       │
-└────────────────┴───────────┘
-
-📊 DIRECTIONAL ANALYSIS
-┌────────────────┬───────────┐
-│ Direction      │ Count     │
-├────────────────┼───────────┤
-│ UP ↑           │ {X} ({Y}%)│
-│ DOWN ↓         │ {X} ({Y}%)│
-└────────────────┴───────────┘
-
-🧠 AI PATTERN ANALYSIS
-
-**Directional Bias:** {Bullish/Bearish/Neutral}
-{Explanation of directional tendency}
-
-**Move Consistency:** {Tight/Moderate/Volatile}
-{Explanation of predictability}
-
-**Seasonal Patterns:**
-{Any identified patterns or "No clear seasonal pattern detected"}
-
-**Notable Outliers:**
-{List any extreme moves with dates and potential causes}
-
-**Trend Observation:**
-{Are moves increasing/decreasing over time?}
-
-📋 TRADING IMPLICATIONS
-
-Based on {TICKER}'s historical behavior:
-
-• **Strategy Suggestion:** {type based on bias/consistency}
-  - {Specific recommendation}
-
-• **Position Sizing:** {standard/reduced/increased}
-  - {Reasoning based on volatility}
-
-• **Risk Warnings:**
-  - {Any specific concerns}
-  - {Outlier risk if applicable}
-
-══════════════════════════════════════════════════════
-```
-
-## No Data Output
-
-```
-══════════════════════════════════════════════════════
-HISTORICAL EARNINGS: {TICKER}
-══════════════════════════════════════════════════════
-
-❌ NO HISTORICAL DATA
+NO HISTORICAL DATA
 
 No earnings history found for {TICKER} in the database.
 
 Possible reasons:
-• New ticker or recent IPO
-• Ticker symbol changed
-• Not in earnings database
+  New ticker or recent IPO
+  Ticker symbol changed
+  Not yet tracked
 
-💡 SUGGESTIONS
-• Run `/analyze {TICKER}` to check current VRP
-• Check if ticker is spelled correctly
-• This ticker may need manual database entry
+Suggestions:
+  Run /analyze {TICKER} to check current VRP
+  Run /maintenance backfill to add historical data
+```
 
-══════════════════════════════════════════════════════
+### Step 3: Calculate Statistics
+```bash
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT COUNT(*) as quarters,
+          ROUND(AVG(ABS(gap_move_pct)), 2) as mean_move,
+          ROUND(MAX(ABS(gap_move_pct)), 2) as max_move,
+          ROUND(MIN(ABS(gap_move_pct)), 2) as min_move,
+          ROUND(SUM(CASE WHEN gap_move_pct >= 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) as up_pct,
+          ROUND(SUM(CASE WHEN gap_move_pct < 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) as down_pct
+   FROM historical_moves
+   WHERE ticker='$TICKER';"
+```
+
+### Step 4: Check Position Limits / TRR
+```bash
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT tail_risk_ratio, tail_risk_level, max_contracts, max_notional,
+          avg_move, max_move, num_quarters
+   FROM position_limits
+   WHERE ticker='$TICKER';"
+```
+
+### Step 5: Check Past Trade Performance
+```bash
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+  "SELECT COUNT(*) as trades,
+          ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
+          ROUND(SUM(gain_loss), 0) as total_pnl,
+          strategy_type
+   FROM strategies
+   WHERE symbol='$TICKER'
+   GROUP BY strategy_type;"
+```
+
+### Step 6: AI Pattern Analysis
+
+Using Claude's built-in analysis (no MCP cost), identify:
+
+1. **Directional Bias** - Strong UP bias (>65%), Strong DOWN bias (>65%), or Neutral
+2. **Move Consistency** - Tight (std dev < 1.5%), Moderate (1.5-3%), Volatile (>3%)
+3. **Notable Outliers** - Moves > 2 standard deviations
+4. **Trend Analysis** - Are moves getting larger or smaller over time?
+5. **Trading Implications** - Strategy suggestions based on historical behavior
+
+## Output Format
+
+```
+==============================================================
+HISTORICAL EARNINGS: {TICKER}
+==============================================================
+
+EARNINGS MOVE HISTORY (Last {N} quarters)
+
+Date          Gap Move   Close Move   Direction
+2026-01-30    +3.2%      +4.1%        UP
+2025-10-30    -5.1%      -3.8%        DOWN
+2025-07-24    +2.8%      +3.2%        UP
+2025-04-24    +1.5%      +2.0%        UP
+2025-01-30    -8.2%      -6.5%        DOWN
+...
+
+STATISTICS
+  Quarters tracked:  {N}
+  Mean Move (abs):   {X.X}%
+  Max Move:          {X.X}%
+  Min Move:          {X.X}%
+
+DIRECTIONAL ANALYSIS
+  UP moves:    {X} ({Y}%)
+  DOWN moves:  {X} ({Y}%)
+
+TAIL RISK
+  TRR: {X.XX}x ({HIGH/NORMAL/LOW})
+  Max contracts: {N}
+  [If HIGH: "Elevated tail risk - max historical move {X.X}% vs avg {X.X}%"]
+
+PAST TRADES (if any)
+  Strategy    Trades  Win Rate  Total P&L
+  {type}      {N}     {X}%      ${X,XXX}
+
+AI PATTERN ANALYSIS
+
+Directional Bias: {Bullish/Bearish/Neutral}
+  {Explanation}
+
+Move Consistency: {Tight/Moderate/Volatile}
+  {Explanation}
+
+Notable Outliers:
+  {Date}: {X.X}% move - {potential cause if determinable}
+
+Trend Observation:
+  {Are moves increasing/decreasing?}
+
+TRADING IMPLICATIONS
+
+Based on {TICKER}'s historical behavior:
+  Strategy Suggestion: {type based on bias/consistency}
+  Position Sizing: {standard/reduced based on TRR}
+  Risk Warnings: {any specific concerns}
+
+==============================================================
 ```
 
 ## Cost Control
 - No Perplexity calls (uses Claude's built-in analysis)
-- Database query only
+- Database queries only
 - Pure visualization + AI insight

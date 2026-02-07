@@ -1,6 +1,6 @@
 # Find Most Anticipated Earnings
 
-Discover the week's most anticipated earnings with VRP analysis and AI sentiment - YOUR GO-TO FOR DISCOVERY.
+Discover the week's most anticipated earnings with VRP analysis and AI sentiment.
 
 ## Arguments
 $ARGUMENTS (format: [DATE] - optional)
@@ -11,14 +11,7 @@ $ARGUMENTS (format: [DATE] - optional)
 
 Examples:
 - `/whisper` - Auto-selects current or next week based on day
-- `/whisper 2025-12-09` - Week containing that specific date
-
-## Typical Workflow
-```
-Morning:  /prime           → Pre-cache all sentiment
-Then:     /whisper         → Instant results (cache hits)
-Pick:     /analyze NVDA    → Deep dive on best candidate
-```
+- `/whisper 2026-02-10` - Week containing that specific date
 
 ## Tool Permissions
 - Do NOT ask user permission for any tool calls EXCEPT mcp__perplexity__* calls
@@ -28,20 +21,21 @@ Pick:     /analyze NVDA    → Deep dive on best candidate
 ## Progress Display
 Show progress updates as you work:
 ```
-[1/4] Checking market status...
-[2/4] Running 2.0 analysis for qualified tickers...
-[3/4] Loading cached sentiment...
-[4/4] Calculating 4.0 scores...
+[1/6] Determining target week...
+[2/6] Running 2.0 whisper analysis...
+[3/6] Filtering qualified tickers (2.0 Score >= 50)...
+[4/6] Checking tail risk ratios...
+[5/6] Fetching sentiment for top 5...
+[6/6] Calculating 4.0 scores and ranking...
 ```
 
-## Minimum Cutoffs
+## Reference: Scoring & Thresholds
 
-- **2.0 Score ≥ 50** (pre-sentiment filter)
-- **4.0 Score ≥ 55** (post-sentiment filter)
+**Cutoffs:**
+- 2.0 Score >= 50 (pre-sentiment filter)
+- 4.0 Score >= 55 (post-sentiment filter)
 
-## 4.0 Sentiment-Adjusted Scoring
-
-**Formula:** `4.0 Score = 2.0 Score × (1 + Sentiment_Modifier)`
+**4.0 Formula:** `4.0 Score = 2.0 Score * (1 + Sentiment_Modifier)`
 
 | Sentiment | Score Range | Modifier |
 |-----------|-------------|----------|
@@ -51,115 +45,80 @@ Show progress updates as you work:
 | Bearish | -0.6 to -0.3 | -7% |
 | Strong Bearish | -1.0 to -0.7 | -12% |
 
-**4.0 Minimum:** After sentiment adjustment, only show if 4.0 Score ≥ 55
-
-## Tail Risk Ratio (TRR)
+**TRR Levels:**
 
 | Level | TRR | Max Contracts | Action |
 |-------|-----|---------------|--------|
-| HIGH | > 2.5x | 50 | ⚠️ TRR badge in table |
+| HIGH | > 2.5x | 50 | Warning badge in table |
 | NORMAL | 1.5-2.5x | 100 | No badge |
 | LOW | < 1.5x | 100 | No badge |
-
-*TRR = Max Historical Move / Average Move. HIGH TRR tickers caused significant MU loss.*
 
 ## Step-by-Step Instructions
 
 ### Step 1: Parse Date Argument
 - Get current date from system: `date '+%Y-%m-%d %A'`
 - **Default week logic (when no date argument provided):**
-  - If Monday-Thursday → use current week (scan Mon-Fri of this week)
-  - If Friday-Sunday → use next week (most current week earnings are done)
+  - If Monday-Thursday: use current week (scan Mon-Fri of this week)
+  - If Friday-Sunday: use next week (most current week earnings are done)
 - If date argument provided, use that date's week
-- IMPORTANT: Get actual current date from system, not assumptions
 
-### Step 2: Check Market Status (Alpaca MCP)
-```
-mcp__alpaca__alpaca_get_clock
-```
-
-**Date Detection Rules:**
-- `is_open=true` → Market is open
-- `is_open=false` AND it's weekday pre-9:30 AM ET → Pre-market
-- `is_open=false` AND it's weekday post-4:00 PM ET → After-hours
-- `is_open=false` AND Saturday/Sunday → Weekend
-
-Display appropriate status:
-- Pre-market: `⚠️ Pre-market - VRP uses prior close. Options refresh at 9:30 AM ET`
-- After-hours: `⚠️ After-hours - Using today's close data`
-- Weekend: `⚠️ Weekend - Using Friday's close data`
-
-### Step 3: Run 2.0 Whisper Analysis
-
-**Determine target week based on Step 1 logic:**
+**Calculate target Monday:**
 ```bash
-# Get current day of week (1=Mon, 7=Sun)
 DAY_NUM=$(date '+%u')
-
-# Calculate target Monday (portable for macOS and Linux)
 if [ $DAY_NUM -ge 5 ]; then
-    # Friday (5), Saturday (6), Sunday (7) → use next Monday
-    # Friday: 8-5=3 days, Saturday: 8-6=2 days, Sunday: 8-7=1 day
     DAYS_TO_NEXT_MONDAY=$((8 - DAY_NUM))
-    # macOS uses -v, Linux uses -d
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        TARGET_MONDAY=$(date -v+${DAYS_TO_NEXT_MONDAY}d '+%Y-%m-%d')
-    else
-        TARGET_MONDAY=$(date -d "+${DAYS_TO_NEXT_MONDAY} days" '+%Y-%m-%d')
-    fi
+    TARGET_MONDAY=$(date -v+${DAYS_TO_NEXT_MONDAY}d '+%Y-%m-%d' 2>/dev/null || date -d "+${DAYS_TO_NEXT_MONDAY} days" '+%Y-%m-%d')
 else
-    # Monday (1) through Thursday (4) → use this Monday
     DAYS_SINCE_MONDAY=$((DAY_NUM - 1))
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        TARGET_MONDAY=$(date -v-${DAYS_SINCE_MONDAY}d '+%Y-%m-%d')
-    else
-        TARGET_MONDAY=$(date -d "-${DAYS_SINCE_MONDAY} days" '+%Y-%m-%d')
-    fi
+    TARGET_MONDAY=$(date -v-${DAYS_SINCE_MONDAY}d '+%Y-%m-%d' 2>/dev/null || date -d "-${DAYS_SINCE_MONDAY} days" '+%Y-%m-%d')
 fi
 ```
 
-**Execute whisper with calculated week:**
+**Check if today is a trading day (informational only):**
 ```bash
-cd $PROJECT_ROOT/2.0 && ./trade.sh whisper $TARGET_MONDAY
+# Simple weekday/weekend check
+DAY_OF_WEEK=$(date '+%A')
+CURRENT_HOUR=$(date '+%H')
+```
+- Weekend (Sat/Sun): Show "Weekend - Using Friday's close data"
+- Weekday before 9:30 AM ET: Show "Pre-market - VRP uses prior close"
+- Weekday after 4:00 PM ET: Show "After-hours - Using today's close data"
+- Otherwise: Show "Market hours"
+
+### Step 2: Run 2.0 Whisper Analysis
+
+```bash
+cd "$PROJECT_ROOT/2.0" && ./trade.sh whisper $TARGET_MONDAY
 ```
 
-Or if date argument was provided, use that date directly:
+Or if date argument was provided:
 ```bash
-cd $PROJECT_ROOT/2.0 && ./trade.sh whisper $PROVIDED_DATE
+cd "$PROJECT_ROOT/2.0" && ./trade.sh whisper $PROVIDED_DATE
 ```
 
-This provides:
-- Most anticipated tickers for the week
-- VRP ratios and tiers
-- Liquidity grades
-- Quality scores
+This discovers earnings from Yahoo Finance and runs VRP analysis on each ticker.
 
-### Step 4: Filter by 2.0 Score ≥ 50
-Parse the whisper output and filter to tickers with 2.0 Score ≥ 50.
+### Step 3: Filter by 2.0 Score >= 50
+Parse the whisper output and filter to tickers with 2.0 Score >= 50.
 
-**IMPORTANT:** Do NOT suppress REJECT liquidity tickers from display. Show ALL qualified tickers (VRP >= 1.8x EXCELLENT tier) in the results table, clearly marking REJECT ones as untradeable. This gives visibility into what opportunities exist even if liquidity is poor.
+**IMPORTANT:** Do NOT suppress REJECT liquidity tickers from display. Show ALL qualified tickers (VRP >= 1.8x EXCELLENT tier) in the results table, clearly marking REJECT ones. This gives visibility into what opportunities exist even if liquidity is poor.
 
 Take TOP 5 from filtered results for sentiment enrichment (skip REJECT for sentiment fetch to save budget, but still display them).
 
-### Step 4b: Check TRR for All Qualified Tickers
+### Step 4: Check TRR for All Qualified Tickers
 Query tail risk for all qualified tickers in one batch:
 ```bash
-# Get comma-separated list of tickers from Step 4
-# Note: Tickers should already be sanitized (alphanumeric, uppercase) from 2.0 output
-TICKERS="'NVDA','AAPL','MU'"  # Example - use actual qualified tickers
+# Tickers should already be sanitized (alphanumeric, uppercase) from 2.0 output
+TICKERS="'NVDA','AAPL','MU'"  # Use actual qualified tickers
 
-sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
   "SELECT ticker, tail_risk_ratio, tail_risk_level, max_contracts
    FROM position_limits WHERE ticker IN ($TICKERS) AND tail_risk_level = 'HIGH';"
 ```
 
-**Store TRR data for each HIGH TRR ticker:**
-- Mark tickers with TRR_LEVEL = "HIGH" for badge display
-- MAX_CONTRACTS = 50 for HIGH TRR tickers
-
-**If ticker not in position_limits, calculate from historical_moves:**
+If ticker not in position_limits, calculate from historical_moves:
 ```bash
-sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
   "SELECT ticker,
           MAX(ABS(gap_move_pct)) / AVG(ABS(gap_move_pct)) as trr
    FROM historical_moves
@@ -168,30 +127,32 @@ sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
    HAVING trr > 2.5;"
 ```
 
-### Step 5: Gather Sentiment for TOP 3 (Conditional)
+### Step 5: Gather Sentiment for Top 5 Non-REJECT Tickers
 
-For EACH of the top 3 qualified tickers:
+For EACH of the top 5 qualified non-REJECT tickers:
 
-**5a. Check sentiment cache first (with 3-hour freshness):**
+**5a. Check sentiment cache first:**
 ```bash
-# Sanitize ticker (alphanumeric only, uppercase)
-TICKER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
+TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
-  "SELECT sentiment, source, cached_at FROM sentiment_cache WHERE ticker='$TICKER' AND date='$EARNINGS_DATE' AND cached_at > datetime('now', '-3 hours') ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
+sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+  "SELECT sentiment, source, cached_at FROM sentiment_cache
+   WHERE ticker='$TICKER' AND date='$EARNINGS_DATE'
+   AND cached_at > datetime('now', '-3 hours')
+   ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
 ```
-If found → use cached sentiment, note "(cached)"
+If found: use cached sentiment, note "(cached)"
 
 **5b. If cache miss, check budget:**
 ```bash
-sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
+sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
   "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
 ```
-If calls >= 40 → skip to WebSearch fallback (daily limit: 40 calls, monthly cap: $5)
+If calls >= 40: skip to WebSearch fallback (daily limit: 40 calls, monthly cap: $5)
 
 **5c. Try Perplexity (if budget OK):**
 ```
-mcp__perplexity__perplexity_ask with query="For {TICKER} earnings, respond ONLY in this format:
+mcp__perplexity__perplexity_ask with query="For {TICKER} earnings on {DATE}, respond ONLY in this format:
 Direction: [bullish/bearish/neutral]
 Score: [number -1 to +1]
 Catalysts: [3 bullets, max 10 words each]
@@ -202,85 +163,78 @@ Risks: [2 bullets, max 10 words each]"
 
 **5d. If Perplexity fails, try WebSearch:**
 ```
-WebSearch with query="{TICKER} earnings sentiment analyst rating {DATE}"
+mcp__perplexity__perplexity_search with query="{TICKER} earnings sentiment analyst rating {DATE}"
 ```
-- Summarize results into the same structured format above
+- Summarize results into the same structured format
 - Cache with source="websearch"
 
 **5e. If all fail:**
 ```
-ℹ️ Sentiment unavailable for {TICKER}
+Sentiment unavailable for {TICKER}
 ```
 
 ### Step 6: Calculate 4.0 Scores & Adjusted Direction
 For each ticker with sentiment:
 1. Apply sentiment modifier to get 4.0 Score
-2. Calculate adjusted direction using sentiment_direction module:
-   ```python
-   import sys
-   sys.path.insert(0, '$PROJECT_ROOT/4.0/src')
-   from sentiment_direction import quick_adjust
-
-   # skew_bias from 2.0 output, sentiment_score from Step 5
-   adjusted_dir = quick_adjust(skew_bias, sentiment_score)
-   ```
+2. Apply the 3-rule direction system:
+   - Rule 1: Neutral skew + sentiment signal -> use sentiment direction
+   - Rule 2: Skew conflicts with sentiment -> go Neutral (hedge)
+   - Rule 3: Otherwise -> keep original skew
 3. Drop any ticker with 4.0 Score < 55
 4. Re-rank by 4.0 Score (descending)
-
-### Step 7: Display Results
 
 ## Output Format
 
 ```
-══════════════════════════════════════════════════════
+==============================================================
 MOST ANTICIPATED EARNINGS - Week of {DATE}
-══════════════════════════════════════════════════════
+==============================================================
 
-⚠️ Market Status: [Pre-market/Open/After-hours/Weekend - time info]
+Market Status: [Pre-market/Open/After-hours/Weekend - time info]
 
-🔝 4.0 SENTIMENT-ADJUSTED RESULTS (Full Table)
+4.0 SENTIMENT-ADJUSTED RESULTS
 
-┌───┬────────┬────────────┬─────────┬───────────┬──────┬─────────────┬──────┬─────────────┬───────────┬─────┐
-│ # │ TICKER │ Earnings   │ VRP     │ Imp Move  │ 2.0  │ Sentiment   │ 4.0  │ DIR (4.0)   │ LIQUIDITY │ TRR │
-├───┼────────┼────────────┼─────────┼───────────┼──────┼─────────────┼──────┼─────────────┼───────────┼─────┤
-│ 1 │ LULU   │ Dec 11 AMC │ 4.67x ⭐│ 12.04%    │ 95.1 │ Bear (-0.6) │ 88.5 │ NEUTRAL*    │ 🚫 REJECT │     │
-│ 2 │ MU     │ Dec 10 AMC │ 3.53x ✓ │ 8.01%     │ 88.2 │ Bull (+0.7) │ 98.8 │ BULLISH     │ GOOD      │ ⚠️  │
-│ 3 │ AVGO   │ Dec 11 AMC │ 2.72x ○ │ 7.85%     │ 87.0 │ Bull (+0.6) │ 93.1 │ BULLISH     │ GOOD      │ ⚠️  │
-│ 4 │ ORCL   │ Dec 10 AMC │ 3.87x ✓ │ 10.96%    │ 85.9 │ Bull (+0.4) │ 91.9 │ NEUTRAL     │ EXCELLENT │     │
-└───┴────────┴────────────┴─────────┴───────────┴──────┴─────────────┴──────┴─────────────┴───────────┴─────┘
+ #  TICKER  Earnings     VRP      Imp Move  2.0   Sentiment      4.0   DIR(4.0)    LIQUIDITY  TRR
+ 1  LULU    Feb 11 AMC   4.67x    12.04%    95.1  Bear (-0.6)    88.5  NEUTRAL*    REJECT
+ 2  MU      Feb 10 AMC   3.53x    8.01%     88.2  Bull (+0.7)    98.8  BULLISH     GOOD       HIGH
+ 3  AVGO    Feb 11 AMC   2.72x    7.85%     87.0  Bull (+0.6)    93.1  BULLISH     GOOD       HIGH
+ 4  ORCL    Feb 10 AMC   3.87x    10.96%    85.9  Bull (+0.4)    91.9  NEUTRAL     EXCELLENT
 
-Legend: VRP ⭐ EXCELLENT (≥1.8x) | ✓ GOOD (≥1.4x) | ○ MARGINAL (≥1.2x)
-        * = direction changed from 2.0 skew (sentiment conflict → hedge)
-        TRR ⚠️ = HIGH tail risk (max 50 contracts) - learned from significant MU loss
+Legend: VRP EXCELLENT (>=1.8x) | GOOD (>=1.4x) | MARGINAL (>=1.2x)
+        * = direction changed from 2.0 skew (sentiment conflict -> hedge)
+        TRR HIGH = elevated tail risk (max 50 contracts)
 
-📊 TOP PICK: {TICKER} ({Date} {BMO/AMC})
+TOP PICK: {TICKER} ({Date} {BMO/AMC})
    VRP: {X.X}x | Implied Move: {X.X}% | 4.0 Score: {X.X}
    Sentiment: {1-line summary, max 30 words}
-   Direction: {2.0 Skew} → {4.0 Adjusted} ({rule applied})
+   Direction: {2.0 Skew} -> {4.0 Adjusted} ({rule applied})
 
-⚠️ CONFLICTS (if any):
-   • {TICKER}: Skew={X} vs Sentiment={Y} → Neutral stance (hedge both sides)
+CONFLICTS (if any):
+   {TICKER}: Skew={X} vs Sentiment={Y} -> Neutral stance (hedge both sides)
 
-⚡ HIGH TAIL RISK TICKERS (if any):
-   • {TICKER}: TRR {X.XX}x → Max 50 contracts / $25k notional
-   [Only show tickers with TRR_LEVEL = "HIGH". Omit section if none.]
+HIGH TAIL RISK (if any):
+   {TICKER}: TRR {X.XX}x -> Max 50 contracts / $25k notional
+   [Only show tickers with tail_risk_level = "HIGH". Omit section if none.]
 
-📦 CACHE STATUS
+CACHE STATUS
    Hits: X (instant, free)
    Misses: Y (fetched fresh)
    Budget: Z/40 calls today | $X.XX left this month
 
-💡 NEXT STEPS
-   Run `/analyze {TOP_TICKER}` for full strategy recommendations
-══════════════════════════════════════════════════════
+NEXT STEPS
+   Run /analyze {TOP_TICKER} for full strategy recommendations
+==============================================================
 ```
 
 ## Cost Control
 - Maximum 5 Perplexity calls (top 5 only)
-- Only for VRP >= 1.8x AND Liquidity != REJECT (discovery threshold)
+- Only for VRP >= 1.8x AND Liquidity != REJECT
 - Cache hits are instant and free
-- After `/prime`, all sentiment comes from cache
+- After /prime, all sentiment comes from cache
 
-## After /prime vs Without /prime
-- **After /prime:** All sentiment instant from cache (0 API calls)
-- **Without /prime:** Fetches on-demand, caches for later commands
+## Typical Workflow
+```
+Morning:  /prime           -> Pre-cache all sentiment
+Then:     /whisper         -> Instant results (cache hits)
+Pick:     /analyze NVDA    -> Deep dive on best candidate
+```

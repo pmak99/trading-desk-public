@@ -11,7 +11,6 @@ None - automatically uses today's date
 - Only pause for Perplexity calls to confirm API usage
 
 ## Progress Display
-Show progress updates as you work:
 ```
 [1/4] Checking market status...
 [2/4] Scanning today's earnings...
@@ -19,177 +18,126 @@ Show progress updates as you work:
 [4/4] Fetching sentiment for qualified tickers...
 ```
 
-## Purpose
-Quick command to check if there are any tradeable opportunities TODAY.
-Run this after market open to see what's actionable.
-
-## Tail Risk Ratio (TRR)
-
-| Level | TRR | Max Contracts | Action |
-|-------|-----|---------------|--------|
-| HIGH | > 2.5x | 50 | ⚠️ TRR warning in alert box |
-| NORMAL | 1.5-2.5x | 100 | No warning |
-| LOW | < 1.5x | 100 | No warning |
-
-*TRR = Max Historical Move / Average Move. HIGH TRR tickers caused significant MU loss.*
-
 ## Step-by-Step Instructions
 
-### Step 1: Check Market Status (Alpaca MCP)
-```
-mcp__alpaca__alpaca_get_clock
+### Step 1: Check Market Status
+```bash
+DAY_OF_WEEK=$(date '+%A')
+CURRENT_HOUR=$(date '+%H')
+TODAY=$(date '+%Y-%m-%d')
 ```
 
-If market is closed on weekend/holiday:
+If market is closed on weekend:
 ```
-ℹ️ Market closed today ({reason})
-   No earnings to trade. Next trading day: {date}
+Market closed today (Weekend)
+   No earnings to trade. Run /whisper for next week's opportunities.
 ```
-→ Exit early
+-> Exit early
 
-If pre-market/after-hours:
-```
-⏰ Market: CLOSED - Opens/Closed at {time}
-   Showing today's earnings opportunities.
-```
+If pre-market/after-hours, display informational note and continue.
 
 ### Step 2: Run Today's Scan
 ```bash
-cd $PROJECT_ROOT/2.0 && ./trade.sh scan $(date +%Y-%m-%d)
+cd "$PROJECT_ROOT/2.0" && ./trade.sh scan $(date +%Y-%m-%d)
 ```
-
-This provides:
-- Today's earnings with VRP analysis
-- Filtered to high-opportunity trades
 
 ### Step 3: Filter High-VRP Alerts
 From results, identify tickers where:
-- VRP >= 1.8x (discovery threshold for alerts - EXCELLENT tier)
+- VRP >= 1.8x (EXCELLENT tier)
 - Liquidity != REJECT
 - Earnings timing is actionable (BMO if morning, AMC if afternoon)
 
 If no alerts qualify:
 ```
-📭 No high-VRP opportunities today.
-   Try `/scan {tomorrow}` to plan ahead.
+No high-VRP opportunities today.
+   Try /scan {tomorrow} to plan ahead.
 ```
 
-### Step 3b: Check TRR for Alert Tickers
-Query tail risk for all alert tickers:
+Query TRR for alert tickers:
 ```bash
-# Note: Tickers should already be sanitized (alphanumeric, uppercase) from 2.0 output
-TICKERS="'NVDA','MU'"  # Use actual tickers from Step 3
+TICKERS="'NVDA','MU'"  # Use actual tickers
 
-sqlite3 $PROJECT_ROOT/2.0/data/ivcrush.db \
+sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
   "SELECT ticker, tail_risk_ratio, tail_risk_level, max_contracts
    FROM position_limits WHERE ticker IN ($TICKERS) AND tail_risk_level = 'HIGH';"
 ```
 
-Mark HIGH TRR tickers for warning display in alert boxes.
+### Step 4: Add Sentiment for Alerts (max 3)
 
-### Step 4: Add Sentiment for Alerts (Conditional)
-
-For EACH alert (max 3):
-
-**4a. Check sentiment cache (with 3-hour freshness):**
+**4a. Check sentiment cache:**
 ```bash
-# Sanitize ticker (alphanumeric only, uppercase)
-TICKER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
+TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
-  "SELECT sentiment, source FROM sentiment_cache WHERE ticker='$TICKER' AND date='$(date +%Y-%m-%d)' AND cached_at > datetime('now', '-3 hours') ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
+sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+  "SELECT sentiment, source FROM sentiment_cache
+   WHERE ticker='$TICKER' AND date='$(date +%Y-%m-%d)'
+   AND cached_at > datetime('now', '-3 hours')
+   ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
 ```
 
 **4b. If cache miss, use fallback chain:**
-1. Check budget:
-   ```bash
-   sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
-     "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
-   ```
-   If >= 40 → skip to WebSearch (daily limit: 40 calls, monthly cap: $5)
-2. Try Perplexity with query:
-   ```
-   "For {TICKER} earnings, respond ONLY in this format:
-   Direction: [bullish/bearish/neutral]
-   Score: [number -1 to +1]
-   Catalysts: [2 bullets, max 8 words each]"
-   ```
-3. Fall back to WebSearch, summarize into same format
+1. Check budget (40/day limit)
+2. Try Perplexity (max 3 calls)
+3. Fall back to `mcp__perplexity__perplexity_search`
 4. Graceful skip if all fail
 
 ## Output Format
 
 ```
-══════════════════════════════════════════════════════
-🚨 TODAY'S TRADING ALERTS - {DATE}
-══════════════════════════════════════════════════════
+==============================================================
+TODAY'S TRADING ALERTS - {DATE}
+==============================================================
 
-⏰ Market: [OPEN/CLOSED] - [time info]
+Market: [OPEN/CLOSED] - [time info]
 
-🔔 HIGH-VRP ALERTS ({N} opportunities)
+HIGH-VRP ALERTS ({N} opportunities)
 
-┌─────────────────────────────────────────────────────┐
-│ 🚨 NVDA - EARNINGS TODAY (AMC)                      │
-├─────────────────────────────────────────────────────┤
-│ VRP: 8.2x ⭐ EXCELLENT                              │
-│ Implied Move: 8.5% | Historical: 1.0%               │
-│ Liquidity: EXCELLENT                                │
-│                                                     │
-│ 🧠 {BULL/BEAR/NEUT} (+0.6): {1-line, max 20 words}  │
-│                                                     │
-│ 💡 Run `/analyze NVDA` for strategy recommendations │
-└─────────────────────────────────────────────────────┘
+--- NVDA - EARNINGS TODAY (AMC) ---
+VRP: 8.2x EXCELLENT
+Implied Move: 8.5% | Historical: 1.0%
+Liquidity: EXCELLENT
+Sentiment: BULL (+0.6): {1-line, max 20 words}
+-> Run /analyze NVDA for strategy recommendations
 
-┌─────────────────────────────────────────────────────┐
-│ 🚨 MU - EARNINGS TODAY (AMC)          ⚠️ HIGH TRR   │
-├─────────────────────────────────────────────────────┤
-│ VRP: 4.2x ✓ GOOD                                    │
-│ Implied Move: 6.2% | Historical: 1.0%               │
-│ Liquidity: EXCELLENT                                │
-│ ⚡ TRR: 3.05x → Max 50 contracts / $25k             │
-│                                                     │
-│ 🧠 {BULL/BEAR/NEUT} (+0.4): {1-line, max 20 words}  │
-│                                                     │
-│ 💡 Run `/analyze MU` for strategy recommendations   │
-└─────────────────────────────────────────────────────┘
+--- MU - EARNINGS TODAY (AMC) --- [HIGH TRR]
+VRP: 4.2x GOOD
+Implied Move: 6.2% | Historical: 1.0%
+Liquidity: EXCELLENT
+TRR: 3.05x -> Max 50 contracts / $25k
+Sentiment: BULL (+0.4): {1-line, max 20 words}
+-> Run /analyze MU for strategy recommendations
 
-[Note: Only show TRR line for HIGH TRR tickers. Omit for NORMAL/LOW.]
-
-📊 SUMMARY
+SUMMARY
    Alerts found: {N}
    With sentiment: {M}
 
-⚠️ REMINDERS
-   • Always check liquidity before trading
-   • Use `/analyze TICKER` for full strategy
-   • Never trade REJECT liquidity (lesson: significant loss)
-   • Respect TRR limits for HIGH tail risk tickers (lesson: significant MU loss)
-
-══════════════════════════════════════════════════════
+REMINDERS
+   Always check liquidity before trading
+   Use /analyze TICKER for full strategy
+   Respect TRR limits for HIGH tail risk tickers
+==============================================================
 ```
 
 ## No Alerts Output
 
 ```
-══════════════════════════════════════════════════════
-🚨 TODAY'S TRADING ALERTS - {DATE}
-══════════════════════════════════════════════════════
+==============================================================
+TODAY'S TRADING ALERTS - {DATE}
+==============================================================
 
-⏰ Market: [OPEN/CLOSED]
+Market: [OPEN/CLOSED]
 
-📭 NO HIGH-VRP OPPORTUNITIES TODAY
+NO HIGH-VRP OPPORTUNITIES TODAY
 
 Scanned {N} tickers with earnings today:
-  • VRP < 1.8x: {M} tickers (insufficient edge)
-  • Liquidity REJECT: {R} tickers (untradeable)
-  • Qualified: 0 tickers
+  VRP < 1.8x: {M} tickers (insufficient edge)
+  Liquidity REJECT: {R} tickers
+  Qualified: 0 tickers
 
-💡 SUGGESTIONS
-   • Run `/scan {tomorrow}` to plan ahead
-   • Run `/whisper` to see week's best opportunities
-   • Check back tomorrow morning
-
-══════════════════════════════════════════════════════
+SUGGESTIONS
+   Run /scan {tomorrow} to plan ahead
+   Run /whisper to see week's best opportunities
+==============================================================
 ```
 
 ## Cost Control
