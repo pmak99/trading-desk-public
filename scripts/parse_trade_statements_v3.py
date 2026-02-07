@@ -260,7 +260,7 @@ def parse_statement(pdf_path: str, month: str) -> Tuple[List[Transaction], Dict]
                         val = st_match.group(2).replace(',', '')
                         if val and val != '-':
                             realized_gains['ytd_st'] = float(val)
-                    except:
+                    except (ValueError, AttributeError, IndexError):
                         pass
 
                 lt_match = re.search(r'Net Long-term Gain/Loss\s+([-\d,]+\.?\d*)\s+([-\d,]+\.?\d*)', text)
@@ -272,7 +272,7 @@ def parse_statement(pdf_path: str, month: str) -> Tuple[List[Transaction], Dict]
                         val = lt_match.group(2).replace(',', '')
                         if val and val != '-':
                             realized_gains['ytd_lt'] = float(val)
-                    except:
+                    except (ValueError, AttributeError, IndexError):
                         pass
 
             # Extract transactions

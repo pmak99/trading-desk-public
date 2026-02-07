@@ -274,13 +274,8 @@ def drop_all_tables(db_path: Path) -> None:
 
     try:
         for table in ALLOWED_TABLES:
-            # Validate table name is alphanumeric + underscore only
-            if not table.replace('_', '').isalnum():
-                raise ValueError(f"Invalid table name: {table}")
-
-            # Use parameterized query where possible, or validated f-string
-            # Note: SQLite doesn't support parameterized table names, so we validate first
-            cursor.execute(f'DROP TABLE IF EXISTS {table}')
+            # Bracket-quote table name for defense-in-depth (whitelist is primary guard)
+            cursor.execute(f'DROP TABLE IF EXISTS [{table}]')
 
         conn.commit()
         logger.warning(f"All tables dropped from {db_path}")

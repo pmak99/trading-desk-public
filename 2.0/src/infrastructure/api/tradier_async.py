@@ -141,6 +141,10 @@ class AsyncTradierAPI:
                         response.raise_for_status()
                         return await response.json()
 
+            except aiohttp.ClientConnectorCertificateError as e:
+                # SSL/TLS certificate errors should not be retried (may indicate MITM)
+                logger.error(f"{operation} SSL certificate error: {e}")
+                raise
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
                 last_exception = e
                 self._error_count += 1

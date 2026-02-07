@@ -133,8 +133,8 @@ async def alerts_ingest(
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_error("alerts_ingest", duration_ms)
-        log("error", "Alert ingest failed", error=type(e).__name__)
-        raise HTTPException(500, f"Alert processing failed: {_mask_sensitive(str(e))}")
+        log("error", "Alert ingest failed", error=type(e).__name__, details=_mask_sensitive(str(e)))
+        raise HTTPException(500, "Alert processing failed")
 
 
 @router.post("/telegram")

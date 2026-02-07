@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.state import lifespan
-from src.api.middleware import rate_limit_middleware, add_security_headers, add_request_id
+from src.api.middleware import rate_limit_middleware, add_security_headers, add_request_id, limit_request_size
 from src.api.routers import health, analysis, operations, webhooks, jobs
 
 # Re-export for backward compatibility (tests import from src.main)
@@ -69,6 +69,7 @@ app.add_middleware(
 
 # Register middleware (order matters - last registered runs first)
 app.middleware("http")(rate_limit_middleware)
+app.middleware("http")(limit_request_size)
 app.middleware("http")(add_security_headers)
 app.middleware("http")(add_request_id)
 

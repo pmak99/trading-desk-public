@@ -10,6 +10,7 @@ import re
 import os
 import hashlib
 import time
+import tempfile
 import signal
 import threading
 from datetime import datetime, timedelta
@@ -518,7 +519,8 @@ class EarningsWhisperScraper:
                         logger.error(f"Timeout navigating to Twitter: {e}")
                         # Debug screenshot only if debug logging enabled
                         if logger.isEnabledFor(logging.DEBUG):
-                            screenshot_path = f"/tmp/twitter_timeout_{int(time.time())}.png"
+                            with tempfile.NamedTemporaryFile(suffix=".png", prefix="twitter_debug_", delete=False) as f:
+                                screenshot_path = f.name
                             page.screenshot(path=screenshot_path)
                             logger.debug(f"Debug screenshot saved to {screenshot_path}")
                         return Result.Err(AppError(ErrorCode.EXTERNAL, f"Navigation timeout: {e}"))

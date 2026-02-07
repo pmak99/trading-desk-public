@@ -93,11 +93,20 @@ class BudgetLogger:
                 )
             """)
             # Add token columns if they don't exist (migration)
-            for column in ['output_tokens', 'reasoning_tokens', 'search_requests']:
-                try:
-                    conn.execute(f"ALTER TABLE api_budget ADD COLUMN {column} INTEGER DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass  # Column already exists
+            # Whitelist of allowed column definitions to prevent SQL injection
+            _ALLOWED_MIGRATIONS = {
+                "output_tokens": "ALTER TABLE api_budget ADD COLUMN output_tokens INTEGER DEFAULT 0",
+                "reasoning_tokens": "ALTER TABLE api_budget ADD COLUMN reasoning_tokens INTEGER DEFAULT 0",
+                "search_requests": "ALTER TABLE api_budget ADD COLUMN search_requests INTEGER DEFAULT 0",
+            }
+            cursor = conn.execute("PRAGMA table_info(api_budget)")
+            existing_columns = {row[1] for row in cursor.fetchall()}
+            for column, sql in _ALLOWED_MIGRATIONS.items():
+                if column not in existing_columns:
+                    try:
+                        conn.execute(sql)
+                    except sqlite3.OperationalError:
+                        pass  # Column already exists
             conn.commit()
         finally:
             conn.close()

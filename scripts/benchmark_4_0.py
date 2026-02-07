@@ -242,7 +242,7 @@ def analyze_scoring_consistency():
                     try:
                         vrp = float(line.split(':')[1].strip().replace('x', ''))
                         vrp_values.append(vrp)
-                    except:
+                    except (ValueError, IndexError):
                         pass
                     break
 

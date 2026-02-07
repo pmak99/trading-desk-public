@@ -76,12 +76,14 @@ def migrate_database(db_path: Path) -> bool:
             'search_requests': 'INTEGER DEFAULT 0',
         }
         columns_added = []
-        for column_name, column_def in NEW_COLUMNS:
+        for column_name, _column_def in NEW_COLUMNS:
             if column_name not in ALLOWED_COLUMNS:
                 raise ValueError(f"Unknown column: {column_name}")
+            # Use definition from whitelist (not from iterable) to prevent injection
+            safe_def = ALLOWED_COLUMNS[column_name]
             if column_name not in existing_columns:
                 try:
-                    cursor.execute(f"ALTER TABLE api_budget ADD COLUMN {column_name} {column_def}")
+                    cursor.execute(f"ALTER TABLE api_budget ADD COLUMN {column_name} {safe_def}")
                     columns_added.append(column_name)
                 except sqlite3.OperationalError as e:
                     if "duplicate column" in str(e).lower():
