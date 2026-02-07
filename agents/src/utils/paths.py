@@ -3,6 +3,7 @@
 Provides common path resolution functions used across integration modules.
 """
 
+import sys
 import subprocess
 from pathlib import Path
 
@@ -53,6 +54,11 @@ def find_main_repo(reference_path: Path = None) -> Path:
 
 # Pre-compute main repo path for module-level use
 MAIN_REPO = find_main_repo()
+
+# Add root to sys.path for common/ access
+_root_str = str(MAIN_REPO)
+if _root_str not in sys.path:
+    sys.path.insert(0, _root_str)
 
 # Common paths used by integration modules
 REPO_2_0 = MAIN_REPO / "2.0"
