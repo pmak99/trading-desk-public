@@ -164,6 +164,7 @@ class SentimentHistory:
         """Initialize database schema."""
         with _db_lock:
             with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS sentiment_history (
                         ticker TEXT NOT NULL,

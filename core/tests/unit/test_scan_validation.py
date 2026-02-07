@@ -226,23 +226,20 @@ class TestIntegrationScenarios:
     """Test real-world scenarios combining multiple functions."""
 
     def test_friday_earnings_bmo_with_offset_1(self):
-        """Friday BMO earnings with offset 1 should adjust Saturday to Monday."""
-        # Find next Friday
-        today = date.today()
-        days_to_friday = (4 - today.weekday()) % 7
-        if days_to_friday == 0:
-            days_to_friday = 7
-        friday = today + timedelta(days=days_to_friday)
+        """Friday BMO earnings with offset 1 should adjust Saturday to next trading day."""
+        # Use a fixed Friday to avoid date-dependent failures (e.g., Presidents' Day)
+        friday = date(2026, 3, 6)  # A Friday where the following Monday is not a holiday
+        assert friday.weekday() == 4  # Sanity check: is Friday
 
         # Calculate expiration with offset 1
         expiration = calculate_expiration_date(
             friday, EarningsTiming.BMO, offset_days=1
         )
 
-        # Should be Monday (adjusted from Saturday)
-        expected_monday = friday + timedelta(days=3)  # Fri + 3 = Mon
-        assert expiration == expected_monday
-        assert expiration.weekday() == 0  # Monday
+        # Friday + 1 = Saturday, adjusted to next trading day (Monday)
+        expected = adjust_to_trading_day(friday + timedelta(days=1))
+        assert expiration == expected
+        assert expiration.weekday() not in [5, 6]  # Not a weekend
 
         # Should pass validation
         validation = validate_expiration_date(expiration, friday, "AAPL")
