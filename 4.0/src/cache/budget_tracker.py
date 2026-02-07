@@ -128,6 +128,7 @@ class BudgetTracker:
         """Initialize database schema with token tracking columns."""
         with _db_lock:
             with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS api_budget (
                         date TEXT PRIMARY KEY,

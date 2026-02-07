@@ -425,6 +425,15 @@ class Container:
         validate_configuration(self.config)
         logger.info("Configuration verified")
 
+    def cleanup_caches(self) -> int:
+        """Remove expired entries from persistent caches. Returns count deleted."""
+        deleted = 0
+        if self._hybrid_cache is not None:
+            deleted = self._hybrid_cache.cleanup_expired()
+            if deleted:
+                logger.info(f"Cleaned {deleted} expired entries from hybrid cache")
+        return deleted
+
     def clear_cache(self) -> None:
         """Clear all caches."""
         if self._cache:

@@ -159,6 +159,30 @@ class MigrationManager:
             sql_down=None  # SQLite doesn't support DROP COLUMN easily
         ))
 
+        # Migration 004: Recreate analysis_log with correct 19-column schema
+        # DB has old 11-column schema (analyzed_at, edge_score), code expects 19 columns.
+        # Table is empty (0 rows) - safe to drop and recreate.
+        self.migrations.append(Migration(
+            version=4,
+            name="recreate_analysis_log_table",
+            sql_up="""
+                -- Handled in _apply_migration_004
+            """,
+            sql_down="DROP TABLE IF EXISTS analysis_log"
+        ))
+
+        # Migration 005: Add missing index + drop redundant index
+        # ADD idx_strategies_parent on strategies(parent_strategy_id) - needed for FK joins
+        # DROP idx_earnings_date - redundant, covered by idx_earnings_date_ticker(earnings_date, ticker)
+        self.migrations.append(Migration(
+            version=5,
+            name="add_parent_index_drop_redundant",
+            sql_up="""
+                -- Handled in _apply_migration_005
+            """,
+            sql_down=None
+        ))
+
         # Sort migrations by version (safety check)
         self.migrations.sort(key=lambda m: m.version)
 
@@ -278,6 +302,10 @@ class MigrationManager:
                     self._apply_migration_002(cursor)
                 elif migration.version == 3:
                     self._apply_migration_003(cursor)
+                elif migration.version == 4:
+                    self._apply_migration_004(cursor)
+                elif migration.version == 5:
+                    self._apply_migration_005(cursor)
                 else:
                     # Standard SQL execution
                     cursor.executescript(migration.sql_up)
@@ -348,6 +376,104 @@ class MigrationManager:
             cursor.execute("ALTER TABLE earnings_calendar ADD COLUMN last_validated_at DATETIME")
         else:
             logger.debug("earnings_calendar table already has last_validated_at column")
+
+    def _apply_migration_004(self, cursor: sqlite3.Cursor):
+        """
+        Apply migration 004: Recreate analysis_log with correct 19-column schema.
+
+        The existing table has old 11-column schema (analyzed_at, edge_score).
+        Code expects 19 columns (timestamp, vix_level, strategy_type, etc.).
+        Table is empty (0 rows) so safe to drop and recreate.
+        """
+        # Verify table is empty before dropping
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='analysis_log'
+        """)
+        if cursor.fetchone():
+            row_count = cursor.execute("SELECT COUNT(*) FROM analysis_log").fetchone()[0]
+            if row_count > 0:
+                logger.warning(
+                    f"analysis_log has {row_count} rows - skipping recreation to preserve data"
+                )
+                return
+
+            # Drop old table and its indexes
+            cursor.execute("DROP TABLE analysis_log")
+            logger.info("Dropped old analysis_log table (0 rows)")
+
+        # Recreate with correct 19-column schema (matches init_schema.py)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS analysis_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME NOT NULL,
+                ticker TEXT NOT NULL,
+                earnings_date DATE NOT NULL,
+                expiration DATE NOT NULL,
+                implied_move_pct REAL NOT NULL,
+                historical_mean_pct REAL NOT NULL,
+                vrp_ratio REAL NOT NULL,
+                recommendation TEXT NOT NULL,
+                confidence REAL,
+                consistency_score REAL,
+                vix_level REAL,
+                vix_regime TEXT,
+                strategy_type TEXT,
+                strategy_score REAL,
+                strategy_pop REAL,
+                strategy_rr REAL,
+                contracts INTEGER,
+                raw_analysis TEXT
+            )
+        """)
+
+        # Create indexes (matches init_schema.py)
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_ticker ON analysis_log(ticker)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_timestamp ON analysis_log(timestamp)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_recommendation ON analysis_log(recommendation)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_regime ON analysis_log(vix_regime)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_strategy ON analysis_log(strategy_type)'
+        )
+        logger.info("Recreated analysis_log with 19-column schema + 5 indexes")
+
+    def _apply_migration_005(self, cursor: sqlite3.Cursor):
+        """
+        Apply migration 005: Add missing index + drop redundant index.
+
+        - ADD idx_strategies_parent on strategies(parent_strategy_id) for FK joins
+        - DROP idx_earnings_date (redundant, covered by idx_earnings_date_ticker)
+        """
+        # Add parent strategy index if strategies table exists
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='strategies'
+        """)
+        if cursor.fetchone():
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_strategies_parent
+                ON strategies(parent_strategy_id)
+            """)
+            logger.info("Created idx_strategies_parent index")
+
+        # Drop redundant idx_earnings_date (covered by idx_earnings_date_ticker)
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='index' AND name='idx_earnings_date'
+        """)
+        if cursor.fetchone():
+            cursor.execute("DROP INDEX idx_earnings_date")
+            logger.info("Dropped redundant idx_earnings_date index")
+        else:
+            logger.debug("idx_earnings_date already absent, skipping drop")
 
     def rollback(self, target_version: int) -> int:
         """
