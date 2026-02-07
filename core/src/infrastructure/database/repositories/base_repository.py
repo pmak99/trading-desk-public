@@ -221,6 +221,44 @@ class BaseRepository(ABC):
         except sqlite3.Error as e:
             return self._db_error(e, operation)
 
+    def _execute_batch_insert(
+        self,
+        queries_and_params: List[tuple[str, tuple]],
+        operation: str = "batch insert",
+    ) -> Result[int, AppError]:
+        """
+        Execute multiple INSERT statements in a single transaction.
+
+        All inserts succeed or all are rolled back together.
+
+        Args:
+            queries_and_params: List of (query, params) tuples
+            operation: Description for error messages
+
+        Returns:
+            Result with count of executed statements or AppError
+        """
+        if not queries_and_params:
+            return Ok(0)
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("BEGIN")
+                    for query, params in queries_and_params:
+                        cursor.execute(query, params)
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+
+            logger.info(f"Batch {operation}: {len(queries_and_params)} statements in single transaction")
+            return Ok(len(queries_and_params))
+
+        except sqlite3.Error as e:
+            return self._db_error(e, operation)
+
     def _execute_delete(
         self,
         query: str,
