@@ -14,7 +14,11 @@ from .schemas import (
     ExplanationResponse,
     AnomalyDetectionResponse,
     HealthCheckResponse,
+    PreFlightResponse,
+    NewsFetchResponse,
+    NewsHeadline,
 )
+from .retry import with_retry, is_transient_error
 from .timeout import gather_with_timeout, run_with_timeout
 
 __all__ = [
@@ -37,6 +41,12 @@ __all__ = [
     'ExplanationResponse',
     'AnomalyDetectionResponse',
     'HealthCheckResponse',
+    'PreFlightResponse',
+    'NewsFetchResponse',
+    'NewsHeadline',
+    # Retry
+    'with_retry',
+    'is_transient_error',
     # Timeout
     'gather_with_timeout',
     'run_with_timeout',

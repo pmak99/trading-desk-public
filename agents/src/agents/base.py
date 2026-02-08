@@ -17,7 +17,9 @@ from ..utils.schemas import (
     ExplanationResponse,
     AnomalyDetectionResponse,
     HealthCheckResponse,
-    SentimentFetchResponse
+    SentimentFetchResponse,
+    PreFlightResponse,
+    NewsFetchResponse,
 )
 
 
@@ -51,7 +53,9 @@ class BaseAgent:
         'ExplanationAgent': ExplanationResponse,
         'AnomalyDetectionAgent': AnomalyDetectionResponse,
         'HealthCheckAgent': HealthCheckResponse,
-        'SentimentFetchAgent': SentimentFetchResponse
+        'SentimentFetchAgent': SentimentFetchResponse,
+        'PreFlightAgent': PreFlightResponse,
+        'NewsFetchAgent': NewsFetchResponse,
     }
 
     @staticmethod

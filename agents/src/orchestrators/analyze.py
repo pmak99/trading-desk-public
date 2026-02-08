@@ -1,12 +1,21 @@
 """AnalyzeOrchestrator - Single ticker deep dive analysis.
 
 Coordinates parallel specialist analysis for comprehensive ticker evaluation,
-providing VRP, liquidity, sentiment, strategies, and explanations.
+providing VRP, liquidity, sentiment, news, strategies, and explanations.
 
-Target: 60 seconds for single ticker (vs 45 seconds sequential in 5.0).
+Pipeline:
+  Step 1: [PreFlight + Health] parallel
+  Step 2: Fail-fast (invalid ticker? unhealthy?)
+  Step 3: Auto-detect earnings date
+  Step 4: [TickerAnalysis + Sentiment + News + Pattern] all parallel (with retry)
+  Step 5: [Explanation + Anomaly] parallel (depend on Step 4 TickerAnalysis)
+  Step 6: Synthesize + Recommend
+
+Target: 20-30 seconds (down from 45-60 seconds sequential).
 """
 
 import asyncio
+import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 
@@ -17,7 +26,12 @@ from ..agents.explanation import ExplanationAgent
 from ..agents.anomaly import AnomalyDetectionAgent
 from ..agents.health import HealthCheckAgent
 from ..agents.pattern_recognition import PatternRecognitionAgent
+from ..agents.preflight import PreFlightAgent
+from ..agents.news_fetch import NewsFetchAgent
 from ..integration.cache_4_0 import Cache4_0
+from ..utils.retry import with_retry
+
+logger = logging.getLogger(__name__)
 
 
 class AnalyzeOrchestrator(BaseOrchestrator):
@@ -25,16 +39,12 @@ class AnalyzeOrchestrator(BaseOrchestrator):
     Orchestrator for /analyze - Single Ticker Deep Dive.
 
     Workflow:
-    1. Run health check (fail fast if APIs down)
-    2. Spawn specialist agents in parallel:
-       - TickerAnalysisAgent: VRP, liquidity, strategies
-       - SentimentFetchAgent: AI sentiment (cached if available)
-       - ExplanationAgent: Narrative reasoning
-       - AnomalyDetectionAgent: Data quality checks
-    3. Wait for all specialists (with timeout)
-    4. Synthesize insights into comprehensive report
-    5. Generate final trade recommendation
-    6. Return markdown-formatted report
+    1. Run PreFlight + Health in parallel (fail fast)
+    2. Auto-detect earnings date
+    3. Run TickerAnalysis + Sentiment + News + Pattern in parallel (with retry)
+    4. Run Explanation + Anomaly in parallel (depend on TickerAnalysis)
+    5. Synthesize insights into comprehensive report
+    6. Generate final trade recommendation
 
     Example:
         orchestrator = AnalyzeOrchestrator()
@@ -58,22 +68,29 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         Execute analyze orchestration workflow.
 
         Args:
-            ticker: Stock ticker symbol
+            ticker: Stock ticker symbol (or company name alias)
             earnings_date: Earnings date (YYYY-MM-DD), auto-detected if None
 
         Returns:
             Orchestration result with comprehensive analysis
-
-        Example:
-            result = await orchestrator.orchestrate(
-                ticker="NVDA",
-                earnings_date="2026-02-05"
-            )
         """
-        # Step 1: Health check
-        print("[1/6] Running health check...")
+        # Step 1: PreFlight + Health in parallel
+        print("[1/7] Running pre-flight validation + health check...")
+        preflight_agent = PreFlightAgent()
         health_agent = HealthCheckAgent()
-        health_result = health_agent.check_health()
+
+        preflight_result, health_result = await asyncio.gather(
+            asyncio.to_thread(preflight_agent.validate, ticker, earnings_date),
+            asyncio.to_thread(health_agent.check_health),
+        )
+
+        # Step 2: Fail-fast checks
+        if not preflight_result.get('is_valid'):
+            return {
+                'success': False,
+                'error': f"Pre-flight failed: {preflight_result.get('error', 'Invalid ticker')}",
+                'preflight': preflight_result
+            }
 
         if health_result['status'] == 'unhealthy':
             return {
@@ -82,28 +99,41 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 'health': health_result
             }
 
-        # Step 2: Auto-detect earnings date if not provided
+        # Use normalized ticker from pre-flight
+        normalized_ticker = preflight_result['normalized_ticker']
+        if normalized_ticker != ticker.upper().strip():
+            print(f"  Resolved: {ticker} -> {normalized_ticker}")
+
+        if preflight_result.get('warnings'):
+            for w in preflight_result['warnings']:
+                print(f"  Warning: {w}")
+
+        # Step 3: Auto-detect earnings date if not provided
         if earnings_date is None:
-            print(f"[2/6] Auto-detecting earnings date for {ticker}...")
-            earnings_date = self._lookup_earnings_date(ticker)
+            print(f"[2/7] Auto-detecting earnings date for {normalized_ticker}...")
+            earnings_date = self._lookup_earnings_date(normalized_ticker)
             if earnings_date is None:
                 return {
                     'success': False,
-                    'error': f'Could not find earnings date for {ticker}'
+                    'error': f'Could not find earnings date for {normalized_ticker}',
+                    'preflight': preflight_result
                 }
             print(f"  Found: {earnings_date}")
         else:
-            print(f"[2/6] Using provided earnings date: {earnings_date}")
+            print(f"[2/7] Using provided earnings date: {earnings_date}")
 
-        # Step 3: Spawn specialist agents in parallel
-        print(f"[3/6] Spawning {ticker} specialist agents...")
+        # Step 4: Spawn specialist agents in parallel
+        print(f"[3/7] Spawning {normalized_ticker} specialist agents (parallel)...")
         specialist_results = await self._parallel_specialist_analysis(
-            ticker=ticker,
+            ticker=normalized_ticker,
             earnings_date=earnings_date
         )
 
-        # Step 4: Check for critical failures
-        print("[4/6] Checking specialist results...")
+        # Include preflight and news in specialist results
+        specialist_results['preflight'] = preflight_result
+
+        # Step 5: Check for critical failures
+        print("[4/7] Checking specialist results...")
         if self._has_critical_failures(specialist_results):
             return {
                 'success': False,
@@ -111,24 +141,25 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 'specialist_results': specialist_results
             }
 
-        # Step 5: Synthesize into comprehensive report
-        print("[5/6] Synthesizing comprehensive report...")
+        # Step 6: Synthesize into comprehensive report
+        print("[5/7] Synthesizing comprehensive report...")
         report = self._synthesize_report(
-            ticker=ticker,
+            ticker=normalized_ticker,
             earnings_date=earnings_date,
             specialist_results=specialist_results
         )
 
-        # Step 6: Generate final recommendation
-        print("[6/6] Generating final recommendation...")
+        # Step 7: Generate final recommendation
+        print("[6/7] Generating final recommendation...")
         recommendation = self._generate_recommendation(
             specialist_results=specialist_results,
             report=report
         )
 
+        print("[7/7] Done.")
         return {
             'success': True,
-            'ticker': ticker,
+            'ticker': normalized_ticker,
             'earnings_date': earnings_date,
             'report': report,
             'recommendation': recommendation,
@@ -139,24 +170,18 @@ class AnalyzeOrchestrator(BaseOrchestrator):
     def _lookup_earnings_date(self, ticker: str) -> Optional[str]:
         """Look up earnings date from calendar."""
         try:
-            # Get upcoming earnings for next 30 days
             result = self.container_2_0.get_upcoming_earnings(days_ahead=30)
 
-            # Handle Result type
-            # Note: 2.0's Result type uses `is_err` property, not `is_error()` method
             if hasattr(result, 'is_err') and result.is_err:
                 return None
 
-            # Extract value
             if hasattr(result, 'value'):
                 earnings_tuples = result.value
             else:
                 earnings_tuples = result
 
-            # Find ticker
             for t, date_obj in earnings_tuples:
                 if t.upper() == ticker.upper():
-                    # Convert date to string
                     if hasattr(date_obj, 'strftime'):
                         return date_obj.strftime('%Y-%m-%d')
                     return str(date_obj)
@@ -171,118 +196,155 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         ticker: str,
         earnings_date: str
     ) -> Dict[str, Any]:
-        """Run all specialist agents in parallel."""
+        """Run all specialist agents in parallel with retry.
+
+        Phase 1: TickerAnalysis + Sentiment + News + Pattern (all independent)
+        Phase 2: Explanation + Anomaly (depend on TickerAnalysis from Phase 1)
+        """
         # Create agents
         ticker_agent = TickerAnalysisAgent()
         sentiment_agent = SentimentFetchAgent()
-        explanation_agent = ExplanationAgent()
-        anomaly_agent = AnomalyDetectionAgent()
+        news_agent = NewsFetchAgent()
+        pattern_agent = PatternRecognitionAgent()
 
-        # Build tasks
-        tasks = {
-            'ticker_analysis': asyncio.create_task(
-                asyncio.to_thread(
-                    ticker_agent.analyze,
-                    ticker,
-                    earnings_date,
-                    generate_strategies=True
-                )
-            ),
-            'sentiment': asyncio.create_task(
-                sentiment_agent.fetch_sentiment(ticker, earnings_date)
-            )
-        }
-
-        # Wait for core analyses with timeout
+        # Phase 1: All independent agents in parallel with retry
+        print("  Phase 1: TickerAnalysis + Sentiment + News + Pattern (parallel)...")
         try:
-            results = await asyncio.wait_for(
+            phase1_results = await asyncio.wait_for(
                 asyncio.gather(
-                    tasks['ticker_analysis'],
-                    tasks['sentiment'],
+                    with_retry(
+                        lambda: asyncio.to_thread(
+                            ticker_agent.analyze,
+                            ticker,
+                            earnings_date,
+                            generate_strategies=True
+                        ),
+                        max_retries=3,
+                        base_delay=2.0,
+                        label=f"TickerAnalysis({ticker})"
+                    ),
+                    with_retry(
+                        lambda: sentiment_agent.fetch_sentiment(ticker, earnings_date),
+                        max_retries=2,
+                        base_delay=2.0,
+                        label=f"Sentiment({ticker})"
+                    ),
+                    with_retry(
+                        lambda: news_agent.fetch_news(ticker),
+                        max_retries=1,
+                        base_delay=2.0,
+                        label=f"News({ticker})"
+                    ),
+                    with_retry(
+                        lambda: asyncio.to_thread(pattern_agent.analyze, ticker),
+                        max_retries=1,
+                        base_delay=2.0,
+                        label=f"Pattern({ticker})"
+                    ),
                     return_exceptions=True
                 ),
                 timeout=self.timeout
             )
-
-            ticker_result = results[0]
-            sentiment_result = results[1]
-
-            # Check if ticker analysis succeeded
-            if isinstance(ticker_result, Exception):
-                return {
-                    'ticker_analysis': {'error': str(ticker_result)},
-                    'sentiment': sentiment_result if not isinstance(sentiment_result, Exception) else {'error': str(sentiment_result)},
-                    'explanation': None,
-                    'anomaly': None
-                }
-
-            if ticker_result.get('error'):
-                return {
-                    'ticker_analysis': ticker_result,
-                    'sentiment': sentiment_result if not isinstance(sentiment_result, Exception) else {'error': str(sentiment_result)},
-                    'explanation': None,
-                    'anomaly': None
-                }
-
-            # Generate explanation based on ticker analysis
-            explanation = explanation_agent.explain(
-                ticker=ticker,
-                vrp_ratio=ticker_result.get('vrp_ratio', 0),
-                liquidity_tier=ticker_result.get('liquidity_tier', 'N/A')
-            )
-
-            # Get actual cache age from sentiment cache
-            cache = Cache4_0()
-            cache_age_hours = cache.get_cache_age_hours(ticker, earnings_date)
-            if cache_age_hours is None:
-                cache_age_hours = 0.0  # Fresh data if not cached
-
-            # Get actual historical quarters count
-            historical_moves = ticker_agent.get_historical_moves(ticker, limit=50)
-            historical_quarters = len(historical_moves) if historical_moves else 0
-
-            # Run anomaly detection with actual values
-            anomaly = anomaly_agent.detect(
-                ticker=ticker,
-                vrp_ratio=ticker_result.get('vrp_ratio', 0),
-                recommendation=ticker_result.get('recommendation', 'SKIP'),
-                liquidity_tier=ticker_result.get('liquidity_tier', 'REJECT'),
-                earnings_date=earnings_date,
-                cache_age_hours=cache_age_hours,
-                historical_quarters=historical_quarters
-            )
-
-            # Run pattern recognition
-            pattern_agent = PatternRecognitionAgent()
-            patterns = pattern_agent.analyze(ticker)
-
-            return {
-                'ticker_analysis': ticker_result,
-                'sentiment': sentiment_result if not isinstance(sentiment_result, Exception) else {'error': str(sentiment_result)},
-                'explanation': explanation,
-                'anomaly': anomaly,
-                'patterns': patterns
-            }
-
         except asyncio.TimeoutError:
             return {
-                'ticker_analysis': {'error': 'Timeout during analysis'},
+                'ticker_analysis': {'error': 'Timeout during Phase 1 analysis'},
                 'sentiment': {'error': 'Timeout'},
+                'news': {'error': 'Timeout'},
                 'explanation': None,
-                'anomaly': None
+                'anomaly': None,
+                'patterns': None
             }
+
+        # Unwrap Phase 1 results
+        ticker_result = self._unwrap_result(phase1_results[0], 'ticker_analysis')
+        sentiment_result = self._unwrap_result(phase1_results[1], 'sentiment')
+        news_result = self._unwrap_result(phase1_results[2], 'news')
+        patterns_result = self._unwrap_result(phase1_results[3], 'patterns')
+
+        # Check if ticker analysis succeeded (critical dependency for Phase 2)
+        if ticker_result.get('error'):
+            print(f"  TickerAnalysis failed: {ticker_result['error']}")
+            return {
+                'ticker_analysis': ticker_result,
+                'sentiment': sentiment_result,
+                'news': news_result,
+                'explanation': None,
+                'anomaly': None,
+                'patterns': patterns_result
+            }
+
+        # Phase 2: Explanation + Anomaly in parallel (depend on TickerAnalysis)
+        print("  Phase 2: Explanation + Anomaly (parallel, depend on TickerAnalysis)...")
+        explanation_agent = ExplanationAgent()
+        anomaly_agent = AnomalyDetectionAgent()
+
+        # Prepare anomaly detection inputs
+        cache = Cache4_0()
+        cache_age_hours = cache.get_cache_age_hours(ticker, earnings_date)
+        if cache_age_hours is None:
+            cache_age_hours = 0.0
+
+        historical_moves = ticker_agent.get_historical_moves(ticker, limit=50)
+        historical_quarters = len(historical_moves) if historical_moves else 0
+
+        try:
+            phase2_results = await asyncio.wait_for(
+                asyncio.gather(
+                    asyncio.to_thread(
+                        explanation_agent.explain,
+                        ticker=ticker,
+                        vrp_ratio=ticker_result.get('vrp_ratio', 0),
+                        liquidity_tier=ticker_result.get('liquidity_tier', 'N/A')
+                    ),
+                    asyncio.to_thread(
+                        anomaly_agent.detect,
+                        ticker=ticker,
+                        vrp_ratio=ticker_result.get('vrp_ratio', 0),
+                        recommendation=ticker_result.get('recommendation', 'SKIP'),
+                        liquidity_tier=ticker_result.get('liquidity_tier', 'REJECT'),
+                        earnings_date=earnings_date,
+                        cache_age_hours=cache_age_hours,
+                        historical_quarters=historical_quarters
+                    ),
+                    return_exceptions=True
+                ),
+                timeout=15
+            )
+        except asyncio.TimeoutError:
+            phase2_results = [None, None]
+
+        explanation = self._unwrap_result(phase2_results[0], 'explanation') if phase2_results[0] is not None else None
+        anomaly = self._unwrap_result(phase2_results[1], 'anomaly') if phase2_results[1] is not None else None
+
+        return {
+            'ticker_analysis': ticker_result,
+            'sentiment': sentiment_result,
+            'news': news_result,
+            'explanation': explanation,
+            'anomaly': anomaly,
+            'patterns': patterns_result
+        }
+
+    def _unwrap_result(self, result: Any, label: str) -> Dict[str, Any]:
+        """Unwrap a gather result, converting exceptions to error dicts."""
+        if isinstance(result, Exception):
+            logger.warning(f"{label} raised {type(result).__name__}: {result}")
+            return {'error': f'{type(result).__name__}: {result}'}
+        if result is None:
+            return {}
+        if isinstance(result, dict):
+            return result
+        return {'error': f'Unexpected result type: {type(result).__name__}'}
 
     def _has_critical_failures(self, specialist_results: Dict[str, Any]) -> bool:
         """Check if any critical specialist failed."""
-        # Ticker analysis is critical
         ticker_result = specialist_results.get('ticker_analysis', {})
         if ticker_result.get('error'):
             return True
 
-        # Check anomaly for DO_NOT_TRADE recommendation
         anomaly_result = specialist_results.get('anomaly', {})
         if anomaly_result and anomaly_result.get('recommendation') == 'DO_NOT_TRADE':
-            print("  ⚠️  CRITICAL: Anomaly detection recommends DO_NOT_TRADE")
+            print("  CRITICAL: Anomaly detection recommends DO_NOT_TRADE")
             return True
 
         return False
@@ -298,8 +360,9 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         sentiment_result = specialist_results.get('sentiment', {})
         explanation_result = specialist_results.get('explanation', {})
         anomaly_result = specialist_results.get('anomaly', {})
+        news_result = specialist_results.get('news', {})
+        preflight_result = specialist_results.get('preflight', {})
 
-        # Build report sections
         report = {
             'ticker': ticker,
             'earnings_date': earnings_date,
@@ -327,12 +390,18 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 'risks': sentiment_result.get('risks', []),
                 'cached': sentiment_result.get('cached', False)
             },
+            'news': {
+                'headlines': news_result.get('headlines', []),
+                'count': news_result.get('count', 0),
+                'error': news_result.get('error')
+            },
             'strategies': ticker_result.get('strategies', []),
             'anomalies': anomaly_result.get('anomalies', []) if anomaly_result else [],
             'key_factors': explanation_result.get('key_factors', []),
             'historical_context': explanation_result.get('historical_context', ''),
             'position_limits': ticker_result.get('position_limits'),
-            'patterns': specialist_results.get('patterns')
+            'patterns': specialist_results.get('patterns'),
+            'preflight_warnings': preflight_result.get('warnings', [])
         }
 
         return report
@@ -399,12 +468,20 @@ class AnalyzeOrchestrator(BaseOrchestrator):
     def format_results(self, result: Dict[str, Any]) -> str:
         """Format orchestration results as markdown report."""
         if not result.get('success'):
-            # Extract detailed error information if available
             output = []
             output.append("# Analysis Failed")
             output.append("")
             output.append(f"**Error:** {result.get('error', 'Unknown error')}")
             output.append("")
+
+            # Pre-flight details
+            preflight = result.get('preflight', {})
+            if preflight and preflight.get('warnings'):
+                output.append("## Pre-flight Warnings")
+                output.append("")
+                for w in preflight['warnings']:
+                    output.append(f"- {w}")
+                output.append("")
 
             # Check for anomaly details in specialist_results
             specialist_results = result.get('specialist_results', {})
@@ -421,9 +498,9 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                         severity = anomaly.get('severity', 'warning')
                         msg = anomaly.get('message', '')
                         if severity == 'critical':
-                            output.append(f"🚫 **CRITICAL:** {msg}")
+                            output.append(f"CRITICAL: {msg}")
                         else:
-                            output.append(f"⚠️  **Warning:** {msg}")
+                            output.append(f"Warning: {msg}")
                     output.append("")
 
                 if recommendation:
@@ -452,6 +529,15 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         output.append("=" * 60)
         output.append("")
 
+        # Pre-flight warnings (if any)
+        preflight_warnings = report.get('preflight_warnings', [])
+        if preflight_warnings:
+            output.append("## Pre-flight Warnings")
+            output.append("")
+            for w in preflight_warnings:
+                output.append(f"- {w}")
+            output.append("")
+
         # Recommendation (top)
         action = recommendation.get('action', 'UNKNOWN')
         reason = recommendation.get('reason', '')
@@ -460,11 +546,11 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         output.append("## RECOMMENDATION")
         output.append("")
         if action == 'TRADE':
-            output.append(f"✅ **{action}**")
+            output.append(f"**{action}**")
         elif action == 'TRADE_CAUTIOUSLY':
-            output.append(f"⚠️  **{action}**")
+            output.append(f"**{action}**")
         else:
-            output.append(f"❌ **{action}**")
+            output.append(f"**{action}**")
         output.append(f"- **Reason:** {reason}")
         output.append(f"- **Details:** {details}")
         output.append("")
@@ -477,7 +563,6 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         output.append(f"- **Liquidity:** {summary['liquidity_tier']}")
         output.append(f"- **Score:** {summary['score']}")
 
-        # Handle None sentiment score/direction
         sent_direction = summary.get('sentiment_direction') or 'N/A'
         sent_score = summary.get('sentiment_score')
         if sent_score is not None:
@@ -514,14 +599,13 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         output.append("")
         liquidity = report['liquidity']
         tier = liquidity['tier']
-        tradeable = liquidity['tradeable']
 
         if tier in ['EXCELLENT', 'GOOD']:
-            output.append(f"✅ **{tier}** - Tradeable at full size")
+            output.append(f"**{tier}** - Tradeable at full size")
         elif tier == 'WARNING':
-            output.append(f"⚠️  **{tier}** - Tradeable at reduced size")
+            output.append(f"**{tier}** - Tradeable at reduced size")
         else:
-            output.append(f"❌ **{tier}** - Not tradeable")
+            output.append(f"**{tier}** - Not tradeable")
         output.append("")
 
         # Position Limits (if HIGH TRR)
@@ -540,7 +624,6 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         output.append("")
         sentiment = report['sentiment']
 
-        # Handle None sentiment score/direction
         sent_direction = (sentiment.get('direction') or 'N/A').title()
         sent_score = sentiment.get('score')
         if sent_score is not None:
@@ -552,7 +635,7 @@ class AnalyzeOrchestrator(BaseOrchestrator):
             output.append("*(Cached - pre-fetched)*")
         output.append("")
 
-        # Filter malformed catalysts (e.g., just "**" or empty strings)
+        # Filter malformed catalysts
         valid_catalysts = [c for c in sentiment['catalysts'] if c and c.strip('*').strip()]
         if valid_catalysts:
             output.append("**Catalysts:**")
@@ -560,12 +643,34 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 output.append(f"- {catalyst}")
             output.append("")
 
-        # Filter malformed risks (e.g., just "**" or empty strings)
         valid_risks = [r for r in sentiment['risks'] if r and r.strip('*').strip()]
         if valid_risks:
             output.append("**Risks:**")
             for risk in valid_risks:
                 output.append(f"- {risk}")
+            output.append("")
+
+        # Recent News
+        news = report.get('news', {})
+        headlines = news.get('headlines', [])
+        if headlines:
+            output.append("## Recent News")
+            output.append("")
+            for headline in headlines:
+                title = headline.get('title', '') if isinstance(headline, dict) else str(headline)
+                source = headline.get('source', '') if isinstance(headline, dict) else ''
+                dt = headline.get('datetime', '') if isinstance(headline, dict) else ''
+                line = f"- {title}"
+                if source:
+                    line += f" ({source})"
+                if dt:
+                    line += f" [{dt}]"
+                output.append(line)
+            output.append("")
+        elif news.get('error'):
+            output.append("## Recent News")
+            output.append("")
+            output.append(f"*{news['error']}*")
             output.append("")
 
         # Strategies
@@ -579,7 +684,6 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 pop = strategy.get('probability_of_profit', 0)
                 contracts = strategy.get('contracts', 0)
 
-                # Format strategy line
                 output.append(f"**{strategy_type}**")
                 strikes = strategy.get('strikes')
                 if strikes:
@@ -609,19 +713,16 @@ class AnalyzeOrchestrator(BaseOrchestrator):
             output.append(f"**Quarters Analyzed:** {patterns['quarters_analyzed']}")
             output.append("")
 
-            # Directional bias
             bias = patterns.get('directional_bias', 'NEUTRAL')
             bullish_pct = patterns.get('bullish_pct', 0.5)
             bias_indicator = {'BULLISH': '(UP)', 'BEARISH': '(DOWN)', 'NEUTRAL': '(--)'}.get(bias, '(--)')
             output.append(f"{bias_indicator} **Directional Bias:** {bias} ({bullish_pct:.0%} UP moves)")
 
-            # Streak
             streak = patterns.get('current_streak', 0)
             streak_dir = patterns.get('streak_direction', 'UP')
             if streak >= 3:
                 output.append(f"**Current Streak:** {streak} consecutive {streak_dir}")
 
-            # Magnitude trend
             trend = patterns.get('magnitude_trend')
             if trend and trend != 'STABLE':
                 recent = patterns.get('avg_move_recent', 0)
@@ -629,7 +730,6 @@ class AnalyzeOrchestrator(BaseOrchestrator):
                 trend_indicator = '(EXPANDING)' if trend == 'EXPANDING' else '(CONTRACTING)'
                 output.append(f"{trend_indicator} **Magnitude:** {trend} ({recent:.1f}% recent vs {overall:.1f}% avg)")
 
-            # Recent moves
             recent_moves = patterns.get('recent_moves', [])
             if recent_moves:
                 output.append("")
