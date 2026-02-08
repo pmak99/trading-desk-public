@@ -265,6 +265,58 @@ class TickerMetadata(BaseModel):
     updated_at: Optional[str] = None
 
 
+class PreFlightResponse(BaseModel):
+    """Response from PreFlightAgent ticker validation."""
+    ticker: str
+    normalized_ticker: str
+    is_valid: bool
+    has_historical_data: bool = False
+    historical_quarters: int = 0
+    data_freshness_days: Optional[int] = None
+    warnings: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+
+    @field_validator('warnings')
+    @classmethod
+    def validate_warnings(cls, v):
+        if len(v) > 10:
+            raise ValueError('Too many warnings (max 10)')
+        return v
+
+    @property
+    def success(self) -> bool:
+        """Pre-flight passed if valid and no error."""
+        return self.is_valid and self.error is None
+
+
+class NewsHeadline(BaseModel):
+    """A single news headline."""
+    title: str
+    source: Optional[str] = None
+    url: Optional[str] = None
+    datetime: Optional[str] = None
+
+
+class NewsFetchResponse(BaseModel):
+    """Response from NewsFetchAgent."""
+    ticker: str
+    headlines: List[NewsHeadline] = Field(default_factory=list)
+    count: int = 0
+    error: Optional[str] = None
+
+    @field_validator('headlines')
+    @classmethod
+    def validate_headlines(cls, v):
+        if len(v) > 10:
+            raise ValueError('Too many headlines (max 10)')
+        return v
+
+    @property
+    def success(self) -> bool:
+        """Fetch succeeded if no error."""
+        return self.error is None
+
+
 class PatternResult(BaseModel):
     """Historical pattern analysis result."""
     ticker: str

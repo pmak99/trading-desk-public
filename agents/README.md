@@ -58,6 +58,8 @@ cd 6.0
 │   │   ├── explanation.py      # Narrative reasoning
 │   │   ├── anomaly.py          # Edge case detection
 │   │   ├── pattern_recognition.py  # Historical pattern mining
+│   │   ├── preflight.py        # Pre-flight ticker validation
+│   │   ├── news_fetch.py       # Finnhub news headlines
 │   │   ├── sector_fetch.py     # Finnhub sector data
 │   │   ├── data_quality.py     # Automated data fixes
 │   │   └── base.py             # BaseAgent (shared logic)
@@ -68,11 +70,11 @@ cd 6.0
 │   │   ├── position_limits.py  # TRR and position sizing
 │   │   ├── ticker_metadata.py  # Ticker metadata access
 │   │   └── mcp_client.py       # MCP server client
-│   ├── utils/                  # Schemas, formatters, timeouts, paths
+│   ├── utils/                  # Schemas, formatters, timeouts, retry, paths
 │   └── cli/                    # CLI wrappers (prime, whisper, analyze, maintenance)
 ├── config/
 │   └── agents.yaml             # Agent timeouts and model config
-└── tests/                      # 48 tests
+└── tests/                      # 82 tests
 ```
 
 ## Performance
@@ -81,7 +83,7 @@ cd 6.0
 |---------|------|-------|
 | `prime` (30 tickers) | ~10s | 9x faster than sequential |
 | `whisper` (30 tickers) | ~90s | 2x faster than 4.0 |
-| `analyze` (single) | ~60s | Full deep dive |
+| `analyze` (single) | ~20-30s | Full parallel deep dive |
 
 ## Agent Timeouts
 
@@ -92,6 +94,8 @@ cd 6.0
 | ExplanationAgent | 30s | Narrative generation |
 | AnomalyDetectionAgent | 20s | Fast validation |
 | HealthCheckAgent | 10s | Simple connectivity |
+| PreFlightAgent | 1s | DB-only ticker validation |
+| NewsFetchAgent | 10s | Finnhub news (non-critical) |
 
 ## Integration with 2.0/4.0
 
@@ -110,7 +114,7 @@ Git worktree support via `git rev-parse --git-common-dir`.
 
 ```bash
 cd 6.0
-../2.0/venv/bin/python -m pytest tests/ -v    # 48 tests
+../2.0/venv/bin/python -m pytest tests/ -v    # 82 tests
 ```
 
 ---

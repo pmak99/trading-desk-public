@@ -13,6 +13,8 @@ from .health import HealthCheckAgent
 from .sector_fetch import SectorFetchAgent
 from .data_quality import DataQualityAgent
 from .pattern_recognition import PatternRecognitionAgent
+from .preflight import PreFlightAgent
+from .news_fetch import NewsFetchAgent
 
 __all__ = [
     'BaseAgent',
@@ -24,4 +26,6 @@ __all__ = [
     'SectorFetchAgent',
     'DataQualityAgent',
     'PatternRecognitionAgent',
+    'PreFlightAgent',
+    'NewsFetchAgent',
 ]
