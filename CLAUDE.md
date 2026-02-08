@@ -196,7 +196,7 @@ DB_PATH=data/ivcrush.db
 cd 2.0 && ./venv/bin/python -m pytest tests/ -v    # 690 tests
 cd 4.0 && ../2.0/venv/bin/python -m pytest tests/  # 221 tests
 cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 311 tests
-cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 48 tests
+cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 82 tests
 ```
 
 ## Working Style Preferences
