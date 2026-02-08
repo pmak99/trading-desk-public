@@ -57,7 +57,7 @@ def make_chain(
     strike = Strike(stock_price)
     return OptionChain(
         ticker=ticker,
-        expiration=date.today() + timedelta(days=7),
+        expiration=date(2026, 3, 23),
         stock_price=Money(stock_price),
         calls={strike: make_option(bid=call_bid, ask=call_ask)},
         puts={strike: make_option(bid=put_bid, ask=put_ask)},
@@ -79,7 +79,7 @@ class TestZeroStraddleCost:
             call_bid=0.0, call_ask=0.0,
             put_bid=0.0, put_ask=0.0,
         )
-        result = calculate_from_atm_chain(chain, "TEST", date.today() + timedelta(days=7))
+        result = calculate_from_atm_chain(chain, "TEST", date(2026, 3, 23))
 
         assert result.is_err
         assert result.error.code == ErrorCode.INVALID
@@ -92,7 +92,7 @@ class TestZeroStraddleCost:
             call_bid=0.0, call_ask=0.0,
             put_bid=5.0, put_ask=5.10,
         )
-        result = calculate_from_atm_chain(chain, "TEST", date.today() + timedelta(days=7))
+        result = calculate_from_atm_chain(chain, "TEST", date(2026, 3, 23))
 
         # Should either error (illiquid) or succeed with small straddle
         # Zero bid/ask triggers is_liquid=False
@@ -108,12 +108,12 @@ class TestZeroStockPrice:
         strike = Strike(0)
         chain = OptionChain(
             ticker="TEST",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=Money(0.0),
             calls={strike: make_option()},
             puts={strike: make_option()},
         )
-        result = calculate_from_atm_chain(chain, "TEST", date.today() + timedelta(days=7))
+        result = calculate_from_atm_chain(chain, "TEST", date(2026, 3, 23))
 
         assert result.is_err
         assert result.error.code == ErrorCode.INVALID
@@ -123,12 +123,12 @@ class TestZeroStockPrice:
         strike = Strike(-10)
         chain = OptionChain(
             ticker="TEST",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=Money(-10.0),
             calls={strike: make_option()},
             puts={strike: make_option()},
         )
-        result = calculate_from_atm_chain(chain, "TEST", date.today() + timedelta(days=7))
+        result = calculate_from_atm_chain(chain, "TEST", date(2026, 3, 23))
 
         assert result.is_err
 
@@ -141,12 +141,12 @@ class TestMissingBidAsk:
         strike = Strike(100)
         chain = OptionChain(
             ticker="TEST",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=Money(100.0),
             calls={strike: make_option(bid=None, ask=None)},
             puts={strike: make_option()},
         )
-        result = calculate_from_atm_chain(chain, "TEST", date.today() + timedelta(days=7))
+        result = calculate_from_atm_chain(chain, "TEST", date(2026, 3, 23))
 
         # Should fail due to illiquidity or missing data
         if result.is_err:
@@ -157,12 +157,12 @@ class TestMissingBidAsk:
         strike = Strike(100)
         chain = OptionChain(
             ticker="TEST",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=Money(100.0),
             calls={strike: make_option()},
             puts={strike: make_option(bid=None, ask=None)},
         )
-        result = calculate_from_atm_chain(chain, "TEST", date.today() + timedelta(days=7))
+        result = calculate_from_atm_chain(chain, "TEST", date(2026, 3, 23))
 
         if result.is_err:
             assert result.error.code in (ErrorCode.INVALID, ErrorCode.NODATA)
@@ -179,7 +179,7 @@ class TestLargeImpliedMove:
             put_bid=25.0, put_ask=25.10,
         )
         result = calculate_from_atm_chain(
-            chain, "TEST", date.today() + timedelta(days=7),
+            chain, "TEST", date(2026, 3, 23),
             validate_straddle_cost=True,
         )
 
@@ -195,7 +195,7 @@ class TestLargeImpliedMove:
             put_bid=3.00, put_ask=3.10,
         )
         result = calculate_from_atm_chain(
-            chain, "TEST", date.today() + timedelta(days=7),
+            chain, "TEST", date(2026, 3, 23),
             validate_straddle_cost=True,
         )
 
@@ -214,7 +214,7 @@ class TestNormalCase:
             put_bid=5.0, put_ask=5.10,
         )
         result = calculate_from_atm_chain(
-            chain, "TEST", date.today() + timedelta(days=7),
+            chain, "TEST", date(2026, 3, 23),
         )
 
         assert result.is_ok
@@ -226,7 +226,7 @@ class TestNormalCase:
         """Result should have all expected fields populated."""
         chain = make_chain(stock_price=150.0)
         result = calculate_from_atm_chain(
-            chain, "NVDA", date.today() + timedelta(days=7),
+            chain, "NVDA", date(2026, 3, 23),
         )
 
         assert result.is_ok
@@ -246,12 +246,12 @@ class TestEmptyChain:
         strike = Strike(100)
         chain = OptionChain(
             ticker="TEST",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=Money(100.0),
             calls={},  # No calls
             puts={strike: make_option()},
         )
-        result = calculate_from_atm_chain(chain, "TEST", date.today() + timedelta(days=7))
+        result = calculate_from_atm_chain(chain, "TEST", date(2026, 3, 23))
 
         assert result.is_err
 
@@ -260,12 +260,12 @@ class TestEmptyChain:
         strike = Strike(100)
         chain = OptionChain(
             ticker="TEST",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=Money(100.0),
             calls={strike: make_option()},
             puts={},  # No puts
         )
-        result = calculate_from_atm_chain(chain, "TEST", date.today() + timedelta(days=7))
+        result = calculate_from_atm_chain(chain, "TEST", date(2026, 3, 23))
 
         assert result.is_err
         assert result.error.code == ErrorCode.NODATA
@@ -274,12 +274,12 @@ class TestEmptyChain:
         """Empty calls and puts should return error."""
         chain = OptionChain(
             ticker="TEST",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=Money(100.0),
             calls={},
             puts={},
         )
-        result = calculate_from_atm_chain(chain, "TEST", date.today() + timedelta(days=7))
+        result = calculate_from_atm_chain(chain, "TEST", date(2026, 3, 23))
 
         assert result.is_err
 
@@ -295,7 +295,7 @@ class TestValidateStraddleCostFlag:
             put_bid=0.10, put_ask=0.15,
         )
         result = calculate_from_atm_chain(
-            chain, "TEST", date.today() + timedelta(days=7),
+            chain, "TEST", date(2026, 3, 23),
             validate_straddle_cost=False,
         )
 

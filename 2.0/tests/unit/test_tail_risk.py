@@ -69,7 +69,7 @@ def make_implied_move(
     straddle = stock_price * implied_pct / 100
     return ImpliedMove(
         ticker=ticker,
-        expiration=date.today() + timedelta(days=7),
+        expiration=date(2026, 3, 23),
         stock_price=Money(stock_price),
         atm_strike=Strike(stock_price),
         straddle_cost=Money(straddle),
@@ -122,7 +122,7 @@ class TestTRRClassification:
         implied = make_implied_move("TEST", implied_pct=20.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         vrp_result, consistency = result.value
@@ -138,7 +138,7 @@ class TestTRRClassification:
         implied = make_implied_move("TEST", implied_pct=15.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         vrp_result, consistency = result.value
@@ -153,7 +153,7 @@ class TestTRRClassification:
         implied = make_implied_move("TEST", implied_pct=15.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         vrp_result, consistency = result.value
@@ -196,7 +196,7 @@ class TestTRRBoundaryConditions:
         implied = make_implied_move("TEST", implied_pct=15.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         vrp_result, consistency = result.value
@@ -213,7 +213,7 @@ class TestTRRBoundaryConditions:
         implied = make_implied_move("TEST", implied_pct=15.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         vrp_result, consistency = result.value
@@ -233,7 +233,7 @@ class TestTRRBoundaryConditions:
         implied = make_implied_move("TEST", implied_pct=15.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         vrp_result, consistency = result.value
@@ -250,7 +250,7 @@ class TestTRRBoundaryConditions:
         implied = make_implied_move("TEST", implied_pct=15.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         vrp_result, consistency = result.value
@@ -281,7 +281,7 @@ class TestTRRPositionLimits:
         implied = make_implied_move("TEST", implied_pct=20.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         _, consistency = result.value
@@ -298,7 +298,7 @@ class TestTRRPositionLimits:
         implied = make_implied_move("TEST", implied_pct=15.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         _, consistency = result.value
@@ -311,7 +311,7 @@ class TestTRRPositionLimits:
         implied = make_implied_move("TEST", implied_pct=15.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         _, consistency = result.value
@@ -345,7 +345,7 @@ class TestTRRRealTickerData:
         implied = make_implied_move("MU", implied_pct=12.0, stock_price=90.0)
 
         result = calculator.calculate_with_consistency(
-            "MU", date.today() + timedelta(days=7), implied, moves
+            "MU", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         _, consistency = result.value
@@ -365,7 +365,7 @@ class TestTRRRealTickerData:
         implied = make_implied_move("PG", implied_pct=5.0, stock_price=150.0)
 
         result = calculator.calculate_with_consistency(
-            "PG", date.today() + timedelta(days=7), implied, moves
+            "PG", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         _, consistency = result.value
@@ -395,7 +395,7 @@ class TestTRRInvalidInput:
 
         # calculate_with_consistency delegates to calculate which checks mean_move <= 0
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_err
         assert result.error.code == ErrorCode.INVALID
@@ -406,7 +406,7 @@ class TestTRRInvalidInput:
         implied = make_implied_move("TEST", implied_pct=10.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_err
         assert result.error.code == ErrorCode.NODATA
@@ -416,7 +416,7 @@ class TestTRRInvalidInput:
         implied = make_implied_move("TEST", implied_pct=10.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, []
+            "TEST", date(2026, 3, 23), implied, []
         )
         assert result.is_err
         assert result.error.code == ErrorCode.NODATA
@@ -428,7 +428,7 @@ class TestTRRInvalidInput:
         implied = make_implied_move("TEST", implied_pct=10.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         _, consistency = result.value
@@ -442,7 +442,7 @@ class TestTRRInvalidInput:
         implied = make_implied_move("TEST", implied_pct=10.0)
 
         result = calculator.calculate_with_consistency(
-            "TEST", date.today() + timedelta(days=7), implied, moves
+            "TEST", date(2026, 3, 23), implied, moves
         )
         assert result.is_ok
         _, consistency = result.value

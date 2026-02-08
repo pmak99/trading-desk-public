@@ -23,6 +23,7 @@ from common.budget_constants import (  # noqa: E402
     MAX_TOKENS_PER_CALL,
     VALID_SERVICES,
     VALID_MODELS,
+    BudgetExhaustedError,
     validate_token_counts,
     calculate_token_cost,
 )
@@ -35,13 +36,13 @@ from .logging import log  # noqa: E402
 DEFAULT_COST_ESTIMATE = PERPLEXITY_COST_PER_CALL_ESTIMATE
 
 
-class BudgetExhausted(Exception):
+class BudgetExhausted(BudgetExhaustedError):
     """Raised when API budget (daily calls or monthly spend) is exhausted."""
 
     def __init__(self, service: str, reason: str):
         self.service = service
         self.reason = reason
-        super().__init__(f"Budget exhausted for {service}: {reason}")
+        super().__init__(message=f"Budget exhausted for {service}: {reason}")
 
 
 class BudgetTracker:

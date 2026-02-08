@@ -9,7 +9,7 @@ These tests ensure the bugs don't regress:
 """
 
 import pytest
-from datetime import date
+from datetime import date, datetime
 from src.application.metrics.consistency_enhanced import ConsistencyAnalyzerEnhanced
 from src.domain.enums import EarningsTiming, DirectionalBias
 from src.container import Container
@@ -184,7 +184,7 @@ class TestBugFixesIntegration:
             ticker="TEST",
             earnings_date=date(2025, 11, 20),
             earnings_timing=EarningsTiming.AMC,  # Using correct enum value
-            entry_time=datetime.now(),
+            entry_time=datetime(2026, 3, 16, 10, 30, 0),
             expiration=date(2025, 11, 21),
             implied_move=ImpliedMove(
                 ticker="TEST",

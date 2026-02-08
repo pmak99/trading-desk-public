@@ -42,7 +42,7 @@ class TestConsistencyAnalyzerEnhanced:
         so we set that field according to the pattern.
         """
         moves = []
-        base_date = date.today()
+        base_date = date(2026, 3, 16)
 
         for i in range(num_quarters):
             earnings_date = base_date - timedelta(days=90 * i)
@@ -149,7 +149,7 @@ class TestConsistencyAnalyzerEnhanced:
         """Test that recent quarters are weighted more heavily."""
         # Create moves where recent quarters are higher
         moves = []
-        base_date = date.today()
+        base_date = date(2026, 3, 16)
 
         # Recent quarters: 8% moves (close_move_pct is the default metric)
         for i in range(4):

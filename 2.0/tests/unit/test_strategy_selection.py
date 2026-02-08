@@ -78,7 +78,7 @@ def scorer():
 @pytest.fixture
 def expiration():
     """Expiration date one week out."""
-    return date.today() + timedelta(days=7)
+    return date(2026, 3, 23)
 
 
 def _make_vrp(
@@ -91,7 +91,7 @@ def _make_vrp(
 ) -> VRPResult:
     """Helper to create VRPResult with sensible defaults."""
     if expiration is None:
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
     return VRPResult(
         ticker=ticker,
         expiration=expiration,
@@ -117,7 +117,7 @@ def _make_strategy(
     position_vega: float = -80.0,
 ) -> Strategy:
     """Helper to create Strategy with sensible defaults."""
-    expiration = date.today() + timedelta(days=7)
+    expiration = date(2026, 3, 23)
     short_strike = Strike(95.0) if strategy_type == StrategyType.BULL_PUT_SPREAD else Strike(105.0)
     long_strike = Strike(90.0) if strategy_type == StrategyType.BULL_PUT_SPREAD else Strike(110.0)
     opt_type = OptionType.PUT if strategy_type == StrategyType.BULL_PUT_SPREAD else OptionType.CALL
@@ -1019,7 +1019,7 @@ class TestVRPCalculatorRecommendation:
             pct = max(0.5, pct)  # Ensure positive
             moves.append(HistoricalMove(
                 ticker="TEST",
-                earnings_date=date.today() - timedelta(days=90 * (i + 1)),
+                earnings_date=date(2026, 3, 16) - timedelta(days=90 * (i + 1)),
                 prev_close=Money(100.0),
                 earnings_open=Money(100.0),
                 earnings_high=Money(100 + pct),
@@ -1033,7 +1033,7 @@ class TestVRPCalculatorRecommendation:
 
     def test_excellent_recommendation(self, calculator):
         """VRP >= 1.8x should produce EXCELLENT recommendation."""
-        exp = date.today() + timedelta(days=7)
+        exp = date(2026, 3, 23)
         # implied=9%, historical close mean ~ 9/(ratio) = 9/1.8 = 5%
         # close_move_pct = pct * 0.5, so pct * 0.5 should average ~5%
         # => pct ~= 10%
@@ -1048,7 +1048,7 @@ class TestVRPCalculatorRecommendation:
 
     def test_skip_recommendation(self, calculator):
         """VRP < 1.2x should produce SKIP recommendation."""
-        exp = date.today() + timedelta(days=7)
+        exp = date(2026, 3, 23)
         # implied=5%, historical close mean ~5% => ratio ~1.0
         implied = self._make_implied_move("TEST", 5.0, exp)
         hist = self._make_historical_moves(mean_pct=10.0)  # close avg ~5%
@@ -1061,7 +1061,7 @@ class TestVRPCalculatorRecommendation:
 
     def test_insufficient_history_returns_error(self, calculator):
         """Fewer than 4 quarters of history should return an error."""
-        exp = date.today() + timedelta(days=7)
+        exp = date(2026, 3, 23)
         implied = self._make_implied_move("TEST", 10.0, exp)
         hist = self._make_historical_moves(mean_pct=5.0, num_quarters=3)
 

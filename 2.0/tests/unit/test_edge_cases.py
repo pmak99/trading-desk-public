@@ -25,7 +25,7 @@ class TestZeroAndNegativeValues:
         mock_options_provider.set_stock_price("DEAD", Money(0))
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("DEAD", date.today() + timedelta(days=7))
+        result = calc.calculate("DEAD", date(2026, 3, 23))
 
         assert result.is_err
         # Returns NODATA since no option chain is set for DEAD
@@ -68,17 +68,17 @@ class TestEmptyAndMissingData:
         # Create empty chain
         empty_chain = OptionChain(
             ticker="EMPTY",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=stock_price,
             calls={},
             puts={},
         )
         mock_options_provider.set_option_chain(
-            "EMPTY", date.today() + timedelta(days=7), empty_chain
+            "EMPTY", date(2026, 3, 23), empty_chain
         )
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("EMPTY", date.today() + timedelta(days=7))
+        result = calc.calculate("EMPTY", date(2026, 3, 23))
 
         assert result.is_err
         assert result.unwrap_err().code == ErrorCode.NODATA
@@ -102,17 +102,17 @@ class TestEmptyAndMissingData:
 
         chain = OptionChain(
             ticker="NOATM",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=stock_price,
             calls=calls,
             puts=puts,
         )
         mock_options_provider.set_option_chain(
-            "NOATM", date.today() + timedelta(days=7), chain
+            "NOATM", date(2026, 3, 23), chain
         )
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("NOATM", date.today() + timedelta(days=7))
+        result = calc.calculate("NOATM", date(2026, 3, 23))
 
         # No ATM strikes should return error (cannot calculate straddle)
         assert result.is_err, "Expected error for chain with no ATM strikes"
@@ -200,15 +200,15 @@ class TestBoundaryConditions:
 
         chain = OptionChain(
             ticker="ZEROD",
-            expiration=date.today(),  # Expires today
+            expiration=date(2026, 3, 16),  # Expires today
             stock_price=stock_price,
             calls=calls,
             puts=puts,
         )
-        mock_options_provider.set_option_chain("ZEROD", date.today(), chain)
+        mock_options_provider.set_option_chain("ZEROD", date(2026, 3, 16), chain)
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("ZEROD", date.today())
+        result = calc.calculate("ZEROD", date(2026, 3, 16))
 
         # 0 DTE options are valid and should calculate successfully
         # Note: Some implementations may reject 0 DTE, so we accept either
@@ -226,7 +226,7 @@ class TestBoundaryConditions:
         stock_price = Money(100)
         mock_options_provider.set_stock_price("LEAPS", stock_price)
 
-        far_date = date.today() + timedelta(days=730)  # ~2 years
+        far_date = date(2028, 3, 15)  # ~2 years
         calls = {
             Strike(100): OptionQuote(
                 bid=Money(20),
@@ -286,17 +286,17 @@ class TestBoundaryConditions:
 
         chain = OptionChain(
             ticker="SINGLE",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=stock_price,
             calls=calls,
             puts=puts,
         )
         mock_options_provider.set_option_chain(
-            "SINGLE", date.today() + timedelta(days=7), chain
+            "SINGLE", date(2026, 3, 23), chain
         )
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("SINGLE", date.today() + timedelta(days=7))
+        result = calc.calculate("SINGLE", date(2026, 3, 23))
 
         assert result.is_ok
 
@@ -345,7 +345,7 @@ class TestDataValidation:
         stock_price = Money(100)
         mock_options_provider.set_stock_price("PAST", stock_price)
 
-        past_date = date.today() - timedelta(days=7)
+        past_date = date(2025, 1, 1)  # Always in the past
         calls = {
             Strike(100): OptionQuote(
                 bid=Money(0), ask=Money(0), implied_volatility=Percentage(0)

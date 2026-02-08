@@ -219,7 +219,7 @@ class TestHybridCacheErrorHandling:
         with sqlite3.connect(str(temp_db)) as conn:
             conn.execute(
                 'INSERT INTO cache (key, value, timestamp) VALUES (?, ?, ?)',
-                ("corrupted", b"not_valid_pickle", datetime.now().isoformat())
+                ("corrupted", b"not_valid_pickle", datetime(2026, 3, 16, 10, 30, 0).isoformat())
             )
             conn.commit()
 
