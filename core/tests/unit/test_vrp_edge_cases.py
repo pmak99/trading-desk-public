@@ -38,7 +38,7 @@ def make_historical_move(
     days_ago: int = 90,
 ) -> HistoricalMove:
     """Create a test HistoricalMove with configurable move percentages."""
-    earnings_date = date.today() - timedelta(days=days_ago)
+    earnings_date = date(2026, 3, 16) - timedelta(days=days_ago)
     return HistoricalMove(
         ticker=ticker,
         earnings_date=earnings_date,
@@ -60,7 +60,7 @@ def make_implied_move(
     """Create a test ImpliedMove with configurable implied move percentage."""
     return ImpliedMove(
         ticker=ticker,
-        expiration=date.today() + timedelta(days=7),
+        expiration=date(2026, 3, 23),
         stock_price=Money(100.0),
         atm_strike=Strike(100.0),
         straddle_cost=Money(implied_pct),
@@ -100,7 +100,7 @@ class TestVRPZeroMeanMove:
         moves = make_historical_moves(n=4, close_move_pct=0.0)
         implied = make_implied_move(implied_pct=10.0)
 
-        result = calc.calculate("TEST", date.today(), implied, moves)
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_err
         assert result.error.code == ErrorCode.INVALID
@@ -115,7 +115,7 @@ class TestVRPZeroMeanMove:
         ]
         implied = make_implied_move(implied_pct=5.0)
 
-        result = calc.calculate("TEST", date.today(), implied, moves)
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_err
 
@@ -133,7 +133,7 @@ class TestVRPNaNInfGuards:
         moves = make_historical_moves(n=4, close_move_pct=-5.0)
         implied = make_implied_move(implied_pct=10.0)
 
-        result = calc.calculate("TEST", date.today(), implied, moves)
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_err
         assert result.error.code == ErrorCode.INVALID
@@ -147,7 +147,7 @@ class TestVRPMinimumQuarters:
         calc = VRPCalculator(min_quarters=4)
         implied = make_implied_move()
 
-        result = calc.calculate("TEST", date.today(), implied, [])
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, [])
 
         assert result.is_err
         assert result.error.code == ErrorCode.NODATA
@@ -159,7 +159,7 @@ class TestVRPMinimumQuarters:
         moves = make_historical_moves(n=3)  # Only 3, need 4
         implied = make_implied_move()
 
-        result = calc.calculate("TEST", date.today(), implied, moves)
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_err
         assert result.error.code == ErrorCode.NODATA
@@ -171,7 +171,7 @@ class TestVRPMinimumQuarters:
         moves = make_historical_moves(n=4, close_move_pct=5.0)
         implied = make_implied_move(implied_pct=10.0)
 
-        result = calc.calculate("TEST", date.today(), implied, moves)
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
 
@@ -181,7 +181,7 @@ class TestVRPMinimumQuarters:
         moves = make_historical_moves(n=12, close_move_pct=5.0)
         implied = make_implied_move(implied_pct=10.0)
 
-        result = calc.calculate("TEST", date.today(), implied, moves)
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
 
@@ -191,7 +191,7 @@ class TestVRPMinimumQuarters:
         moves = make_historical_moves(n=1, close_move_pct=5.0)
         implied = make_implied_move(implied_pct=10.0)
 
-        result = calc.calculate("TEST", date.today(), implied, moves)
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
 
@@ -202,7 +202,7 @@ class TestVRPMinimumQuarters:
         moves = make_historical_moves(n=n_moves, close_move_pct=5.0)
         implied = make_implied_move(implied_pct=10.0)
 
-        result = calc.calculate("TEST", date.today(), implied, moves)
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_err
         assert result.error.code == ErrorCode.NODATA
@@ -218,7 +218,7 @@ class TestVRPNegativeImpliedMove:
         implied = make_implied_move(implied_pct=-5.0)
 
         # Percentage allows -100 to 1000, so -5.0 is valid
-        result = calc.calculate("TEST", date.today(), implied, moves)
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         # Should succeed but with a negative VRP ratio -> SKIP recommendation
         assert result.is_ok
@@ -259,7 +259,7 @@ class TestVRPThresholdBoundaries:
     def test_exactly_at_excellent_threshold(self, balanced_calc):
         """VRP = 1.8x should be EXCELLENT (>= threshold)."""
         moves, implied = self._make_vrp_at_ratio(1.8)
-        result = balanced_calc.calculate("TEST", date.today(), implied, moves)
+        result = balanced_calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.EXCELLENT
@@ -268,7 +268,7 @@ class TestVRPThresholdBoundaries:
     def test_just_below_excellent_threshold(self, balanced_calc):
         """VRP = 1.79x should be GOOD, not EXCELLENT."""
         moves, implied = self._make_vrp_at_ratio(1.79)
-        result = balanced_calc.calculate("TEST", date.today(), implied, moves)
+        result = balanced_calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.GOOD
@@ -276,7 +276,7 @@ class TestVRPThresholdBoundaries:
     def test_exactly_at_good_threshold(self, balanced_calc):
         """VRP = 1.4x should be GOOD (>= threshold)."""
         moves, implied = self._make_vrp_at_ratio(1.4)
-        result = balanced_calc.calculate("TEST", date.today(), implied, moves)
+        result = balanced_calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.GOOD
@@ -284,7 +284,7 @@ class TestVRPThresholdBoundaries:
     def test_just_below_good_threshold(self, balanced_calc):
         """VRP = 1.39x should be MARGINAL, not GOOD."""
         moves, implied = self._make_vrp_at_ratio(1.39)
-        result = balanced_calc.calculate("TEST", date.today(), implied, moves)
+        result = balanced_calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.MARGINAL
@@ -292,7 +292,7 @@ class TestVRPThresholdBoundaries:
     def test_exactly_at_marginal_threshold(self, balanced_calc):
         """VRP = 1.2x should be MARGINAL (>= threshold)."""
         moves, implied = self._make_vrp_at_ratio(1.2)
-        result = balanced_calc.calculate("TEST", date.today(), implied, moves)
+        result = balanced_calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.MARGINAL
@@ -300,7 +300,7 @@ class TestVRPThresholdBoundaries:
     def test_just_below_marginal_threshold(self, balanced_calc):
         """VRP = 1.19x should be SKIP."""
         moves, implied = self._make_vrp_at_ratio(1.19)
-        result = balanced_calc.calculate("TEST", date.today(), implied, moves)
+        result = balanced_calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.SKIP
@@ -308,7 +308,7 @@ class TestVRPThresholdBoundaries:
     def test_ratio_at_1_0_is_skip(self, balanced_calc):
         """VRP = 1.0x (implied = historical) should be SKIP."""
         moves, implied = self._make_vrp_at_ratio(1.0)
-        result = balanced_calc.calculate("TEST", date.today(), implied, moves)
+        result = balanced_calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.SKIP
@@ -316,7 +316,7 @@ class TestVRPThresholdBoundaries:
     def test_very_high_ratio(self, balanced_calc):
         """Very high VRP ratio should be EXCELLENT."""
         moves, implied = self._make_vrp_at_ratio(10.0)
-        result = balanced_calc.calculate("TEST", date.today(), implied, moves)
+        result = balanced_calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.EXCELLENT
@@ -338,7 +338,7 @@ class TestVRPMoveMetric:
         moves = make_historical_moves(n=4)
         implied = make_implied_move()
 
-        result = calc.calculate("TEST", date.today(), implied, moves)
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, moves)
         assert result.is_ok
 
     def test_close_metric_uses_close_move_pct(self):
@@ -348,7 +348,7 @@ class TestVRPMoveMetric:
         moves = make_historical_moves(n=4, close_move_pct=5.0)
         implied = make_implied_move(implied_pct=10.0)
 
-        result = calc.calculate("TEST", date.today(), implied, moves)
+        result = calc.calculate("TEST", date(2026, 3, 16), implied, moves)
 
         assert result.is_ok
         assert abs(result.value.vrp_ratio - 2.0) < 0.01
@@ -364,7 +364,7 @@ class TestVRPConsistencyMetrics:
         implied = make_implied_move(implied_pct=10.0)
 
         result = calc.calculate_with_consistency(
-            "TEST", date.today(), implied, moves
+            "TEST", date(2026, 3, 16), implied, moves
         )
 
         assert result.is_ok
@@ -381,7 +381,7 @@ class TestVRPConsistencyMetrics:
         """Errors from calculate() should propagate through calculate_with_consistency."""
         calc = VRPCalculator(min_quarters=4)
         result = calc.calculate_with_consistency(
-            "TEST", date.today(), make_implied_move(), []
+            "TEST", date(2026, 3, 16), make_implied_move(), []
         )
 
         assert result.is_err
@@ -395,7 +395,7 @@ class TestVRPConsistencyMetrics:
         implied = make_implied_move(implied_pct=10.0)
 
         result = calc.calculate_with_consistency(
-            "TEST", date.today(), implied, moves
+            "TEST", date(2026, 3, 16), implied, moves
         )
 
         assert result.is_ok

@@ -41,7 +41,7 @@ class TestSkewAnalyzerEnhanced:
         Returns:
             OptionChain with specified skew
         """
-        expiration = date.today() + timedelta(days=30)
+        expiration = date(2026, 4, 15)
 
         # Create strikes from -15% to +15%
         strikes = []
@@ -160,7 +160,7 @@ class TestSkewAnalyzerEnhanced:
     def test_insufficient_data_points(self, analyzer, provider):
         """Test error when insufficient data points for fit."""
         # Create chain with very few strikes
-        expiration = date.today() + timedelta(days=30)
+        expiration = date(2026, 4, 15)
         chain = OptionChain(
             ticker="TEST",
             expiration=expiration,
@@ -185,7 +185,7 @@ class TestSkewAnalyzerEnhanced:
             AppError(ErrorCode.EXTERNAL, "API error")
         )
 
-        result = analyzer.analyze_skew_curve("TEST", date.today() + timedelta(days=30))
+        result = analyzer.analyze_skew_curve("TEST", date(2026, 4, 15))
 
         assert result.is_err
         assert result.error.code == ErrorCode.EXTERNAL

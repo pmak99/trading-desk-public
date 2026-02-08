@@ -180,7 +180,7 @@ class TestHybridTierClassification:
 
         return OptionChain(
             ticker="TEST",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=stock_price,
             calls=calls,
             puts=puts,

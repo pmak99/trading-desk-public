@@ -49,7 +49,7 @@ class TestImpliedMoveCalculator:
 
         chain = OptionChain(
             ticker="TEST",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=stock_price,
             calls=calls,
             puts=puts,
@@ -80,7 +80,7 @@ class TestImpliedMoveCalculator:
     def test_calculate_no_chain(self, mock_options_provider):
         """Test error when no option chain available."""
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("MISSING", date.today())
+        result = calc.calculate("MISSING", date(2026, 3, 16))
 
         assert result.is_err
         assert result.error.code == ErrorCode.NODATA
@@ -111,7 +111,7 @@ class TestImpliedMoveCalculator:
 
         chain = OptionChain(
             ticker="TEST",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=stock_price,
             calls=calls,
             puts=puts,
@@ -136,7 +136,7 @@ class TestVRPCalculator:
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
 
         # Implied move: 10%
         implied_move = ImpliedMove(
@@ -154,7 +154,7 @@ class TestVRPCalculator:
         historical_moves = [
             HistoricalMove(
                 ticker=ticker,
-                earnings_date=date.today() - timedelta(days=90 * i),
+                earnings_date=date(2026, 3, 16) - timedelta(days=90 * i),
                 prev_close=Money(100.0),
                 earnings_open=Money(100.0),
                 earnings_high=Money(102.5),
@@ -188,7 +188,7 @@ class TestVRPCalculator:
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
 
         # Implied move: 7.5%
         implied_move = ImpliedMove(
@@ -206,7 +206,7 @@ class TestVRPCalculator:
         historical_moves = [
             HistoricalMove(
                 ticker=ticker,
-                earnings_date=date.today() - timedelta(days=90 * i),
+                earnings_date=date(2026, 3, 16) - timedelta(days=90 * i),
                 prev_close=Money(100.0),
                 earnings_open=Money(100.0),
                 earnings_high=Money(102.5),
@@ -240,7 +240,7 @@ class TestVRPCalculator:
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
 
         # Implied move: 5%
         implied_move = ImpliedMove(
@@ -258,7 +258,7 @@ class TestVRPCalculator:
         historical_moves = [
             HistoricalMove(
                 ticker=ticker,
-                earnings_date=date.today() - timedelta(days=90 * i),
+                earnings_date=date(2026, 3, 16) - timedelta(days=90 * i),
                 prev_close=Money(100.0),
                 earnings_open=Money(100.0),
                 earnings_high=Money(102.5),
@@ -289,7 +289,7 @@ class TestVRPCalculator:
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
 
         implied_move = ImpliedMove(
             ticker=ticker,
@@ -306,7 +306,7 @@ class TestVRPCalculator:
         historical_moves = [
             HistoricalMove(
                 ticker=ticker,
-                earnings_date=date.today() - timedelta(days=90 * i),
+                earnings_date=date(2026, 3, 16) - timedelta(days=90 * i),
                 prev_close=Money(100.0),
                 earnings_open=Money(100.0),
                 earnings_high=Money(102.5),

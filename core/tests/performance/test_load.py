@@ -74,7 +74,7 @@ class TestBaselinePerformance:
     async def test_10_tickers_concurrent(self, mock_options_provider):
         """Baseline: Analyze 10 tickers concurrently."""
         tickers = [f"TICK{i:02d}" for i in range(10)]
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
 
         # Setup tickers
         for ticker in tickers:
@@ -112,7 +112,7 @@ class TestTargetLoad:
     async def test_50_tickers_concurrent(self, mock_options_provider):
         """Target load: Analyze 50 tickers concurrently."""
         tickers = [f"LOAD{i:02d}" for i in range(50)]
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
 
         # Setup tickers with varying stock prices
         for ticker in tickers:
@@ -151,7 +151,7 @@ class TestStressLoad:
     async def test_100_tickers_concurrent(self, mock_options_provider):
         """Stress test: Analyze 100 tickers concurrently."""
         tickers = [f"STRESS{i:03d}" for i in range(100)]
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
 
         # Setup tickers with varying stock prices
         for ticker in tickers:
@@ -190,7 +190,7 @@ class TestBatchProcessing:
     async def test_sequential_batches(self, mock_options_provider):
         """Test processing tickers in sequential batches."""
         tickers = [f"BATCH{i:02d}" for i in range(30)]
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
 
         # Setup tickers
         for ticker in tickers:
@@ -230,7 +230,7 @@ class TestBatchProcessing:
     async def test_concurrent_with_limit(self, mock_options_provider):
         """Test concurrent processing with semaphore limit."""
         tickers = [f"LIMIT{i:02d}" for i in range(50)]
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
 
         # Setup tickers
         for ticker in tickers:
@@ -271,7 +271,7 @@ class TestErrorHandlingUnderLoad:
     async def test_mixed_success_and_failures(self, mock_options_provider):
         """Test handling mix of successful and failing tickers."""
         tickers = [f"MIX{i:02d}" for i in range(20)]
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
 
         # Setup: Half with valid data, half with missing data
         for i, ticker in enumerate(tickers):
@@ -308,7 +308,7 @@ class TestPerformanceScaling:
     @pytest.mark.asyncio
     async def test_linear_scaling(self, mock_options_provider):
         """Verify performance scales roughly linearly with ticker count."""
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
         results_data = []
 
         for count in [10, 20, 40]:
@@ -354,7 +354,7 @@ class TestMemoryStability:
     async def test_repeated_analysis_no_leak(self, mock_options_provider):
         """Verify repeated analysis doesn't leak memory."""
         tickers = [f"MEM{i:02d}" for i in range(10)]
-        expiration = date.today() + timedelta(days=7)
+        expiration = date(2026, 3, 23)
 
         # Setup tickers
         for ticker in tickers:

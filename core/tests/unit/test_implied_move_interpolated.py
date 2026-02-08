@@ -41,7 +41,7 @@ class TestImpliedMoveCalculatorInterpolated:
         Returns:
             OptionChain
         """
-        expiration = date.today() + timedelta(days=30)
+        expiration = date(2026, 4, 15)
 
         calls = {}
         puts = {}
@@ -142,7 +142,7 @@ class TestImpliedMoveCalculatorInterpolated:
 
     def test_missing_lower_strike_error(self, calculator, provider):
         """Test error when lower bracket strike is missing."""
-        expiration = date.today() + timedelta(days=30)
+        expiration = date(2026, 4, 15)
 
         # Only upper strikes available
         chain = OptionChain(
@@ -215,7 +215,7 @@ class TestImpliedMoveCalculatorInterpolated:
 
     def test_past_expiration_error(self, calculator, provider):
         """Test error for past expiration date."""
-        past_date = date.today() - timedelta(days=30)
+        past_date = date(2025, 1, 1)  # Always in the past
 
         result = calculator.calculate("TEST", past_date)
 
@@ -230,7 +230,7 @@ class TestImpliedMoveCalculatorInterpolated:
             AppError(ErrorCode.EXTERNAL, "API error")
         )
 
-        result = calculator.calculate("TEST", date.today() + timedelta(days=30))
+        result = calculator.calculate("TEST", date(2026, 4, 15))
 
         assert result.is_err
         assert result.error.code == ErrorCode.EXTERNAL
@@ -238,7 +238,7 @@ class TestImpliedMoveCalculatorInterpolated:
     def test_iv_interpolation(self, calculator, provider):
         """Test that IVs are also interpolated."""
         # Create chain with different IVs at each strike
-        expiration = date.today() + timedelta(days=30)
+        expiration = date(2026, 4, 15)
 
         chain = OptionChain(
             ticker="TEST",

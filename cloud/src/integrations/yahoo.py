@@ -18,6 +18,7 @@ from src.core.logging import log
 
 # Rate limit protection
 _last_request_time = 0
+_rate_limit_lock = asyncio.Lock()
 MIN_REQUEST_INTERVAL = 1.0  # 1 second between requests
 
 # Errors that indicate transient API issues (retry-able)
@@ -70,12 +71,13 @@ class YahooFinanceClient:
 
         global _last_request_time
 
-        # Rate limit protection
-        now = time.time()
-        wait_time = MIN_REQUEST_INTERVAL - (now - _last_request_time)
-        if wait_time > 0:
-            await asyncio.sleep(wait_time)
-        _last_request_time = time.time()
+        # Rate limit protection (lock prevents concurrent requests racing)
+        async with _rate_limit_lock:
+            now = time.time()
+            wait_time = MIN_REQUEST_INTERVAL - (now - _last_request_time)
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            _last_request_time = time.time()
 
         loop = asyncio.get_event_loop()
 

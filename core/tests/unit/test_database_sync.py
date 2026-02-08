@@ -14,8 +14,11 @@ import pytest
 import sqlite3
 import tempfile
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 from unittest.mock import patch, MagicMock
+
+# Fixed timestamp for deterministic tests
+_FIXED_TIMESTAMP = datetime(2026, 3, 16, 10, 30, 0)
 
 import sys
 # Add scripts/ to path so we can import sync_databases
@@ -122,14 +125,14 @@ def insert_historical_move(conn, ticker, earnings_date, close_move_pct=5.0):
         VALUES (?, ?, 100.0, 102.0, 105.0, 98.0, ?, ?, 2.0, ?, 1000000, 2000000, ?)
     """, (ticker, earnings_date, 100.0 + close_move_pct,
           close_move_pct + 1.0, close_move_pct,
-          datetime.now().isoformat()))
+          _FIXED_TIMESTAMP.isoformat()))
     conn.commit()
 
 
 def insert_earnings_calendar(conn, ticker, earnings_date, timing="BMO", updated_at=None):
     """Insert a test earnings calendar record."""
     if updated_at is None:
-        updated_at = datetime.now().isoformat()
+        updated_at = _FIXED_TIMESTAMP.isoformat()
     conn.execute("""
         INSERT OR REPLACE INTO earnings_calendar
         (ticker, earnings_date, timing, confirmed, updated_at, last_validated_at)
@@ -149,7 +152,7 @@ def insert_trade_journal(conn, symbol, acquired_date, sale_date, cost_basis,
         VALUES (?, ?, ?, 5, ?, ?, '2026-02-07', 10, ?, 500.0, 100.0, 1,
                 'SHORT', 0, '2026-01-30', 5.0, ?)
     """, (symbol, acquired_date, sale_date, option_type, strike, cost_basis,
-          datetime.now().isoformat()))
+          _FIXED_TIMESTAMP.isoformat()))
     conn.commit()
 
 

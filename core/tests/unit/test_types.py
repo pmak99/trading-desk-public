@@ -218,7 +218,7 @@ class TestOptionChain:
         """Test ATM when stock price is between strikes."""
         chain = OptionChain(
             ticker="TEST",
-            expiration=date.today() + timedelta(days=7),
+            expiration=date(2026, 3, 23),
             stock_price=Money(102.5),
             calls={
                 Strike(100.0): OptionQuote(bid=Money(5.0), ask=Money(5.1)),
@@ -262,7 +262,7 @@ class TestOptionChain:
     def test_empty_chain_raises(self):
         chain = OptionChain(
             ticker="TEST",
-            expiration=date.today(),
+            expiration=date(2026, 3, 16),
             stock_price=Money(100.0),
             calls={},
             puts={},
