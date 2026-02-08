@@ -179,6 +179,12 @@ GROUP BY campaign_id ORDER BY total;
 | `/backfill ARGS` | Record post-earnings outcomes |
 | `/collect TICKER` | Collect pre-earnings sentiment |
 | `/export-report [MODE]` | Export to CSV/JSON |
+| `/positions [TICKER]` | Open positions and 30-day exposure dashboard |
+| `/risk [DAYS]` | Portfolio risk assessment (TRR, concentration, drawdown) |
+| `/calendar [DATE]` | Weekly earnings calendar with history and TRR flags |
+| `/pnl [PERIOD]` | P&L summary (week/month/ytd/year/quarter/N days) |
+| `/postmortem TICKER` | Post-earnings: predicted vs actual move analysis |
+| `/deploy [--quick\|--status\|--logs\|--rollback]` | Deploy 5.0 to Cloud Run |
 
 ## Environment Variables
 
