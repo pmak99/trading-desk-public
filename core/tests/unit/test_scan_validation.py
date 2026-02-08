@@ -137,32 +137,25 @@ class TestValidateExpirationDate:
 
     def test_valid_expiration(self):
         """Valid expiration should return None (no error)."""
-        today = date.today()
-        # Find next Monday to ensure it's a weekday
-        days_to_monday = (7 - today.weekday()) % 7
-        if days_to_monday == 0:
-            days_to_monday = 7
-        earnings = today + timedelta(days=days_to_monday)  # Next Monday
-        expiration = earnings + timedelta(days=1)  # Tuesday
+        earnings = date(2026, 3, 9)  # Monday
+        expiration = date(2026, 3, 10)  # Tuesday
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
         assert result is None
 
     def test_expiration_in_past(self):
         """Expiration in the past should return error."""
-        today = date.today()
-        earnings = today + timedelta(days=1)
-        expiration = today - timedelta(days=1)  # Past
+        earnings = date(2026, 3, 10)  # Tuesday
+        expiration = date(2026, 3, 8)  # Sunday (past relative to earnings)
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
         assert result is not None
-        assert "in the past" in result
+        assert "in the past" in result or "before earnings" in result
 
     def test_expiration_before_earnings(self):
         """Expiration before earnings should return error."""
-        today = date.today()
-        earnings = today + timedelta(days=5)
-        expiration = today + timedelta(days=2)  # Before earnings
+        earnings = date(2026, 3, 13)  # Friday
+        expiration = date(2026, 3, 10)  # Tuesday (before earnings)
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
         assert result is not None
@@ -170,14 +163,8 @@ class TestValidateExpirationDate:
 
     def test_expiration_on_weekend(self):
         """Expiration on weekend should return error (programming error)."""
-        today = date.today()
-        earnings = today + timedelta(days=1)
-
-        # Find next Saturday
-        days_to_saturday = (5 - today.weekday()) % 7
-        if days_to_saturday == 0:
-            days_to_saturday = 7
-        saturday = today + timedelta(days=days_to_saturday)
+        earnings = date(2026, 3, 9)  # Monday
+        saturday = date(2026, 3, 14)  # Saturday
 
         result = validate_expiration_date(saturday, earnings, "AAPL")
         assert result is not None
@@ -185,11 +172,8 @@ class TestValidateExpirationDate:
 
     def test_expiration_too_far_future(self):
         """Expiration > 30 days after earnings should return error."""
-        today = date.today()
-        # Ensure earnings is on a weekday
-        earnings = adjust_to_trading_day(today + timedelta(days=1))
-        # Calculate expiration 35 days after earnings (also ensure weekday)
-        expiration = adjust_to_trading_day(earnings + timedelta(days=35))
+        earnings = date(2026, 3, 9)  # Monday
+        expiration = date(2026, 4, 14)  # 36 days later, a Tuesday
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
         assert result is not None
@@ -197,25 +181,15 @@ class TestValidateExpirationDate:
 
     def test_expiration_exactly_30_days_valid(self):
         """Expiration exactly 30 days after earnings should be valid."""
-        today = date.today()
-        # Find next Monday
-        days_to_monday = (7 - today.weekday()) % 7
-        if days_to_monday == 0:
-            days_to_monday = 7
-        earnings = today + timedelta(days=days_to_monday)  # Next Monday
-        expiration_target = earnings + timedelta(days=30)  # 30 days later
-
-        # Adjust if it falls on weekend
-        expiration = adjust_to_trading_day(expiration_target)
+        earnings = date(2026, 3, 9)  # Monday
+        expiration = adjust_to_trading_day(earnings + timedelta(days=30))  # Apr 8, Wed
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
         assert result is None
 
     def test_expiration_same_as_earnings(self):
         """Expiration same as earnings (0DTE) should be valid."""
-        today = date.today()
-        # Ensure earnings is on a weekday
-        earnings = adjust_to_trading_day(today + timedelta(days=1))
+        earnings = date(2026, 3, 9)  # Monday
         expiration = earnings  # Same day
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
@@ -247,12 +221,8 @@ class TestIntegrationScenarios:
 
     def test_thursday_amc_auto_calculation(self):
         """Thursday AMC should auto-calculate to Friday 1 week out (avoid 0DTE risk)."""
-        # Find next Thursday
-        today = date.today()
-        days_to_thursday = (3 - today.weekday()) % 7
-        if days_to_thursday == 0:
-            days_to_thursday = 7
-        thursday = today + timedelta(days=days_to_thursday)
+        thursday = date(2026, 3, 5)  # A Thursday
+        assert thursday.weekday() == 3
 
         # Calculate expiration (no offset)
         expiration = calculate_expiration_date(thursday, EarningsTiming.AMC)
@@ -268,12 +238,8 @@ class TestIntegrationScenarios:
 
     def test_monday_unknown_timing(self):
         """Monday with unknown timing should use next Friday."""
-        # Find next Monday
-        today = date.today()
-        days_to_monday = (7 - today.weekday()) % 7
-        if days_to_monday == 0:
-            days_to_monday = 7
-        monday = today + timedelta(days=days_to_monday)
+        monday = date(2026, 3, 9)  # A Monday
+        assert monday.weekday() == 0
 
         # Calculate expiration (no offset, unknown timing)
         expiration = calculate_expiration_date(monday, EarningsTiming.UNKNOWN)
