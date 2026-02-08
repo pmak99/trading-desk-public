@@ -171,19 +171,21 @@ async def budget_status(_: bool = Depends(verify_api_key)):
     # Get recent spending history from database
     try:
         conn = sqlite3.connect(settings.DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT date, SUM(cost) as daily_cost, COUNT(*) as calls
-            FROM api_budget
-            WHERE date >= date('now', '-7 days')
-            GROUP BY date
-            ORDER BY date DESC
-        """)
-        recent_spending = [
-            {"date": row[0], "cost": row[1], "calls": row[2]}
-            for row in cursor.fetchall()
-        ]
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT date, SUM(cost) as daily_cost, COUNT(*) as calls
+                FROM api_budget
+                WHERE date >= date('now', '-7 days')
+                GROUP BY date
+                ORDER BY date DESC
+            """)
+            recent_spending = [
+                {"date": row[0], "cost": row[1], "calls": row[2]}
+                for row in cursor.fetchall()
+            ]
+        finally:
+            conn.close()
     except Exception:
         recent_spending = []
 

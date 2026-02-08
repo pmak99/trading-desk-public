@@ -74,6 +74,7 @@ src/data/cache/
 # Data directories in version directories (test databases, etc.)
 1.0/data/
 2.0/data/
+4.0/data/
 5.0/data/
 *.db
 
@@ -90,6 +91,10 @@ src/data/cache/
 .dmypy.json
 dmypy.json
 3.0/.env
+
+# Backup files
+*.backup-*
+*.bak
 
 # Exclude sensitive 2025 trade statements and analysis
 docs/2025 Trades/
