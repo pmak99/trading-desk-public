@@ -199,6 +199,15 @@ cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 311 tests
 cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 48 tests
 ```
 
+## Working Style Preferences
+
+1. **Confirm scope before executing** — For data operations (backfill, sync, cleanup), confirm the exact scope (which tickers, which date range, which database) before executing. For batch operations, always scope to the user's actual data (historically traded tickers from `strategies`/`trade_journal`, existing watchlists) rather than arbitrary/random selections.
+2. **Respect rewrite requests** — When asked for a full rewrite or ground-up rebuild, do NOT attempt incremental fixes first. Go straight to the clean-slate approach.
+3. **Audit all related configs** — When fixing any issue, find ALL files that reference the same service, URL, endpoint, or config value and fix them together. A fix in one file often needs to be mirrored in others.
+4. **Source env before API calls** — Always check for required environment variables (`TRADIER_API_KEY`, `TWELVE_DATA_KEY`, `PERPLEXITY_API_KEY`, etc.) before executing scripts that need them. Source `.env` if needed.
+5. **Verify data, don't infer** — When checking external sources (job postings, ticker lookups, API responses), verify actual data fields rather than inferring from URLs or titles. Validate ticker symbols against exchange lookup (e.g., "PFIZER" -> "PFE").
+6. **Complete output, no truncation** — Slash commands (`/prime`, `/whisper`, `/analyze`, `/backfill`, `/scan`, etc.) must run to full completion with complete output displayed. Never truncate results.
+
 ## When Analyzing Trades
 
 1. Check TRR level - prefer LOW, avoid HIGH
