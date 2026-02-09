@@ -135,6 +135,8 @@ class HybridCache:
             if key in self._l1_cache:
                 stored_time = self._l1_timestamps.get(key)
                 if stored_time and (now - stored_time).total_seconds() < self.l1_ttl:
+                    # Move to end for true LRU ordering (most recently used = last)
+                    self._l1_cache.move_to_end(key)
                     logger.debug(f"Cache L1 HIT: {key}")
                     return self._l1_cache[key]
                 else:
@@ -293,15 +295,23 @@ class HybridCache:
         """
         Remove expired entries from L2 cache.
 
+        Uses the per-key expiration column when available, falling back
+        to timestamp-based cleanup for entries without expiration set.
+
         Returns:
             Number of entries deleted
         """
         try:
-            cutoff = datetime.now() - timedelta(seconds=self.l2_ttl)
+            now = datetime.now().isoformat()
+            cutoff = (datetime.now() - timedelta(seconds=self.l2_ttl)).isoformat()
             with sqlite3.connect(str(self.db_path), timeout=CONNECTION_TIMEOUT) as conn:
+                # Delete entries with explicit expiration that has passed,
+                # OR entries without expiration that exceed the default TTL
                 cursor = conn.execute(
-                    'DELETE FROM cache WHERE timestamp < ?',
-                    (cutoff.isoformat(),)
+                    '''DELETE FROM cache
+                       WHERE (expiration IS NOT NULL AND expiration < ?)
+                          OR (expiration IS NULL AND timestamp < ?)''',
+                    (now, cutoff)
                 )
                 deleted = cursor.rowcount
                 conn.commit()
@@ -314,14 +324,15 @@ class HybridCache:
             return 0
 
     def _evict_oldest_l1(self) -> None:
-        """Evict oldest entry from L1 cache (called with lock held).
+        """Evict least recently used entry from L1 cache (called with lock held).
 
-        Uses OrderedDict for O(1) eviction of least recently used item.
+        Uses OrderedDict with move_to_end() on access for true LRU eviction.
+        First item (last=False) is least recently used.
         """
         if not self._l1_cache:
             return
 
-        # OrderedDict: first item is oldest (FIFO)
+        # OrderedDict: first item is least recently used (LRU)
         oldest_key, _ = self._l1_cache.popitem(last=False)
         if oldest_key in self._l1_timestamps:
             del self._l1_timestamps[oldest_key]

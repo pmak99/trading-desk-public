@@ -249,7 +249,10 @@ class EarningsWhisperScraper:
         self._min_request_interval = 5.0  # minimum seconds between requests
 
         # OCR result cache: {url_hash: (tickers, timestamp)}
+        # Bounded to prevent memory leaks; protected by lock for thread safety
         self._ocr_cache: Dict[str, Tuple[List[str], float]] = {}
+        self._ocr_cache_lock = threading.Lock()
+        self._ocr_cache_max_size = 50
 
         # Week-specific whisper results cache (injected dependency)
         self._cache = cache
@@ -719,17 +722,18 @@ class EarningsWhisperScraper:
                     "OCR not available. Install: pip install pillow pytesseract && brew install tesseract"
                 ))
 
-            # Check cache first
+            # Check cache first (thread-safe)
             url_hash = hashlib.md5(image_url.encode()).hexdigest()
-            if url_hash in self._ocr_cache:
-                cached_tickers, cached_time = self._ocr_cache[url_hash]
-                age_seconds = datetime.now().timestamp() - cached_time
-                if age_seconds < self.OCR_CACHE_TTL_SECONDS:
-                    logger.debug(f"Cache hit for {image_url[:50]}... (age: {age_seconds:.0f}s)")
-                    return Result.Ok(cached_tickers)
-                else:
-                    logger.debug(f"Cache expired for {image_url[:50]}... (age: {age_seconds:.0f}s)")
-                    del self._ocr_cache[url_hash]
+            with self._ocr_cache_lock:
+                if url_hash in self._ocr_cache:
+                    cached_tickers, cached_time = self._ocr_cache[url_hash]
+                    age_seconds = datetime.now().timestamp() - cached_time
+                    if age_seconds < self.OCR_CACHE_TTL_SECONDS:
+                        logger.debug(f"Cache hit for {image_url[:50]}... (age: {age_seconds:.0f}s)")
+                        return Result.Ok(cached_tickers)
+                    else:
+                        logger.debug(f"Cache expired for {image_url[:50]}... (age: {age_seconds:.0f}s)")
+                        del self._ocr_cache[url_hash]
 
             # Download image with circuit breaker protection
             try:
@@ -767,8 +771,13 @@ class EarningsWhisperScraper:
 
                 logger.debug(f"Extracted {len(tickers)} tickers after filtering")
 
-                # Cache the result
-                self._ocr_cache[url_hash] = (tickers, datetime.now().timestamp())
+                # Cache the result (thread-safe, bounded)
+                with self._ocr_cache_lock:
+                    # Evict oldest entries if at capacity
+                    while len(self._ocr_cache) >= self._ocr_cache_max_size:
+                        oldest_key = min(self._ocr_cache, key=lambda k: self._ocr_cache[k][1])
+                        del self._ocr_cache[oldest_key]
+                    self._ocr_cache[url_hash] = (tickers, datetime.now().timestamp())
                 logger.debug(f"Cached OCR result for {image_url[:50]}...")
 
                 return Result.Ok(tickers)

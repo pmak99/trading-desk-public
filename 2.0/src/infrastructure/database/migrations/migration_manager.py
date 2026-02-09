@@ -183,6 +183,17 @@ class MigrationManager:
             sql_down=None
         ))
 
+        # Migration 006: Add missing indices on strategies and trade_journal
+        # These tables are heavily queried but have zero secondary indices.
+        self.migrations.append(Migration(
+            version=6,
+            name="add_strategies_and_journal_indices",
+            sql_up="""
+                -- Handled in _apply_migration_006
+            """,
+            sql_down=None
+        ))
+
         # Sort migrations by version (safety check)
         self.migrations.sort(key=lambda m: m.version)
 
@@ -306,6 +317,8 @@ class MigrationManager:
                     self._apply_migration_004(cursor)
                 elif migration.version == 5:
                     self._apply_migration_005(cursor)
+                elif migration.version == 6:
+                    self._apply_migration_006(cursor)
                 else:
                     # Execute statements individually (safer than executescript)
                     for statement in migration.sql_up.split(';'):
@@ -477,6 +490,65 @@ class MigrationManager:
             logger.info("Dropped redundant idx_earnings_date index")
         else:
             logger.debug("idx_earnings_date already absent, skipping drop")
+
+    def _apply_migration_006(self, cursor: sqlite3.Cursor):
+        """
+        Apply migration 006: Add missing indices on strategies and trade_journal.
+
+        These tables are heavily queried (GROUP BY, WHERE, JOIN) but had no
+        secondary indices, causing full table scans on every query.
+        """
+        # strategies table indices
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='strategies'
+        """)
+        if cursor.fetchone():
+            index_defs = [
+                ("idx_strategies_type", "strategies(strategy_type)"),
+                ("idx_strategies_symbol", "strategies(symbol)"),
+                ("idx_strategies_earnings", "strategies(earnings_date)"),
+            ]
+            for idx_name, idx_def in index_defs:
+                cursor.execute(
+                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {idx_def}"
+                )
+                logger.info(f"Created index {idx_name}")
+
+            # Partial indices for sparse columns
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_strategies_campaign
+                ON strategies(campaign_id) WHERE campaign_id IS NOT NULL
+            """)
+            logger.info("Created partial index idx_strategies_campaign")
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_strategies_trr
+                ON strategies(trr_at_entry) WHERE trr_at_entry IS NOT NULL
+            """)
+            logger.info("Created partial index idx_strategies_trr")
+
+        # trade_journal table indices
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='trade_journal'
+        """)
+        if cursor.fetchone():
+            index_defs = [
+                ("idx_trade_journal_strategy", "trade_journal(strategy_id)"),
+                ("idx_trade_journal_symbol", "trade_journal(symbol)"),
+                ("idx_trade_journal_sale_date", "trade_journal(sale_date)"),
+                ("idx_trade_journal_earnings", "trade_journal(earnings_date)"),
+            ]
+            for idx_name, idx_def in index_defs:
+                cursor.execute(
+                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {idx_def}"
+                )
+                logger.info(f"Created index {idx_name}")
+
+        # Update query planner statistics
+        cursor.execute("ANALYZE")
+        logger.info("Updated query planner statistics (ANALYZE)")
 
     def rollback(self, target_version: int) -> int:
         """

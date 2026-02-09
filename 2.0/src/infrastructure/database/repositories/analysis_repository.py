@@ -191,7 +191,13 @@ class AnalysisRepository(ResilientRepository):
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
-                query = "SELECT * FROM analysis_log WHERE 1=1"
+                query = """SELECT timestamp, ticker, earnings_date, expiration,
+                           implied_move_pct, historical_mean_pct, vrp_ratio,
+                           recommendation, confidence, consistency_score,
+                           vix_level, vix_regime,
+                           strategy_type, strategy_score, strategy_pop,
+                           strategy_rr, contracts
+                    FROM analysis_log WHERE 1=1"""
                 params = []
 
                 if min_vrp is not None:
