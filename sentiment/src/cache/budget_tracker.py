@@ -414,6 +414,35 @@ class BudgetTracker:
                     "total_search_requests": row['total_search_requests'] or 0
                 }
 
+    def cleanup_old(self, days_to_keep: int = 90) -> int:
+        """Delete api_budget rows older than N days.
+
+        Keeps recent data for monthly summaries while preventing unbounded growth.
+
+        Args:
+            days_to_keep: Number of days of history to retain (default: 90)
+
+        Returns:
+            Number of rows deleted
+        """
+        cutoff = date.today().isoformat()
+        # Calculate cutoff using SQL for simplicity
+        try:
+            with _db_lock:
+                with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                    cursor = conn.execute(
+                        "DELETE FROM api_budget WHERE date < date(?, '-' || ? || ' days')",
+                        (cutoff, days_to_keep)
+                    )
+                    deleted = cursor.rowcount
+                    conn.commit()
+            if deleted > 0:
+                logger.info(f"Cleaned up {deleted} old api_budget rows (kept last {days_to_keep} days)")
+            return deleted
+        except sqlite3.Error as e:
+            logger.error(f"Failed to cleanup old budget rows: {e}")
+            return 0
+
     def reset_today(self) -> None:
         """Reset today's counts (for testing)."""
         today = self._get_today()
