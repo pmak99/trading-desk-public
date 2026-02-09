@@ -130,7 +130,7 @@ Rate limit: 60 req/min per IP.
 
 ## Databases
 
-**ivcrush.db** (`2.0/data/ivcrush.db` | `gs://your-gcs-bucket/ivcrush.db`) — 15 tables, schema v5:
+**ivcrush.db** (`2.0/data/ivcrush.db` | `gs://your-gcs-bucket/ivcrush.db`) — 15 tables, schema v6:
 - `historical_moves` (6,861) | `earnings_calendar` (6,762) | `strategies` (203)
 - `trade_journal` (556) | `position_limits` (428) | `bias_predictions` (28) | `iv_log` (16)
 - Empty: `analysis_log`, `cache`, `rate_limits`, `backtest_runs`, `backtest_trades`, `job_status`, `ticker_metadata`

@@ -295,6 +295,88 @@ class PricesRepository(BaseRepository):
             logger.error(f"Failed to count moves: {e}")
             return Err(AppError(ErrorCode.DBERROR, str(e)))
 
+    def get_historical_moves_batch(
+        self, tickers: List[str], limit: int = 12
+    ) -> Result[dict[str, List[HistoricalMove]], AppError]:
+        """
+        Get historical moves for multiple tickers in a single query.
+
+        Eliminates N+1 pattern: fetches all tickers in 1 query using
+        a window function instead of N separate queries.
+
+        Args:
+            tickers: List of stock ticker symbols
+            limit: Maximum moves per ticker (default: 12)
+
+        Returns:
+            Result with dict mapping ticker -> list of HistoricalMove
+        """
+        if not tickers:
+            return Ok({})
+
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Build parameterized IN clause
+                placeholders = ",".join("?" for _ in tickers)
+                upper_tickers = [t.upper() for t in tickers]
+
+                cursor.execute(
+                    f'''
+                    WITH ranked AS (
+                        SELECT ticker, earnings_date, prev_close, earnings_open,
+                               earnings_high, earnings_low, earnings_close,
+                               intraday_move_pct, gap_move_pct, close_move_pct,
+                               volume_before, volume_earnings,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY ticker ORDER BY earnings_date DESC
+                               ) as rn
+                        FROM historical_moves
+                        WHERE ticker IN ({placeholders})
+                    )
+                    SELECT ticker, earnings_date, prev_close, earnings_open,
+                           earnings_high, earnings_low, earnings_close,
+                           intraday_move_pct, gap_move_pct, close_move_pct,
+                           volume_before, volume_earnings
+                    FROM ranked
+                    WHERE rn <= ?
+                    ORDER BY ticker, earnings_date DESC
+                    ''',
+                    (*upper_tickers, limit),
+                )
+                rows = cursor.fetchall()
+
+            # Group results by ticker
+            result: dict[str, List[HistoricalMove]] = {t: [] for t in upper_tickers}
+            for row in rows:
+                move = HistoricalMove(
+                    ticker=row[0],
+                    earnings_date=date.fromisoformat(row[1]),
+                    prev_close=Money(row[2]),
+                    earnings_open=Money(row[3]),
+                    earnings_high=Money(row[4]),
+                    earnings_low=Money(row[5]),
+                    earnings_close=Money(row[6]),
+                    intraday_move_pct=Percentage(row[7]),
+                    gap_move_pct=Percentage(row[8]),
+                    close_move_pct=Percentage(row[9]),
+                    volume_before=row[10],
+                    volume_earnings=row[11],
+                )
+                if move.ticker in result:
+                    result[move.ticker].append(move)
+
+            logger.debug(
+                f"Batch retrieved moves for {len(tickers)} tickers "
+                f"({sum(len(v) for v in result.values())} total moves)"
+            )
+            return Ok(result)
+
+        except sqlite3.Error as e:
+            logger.error(f"Failed to get batch historical moves: {e}")
+            return Err(AppError(ErrorCode.DBERROR, str(e)))
+
     def delete_old_moves(
         self, days_old: int = 1095
     ) -> Result[int, AppError]:
