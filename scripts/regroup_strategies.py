@@ -82,46 +82,6 @@ def load_orphan_legs(db_path: str) -> List[LegRecord]:
     return legs
 
 
-def identify_spread_type(legs: List[LegRecord]) -> Tuple[str, bool]:
-    """
-    Identify the spread type based on leg characteristics.
-
-    Returns:
-        Tuple of (strategy_type, is_credit)
-    """
-    strikes = set(leg.strike for leg in legs if leg.strike)
-    option_types = set(leg.option_type for leg in legs)
-    has_short = any(leg.is_short for leg in legs)
-    has_long = any(not leg.is_short for leg in legs)
-
-    total_pnl = sum(leg.gain_loss for leg in legs)
-
-    # Iron condor: 4 strikes, both calls and puts
-    if len(strikes) == 4 and len(option_types) == 2:
-        return "IRON_CONDOR", has_short
-
-    # Vertical spread: 2 strikes, same option type
-    if len(strikes) == 2 and len(option_types) == 1:
-        if has_short and has_long:
-            opt_type = list(option_types)[0]
-            # Credit spread = sold higher premium
-            # Determine by net P&L pattern
-            return "SPREAD", has_short
-        elif has_short:
-            return "SPREAD", True
-        else:
-            return "SPREAD", False
-
-    # Single leg trades
-    if len(strikes) == 1:
-        if has_short:
-            return "SINGLE", True
-        else:
-            return "SINGLE", False
-
-    # Complex/unknown
-    return "COMPLEX", has_short
-
 
 def group_legs_by_expiration(legs: List[LegRecord]) -> Dict[Tuple[str, str, str], List[LegRecord]]:
     """
@@ -253,6 +213,7 @@ def run_regrouping(db_path: str, dry_run: bool = False) -> Dict[str, Any]:
             'strategies_created': 0,
             'legs_linked': 0,
             'by_type': {},
+            'details': [],
         }
 
     print(f"Found {len(legs)} orphan legs")
@@ -277,11 +238,9 @@ def run_regrouping(db_path: str, dry_run: bool = False) -> Dict[str, Any]:
 
     try:
         for (symbol, expiration, option_type), group_legs in groups.items():
-            # Identify spread type
-            strategy_type, is_credit = identify_spread_type(group_legs)
-
-            # For spreads with multiple legs, try to match them
-            if strategy_type == "SPREAD" and len(group_legs) > 2:
+            # For groups with 2+ distinct strikes and >2 legs, try to match spread pairs
+            distinct_group_strikes = len(set(leg.strike for leg in group_legs if leg.strike))
+            if distinct_group_strikes == 2 and len(group_legs) > 2:
                 matched_groups = match_spread_legs(group_legs)
             else:
                 matched_groups = [group_legs]
