@@ -32,7 +32,11 @@ from enum import Enum
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dotenv import load_dotenv
 from src.utils.logging import setup_logging
+
+# Load .env from project root (2.0/)
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
 

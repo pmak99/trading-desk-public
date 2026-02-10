@@ -290,14 +290,14 @@ def run_regrouping(db_path: str, dry_run: bool = False) -> Dict[str, Any]:
                 leg_count = len(matched_legs)
                 combined_pnl = sum(leg.gain_loss for leg in matched_legs)
 
-                # Refine strategy type based on actual leg count
-                # Note: DB constraint only allows SINGLE, SPREAD, IRON_CONDOR
-                if leg_count == 1:
+                # Determine strategy type from strike structure
+                distinct_strikes = len(set(leg.strike for leg in matched_legs if leg.strike))
+                if distinct_strikes <= 1:
+                    # All legs at same strike = multiple fills of a SINGLE
                     final_type = "SINGLE"
-                elif leg_count == 4:
+                elif distinct_strikes == 4:
                     final_type = "IRON_CONDOR"
                 else:
-                    # All multi-leg strategies (2, 3, 5+) go to SPREAD
                     final_type = "SPREAD"
 
                 detail = {
