@@ -134,7 +134,7 @@ Rate limit: 60 req/min per IP.
 - `historical_moves` (6,861) | `earnings_calendar` (6,762) | `strategies` (203)
 - `trade_journal` (556) | `position_limits` (428) | `bias_predictions` (28) | `iv_log` (16)
 - Empty: `analysis_log`, `cache`, `rate_limits`, `backtest_runs`, `backtest_trades`, `job_status`, `ticker_metadata`
-- Note: 92 strategies + 239 trade_journal rows have sale_date < acquired_date — this is Fidelity's convention for credit trades (sell-to-open), not a bug
+- Note: ~239 trade_journal rows have sale_date < acquired_date — this is Fidelity's convention for credit trades (sell-to-open), not a bug. Strategies table is normalized to chronological order (acquired=open, sale=close).
 
 **sentiment_cache.db** (`4.0/data/sentiment_cache.db`) — 3 tables, WAL mode:
 - `sentiment_cache` (3hr TTL) | `api_budget` (daily counts) | `sentiment_history` (permanent)
