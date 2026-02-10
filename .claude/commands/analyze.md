@@ -134,11 +134,14 @@ Always fetch regardless of VRP - it's free (rate limit: 60 calls/min).
 mcp__finnhub__finnhub_news_sentiment with:
   operation="get_company_news"
   symbol="{TICKER}"
-  from_date="{7_DAYS_AGO}"
+  from_date="{3_DAYS_AGO}"
   to_date="{TODAY}"
+  max_results=5
 ```
 **IMPORTANT:** Pass parameters as top-level arguments, NOT nested in a JSON object.
-Extract only first 5 headlines from the response.
+**IMPORTANT:** Use a 3-day window (NOT 7 days) to limit response size. Popular tickers return 50+ articles over 7 days (100k+ chars) which exceeds output limits.
+**IMPORTANT:** Pass `max_results=5` when available (requires MCP server restart after update). If the parameter is rejected, the 3-day window alone keeps output manageable.
+**FALLBACK:** If Finnhub response is still truncated/saved to file, skip reading the file and note "News data too large — use /history or Finnhub directly for full coverage."
 
 **DO NOT CALL** finnhub_stock_ownership or finnhub_stock_fundamentals.
 
