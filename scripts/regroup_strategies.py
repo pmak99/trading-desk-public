@@ -147,12 +147,18 @@ def create_strategy_and_link(
     is_winner = combined_pnl > 0
     total_quantity = sum(leg.quantity for leg in legs)
 
-    # Use earliest acquired and latest sale date
-    acquired_dates = [leg.acquired_date for leg in legs if leg.acquired_date]
-    sale_dates = [leg.sale_date for leg in legs if leg.sale_date]
+    # Determine chronological open/close dates
+    # Fidelity credit trades have inverted dates (sale < acquired),
+    # so we normalize: acquired_date = earliest, sale_date = latest
+    all_dates = []
+    for leg in legs:
+        if leg.acquired_date:
+            all_dates.append(leg.acquired_date)
+        if leg.sale_date:
+            all_dates.append(leg.sale_date)
 
-    acquired_date = min(acquired_dates) if acquired_dates else None
-    sale_date = max(sale_dates) if sale_dates else legs[0].sale_date
+    acquired_date = min(all_dates) if all_dates else None
+    sale_date = max(all_dates) if all_dates else legs[0].sale_date
 
     # Calculate days held
     days_held = None
@@ -160,7 +166,7 @@ def create_strategy_and_link(
         try:
             acq = datetime.strptime(acquired_date, "%Y-%m-%d")
             sale = datetime.strptime(sale_date, "%Y-%m-%d")
-            days_held = (sale - acq).days
+            days_held = abs((sale - acq).days)
         except ValueError:
             pass
 
