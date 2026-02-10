@@ -37,13 +37,16 @@ def aggregate_fills(rows: list[dict]) -> list[dict]:
         symbol = row['Symbol'].strip()
         if not symbol:
             continue
+        # Key must match DB UNIQUE constraint types (floats, not strings)
+        # to catch fills like "440.0" vs "440" or "$54.14" vs "$54.1400"
+        strike_str = row.get('Strike', '').strip()
         key = (
             symbol,
             row.get('Acquired Date', '').strip(),
             row['Sale Date'].strip(),
             row.get('Option Type', '').strip(),
-            row.get('Strike', '').strip(),
-            row['Cost Basis'].strip(),
+            float(strike_str) if strike_str else None,
+            parse_dollar(row['Cost Basis']),
         )
         groups[key].append(row)
 
@@ -122,7 +125,7 @@ def import_csv_to_db(csv_path: str, db_path: str, dry_run: bool = False) -> dict
             actual_move = float(actual_move_str.replace('%', '')) if actual_move_str else None
 
             if dry_run:
-                inserted += 1
+                inserted += 1  # counts records to attempt, not guaranteed inserts
                 continue
 
             try:
@@ -183,7 +186,8 @@ def main():
 
     prefix = "[DRY RUN] " if args.dry_run else ""
     print(f"\n{prefix}Results:")
-    print(f"  Inserted: {result['inserted']}")
+    label = "Would attempt" if args.dry_run else "Inserted"
+    print(f"  {label}: {result['inserted']}")
     print(f"  Skipped (duplicates): {result['skipped']}")
     if result['errors']:
         print(f"  Errors: {len(result['errors'])}")
