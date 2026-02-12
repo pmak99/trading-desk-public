@@ -1,4 +1,4 @@
-# IV Crush 5.0 - Autopilot
+# IV Crush cloud - Autopilot
 
 ## Overview
 
@@ -440,7 +440,7 @@ Create in Grafana Cloud UI:
 
 ### PORT (Copy with minimal changes)
 
-From `2.0/src/`:
+From `core/src/`:
 - `application/metrics/vrp.py` - VRP calculation
 - `application/metrics/liquidity_scorer.py` - Liquidity tiers
 - `domain/scoring/strategy_scorer.py` - Composite scoring
@@ -631,7 +631,7 @@ LIQUIDITY_RANK = {"EXCELLENT": 0, "GOOD": 1, "WARNING": 2, "REJECT": 3}
 ## Directory Structure
 
 ```
-5.0/
+cloud/
 ├── DESIGN.md                 # This document
 ├── Dockerfile
 ├── requirements.txt
@@ -730,8 +730,8 @@ gcloud iam service-accounts create ivcrush
 gsutil mb gs://ivcrush-data
 
 # 6. Upload initial databases
-gsutil cp 2.0/data/ivcrush.db gs://ivcrush-data/
-gsutil cp 4.0/data/sentiment_cache.db gs://ivcrush-data/
+gsutil cp core/data/ivcrush.db gs://ivcrush-data/
+gsutil cp sentiment/data/sentiment_cache.db gs://ivcrush-data/
 
 # 7. Deploy Cloud Run
 gcloud run deploy ivcrush \
@@ -757,7 +757,7 @@ curl "https://api.telegram.org/bot{TOKEN}/setWebhook?url=https://ivcrush-xxx.run
 
 ```bash
 # Run locally with hot reload
-cd 5.0
+cd cloud
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt

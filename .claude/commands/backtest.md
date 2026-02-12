@@ -33,7 +33,7 @@ Examples:
 
 **Overall metrics:**
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
           ROUND(SUM(gain_loss), 0) as total_pnl,
@@ -49,7 +49,7 @@ Replace `$TICKER_FILTER` with `AND symbol = 'TICKER'` if ticker provided.
 
 **By strategy type:**
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT strategy_type,
           COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
@@ -63,7 +63,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 **By TRR level (if trr_at_entry populated):**
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT CASE
             WHEN trr_at_entry > 2.5 THEN 'HIGH'
             WHEN trr_at_entry >= 1.5 THEN 'NORMAL'
@@ -81,7 +81,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 **By trade type (NEW/REPAIR/ROLL):**
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT COALESCE(trade_type, 'NEW') as trade_type,
           COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
@@ -94,7 +94,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 **Top/bottom tickers:**
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT symbol, COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
           ROUND(SUM(gain_loss), 0) as total_pnl,
@@ -107,7 +107,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 ```
 
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT symbol, COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
           ROUND(SUM(gain_loss), 0) as total_pnl,
@@ -121,7 +121,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 **Campaign analysis (linked trades):**
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT campaign_id, SUM(gain_loss) as total,
           GROUP_CONCAT(trade_type || ': $' || ROUND(gain_loss, 0)) as chain
    FROM strategies
@@ -133,7 +133,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 3: Run Backtest Report Script (if available)
 ```bash
-"$PROJECT_ROOT/2.0/venv/bin/python" "$PROJECT_ROOT/scripts/backtest_report.py" $TICKER 2>/dev/null
+"$PROJECT_ROOT/core/venv/bin/python" "$PROJECT_ROOT/scripts/backtest_report.py" $TICKER 2>/dev/null
 ```
 
 If script fails or doesn't produce output, use the DB queries above (they contain all the data needed).
@@ -144,7 +144,7 @@ Using Claude's built-in analysis (no MCP cost), provide insights on:
 
 1. **Edge Validation** - Does higher VRP correlate with better results?
 2. **Strategy Effectiveness** - SINGLE (64% win) vs SPREAD (52% win) vs others
-3. **TRR Impact** - HIGH TRR lost significant losses in 2025, LOW TRR made strong profit
+3. **TRR Impact** - HIGH TRR significant losses, LOW TRR strong profit
 4. **Trade Type Analysis** - NEW vs REPAIR vs ROLL performance
 5. **Campaign Analysis** - Repairs reduce loss but rarely save campaigns. Rolls always lose.
 6. **Actionable Recommendations**
@@ -200,7 +200,7 @@ Edge Validation:
 
 Key Lessons:
   - SINGLE options outperform spreads (64% vs 52% win rate)
-  - LOW TRR tickers most profitable, HIGH TRR lost significant losses
+  - LOW TRR tickers most profitable, HIGH TRR significant losses
   - Repairs reduce loss but rarely save campaigns
   - Rolls always make things worse (0% success rate)
 

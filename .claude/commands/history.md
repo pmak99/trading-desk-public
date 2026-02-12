@@ -36,7 +36,7 @@ Sanitize: `TICKER=$(echo "$RAW" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]
 
 ### Step 2: Query Historical Moves
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT earnings_date,
           ROUND(gap_move_pct, 2) as gap_move,
           ROUND(close_move_pct, 2) as close_move,
@@ -65,7 +65,7 @@ Suggestions:
 
 ### Step 3: Calculate Statistics
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT COUNT(*) as quarters,
           ROUND(AVG(ABS(gap_move_pct)), 2) as mean_move,
           ROUND(MAX(ABS(gap_move_pct)), 2) as max_move,
@@ -78,7 +78,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 4: Check Position Limits / TRR
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT tail_risk_ratio, tail_risk_level, max_contracts, max_notional,
           avg_move, max_move, num_quarters
    FROM position_limits
@@ -87,7 +87,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 5: Check Past Trade Performance
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
           ROUND(SUM(gain_loss), 0) as total_pnl,

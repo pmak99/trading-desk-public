@@ -41,7 +41,7 @@ Build a permanent sentiment dataset for validating AI value-add:
 TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
 # Auto-detect earnings date if not provided
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT earnings_date, timing FROM earnings_calendar
    WHERE ticker='$TICKER' AND earnings_date >= date('now')
    ORDER BY earnings_date ASC LIMIT 1;"
@@ -49,7 +49,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 2: Get Ticker Context from 2.0
 ```bash
-cd "$PROJECT_ROOT/2.0" && ./trade.sh $TICKER $DATE 2>&1 | head -100
+cd "$PROJECT_ROOT/core" && ./trade.sh $TICKER $DATE 2>&1 | head -100
 ```
 
 Extract from output:
@@ -59,7 +59,7 @@ Extract from output:
 
 ### Step 3: Check if Already Collected
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT collected_at, source, sentiment_direction FROM sentiment_history
    WHERE ticker='$TICKER' AND earnings_date='$DATE';"
 ```
@@ -81,7 +81,7 @@ Summarize into structured format:
 **4b. If search insufficient, try Perplexity ask:**
 Check budget first:
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT COALESCE((SELECT calls FROM api_budget WHERE date=date('now')), 0) as calls;"
 ```
 
@@ -108,7 +108,7 @@ Score mapping:
 
 ### Step 6: Save to Sentiment History
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "INSERT OR REPLACE INTO sentiment_history
    (ticker, earnings_date, collected_at, source, sentiment_text,
     sentiment_score, sentiment_direction, vrp_ratio, implied_move_pct, updated_at)
@@ -118,7 +118,7 @@ sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
 
 ### Step 7: Also Cache for Immediate Use
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "INSERT OR REPLACE INTO sentiment_cache
    (ticker, date, source, sentiment, cached_at)
    VALUES ('$TICKER', '$DATE', '$SOURCE', '$SENTIMENT_TEXT', datetime('now'));"

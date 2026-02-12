@@ -1,5 +1,5 @@
-# 6.0 Agent System Dependencies
-# Reuses 2.0 venv - minimal additional dependencies
+# agents Agent System Dependencies
+# Reuses core venv - minimal additional dependencies
 
 # Core dependencies inherited from 2.0:
 # - pydantic (for schema validation)
@@ -11,4 +11,4 @@
 pyyaml>=6.0         # For config/agents.yaml parsing
 tabulate>=0.9.0     # For ASCII table formatting
 
-# All other dependencies already available in ../2.0/venv
+# All other dependencies already available in ../core/venv

@@ -262,14 +262,14 @@ class BaseAgent:
     @staticmethod
     def is_result_error(result) -> bool:
         """
-        Check if a 2.0 Result object is an error, handling both property and method patterns.
+        Check if a core Result object is an error, handling both property and method patterns.
 
         2.0's Result type uses `is_err` as a @property. This helper ensures correct
         access regardless of whether it's a property or method, providing a single
         consistent check point.
 
         Args:
-            result: A 2.0 Result[T, Error] object
+            result: A core Result[T, Error] object
 
         Returns:
             True if the result is an error, False otherwise

@@ -13,8 +13,8 @@ import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Import 6.0 modules
-# Note: Namespace collision with 2.0/src is handled by deferring 2.0 imports
+# Import agents modules
+# Note: Namespace collision with core/src is handled by deferring core imports
 # until inside Container2_0 class (after sys.path is properly configured)
 from src.orchestrators.prime import PrimeOrchestrator
 

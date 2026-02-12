@@ -59,9 +59,9 @@ DAY_OF_WEEK=$(date '+%A')
 - Holiday: Same as weekend
 - Weekday: Continue with full priming
 
-### Step 3: Run 2.0 Whisper Mode
+### Step 3: Run core Whisper Mode
 ```bash
-cd "$PROJECT_ROOT/2.0" && ./trade.sh whisper $TARGET_MONDAY
+cd "$PROJECT_ROOT/core" && ./trade.sh whisper $TARGET_MONDAY
 ```
 
 **IMPORTANT:** Always pass the date argument to whisper. Without it, whisper may default to the wrong week.
@@ -73,7 +73,7 @@ From whisper results, filter to tickers where:
 
 ### Step 5: Check Budget Status
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT COALESCE((SELECT calls FROM api_budget WHERE date='$(date +%Y-%m-%d)'), 0) as calls;"
 ```
 
@@ -91,7 +91,7 @@ For EACH qualified ticker (in order of VRP score):
 ```bash
 TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT 1 FROM sentiment_cache WHERE ticker='$TICKER' AND date='$EARNINGS_DATE'
    AND cached_at > datetime('now', '-3 hours');"
 ```
@@ -119,7 +119,7 @@ If exists: skip, mark as "already cached"
 
 **6c. Save to sentiment_history (permanent storage for backtesting):**
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "INSERT OR REPLACE INTO sentiment_history
    (ticker, earnings_date, collected_at, source, sentiment_text,
     sentiment_score, sentiment_direction, vrp_ratio, implied_move_pct, updated_at)
@@ -138,7 +138,7 @@ sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
 
 ### Step 7: Update Budget Tracker
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "INSERT INTO api_budget (date, calls, cost, last_updated)
    VALUES ('$(date +%Y-%m-%d)', $NEW_CALLS, $NEW_COST, datetime('now'))
    ON CONFLICT(date) DO UPDATE SET

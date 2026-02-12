@@ -1,4 +1,4 @@
-# Trading Desk 5.0 - Cloud Build Configuration
+# Trading Desk cloud - Cloud Build Configuration
 #
 # Usage:
 #   Triggered by push:  Automatic (COMMIT_SHA populated by Cloud Build)

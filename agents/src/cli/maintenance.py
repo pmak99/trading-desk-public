@@ -25,8 +25,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Import 6.0 modules
-# Note: Namespace collision with 2.0/src is handled by deferring 2.0 imports
+# Import agents modules
+# Note: Namespace collision with core/src is handled by deferring core imports
 # until inside Container2_0 class (after sys.path is properly configured)
 from src.agents.health import HealthCheckAgent
 from src.integration.container_2_0 import Container2_0
@@ -283,7 +283,7 @@ def run_data_quality():
 
         if insufficient_data:
             logger.info("- Run backfill for tickers with <4 quarters")
-            logger.info("  Command: cd ../2.0 && ./trade.sh backfill <TICKER>")
+            logger.info("  Command: cd ../core && ./trade.sh backfill <TICKER>")
 
         if outliers:
             logger.info("- Review outlier moves for data entry errors")

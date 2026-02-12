@@ -1,4 +1,4 @@
-# 5.0 Cloud Autopilot
+# cloud Cloud Autopilot
 
 24/7 cloud-native trading system on GCP Cloud Run. Transforms manual CLI commands into automated pre-market scans, real-time alerts, and Telegram notifications.
 
@@ -8,7 +8,7 @@
 
 - **12 Scheduled Jobs** - Pre-market prep, sentiment scan, morning digest, outcome recording
 - **Telegram Bot** - Mobile access via `/health`, `/whisper`, `/analyze TICKER`
-- **Full VRP Stack** - VRP, liquidity, skew, and 3-rule direction system (ported from 2.0/4.0)
+- **Full VRP Stack** - VRP, liquidity, skew, and 3-rule direction system (ported from core/sentiment)
 - **AI Sentiment** - Perplexity-powered with budget tracking
 - **Performance Optimized** - Parallel analysis (5 concurrent), VRP caching (1-6hr TTL)
 
@@ -17,7 +17,7 @@
 ### Local Development
 
 ```bash
-cd 5.0
+cd cloud
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 cp .env.template .env   # Edit with API keys
@@ -92,7 +92,7 @@ docker compose -f docker-compose.yml up --build
 ## Architecture
 
 ```
-5.0/
+cloud/
 ├── src/
 │   ├── main.py              # FastAPI entry point
 │   ├── api/                 # API layer
@@ -120,7 +120,7 @@ docker compose -f docker-compose.yml up --build
 See [DEPLOYMENT.md](DEPLOYMENT.md) for complete instructions.
 
 ```bash
-cd 5.0
+cd cloud
 ./deploy.sh              # Full deploy with DB sync
 ./deploy.sh --quick      # Code-only deploy (faster)
 ```
@@ -158,8 +158,8 @@ GCS_BUCKET=your-gcs-bucket
 ## Testing
 
 ```bash
-cd 5.0
-../2.0/venv/bin/python -m pytest tests/ -v    # 311 tests
+cd cloud
+../core/venv/bin/python -m pytest tests/ -v    # 311 tests
 ```
 
 ---

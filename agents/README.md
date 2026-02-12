@@ -1,8 +1,8 @@
-# 6.0 Agent Orchestration
+# agents Agent Orchestration
 
-Agent-based orchestration layer with parallel processing. Coordinates multiple specialist agents working concurrently on top of the 2.0/4.0 stack.
+Agent-based orchestration layer with parallel processing. Coordinates multiple specialist agents working concurrently on top of the core/sentiment stack.
 
-## What 6.0 Adds
+## What agents Adds
 
 | Feature | Before (4.0) | After (6.0) |
 |---------|--------------|-------------|
@@ -15,7 +15,7 @@ Agent-based orchestration layer with parallel processing. Coordinates multiple s
 ## Quick Start
 
 ```bash
-cd 6.0
+cd agents
 
 ./agent.sh help                          # Show all commands
 ./agent.sh maintenance health            # Verify systems
@@ -24,7 +24,7 @@ cd 6.0
 ./agent.sh analyze NVDA                  # Deep dive
 ```
 
-**Prerequisites:** Python 3.11+, 2.0 venv (shared), API keys auto-loaded from `2.0/.env` and `5.0/.env`
+**Prerequisites:** Python 3.11+, core venv (shared), API keys auto-loaded from `core/.env` and `cloud/.env`
 
 ## Commands
 
@@ -43,7 +43,7 @@ cd 6.0
 ## Architecture
 
 ```
-6.0/
+agents/
 ├── agent.sh                    # CLI entry point
 ├── src/
 │   ├── orchestrators/          # Coordinate parallel agent execution
@@ -82,14 +82,14 @@ cd 6.0
 | Command | Time | Notes |
 |---------|------|-------|
 | `prime` (30 tickers) | ~10s | 9x faster than sequential |
-| `whisper` (30 tickers) | ~90s | 2x faster than 4.0 |
+| `whisper` (30 tickers) | ~90s | 2x faster than sentiment |
 | `analyze` (single) | ~20-30s | Full parallel deep dive |
 
 ## Agent Timeouts
 
 | Agent | Timeout | Rationale |
 |-------|---------|-----------|
-| TickerAnalysisAgent | 30s | 2.0 analysis is fast |
+| TickerAnalysisAgent | 30s | core analysis is fast |
 | SentimentFetchAgent | 30s | Perplexity typically < 10s |
 | ExplanationAgent | 30s | Narrative generation |
 | AnomalyDetectionAgent | 20s | Fast validation |
@@ -97,7 +97,7 @@ cd 6.0
 | PreFlightAgent | 1s | DB-only ticker validation |
 | NewsFetchAgent | 10s | Finnhub news (non-critical) |
 
-## Integration with 2.0/4.0
+## Integration with core/sentiment
 
 6.0 imports existing systems via `sys.path` injection:
 
@@ -113,8 +113,8 @@ Git worktree support via `git rev-parse --git-common-dir`.
 ## Testing
 
 ```bash
-cd 6.0
-../2.0/venv/bin/python -m pytest tests/ -v    # 82 tests
+cd agents
+../core/venv/bin/python -m pytest tests/ -v    # 82 tests
 ```
 
 ---

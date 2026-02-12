@@ -41,11 +41,11 @@ Examples:
 
 ### Step 2: Show Current Status
 ```bash
-ls -lh "$PROJECT_ROOT/2.0/data/ivcrush.db"
-ls -lh "$PROJECT_ROOT/4.0/data/sentiment_cache.db"
+ls -lh "$PROJECT_ROOT/core/data/ivcrush.db"
+ls -lh "$PROJECT_ROOT/sentiment/data/sentiment_cache.db"
 
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" "SELECT COUNT(*) FROM historical_moves;"
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" "SELECT COUNT(*) FROM sentiment_cache;"
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" "SELECT COUNT(*) FROM historical_moves;"
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" "SELECT COUNT(*) FROM sentiment_cache;"
 ```
 
 ### Step 3: Sync DB with Cloud (if running all or `sync-cloud`)
@@ -53,7 +53,7 @@ sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" "SELECT COUNT(*) FROM sentim
 **IMPORTANT:** Run this FIRST to ensure local and cloud databases are in sync.
 
 ```bash
-cd "$PROJECT_ROOT/2.0" && ./trade.sh sync-cloud
+cd "$PROJECT_ROOT/core" && ./trade.sh sync-cloud
 ```
 
 This will:
@@ -64,66 +64,66 @@ This will:
 
 ### Step 4: Database Backup (if running all or `backup`)
 
-**4a. Backup 2.0 database:**
+**4a. Backup core database:**
 ```bash
-TIMESTAMP=$(date +%Y%m%d_%H%M%S) && cp "$PROJECT_ROOT/2.0/data/ivcrush.db" "$PROJECT_ROOT/2.0/backups/ivcrush_${TIMESTAMP}.db"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S) && cp "$PROJECT_ROOT/core/data/ivcrush.db" "$PROJECT_ROOT/core/backups/ivcrush_${TIMESTAMP}.db"
 ```
 
-**4b. Backup 4.0 database:**
+**4b. Backup sentiment database:**
 ```bash
-mkdir -p "$PROJECT_ROOT/4.0/backups" && TIMESTAMP=$(date +%Y%m%d_%H%M%S) && cp "$PROJECT_ROOT/4.0/data/sentiment_cache.db" "$PROJECT_ROOT/4.0/backups/sentiment_cache_${TIMESTAMP}.db"
+mkdir -p "$PROJECT_ROOT/sentiment/backups" && TIMESTAMP=$(date +%Y%m%d_%H%M%S) && cp "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" "$PROJECT_ROOT/sentiment/backups/sentiment_cache_${TIMESTAMP}.db"
 ```
 
 **4c. Prune old backups (keep last 5):**
 ```bash
-cd "$PROJECT_ROOT/2.0/backups" && ls -t *.db 2>/dev/null | tail -n +6 | xargs rm -f
-cd "$PROJECT_ROOT/4.0/backups" && ls -t *.db 2>/dev/null | tail -n +6 | xargs rm -f
+cd "$PROJECT_ROOT/core/backups" && ls -t *.db 2>/dev/null | tail -n +6 | xargs rm -f
+cd "$PROJECT_ROOT/sentiment/backups" && ls -t *.db 2>/dev/null | tail -n +6 | xargs rm -f
 ```
 
 ### Step 5: Backfill Missing Historical Data (if running all or `backfill`)
 
 **5a. Find tickers with sparse data (<5 historical moves):**
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT ticker, COUNT(*) as cnt FROM historical_moves GROUP BY ticker HAVING cnt < 5 ORDER BY cnt;"
 ```
 
 **5b. For each sparse ticker, run backfill:**
 ```bash
-cd "$PROJECT_ROOT/2.0" && ./venv/bin/python scripts/backfill_historical.py $TICKER --start-date 2023-01-01
+cd "$PROJECT_ROOT/core" && ./venv/bin/python scripts/backfill_historical.py $TICKER --start-date 2023-01-01
 ```
 
 ### Step 6: Cleanup Expired Caches (if running all or `cleanup`)
 
 **6a. Remove expired sentiment cache entries (>24 hours old):**
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "DELETE FROM sentiment_cache WHERE cached_at < datetime('now', '-24 hours'); SELECT changes();"
 ```
 
 **6b. Vacuum databases to reclaim space:**
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" "VACUUM;"
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" "VACUUM;"
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" "VACUUM;"
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" "VACUUM;"
 ```
 
 ### Step 7: Data Integrity Validation (if running all or `validate`)
 
 **7a. Check for orphaned records:**
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT DISTINCT ticker FROM earnings_calendar WHERE ticker NOT IN (SELECT DISTINCT ticker FROM historical_moves) LIMIT 10;"
 ```
 
 **7b. Check for duplicate entries:**
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT ticker, earnings_date, COUNT(*) as cnt FROM historical_moves GROUP BY ticker, earnings_date HAVING cnt > 1;"
 ```
 
 **7c. Check sentiment_history for backtesting data:**
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT COUNT(*) as total,
           SUM(CASE WHEN actual_move_pct IS NOT NULL THEN 1 ELSE 0 END) as with_outcome
    FROM sentiment_history;"
@@ -133,13 +133,13 @@ sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
 
 **8a. Recent budget:**
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT date, calls, cost FROM api_budget ORDER BY date DESC LIMIT 3;"
 ```
 
 **8b. Monthly spend:**
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT strftime('%Y-%m', date) as month, SUM(calls) as total_calls, ROUND(SUM(cost), 2) as total_cost
    FROM api_budget GROUP BY month ORDER BY month DESC LIMIT 3;"
 ```
@@ -147,7 +147,7 @@ sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
 ### Step 9: Sync Stale Earnings Dates (if running all or `sync`)
 
 ```bash
-cd "$PROJECT_ROOT/2.0" && ./trade.sh sync
+cd "$PROJECT_ROOT/core" && ./trade.sh sync
 ```
 
 This discovers new earnings announcements and validates dates using cross-reference validation.
@@ -160,8 +160,8 @@ MAINTENANCE MODE
 ==============================================================
 
 CURRENT STATUS
-   2.0 Database:    X.X MB (X,XXX records)
-   4.0 Cache:       XXX KB (X cached)
+   core Database:    X.X MB (X,XXX records)
+   sentiment Cache:       XXX KB (X cached)
    Last backup:     YYYY-MM-DD HH:MM
 
 CLOUD SYNC
@@ -169,8 +169,8 @@ CLOUD SYNC
    [check] Backed up to Google Drive
 
 BACKUP
-   [check] 2.0 backed up -> ivcrush_YYYYMMDD_HHMMSS.db
-   [check] 4.0 backed up -> sentiment_cache_YYYYMMDD_HHMMSS.db
+   [check] core backed up -> ivcrush_YYYYMMDD_HHMMSS.db
+   [check] sentiment backed up -> sentiment_cache_YYYYMMDD_HHMMSS.db
    [check] Pruned X old backups
 
 BACKFILL
@@ -202,7 +202,7 @@ MAINTENANCE COMPLETE
 
 | Task | What it does | When to run |
 |------|--------------|-------------|
-| `sync-cloud` | Sync local DB with 5.0 cloud (GCS) + backup to Google Drive | Weekly (FIRST task) |
+| `sync-cloud` | Sync local DB with cloud cloud (GCS) + backup to Google Drive | Weekly (FIRST task) |
 | `backup` | Copy databases to local backups/ | Weekly or before major changes |
 | `sync` | Refresh earnings calendar from Alpha Vantage + Yahoo | Weekly or before whisper |
 | `backfill` | Fill missing historical moves | After adding new tickers |

@@ -3,7 +3,7 @@
 This package provides:
 - Orchestrators: Coordinate complex workflows (/whisper, /analyze, /prime)
 - Agents: Worker units for specific tasks
-- Integration: Wrappers for 2.0, 4.0, 5.0 systems
+- Integration: Wrappers for 2.0, 4.0, cloud systems
 - Utils: Common utilities
 """
 

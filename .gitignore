@@ -67,15 +67,15 @@ src/data/cache/
 1.0/profiling/results/*.prof
 1.0/profiling/results/*.txt
 1.0/benchmarks/results/*.json
-2.0/profiling/results/*.prof
-2.0/profiling/results/*.txt
-2.0/benchmarks/results/*.json
+core/profiling/results/*.prof
+core/profiling/results/*.txt
+core/benchmarks/results/*.json
 
 # Data directories in version directories (test databases, etc.)
 1.0/data/
-2.0/data/
-4.0/data/
-5.0/data/
+core/data/
+sentiment/data/
+cloud/data/
 *.db
 
 # Database files - catch-all pattern (prevent ivcrush.db from any directory)
@@ -96,5 +96,15 @@ dmypy.json
 *.backup-*
 *.bak
 
-# Exclude sensitive 2025 trade statements and analysis
+# Exclude sensitive trade statements and analysis
 docs/2025 Trades/
+
+# Claude Code local settings (may contain API keys in allowlist)
+.claude/settings.local.json
+**/settings.local.json
+
+# Terraform secrets and state
+terraform.tfvars
+*.tfstate
+*.tfstate.backup
+.terraform/

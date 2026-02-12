@@ -7,7 +7,7 @@ TickerAnalysisAgent:
   prompt: |
     You are a TickerAnalysisAgent. Analyze {ticker} for earnings on {earnings_date}.
 
-    Use the following 2.0 system APIs:
+    Use the following core system APIs:
     - container.analyzer.analyze() for full VRP + liquidity + strategy analysis
     - container.prices_repository.get_historical_moves() for historical earnings data
 
@@ -112,7 +112,7 @@ HealthCheckAgent:
     Check these systems:
     1. API connectivity (Tradier, Alpha Vantage, Perplexity)
     2. Database health (connection, integrity, size)
-    3. Budget status (daily/monthly limits from 4.0 cache)
+    3. Budget status (daily/monthly limits from sentiment cache)
     4. Data freshness (earnings calendar age)
     5. Cache statistics (hit rate, size)
 

@@ -50,7 +50,7 @@ WEIGHT_LIQUIDITY = 0.20
 
 # =============================================================================
 # Sentiment Modifiers - Applied to base score
-# 4.0 Score = 2.0 Score x (1 + modifier)
+# sentiment Score = core Score x (1 + modifier)
 # =============================================================================
 SENTIMENT_STRONG_BULLISH_THRESHOLD = 0.6
 SENTIMENT_BULLISH_THRESHOLD = 0.2

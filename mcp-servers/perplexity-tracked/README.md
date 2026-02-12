@@ -6,7 +6,7 @@ A custom MCP server that replaces the standard Perplexity MCP and logs all API u
 
 - **Accurate Token Tracking**: Extracts actual token counts from Perplexity API responses
 - **Invoice-Verified Pricing**: Uses rates from actual Perplexity invoice
-- **Budget Integration**: Logs to the same database as 4.0 budget tracker
+- **Budget Integration**: Logs to the same database as sentiment budget tracker
 - **Drop-in Replacement**: Exposes the same tools as the standard perplexity MCP
 
 ## Installation
@@ -19,7 +19,7 @@ pip install -r requirements.txt
 Or use the project's virtual environment:
 
 ```bash
-$PROJECT_ROOT/2.0/venv/bin/pip install mcp httpx
+$PROJECT_ROOT/core/venv/bin/pip install mcp httpx
 ```
 
 ## Configuration
@@ -31,13 +31,13 @@ Update `~/.claude.json` to use this server instead of the standard Perplexity MC
   "mcpServers": {
     "perplexity": {
       "type": "stdio",
-      "command": "$PROJECT_ROOT/2.0/venv/bin/python",
+      "command": "$PROJECT_ROOT/core/venv/bin/python",
       "args": [
         "$PROJECT_ROOT/mcp-servers/perplexity-tracked/server.py"
       ],
       "env": {
         "PERPLEXITY_API_KEY": "pplx-xxx...your-key-here",
-        "BUDGET_DB_PATH": "$PROJECT_ROOT/4.0/data/sentiment_cache.db"
+        "BUDGET_DB_PATH": "$PROJECT_ROOT/sentiment/data/sentiment_cache.db"
       }
     }
   }
@@ -49,7 +49,7 @@ Update `~/.claude.json` to use this server instead of the standard Perplexity MC
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `PERPLEXITY_API_KEY` | Yes | Your Perplexity API key |
-| `BUDGET_DB_PATH` | No | Path to budget tracker database (defaults to 4.0 db) |
+| `BUDGET_DB_PATH` | No | Path to budget tracker database (defaults to sentiment db) |
 
 ## Available Tools
 
@@ -102,6 +102,6 @@ python server.py
 After making Perplexity calls, verify token tracking:
 
 ```bash
-sqlite3 $PROJECT_ROOT/4.0/data/sentiment_cache.db \
+sqlite3 $PROJECT_ROOT/sentiment/data/sentiment_cache.db \
   "SELECT * FROM api_budget ORDER BY date DESC LIMIT 5"
 ```

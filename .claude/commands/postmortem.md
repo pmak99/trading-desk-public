@@ -34,7 +34,7 @@ Examples:
 ```bash
 TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT earnings_date, timing FROM earnings_calendar
    WHERE ticker='$TICKER' AND earnings_date <= date('now')
    ORDER BY earnings_date DESC LIMIT 1;"
@@ -44,7 +44,7 @@ If specific date provided, use that instead.
 
 ### Step 2: Load Historical Move (Actual Result)
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT earnings_date, gap_move_pct, close_before, close_after, direction
    FROM historical_moves
    WHERE ticker='$TICKER' AND earnings_date='$EARNINGS_DATE';"
@@ -61,7 +61,7 @@ Calculate the gap move from the price data.
 ### Step 3: Load Pre-Earnings Predictions
 ```bash
 # Check what the system predicted (implied move, VRP)
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT h.ticker, h.earnings_date, h.gap_move_pct as actual_move,
           p.tail_risk_ratio, p.tail_risk_level, p.avg_move, p.max_move
    FROM historical_moves h
@@ -71,7 +71,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 4: Check Sentiment Prediction (if available)
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT ticker, date, sentiment, source, actual_move_pct, was_correct
    FROM sentiment_history
    WHERE ticker='$TICKER' AND date='$EARNINGS_DATE';"
@@ -79,7 +79,7 @@ sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
 
 Also check the bias prediction if available:
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT ticker, earnings_date, skew_direction, sentiment_direction,
           final_direction, rule_applied
    FROM bias_predictions
@@ -88,7 +88,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 5: Check Trade Results
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT s.symbol, s.strategy_type, s.gain_loss, s.is_winner,
           s.trade_type, s.campaign_id, s.acquired_date, s.sale_date,
           s.net_credit, s.net_debit, s.quantity
@@ -100,7 +100,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 Also check trade journal for full option details:
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT tj.symbol, tj.option_type, tj.strike, tj.expiration,
           tj.quantity, tj.cost_basis, tj.proceeds, tj.gain_loss
    FROM trade_journal tj
@@ -157,8 +157,8 @@ PRE-EARNINGS PREDICTIONS
   TRR Level:       {HIGH/NORMAL/LOW} ({X.XX}x)
 
 DIRECTION PREDICTIONS
-  2.0 Skew:     {BULLISH/BEARISH/NEUTRAL}
-  4.0 Sentiment: {BULLISH/BEARISH/NEUTRAL} (score: {X.X})
+  core Skew:     {BULLISH/BEARISH/NEUTRAL}
+  sentiment Sentiment: {BULLISH/BEARISH/NEUTRAL} (score: {X.X})
   Final Bias:    {direction} (Rule: {rule_applied})
   RESULT:        {CORRECT/INCORRECT/N/A}
 

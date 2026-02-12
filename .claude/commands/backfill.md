@@ -18,7 +18,7 @@ Examples:
 ## Progress Display
 ```
 [1/3] Verifying sentiment records exist...
-[2/3] Fetching actual outcomes from 2.0 database...
+[2/3] Fetching actual outcomes from core database...
 [3/3] Updating sentiment_history with results...
 ```
 
@@ -36,7 +36,7 @@ Complete the sentiment collection loop:
 ```bash
 TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT ticker, sentiment_direction, vrp_ratio FROM sentiment_history
    WHERE ticker='$TICKER' AND earnings_date='$DATE';"
 ```
@@ -47,9 +47,9 @@ No sentiment record found for $TICKER on $DATE
    Collect sentiment first with: /collect $TICKER $DATE
 ```
 
-**Step 2: Get actual outcome from 2.0 database**
+**Step 2: Get actual outcome from core database**
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT close_move_pct, gap_move_pct,
           CASE WHEN close_move_pct >= 0 THEN 'UP' ELSE 'DOWN' END as direction
    FROM historical_moves
@@ -65,12 +65,12 @@ If no outcome data yet:
 ```
 Outcome not yet available for $TICKER on $DATE
    Historical data may not be recorded yet.
-   Try running: cd "$PROJECT_ROOT/2.0" && ./venv/bin/python scripts/backfill_historical.py $TICKER
+   Try running: cd "$PROJECT_ROOT/core" && ./venv/bin/python scripts/backfill_historical.py $TICKER
 ```
 
 **Step 3: Update sentiment_history with outcome**
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "UPDATE sentiment_history
    SET actual_move_pct = $MOVE,
        actual_direction = '$DIRECTION',
@@ -88,7 +88,7 @@ sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
 
 **Step 1: Get all pending records**
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT ticker, earnings_date, sentiment_direction
    FROM sentiment_history
    WHERE actual_move_pct IS NULL
@@ -97,7 +97,7 @@ sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
 ```
 
 **Step 2: For each pending record, try to backfill**
-Loop through and attempt to get outcome from 2.0 database.
+Loop through and attempt to get outcome from core database.
 
 **Step 3: Report results**
 ```
@@ -114,7 +114,7 @@ Backfill Results:
 
 **Step 1: Query accuracy stats**
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT
      COUNT(*) as total,
      SUM(CASE WHEN actual_move_pct IS NOT NULL THEN 1 ELSE 0 END) as with_outcomes,
@@ -125,7 +125,7 @@ sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
 
 **Step 2: Query by direction**
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT sentiment_direction,
           COUNT(*) as total,
           SUM(CASE WHEN prediction_correct = 1 THEN 1 ELSE 0 END) as correct,
@@ -137,7 +137,7 @@ sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
 
 **Step 3: Query trade outcomes**
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT trade_outcome, COUNT(*) as cnt
    FROM sentiment_history
    WHERE trade_outcome IS NOT NULL
@@ -177,5 +177,5 @@ INSIGHTS
 ```
 
 ## Notes
-- Outcomes require 2.0 historical_moves data (may need backfill_historical.py)
+- Outcomes require core historical_moves data (may need backfill_historical.py)
 - Need ~30 records with outcomes for statistically meaningful accuracy

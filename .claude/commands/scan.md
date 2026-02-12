@@ -16,7 +16,7 @@ Examples:
 ## Progress Display
 ```
 [1/5] Validating date...
-[2/5] Running 2.0 scan for date...
+[2/5] Running core scan for date...
 [3/5] Filtering high-VRP tickers...
 [4/5] Checking tail risk ratios...
 [5/5] Fetching sentiment for top 3...
@@ -46,16 +46,16 @@ DAY_OF_WEEK=$(date '+%A')
 ```
 Display market status as informational note (open/closed/weekend).
 
-### Step 3: Run 2.0 Scan for Date
+### Step 3: Run core Scan for Date
 ```bash
-cd "$PROJECT_ROOT/2.0" && ./trade.sh scan $DATE
+cd "$PROJECT_ROOT/core" && ./trade.sh scan $DATE
 ```
 
 This analyzes every ticker with earnings on that date. Extract for each ticker:
 - Ticker symbol and timing (BMO/AMC)
 - VRP ratio and rating
 - Implied move percentage
-- 2.0 Score
+- core Score
 - Liquidity tier
 
 ### Step 4: Identify TOP 5 VRP >= 1.8x Tickers
@@ -65,7 +65,7 @@ Query TRR for all qualified tickers:
 ```bash
 TICKERS="'NVDA','AMD','MU'"  # Use actual tickers from scan
 
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT ticker, tail_risk_ratio, tail_risk_level, max_contracts
    FROM position_limits WHERE ticker IN ($TICKERS) AND tail_risk_level = 'HIGH';"
 ```
@@ -78,7 +78,7 @@ For EACH of the top 3 non-REJECT tickers:
 ```bash
 TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT sentiment, source, cached_at FROM sentiment_cache
    WHERE ticker='$TICKER' AND date='$DATE'
    AND cached_at > datetime('now', '-3 hours')
@@ -91,10 +91,10 @@ sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
 3. Fall back to `mcp__perplexity__perplexity_search`
 4. Graceful skip if all fail
 
-Calculate 4.0 Score for each:
+Calculate sentiment Score for each:
 ```
 Modifier: Strong Bullish +0.12, Bullish +0.07, Neutral 0.00, Bearish -0.07, Strong Bearish -0.12
-4.0 Score = 2.0 Score * (1 + modifier)
+4.0 Score = core Score * (1 + modifier)
 ```
 
 ## Output Format
@@ -126,19 +126,19 @@ SUMMARY
 TOP 3 OPPORTUNITIES
 
 1. NVDA - Earnings {BMO/AMC}
-   VRP: 8.2x (EXCELLENT) | Implied: 8.5% | 2.0 Score: 92
+   VRP: 8.2x (EXCELLENT) | Implied: 8.5% | core Score: 92
    Liquidity: EXCELLENT | TRR: LOW
-   Sentiment: {summary} | 4.0 Score: {X.X}
+   Sentiment: {summary} | sentiment Score: {X.X}
 
 2. AMD - Earnings {BMO/AMC}
-   VRP: 6.1x (EXCELLENT) | Implied: 6.2% | 2.0 Score: 85
+   VRP: 6.1x (EXCELLENT) | Implied: 6.2% | core Score: 85
    Liquidity: EXCELLENT | TRR: NORMAL
-   Sentiment: {summary} | 4.0 Score: {X.X}
+   Sentiment: {summary} | sentiment Score: {X.X}
 
 3. AVGO - Earnings {BMO/AMC}
-   VRP: 5.4x (EXCELLENT) | Implied: 5.8% | 2.0 Score: 72
+   VRP: 5.4x (EXCELLENT) | Implied: 5.8% | core Score: 72
    Liquidity: WARNING | TRR: HIGH -> Max 50 contracts
-   Sentiment: {summary} | 4.0 Score: {X.X}
+   Sentiment: {summary} | sentiment Score: {X.X}
 
 HIGH TAIL RISK (if any):
    {TICKER}: TRR {X.XX}x -> Max 50 contracts / $25k notional

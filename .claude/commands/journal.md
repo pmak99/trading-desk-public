@@ -60,18 +60,18 @@ To export from Fidelity:
 
 Run the enhanced CSV parser:
 ```bash
-"$PROJECT_ROOT/2.0/venv/bin/python" "$PROJECT_ROOT/scripts/parse_fidelity_csv.py" "/path/to/detected/file.csv"
+"$PROJECT_ROOT/core/venv/bin/python" "$PROJECT_ROOT/scripts/parse_fidelity_csv.py" "/path/to/detected/file.csv"
 ```
 
 If no explicit file path, run without argument (script has its own auto-detect):
 ```bash
-"$PROJECT_ROOT/2.0/venv/bin/python" "$PROJECT_ROOT/scripts/parse_fidelity_csv.py"
+"$PROJECT_ROOT/core/venv/bin/python" "$PROJECT_ROOT/scripts/parse_fidelity_csv.py"
 ```
 
 ### Step 2B: If No CSV, Use PDF Parser (Legacy)
 
 ```bash
-"$PROJECT_ROOT/2.0/venv/bin/python" "$PROJECT_ROOT/scripts/parse_trade_statements_v3.py"
+"$PROJECT_ROOT/core/venv/bin/python" "$PROJECT_ROOT/scripts/parse_trade_statements_v3.py"
 ```
 
 ### Step 3: Correlate with VRP Database
@@ -80,7 +80,7 @@ If CSV parser was used, it automatically correlates with ivcrush.db. No extra st
 
 For additional DB context:
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT symbol, COUNT(*) trades, ROUND(SUM(gain_loss), 0) total_pnl,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) win_rate
    FROM strategies

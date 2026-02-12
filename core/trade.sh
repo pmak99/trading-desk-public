@@ -1,5 +1,5 @@
 #!/bin/bash
-# IV Crush 2.0 - Fire-and-Forget Trading Script
+# IV Crush core - Fire-and-Forget Trading Script
 # Strategy: Balanced (Sharpe 8.07, Win Rate 100% on 8 trades Q2-Q4 2024)
 #
 # Usage:
@@ -85,7 +85,7 @@ calculate_expiration() {
 # Functions
 health_check() {
     echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
-    echo -e "${BLUE}${BOLD}    IV Crush 2.0 - System Health${NC}"
+    echo -e "${BLUE}${BOLD}    IV Crush core - System Health${NC}"
     echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
     python scripts/health_check.py 2>&1 | grep -A 10 "System Health\|UP\|HEALTHY" || {
         echo -e "${RED}Health check failed${NC}"
@@ -333,7 +333,7 @@ sync_earnings_calendar() {
 
 show_usage() {
     cat << EOF
-${BLUE}${BOLD}IV Crush 2.0 - Earnings IV Crush Trading${NC}
+${BLUE}${BOLD}IV Crush core - Earnings IV Crush Trading${NC}
 
 ${BOLD}USAGE${NC}
     $0 TICKER YYYY-MM-DD             Single ticker analysis
@@ -586,7 +586,7 @@ case "${1:-}" in
         ;;
 
     sync-cloud)
-        # Sync local DB with 5.0 cloud (GCS) and backup to Google Drive
+        # Sync local DB with cloud cloud (GCS) and backup to Google Drive
         echo -e "${BLUE}${BOLD}Syncing with cloud database...${NC}"
         python3 "../scripts/sync_databases.py"
         ;;

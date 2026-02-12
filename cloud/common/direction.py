@@ -171,7 +171,7 @@ def adjust_direction(
     Simple 3-rule version covering >99% of real cases.
 
     Args:
-        skew_bias: Original bias from 2.0 skew analyzer
+        skew_bias: Original bias from core skew analyzer
                    (e.g., "NEUTRAL", "BULLISH", "DirectionalBias.STRONG_BULLISH")
         sentiment_score: Sentiment score from -1.0 to +1.0
         sentiment_direction: Optional explicit direction ("bullish", "bearish", "neutral")

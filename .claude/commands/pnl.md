@@ -41,7 +41,7 @@ Convert argument to date range:
 
 ### Step 2: Overall P&L
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT COUNT(*) as trades,
           SUM(is_winner) as wins,
           COUNT(*) - SUM(is_winner) as losses,
@@ -58,7 +58,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 3: By Strategy Type
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT strategy_type,
           COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
@@ -71,7 +71,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 4: By Ticker (Top 5 Winners / Bottom 5 Losers)
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT symbol,
           COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
@@ -84,7 +84,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 ```
 
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT symbol,
           COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
@@ -98,7 +98,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 5: Monthly Breakdown (if period > 30 days)
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT strftime('%Y-%m', sale_date) as month,
           COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
@@ -112,7 +112,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 6: Trade Type Breakdown
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT COALESCE(trade_type, 'NEW') as type,
           COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,

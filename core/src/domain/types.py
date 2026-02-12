@@ -1,5 +1,5 @@
 """
-Domain types for IV Crush 2.0 system.
+Domain types for IV Crush core system.
 
 All types are immutable (frozen dataclasses) to ensure thread safety
 and prevent accidental mutations.
@@ -81,7 +81,7 @@ class Money:
 class Percentage:
     """
     Percentage value with validation.
-    Stored as float (e.g., 5.0 means 5%).
+    Stored as float (e.g., cloud means 5%).
     """
 
     value: float

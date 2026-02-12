@@ -1,155 +1,179 @@
 # Trading Desk
 
-Production options trading system for **IV Crush** strategies - selling options before earnings when implied volatility is elevated, profiting from volatility collapse after announcements.
+> Production quantitative options trading system for IV Crush strategies, built iteratively with Claude Code as an AI pair-programming partner.
+
+## What This Is
+
+A real trading system used daily for options trading around earnings announcements. It exploits the **Implied Volatility Crush** — selling options when IV is elevated before earnings, profiting from the volatility collapse after the announcement.
+
+- **200+ strategies** tracked with full P&L accounting
+- **~55-60% win rate** across all strategy types
+- **6,800+ historical earnings moves** for backtesting and pattern analysis
+- **1,300+ tests** across four subsystems
+- **570+ commits** of iterative development (Oct 2025 – Feb 2026)
 
 ## Architecture
 
 ```
-6.0 Agent Orchestration ──→ Parallel Claude Code agents for analysis
-5.0 Cloud Autopilot     ──→ 24/7 Cloud Run + Telegram bot
-4.0 AI Sentiment        ──→ Perplexity-powered sentiment layer
-2.0 Core Math Engine    ──→ VRP/strategy calculations (shared library)
+agents  Agent Orchestration ──→ Parallel Claude Code agents for analysis
+cloud   Cloud Autopilot     ──→ 24/7 Cloud Run + Telegram bot
+sentiment AI Sentiment      ──→ Perplexity-powered sentiment layer
+core    Core Math Engine    ──→ VRP/strategy calculations (shared library)
 ────────────────────────────────────────────────────────────────────
-SQLite (ivcrush.db)     ──→ 15 tables, 6,861 historical moves
+SQLite (ivcrush.db)         ──→ 15 tables, 6,861 historical moves
 ```
 
-All subsystems import 2.0 as a shared library via `sys.path` injection. 4.0, 5.0, and 6.0 never duplicate 2.0's math.
+All subsystems import core as a shared library via `sys.path` injection. Sentiment, cloud, and agents never duplicate core's math.
 
-| Subsystem | Purpose | Tests | Status |
-|-----------|---------|------:|--------|
-| [2.0](2.0/) | Core VRP math and strategy generation | 690 | Production |
-| [4.0](4.0/) | AI sentiment layer (Perplexity) | 221 | Production |
-| [5.0](5.0/) | Cloud autopilot (Cloud Run + Telegram) | 311 | Production |
-| [6.0](6.0/) | Agent orchestration (parallel processing) | 48 | Production |
+| Subsystem | Purpose | Tests | Key Tech |
+|-----------|---------|------:|----------|
+| [core](core/) | VRP math, scoring, strategy generation | 690 | SQLite, DDD, configurable scoring |
+| [sentiment](sentiment/) | AI sentiment with budget tracking | 221 | Perplexity API, 3hr TTL cache |
+| [cloud](cloud/) | 24/7 autopilot with Telegram alerts | 311 | FastAPI, Cloud Run, GCS sync |
+| [agents](agents/) | Parallel agent orchestration | 82 | Claude Code agents, YAML config |
 
-## Quick Start
+## Claude Code Integration
 
-```bash
-# Local analysis (2.0)
-cd 2.0/
-./trade.sh NVDA 2026-02-10      # Single ticker
-./trade.sh scan 2026-02-10      # All earnings on date
-./trade.sh whisper              # Most anticipated earnings
-./trade.sh health               # System health check
+This project was built almost entirely through AI pair-programming with Claude Code. The integration goes beyond simple code generation:
 
-# Agent orchestration (6.0)
-cd 6.0/
-./agent.sh whisper              # Find opportunities (parallel)
-./agent.sh analyze NVDA         # Deep dive
+### 19 Custom Slash Commands
 
-# Cloud API (5.0)
-curl -H "X-API-Key: $KEY" https://your-cloud-run-url.run.app/api/whisper
-```
+Every daily workflow is a Claude Code slash command in [`.claude/commands/`](.claude/commands/):
 
-## Claude Code Commands
-
-All 13 slash commands for interactive analysis:
-
-| Command | Purpose |
-|---------|---------|
+| Command | What It Does |
+|---------|-------------|
 | `/whisper` | Find most anticipated earnings with VRP analysis |
 | `/analyze TICKER` | Deep dive single ticker for trade decision |
 | `/scan DATE` | Scan all earnings on a specific date |
-| `/prime` | Pre-cache sentiment for the upcoming week |
+| `/prime` | Pre-cache sentiment for upcoming earnings week |
 | `/alert` | Today's high-VRP trading alerts |
 | `/health` | System status (APIs, DB, budget) |
-| `/maintenance MODE` | System maintenance (sync, backup, backfill, cleanup) |
+| `/maintenance MODE` | System maintenance (sync, backup, backfill, cleanup, validate) |
 | `/journal FILE` | Parse Fidelity CSV/PDF trade statements |
 | `/backtest [TICKER]` | Performance analysis from strategies DB |
 | `/history TICKER` | Historical earnings moves with pattern analysis |
-| `/backfill ARGS` | Record post-earnings outcomes for sentiment accuracy |
+| `/backfill ARGS` | Record post-earnings outcomes |
 | `/collect TICKER` | Collect and store pre-earnings sentiment |
-| `/export-report [MODE]` | Export scan results, journal, or performance to CSV |
+| `/export-report [MODE]` | Export to CSV/JSON |
+| `/positions [TICKER]` | Open positions and 30-day exposure dashboard |
+| `/risk [DAYS]` | Portfolio risk assessment (TRR, concentration, drawdown) |
+| `/calendar [DATE]` | Weekly earnings calendar with history and TRR flags |
+| `/pnl [PERIOD]` | P&L summary (week/month/ytd/year/quarter/N days) |
+| `/postmortem TICKER` | Post-earnings: predicted vs actual move analysis |
+| `/deploy [--quick]` | Deploy cloud to Cloud Run |
+
+### Custom MCP Server
+
+A [budget-aware Perplexity MCP server](mcp-servers/perplexity-tracked/) that:
+- Tracks API spending against a monthly budget ($5 hard cap)
+- Persists call history in SQLite for cost analysis
+- Provides `perplexity_ask` and `perplexity_search` tools to Claude Code
+- Cascades between `sonar` and `sonar-pro` models based on query complexity
+
+### CLAUDE.md as Living Documentation
+
+The [`CLAUDE.md`](CLAUDE.md) file serves as a domain knowledge base for Claude Code — VRP thresholds, scoring weights, strategy performance data, liquidity tiers, and critical trading rules. This means every Claude Code session starts with full domain context.
+
+### Development Methodology
+
+All 570+ commits show AI-assisted development patterns:
+- Test-driven development with Claude Code running tests iteratively
+- Architectural decisions documented in [`docs/plans/`](docs/plans/)
+- Progressive system evolution from local CLI to cloud autopilot to agent orchestration
+
+## Key Technical Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **`sys.path` injection** over packages | Four subsystems share core's math without pip install complexity |
+| **SQLite** over Postgres | Single-user system, portable, cloud-syncable via GCS |
+| **Budget-aware AI** | Hard $5/month cap on Perplexity API prevents runaway costs |
+| **DDD architecture** | Domain/application/infrastructure separation in core enables testing |
+| **YAML agent config** | Agent behavior (models, tools, prompts) configured without code changes |
+| **Tail Risk Ratio (TRR)** | Position sizing based on historical tail risk, not just VRP |
+
+## Performance Highlights
+
+| Metric | Value |
+|--------|-------|
+| Overall win rate | ~55-60% |
+| Strategies tracked | 200+ |
+| Best strategy type | SINGLE options (~60-65% win rate) |
+| Best TRR tier | LOW TRR (~70% win rate, strong profit) |
+| Historical moves DB | 6,861 records across 400+ tickers |
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.11+
+- API keys: Tradier, Alpha Vantage, Twelve Data, Perplexity
+
+### Setup
+
+```bash
+# Clone and set up core
+cd core/
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # Add your API keys
+
+# Run tests
+python -m pytest tests/ -v
+
+# Analyze a ticker
+./trade.sh NVDA 2026-02-10
+
+# Scan all earnings on a date
+./trade.sh scan 2026-02-10
+```
+
+### Agent System
+
+```bash
+cd agents/
+./agent.sh whisper              # Find opportunities (parallel)
+./agent.sh analyze NVDA         # Deep dive with TRR + sentiment
+```
+
+### Cloud Deployment
+
+```bash
+cd cloud/
+./deploy.sh                     # Deploy to Cloud Run
+```
 
 ## Directory Structure
 
 ```
-Trading Desk/
-├── 2.0/            Core math engine (VRP, liquidity, strategies)
-├── 4.0/            AI sentiment layer (Perplexity integration)
-├── 5.0/            Cloud autopilot (FastAPI + Telegram)
-├── 6.0/            Agent orchestration (parallel Claude Code)
-├── scripts/        Root-level utilities and data pipelines
-├── docs/           Research docs, trade records
-├── mcp-servers/    Custom MCP server configs
-└── .claude/        Claude Code commands and settings
-```
-
-## Databases
-
-### ivcrush.db (2.0)
-
-Primary database shared by all subsystems.
-
-| Table | Records | Purpose |
-|-------|--------:|---------|
-| `historical_moves` | 6,861 | Post-earnings price movements for VRP |
-| `earnings_calendar` | 6,762 | Upcoming and past earnings dates |
-| `strategies` | 203 | Grouped trades with P&L tracking |
-| `trade_journal` | 556 | Individual option legs |
-| `position_limits` | 428 | TRR-based position sizing |
-| `bias_predictions` | 28 | Directional bias predictions |
-
-Plus: `analysis_log`, `cache`, `rate_limits`, `schema_migrations`, `backtest_runs`, `backtest_trades`, `iv_log`, `job_status`, `ticker_metadata`
-
-**Locations:** `2.0/data/ivcrush.db` (local) | `gs://your-gcs-bucket/ivcrush.db` (cloud)
-
-### sentiment_cache.db (4.0)
-
-| Table | Records | Purpose |
-|-------|--------:|---------|
-| `sentiment_cache` | 0 | Short-lived sentiment cache (3hr TTL) |
-| `api_budget` | 17 | Daily Perplexity API call tracking |
-| `sentiment_history` | 27 | Permanent sentiment records for backtesting |
-
-**Location:** `4.0/data/sentiment_cache.db`
-
-## Environment Variables
-
-```bash
-TRADIER_API_KEY=xxx           # Options chains, Greeks, IV
-ALPHA_VANTAGE_KEY=xxx         # Earnings calendar
-TWELVE_DATA_KEY=xxx           # Historical prices
-PERPLEXITY_API_KEY=xxx        # AI sentiment (4.0/5.0)
-TELEGRAM_BOT_TOKEN=xxx        # Telegram notifications (5.0)
-TELEGRAM_CHAT_ID=xxx          # Telegram chat (5.0)
+trading-desk/
+├── core/              Core math engine (VRP, liquidity, strategies)
+├── sentiment/         AI sentiment layer (Perplexity integration)
+├── cloud/             Cloud autopilot (FastAPI + Telegram)
+├── agents/            Agent orchestration (parallel Claude Code)
+├── common/            Shared constants and enums
+├── scripts/           Data pipelines and utilities
+├── docs/              Architecture docs and implementation plans
+├── mcp-servers/       Custom MCP server (Perplexity budget tracker)
+├── .claude/           Claude Code commands (19 slash commands)
+├── CLAUDE.md          Domain knowledge base for Claude Code
+└── .github/           CI workflows and Dependabot config
 ```
 
 ## Testing
 
 ```bash
-cd 2.0 && ./venv/bin/python -m pytest tests/ -v    # 690 tests
-cd 4.0 && ../2.0/venv/bin/python -m pytest tests/  # 221 tests
-cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 311 tests
-cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 48 tests
+cd core && ./venv/bin/python -m pytest tests/ -v          # 690 tests
+cd sentiment && ../core/venv/bin/python -m pytest tests/  # 221 tests
+cd cloud && ../core/venv/bin/python -m pytest tests/      # 311 tests
+cd agents && ../core/venv/bin/python -m pytest tests/     # 82 tests
 ```
 
-Total: 1,270 tests across all subsystems.
-
-## Scripts
-
-Root-level utilities in `scripts/`:
-
-| Script | Purpose |
-|--------|---------|
-| `parse_fidelity_csv.py` | Parse Fidelity CSV exports into trade_journal |
-| `parse_trade_statements_v3.py` | Parse Fidelity PDF statements (legacy) |
-| `export_scan_results.py` | Export scan output to CSV/JSON |
-| `backtest_report.py` | Generate backtest performance reports |
-| `backfill_strategies.py` | Backfill strategy trade_type/campaign fields |
-| `backfill_earnings_dates.py` | Backfill missing earnings dates |
-| `db_health_check.py` | Database integrity validation |
-| `sync_databases.py` | Sync local and cloud databases |
-| `strategy_grouper.py` | Group trade journal entries into strategies |
-| `visualize_moves.py` | Historical earnings move visualization |
-
-## Archived Systems
-
-| Version | Status | Reason |
-|---------|--------|--------|
-| 1.0 | Deprecated | Superseded by 2.0's DDD architecture |
-| 3.0 | Paused | ML direction prediction showed no edge |
+Total: **1,304 tests** across all subsystems.
 
 ---
 
-**Disclaimer:** For research purposes only. Not financial advice. Options trading involves substantial risk.
+**Disclaimer:** For research and educational purposes only. Not financial advice. Options trading involves substantial risk of loss.
+
+**License:** [MIT](LICENSE)
