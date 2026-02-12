@@ -21,7 +21,7 @@ class TestVRPScoring:
 
     @pytest.fixture
     def scorer(self):
-        """Create scorer with default thresholds (2.0/1.5/1.2)."""
+        """Create scorer with default thresholds (core/1.5/1.2)."""
         config = get_config("balanced")
         return TickerScorer(config)
 
@@ -118,7 +118,7 @@ class TestVRPScoring:
         score = scorer.calculate_vrp_score(1.4)
         assert score == 50.0
 
-        # 2.0x (default excellent) is between good and excellent for conservative
+        # corex (default excellent) is between good and excellent for conservative
         score = scorer.calculate_vrp_score(2.0)
         assert 75.0 < score < 100.0
 
@@ -235,8 +235,8 @@ class TestLiquidityScoring:
 
         With 4-tier scoring:
         - OI 100: 2.5 pts (just above min, below warning tier)
-        - Spread 15%: 5.0 pts (warning tier)
-        - Volume 50: 2.0 pts (at min)
+        - Spread 15%: cloud pts (warning tier)
+        - Volume 50: core pts (at min)
         Total: 9.5 * 4 = 38.0
         """
         score = scorer.calculate_liquidity_score(

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sync databases between 5.0 cloud (GCS) and 2.0 local.
+Sync databases between cloud cloud (GCS) and core local.
 
 Bidirectional sync strategy:
 - historical_moves: Union (UNIQUE ticker+date prevents dupes)
@@ -23,7 +23,7 @@ import tempfile
 # Paths
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
-LOCAL_DB = PROJECT_ROOT / "2.0" / "data" / "ivcrush.db"
+LOCAL_DB = PROJECT_ROOT / "core" / "data" / "ivcrush.db"
 GCS_BUCKET = "your-gcs-bucket"
 GCS_BLOB = "ivcrush.db"
 # Google Drive backup path - auto-detect or use environment variable

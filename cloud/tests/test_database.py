@@ -1,4 +1,4 @@
-# 5.0/tests/test_database.py
+# cloud/tests/test_database.py
 """Tests for DatabaseSync with GCS locking."""
 
 import pytest

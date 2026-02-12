@@ -1,8 +1,8 @@
 """
 Integration tests for the cross-subsystem analysis flow.
 
-Tests the full pipeline: 2.0 VRP calculation -> 4.0 sentiment modifier
--> 5.0 API response -> final recommendation.
+Tests the full pipeline: core VRP calculation -> sentiment sentiment modifier
+-> cloud API response -> final recommendation.
 
 Uses real domain function calls (not mocked) with test data that
 exercises the actual calculation logic.
@@ -65,19 +65,19 @@ class TestEndToEndAnalysisFlow:
             vrp_tier=vrp["tier"],
         )
         base_score = score_result["total_score"]
-        assert base_score >= 50, f"Base score {base_score} should pass 2.0 pre-filter (>=50)"
+        assert base_score >= 50, f"Base score {base_score} should pass core pre-filter (>=50)"
 
         # Step 4: Sentiment modifier (4.0) - strong bullish +12%
         final_score = apply_sentiment_modifier(base_score, sentiment_score=0.7)
         assert final_score > base_score, "Bullish sentiment should increase score"
-        assert final_score >= 55, f"Final score {final_score} should pass 4.0 post-filter (>=55)"
+        assert final_score >= 55, f"Final score {final_score} should pass sentiment post-filter (>=55)"
 
         # Step 5: Direction
         direction = get_direction("neutral", sentiment_score=0.7, sentiment_direction="bullish")
         assert direction == "BULLISH"
 
     def test_marginal_opportunity_rejected_by_sentiment(self):
-        """Marginal VRP that passes 2.0 filter but fails 4.0 post-filter with bearish sentiment."""
+        """Marginal VRP that passes core filter but fails sentiment post-filter with bearish sentiment."""
         # VRP: 1.3x (MARGINAL) - implied 5.85% vs ~4.5 mean
         vrp = calculate_vrp(implied_move_pct=5.85, historical_moves=HISTORICAL_MINIMAL)
         assert vrp["tier"] == "MARGINAL"
@@ -215,7 +215,7 @@ class TestVRPWithRealisticData:
 
     def test_vrp_tier_boundary_marginal(self):
         """VRP exactly at 1.2 threshold -> MARGINAL."""
-        # Mean = 5.0, implied = 6.0 -> VRP = 1.2
+        # Mean = 5.0, implied = agents -> VRP = 1.2
         vrp = calculate_vrp(
             implied_move_pct=6.0,
             historical_moves=[5.0, 5.0, 5.0, 5.0],
@@ -366,7 +366,7 @@ class TestScoreFlowPipeline:
         )
 
     def test_pipeline_passes_4_0_filter_with_bullish_sentiment(self):
-        """Base score near cutoff passes 4.0 filter when boosted by bullish sentiment."""
+        """Base score near cutoff passes sentiment filter when boosted by bullish sentiment."""
         # Create a score just around 50-55 range
         result = calculate_score(
             vrp_ratio=1.5,
@@ -381,7 +381,7 @@ class TestScoreFlowPipeline:
         assert final == pytest.approx(base * 1.07, abs=0.1)
 
     def test_pipeline_fails_4_0_filter_with_bearish_sentiment(self):
-        """Borderline base score fails 4.0 filter when reduced by bearish sentiment."""
+        """Borderline base score fails sentiment filter when reduced by bearish sentiment."""
         # Score right around 55
         result = calculate_score(
             vrp_ratio=1.5,
@@ -679,26 +679,26 @@ class TestCrossSubsystemScenarios:
         AAPL earnings: high VRP, great liquidity, bullish sentiment.
         Should produce a clear GO recommendation.
         """
-        # 2.0: VRP
+        # core: VRP
         vrp = calculate_vrp(implied_move_pct=7.5, historical_moves=HISTORICAL_AAPL)
         assert vrp["tier"] == "EXCELLENT"
 
-        # 2.0: Liquidity
+        # core: Liquidity
         liq = classify_liquidity_tier(oi=800, spread_pct=5.0, position_size=100)
         assert liq == "EXCELLENT"
 
-        # 2.0: Base score
+        # core: Base score
         score = calculate_score(
             vrp_ratio=vrp["vrp_ratio"],
             implied_move_pct=vrp["implied_move_pct"],
             liquidity_tier=liq,
         )
         base = score["total_score"]
-        assert base >= 50  # Passes 2.0 filter
+        assert base >= 50  # Passes core filter
 
-        # 4.0: Sentiment
+        # sentiment: Sentiment
         final = apply_sentiment_modifier(base, sentiment_score=0.5)
-        assert final >= 55  # Passes 4.0 filter
+        assert final >= 55  # Passes sentiment filter
         assert final > base  # Sentiment boosted
 
         # Direction: neutral skew + bullish sentiment -> bullish
@@ -711,11 +711,11 @@ class TestCrossSubsystemScenarios:
         MSFT earnings: moderate VRP, bullish skew but bearish sentiment.
         Direction conflict forces neutral hedge.
         """
-        # 2.0: VRP
+        # core: VRP
         vrp = calculate_vrp(implied_move_pct=7.5, historical_moves=HISTORICAL_MSFT)
         assert vrp["tier"] in ("GOOD", "EXCELLENT")
 
-        # 2.0: Base score
+        # core: Base score
         score = calculate_score(
             vrp_ratio=vrp["vrp_ratio"],
             implied_move_pct=7.5,
@@ -723,7 +723,7 @@ class TestCrossSubsystemScenarios:
         )
         base = score["total_score"]
 
-        # 4.0: Strong bearish sentiment reduces score by 12%
+        # sentiment: Strong bearish sentiment reduces score by 12%
         final = apply_sentiment_modifier(base, sentiment_score=-0.7)
         assert final < base
         assert final == pytest.approx(base * 0.88, abs=0.1)
@@ -739,7 +739,7 @@ class TestCrossSubsystemScenarios:
         """
         Low VRP ticker: no volatility edge, should be skipped regardless of sentiment.
         """
-        # 2.0: VRP barely 1.0x
+        # core: VRP barely 1.0x
         vrp = calculate_vrp(
             implied_move_pct=10.0,
             historical_moves=HISTORICAL_TSLA,  # mean ~10.55
@@ -777,21 +777,21 @@ class TestCrossSubsystemScenarios:
 
     def test_sentiment_can_push_borderline_over_filter(self):
         """
-        Score at 52 (passes 2.0 filter >= 50, fails 4.0 >= 55).
+        Score at 52 (passes core filter >= 50, fails sentiment >= 55).
         Strong bullish sentiment (+12%) pushes to 58.2 -> passes both.
         """
         base_score = 52.0
         final = apply_sentiment_modifier(base_score, sentiment_score=0.8)
         assert final == pytest.approx(58.2, abs=0.1)  # 52 * 1.12
-        assert final >= 55  # Now passes 4.0 filter
+        assert final >= 55  # Now passes sentiment filter
 
     def test_sentiment_can_push_borderline_below_filter(self):
         """
         Score at 60 (passes both filters).
-        Strong bearish sentiment (-12%) reduces to 52.8 -> still passes 2.0 but marginal.
+        Strong bearish sentiment (-12%) reduces to 52.8 -> still passes core but marginal.
         """
         base_score = 60.0
         final = apply_sentiment_modifier(base_score, sentiment_score=-0.8)
         assert final == pytest.approx(52.8, abs=0.1)  # 60 * 0.88
-        assert final < 55  # Fails 4.0 filter
-        assert final >= 50  # Still passes 2.0 filter
+        assert final < 55  # Fails sentiment filter
+        assert final >= 50  # Still passes core filter

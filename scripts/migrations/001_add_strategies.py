@@ -92,7 +92,7 @@ def migrate(db_path: str, dry_run: bool = False) -> bool:
 
 if __name__ == "__main__":
     project_root = Path(__file__).parent.parent.parent
-    db_path = project_root / "2.0" / "data" / "ivcrush.db"
+    db_path = project_root / "core" / "data" / "ivcrush.db"
 
     dry_run = "--dry-run" in sys.argv
     success = migrate(str(db_path), dry_run=dry_run)

@@ -1,4 +1,4 @@
-"""TickerAnalysisAgent - Executes 2.0 analysis for single ticker.
+"""TickerAnalysisAgent - Executes core analysis for single ticker.
 
 This agent wraps 2.0's analyzer to provide VRP calculation, liquidity scoring,
 and strategy generation for a single ticker.
@@ -10,8 +10,8 @@ import logging
 import sys
 from pathlib import Path
 
-# Add 2.0 to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "2.0"))
+# Add core to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "core"))
 from src.application.filters.weekly_options import has_weekly_options
 
 from ..integration.container_2_0 import Container2_0
@@ -38,7 +38,7 @@ class TickerAnalysisAgent:
     """
 
     def __init__(self):
-        """Initialize agent with 2.0 container and position limits repo."""
+        """Initialize agent with core container and position limits repo."""
         self.container = Container2_0()
         self.position_limits_repo = PositionLimitsRepository()
 
@@ -173,14 +173,14 @@ class TickerAnalysisAgent:
         return expiration_dt.strftime('%Y-%m-%d')
 
     def _extract_vrp_ratio(self, result: Any) -> Optional[float]:
-        """Extract VRP ratio from 2.0 TickerAnalysis result."""
+        """Extract VRP ratio from core TickerAnalysis result."""
         # TickerAnalysis has vrp: VRPResult with vrp_ratio field
         if hasattr(result, 'vrp') and hasattr(result.vrp, 'vrp_ratio'):
             return result.vrp.vrp_ratio
         return None
 
     def _extract_recommendation(self, result: Any) -> Optional[str]:
-        """Extract VRP recommendation from 2.0 TickerAnalysis result."""
+        """Extract VRP recommendation from core TickerAnalysis result."""
         # TickerAnalysis has vrp: VRPResult with recommendation (enum)
         if hasattr(result, 'vrp') and hasattr(result.vrp, 'recommendation'):
             # Convert enum to string and uppercase (schema expects uppercase)
@@ -191,7 +191,7 @@ class TickerAnalysisAgent:
 
     def _extract_liquidity_tier(self, result: Any) -> Optional[str]:
         """
-        Extract liquidity tier from 2.0 result.
+        Extract liquidity tier from core result.
 
         When strategies are generated, get tier from recommended strategy.
         Otherwise, call 2.0's liquidity scorer directly using the cached
@@ -227,7 +227,7 @@ class TickerAnalysisAgent:
 
     def _extract_score(self, result: Any) -> Optional[int]:
         """
-        Extract composite score from 2.0 result.
+        Extract composite score from core result.
 
         Note: TickerAnalysis doesn't have composite_score. That's in a separate
         TickerScore object from the scorer service. For now, we'll compute a
@@ -259,7 +259,7 @@ class TickerAnalysisAgent:
 
     def _extract_strategies(self, result: Any) -> Optional[list]:
         """
-        Extract strategy recommendations from 2.0 TickerAnalysis result.
+        Extract strategy recommendations from core TickerAnalysis result.
 
         Returns simplified dict representation of strategies.
         """

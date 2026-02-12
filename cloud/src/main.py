@@ -1,5 +1,5 @@
 """
-Trading Desk 5.0 - Autopilot
+Trading Desk cloud - Autopilot
 FastAPI application entry point.
 
 This module creates the FastAPI app, registers routers and middleware,

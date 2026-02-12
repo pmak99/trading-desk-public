@@ -1,18 +1,18 @@
-# 4.0 AI Sentiment Layer
+# sentiment AI Sentiment Layer
 
 AI-enhanced layer on top of 2.0's VRP system. Adds Perplexity-powered sentiment analysis with intelligent caching and budget tracking.
 
 ## Design Principles
 
-1. **AI for Discovery, Math for Trading** - Sentiment informs what to look at; 2.0 math decides how to trade
-2. **Import 2.0, Don't Copy** - All core logic comes from 2.0 via `sys.path` injection
+1. **AI for Discovery, Math for Trading** - Sentiment informs what to look at; core math decides how to trade
+2. **Import 2.0, Don't Copy** - All core logic comes from core via `sys.path` injection
 3. **Graceful Degradation** - Sentiment never blocks analysis; falls back to WebSearch then skips
 4. **Cost-Conscious** - 40 calls/day budget, 3-hour TTL caching, free fallbacks first
 
 ## Sentiment-Adjusted Scoring
 
 ```
-4.0 Score = 2.0 Score x (1 + Sentiment Modifier)
+4.0 Score = core Score x (1 + Sentiment Modifier)
 ```
 
 | Sentiment | Score Range | Modifier |
@@ -23,7 +23,7 @@ AI-enhanced layer on top of 2.0's VRP system. Adds Perplexity-powered sentiment 
 | Bearish | -0.6 to -0.2 | -7% |
 | Strong Bearish | <= -0.6 | -12% |
 
-**Cutoffs:** 2.0 Score >= 50 (pre-filter) | 4.0 Score >= 55 (post-filter)
+**Cutoffs:** core Score >= 50 (pre-filter) | sentiment Score >= 55 (post-filter)
 
 ## Directional Bias Rules
 
@@ -64,7 +64,7 @@ AI-enhanced layer on top of 2.0's VRP system. Adds Perplexity-powered sentiment 
 ## Architecture
 
 ```
-4.0/
+sentiment/
 ├── src/
 │   ├── __init__.py               # Imports from 2.0
 │   ├── sentiment_direction.py    # 3-rule directional bias
@@ -99,8 +99,8 @@ Risks: [1-2 bullets, max 10 words each]
 ## Testing
 
 ```bash
-cd 4.0
-../2.0/venv/bin/python -m pytest tests/ -v    # 221 tests
+cd sentiment
+../core/venv/bin/python -m pytest tests/ -v    # 221 tests
 ```
 
 ---

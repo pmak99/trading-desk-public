@@ -1,4 +1,4 @@
-# 5.0/tests/test_direction.py
+# cloud/tests/test_direction.py
 """Tests for direction adjustment module (3-rule system).
 
 Uses common/direction.py canonical implementation.

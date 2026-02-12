@@ -81,7 +81,7 @@ Notes:
     setup_logging(level=args.log_level)
 
     logger.info("=" * 80)
-    logger.info(f"IV Crush 2.0 - Ticker Analysis")
+    logger.info(f"IV Crush core - Ticker Analysis")
     logger.info("=" * 80)
     logger.info(f"Ticker: {args.ticker}")
     logger.info(f"Earnings Date: {args.earnings_date}")

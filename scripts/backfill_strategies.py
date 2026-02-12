@@ -326,7 +326,7 @@ def main():
     import argparse
 
     project_root = Path(__file__).parent.parent
-    default_db = project_root / "2.0" / "data" / "ivcrush.db"
+    default_db = project_root / "core" / "data" / "ivcrush.db"
 
     parser = argparse.ArgumentParser(description='Backfill strategies from trade journal')
     parser.add_argument('--db', default=str(default_db), help='Database path')

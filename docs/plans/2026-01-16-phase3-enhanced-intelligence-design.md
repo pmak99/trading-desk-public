@@ -1,4 +1,4 @@
-# 6.0 Phase 3: Enhanced Intelligence Design
+# agents Phase 3: Enhanced Intelligence Design
 
 **Date:** 2026-01-16
 **Status:** Approved
@@ -8,7 +8,7 @@
 
 ## Overview
 
-Phase 3 extends the 6.0 agent system with four features:
+Phase 3 extends the agents agent system with four features:
 
 1. **TRR-based Position Sizing** - Surface existing tail risk data to prevent oversizing
 2. **Real Sector Data Integration** - Replace placeholder sector grouping with Finnhub data
@@ -30,28 +30,28 @@ Phase 3 extends the 6.0 agent system with four features:
 
 ### Goal
 
-Surface existing TRR data in whisper/analyze output to prevent oversizing on high-risk tickers. Learned from $134k MU loss in December 2025.
+Surface existing TRR data in whisper/analyze output to prevent oversizing on high-risk tickers. Learned from significant MU loss in December 2025.
 
 ### Current State
 
 - `position_limits` table populated with 451 tickers
 - Contains: tail_risk_ratio, tail_risk_level, max_contracts, max_notional
-- Data NOT surfaced in 6.0 output
+- Data NOT surfaced in agents output
 
 ### Files Changed
 
 ```
-6.0/src/integration/
+agents/src/integration/
   └── position_limits.py  (NEW)
 
-6.0/src/agents/
+agents/src/agents/
   └── ticker_analysis.py  (MODIFY - query position_limits)
 
-6.0/src/orchestrators/
+agents/src/orchestrators/
   └── whisper.py  (MODIFY - add TRR warnings)
   └── analyze.py  (MODIFY - show position limits section)
 
-6.0/src/utils/
+agents/src/utils/
   └── formatter.py  (MODIFY - format TRR badges/warnings)
   └── schemas.py  (MODIFY - add PositionLimits schema)
 ```
@@ -104,23 +104,23 @@ Replace placeholder "first letter" sector grouping with real sector/industry dat
 ### Current State
 
 - `ticker_metadata` table exists but is EMPTY
-- whisper.py line 287: `# TODO: Use proper sector data from 2.0 company profiles`
+- whisper.py line 287: `# TODO: Use proper sector data from core company profiles`
 - Cross-ticker warnings use first letter as sector proxy
 
 ### Files Changed
 
 ```
-6.0/src/agents/
+agents/src/agents/
   └── sector_fetch.py  (NEW)
 
-6.0/src/integration/
+agents/src/integration/
   └── ticker_metadata.py  (NEW)
 
-6.0/src/orchestrators/
+agents/src/orchestrators/
   └── whisper.py  (MODIFY - use real sector in _detect_cross_ticker_risks)
   └── maintenance.py  (MODIFY - add sector-sync command)
 
-6.0/src/utils/
+agents/src/utils/
   └── schemas.py  (MODIFY - add TickerMetadata schema)
 ```
 
@@ -205,7 +205,7 @@ Extend MaintenanceOrchestrator to auto-fix safe data issues instead of just repo
 `./agent.sh maintenance data-quality` reports issues:
 ```
 ⚠️ 4 tickers with <4 quarters: NAVN, BLSH, ABVX, SAIL
-  Command: cd ../2.0 && ./trade.sh backfill <TICKER>
+  Command: cd ../core && ./trade.sh backfill <TICKER>
 ```
 
 No auto-fix capability.
@@ -213,13 +213,13 @@ No auto-fix capability.
 ### Files Changed
 
 ```
-6.0/src/agents/
+agents/src/agents/
   └── data_quality.py  (NEW)
 
-6.0/src/orchestrators/
+agents/src/orchestrators/
   └── maintenance.py  (MODIFY - add --fix and --dry-run flags)
 
-6.0/src/cli/
+agents/src/cli/
   └── maintenance.py  (MODIFY - parse new flags)
 ```
 
@@ -307,13 +307,13 @@ Mine historical earnings patterns to surface actionable insights during `/analyz
 ### Files Changed
 
 ```
-6.0/src/agents/
+agents/src/agents/
   └── pattern_recognition.py  (NEW)
 
-6.0/src/orchestrators/
+agents/src/orchestrators/
   └── analyze.py  (MODIFY - run PatternRecognitionAgent in parallel)
 
-6.0/src/utils/
+agents/src/utils/
   └── schemas.py  (MODIFY - add PatternResult schema)
   └── formatter.py  (MODIFY - format pattern output)
 ```

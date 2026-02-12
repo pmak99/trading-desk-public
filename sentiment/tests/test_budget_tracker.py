@@ -1,5 +1,5 @@
 """
-Unit tests for 4.0 budget_tracker module.
+Unit tests for sentiment budget_tracker module.
 
 Tests the Perplexity API budget tracking system.
 """

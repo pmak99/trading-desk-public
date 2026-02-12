@@ -1,4 +1,4 @@
-# 5.0/tests/test_implied_move.py
+# cloud/tests/test_implied_move.py
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from src.domain.implied_move import (
@@ -16,7 +16,7 @@ def test_calculate_implied_move_basic():
         call_price=5.0,
         put_price=4.5,
     )
-    # Straddle = 5.0 + 4.5 = 9.5
+    # Straddle = cloud + 4.5 = 9.5
     # Implied move = 9.5 / 100 * 100 = 9.5%
     assert result["implied_move_pct"] == 9.5
     assert result["straddle_price"] == 9.5
@@ -231,7 +231,7 @@ def test_get_implied_move_with_fallback_no_real_data():
     implied_move, used_real = get_implied_move_with_fallback(real_result, historical_avg)
 
     assert implied_move == historical_avg * IMPLIED_MOVE_FALLBACK_MULTIPLIER
-    assert implied_move == 7.5  # 5.0 * 1.5
+    assert implied_move == 7.5  # cloud * 1.5
     assert used_real is False
 
 
@@ -245,7 +245,7 @@ def test_get_implied_move_with_fallback_none_implied_move():
 
     implied_move, used_real = get_implied_move_with_fallback(real_result, historical_avg)
 
-    assert implied_move == 9.0  # 6.0 * 1.5
+    assert implied_move == 9.0  # agents * 1.5
     assert used_real is False
 
 

@@ -30,10 +30,10 @@ Examples:
 
 **Run scan and pipe to export script:**
 ```bash
-cd "$PROJECT_ROOT/2.0" && ./trade.sh scan $(date +%Y-%m-%d) 2>&1 | "$PROJECT_ROOT/2.0/venv/bin/python" "$PROJECT_ROOT/scripts/export_scan_results.py"
+cd "$PROJECT_ROOT/core" && ./trade.sh scan $(date +%Y-%m-%d) 2>&1 | "$PROJECT_ROOT/core/venv/bin/python" "$PROJECT_ROOT/scripts/export_scan_results.py"
 ```
 
-Output files in `2.0/docs/scan_exports/`:
+Output files in `core/docs/scan_exports/`:
 - `scan_YYYYMMDD.csv` - CSV format
 - `scan_YYYYMMDD.json` - JSON format
 
@@ -43,7 +43,7 @@ Output files in `2.0/docs/scan_exports/`:
 
 Query strategies database and format:
 ```bash
-sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 -header -csv "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT symbol, strategy_type, acquired_date, sale_date, days_held,
           gain_loss, is_winner, trade_type, campaign_id, trr_at_entry
    FROM strategies
@@ -52,18 +52,18 @@ sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 Save output to a timestamped file:
 ```bash
-sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 -header -csv "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT symbol, strategy_type, acquired_date, sale_date, days_held,
           gain_loss, is_winner, trade_type, campaign_id, trr_at_entry
    FROM strategies
-   ORDER BY sale_date DESC;" > "$PROJECT_ROOT/2.0/docs/scan_exports/strategies_$(date +%Y%m%d).csv"
+   ORDER BY sale_date DESC;" > "$PROJECT_ROOT/core/docs/scan_exports/strategies_$(date +%Y%m%d).csv"
 ```
 
 ### Mode 3: Export Performance Summary (`performance`)
 
 Generate a comprehensive performance CSV:
 ```bash
-sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 -header -csv "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT symbol,
           strategy_type,
           COUNT(*) as trades,
@@ -74,7 +74,7 @@ sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
           ROUND(AVG(CASE WHEN NOT is_winner THEN gain_loss END), 0) as avg_loss
    FROM strategies
    GROUP BY symbol, strategy_type
-   ORDER BY total_pnl DESC;" > "$PROJECT_ROOT/2.0/docs/scan_exports/performance_$(date +%Y%m%d).csv"
+   ORDER BY total_pnl DESC;" > "$PROJECT_ROOT/core/docs/scan_exports/performance_$(date +%Y%m%d).csv"
 ```
 
 ### Mode 4: Export Ticker Report (`TICKER`)
@@ -83,22 +83,22 @@ Export all trades for a specific ticker:
 ```bash
 TICKER=$(echo "$RAW" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 -header -csv "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT s.symbol, s.strategy_type, s.acquired_date, s.sale_date,
           s.gain_loss, s.is_winner, s.trade_type, s.campaign_id,
           tj.option_type, tj.strike, tj.expiration, tj.cost_basis, tj.proceeds
    FROM strategies s
    LEFT JOIN trade_journal tj ON tj.strategy_id = s.id
    WHERE s.symbol='$TICKER'
-   ORDER BY s.sale_date DESC;" > "$PROJECT_ROOT/2.0/docs/scan_exports/${TICKER}_trades_$(date +%Y%m%d).csv"
+   ORDER BY s.sale_date DESC;" > "$PROJECT_ROOT/core/docs/scan_exports/${TICKER}_trades_$(date +%Y%m%d).csv"
 ```
 
 Also query historical moves:
 ```bash
-sqlite3 -header -csv "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 -header -csv "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT * FROM historical_moves
    WHERE ticker='$TICKER'
-   ORDER BY earnings_date DESC;" > "$PROJECT_ROOT/2.0/docs/scan_exports/${TICKER}_history_$(date +%Y%m%d).csv"
+   ORDER BY earnings_date DESC;" > "$PROJECT_ROOT/core/docs/scan_exports/${TICKER}_history_$(date +%Y%m%d).csv"
 ```
 
 ## Output Format
@@ -111,8 +111,8 @@ EXPORT REPORT
 Export Type: {scan/journal/performance/TICKER}
 
 FILES GENERATED:
-  CSV:  2.0/docs/scan_exports/{filename}.csv
-  JSON: 2.0/docs/scan_exports/{filename}.json (if applicable)
+  CSV:  core/docs/scan_exports/{filename}.csv
+  JSON: core/docs/scan_exports/{filename}.json (if applicable)
 
 SUMMARY:
   Records exported: {N}

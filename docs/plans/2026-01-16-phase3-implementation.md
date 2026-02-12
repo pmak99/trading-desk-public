@@ -1,8 +1,8 @@
-# 6.0 Phase 3: Enhanced Intelligence Implementation Plan
+# agents Phase 3: Enhanced Intelligence Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add TRR-based position sizing, real sector data, automated data quality fixes, and pattern recognition to the 6.0 agent system.
+**Goal:** Add TRR-based position sizing, real sector data, automated data quality fixes, and pattern recognition to the agents agent system.
 
 **Architecture:** Four independent features that integrate with existing orchestrators. Each feature follows TDD with dedicated tests. All code reuses existing patterns from `ticker_analysis.py` and `schemas.py`.
 
@@ -15,12 +15,12 @@
 ### Task 1.1: Add PositionLimits Schema
 
 **Files:**
-- Modify: `6.0/src/utils/schemas.py`
-- Test: `6.0/tests/test_schemas.py` (new)
+- Modify: `agents/src/utils/schemas.py`
+- Test: `agents/tests/test_schemas.py` (new)
 
 **Step 1: Write the failing test**
 
-Create `6.0/tests/test_schemas.py`:
+Create `agents/tests/test_schemas.py`:
 
 ```python
 #!/usr/bin/env python
@@ -29,7 +29,7 @@ Create `6.0/tests/test_schemas.py`:
 import sys
 from pathlib import Path
 
-# Add 6.0/ to path
+# Add agents/ to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
@@ -83,13 +83,13 @@ class TestPositionLimits:
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_schemas.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_schemas.py -v`
 
 Expected: FAIL with "cannot import name 'PositionLimits'"
 
 **Step 3: Write minimal implementation**
 
-Add to `6.0/src/utils/schemas.py` after `HealthCheckResponse` class:
+Add to `agents/src/utils/schemas.py` after `HealthCheckResponse` class:
 
 ```python
 class PositionLimits(BaseModel):
@@ -116,14 +116,14 @@ class PositionLimits(BaseModel):
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_schemas.py::TestPositionLimits -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_schemas.py::TestPositionLimits -v`
 
 Expected: PASS (3 tests)
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/utils/schemas.py 6.0/tests/test_schemas.py && git commit -m "feat(6.0): add PositionLimits schema for TRR integration
+cd "$PROJECT_ROOT" && git add agents/src/utils/schemas.py agents/tests/test_schemas.py && git commit -m "feat(6.0): add PositionLimits schema for TRR integration
 
 - Add PositionLimits Pydantic model with validation
 - Support LOW/NORMAL/HIGH tail risk levels
@@ -137,12 +137,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 1.2: Create Position Limits Integration Module
 
 **Files:**
-- Create: `6.0/src/integration/position_limits.py`
-- Test: `6.0/tests/test_position_limits.py` (new)
+- Create: `agents/src/integration/position_limits.py`
+- Test: `agents/tests/test_position_limits.py` (new)
 
 **Step 1: Write the failing test**
 
-Create `6.0/tests/test_position_limits.py`:
+Create `agents/tests/test_position_limits.py`:
 
 ```python
 #!/usr/bin/env python
@@ -191,13 +191,13 @@ class TestPositionLimitsRepository:
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_position_limits.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_position_limits.py -v`
 
 Expected: FAIL with "cannot import name 'PositionLimitsRepository'"
 
 **Step 3: Write minimal implementation**
 
-Create `6.0/src/integration/position_limits.py`:
+Create `agents/src/integration/position_limits.py`:
 
 ```python
 """Position limits integration - query TRR data from database.
@@ -217,7 +217,7 @@ class PositionLimitsRepository:
     """Repository for querying position limits from database."""
 
     def __init__(self):
-        """Initialize with database path from 2.0 container."""
+        """Initialize with database path from core container."""
         container = Container2_0()
         self.db_path = container.get_db_path()
 
@@ -294,31 +294,31 @@ class PositionLimitsRepository:
 
 **Step 4: Add get_db_path to Container2_0**
 
-Add this method to `6.0/src/integration/container_2_0.py` inside the `Container2_0` class:
+Add this method to `agents/src/integration/container_2_0.py` inside the `Container2_0` class:
 
 ```python
     def get_db_path(self) -> str:
-        """Get database path from 2.0 container."""
+        """Get database path from core container."""
         if self.container is None:
             self._initialize()
         # Access DB path from environment or default
         import os
         db_path = os.environ.get('DB_PATH', 'data/ivcrush.db')
-        # Make absolute relative to 2.0 directory
+        # Make absolute relative to core directory
         main_repo = self._find_main_repo()
-        return str(main_repo / "2.0" / db_path)
+        return str(main_repo / "core" / db_path)
 ```
 
 **Step 5: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_position_limits.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_position_limits.py -v`
 
 Expected: PASS (3 tests)
 
 **Step 6: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/integration/position_limits.py 6.0/src/integration/container_2_0.py 6.0/tests/test_position_limits.py && git commit -m "feat(6.0): add PositionLimitsRepository for TRR queries
+cd "$PROJECT_ROOT" && git add agents/src/integration/position_limits.py agents/src/integration/container_2_0.py agents/tests/test_position_limits.py && git commit -m "feat(6.0): add PositionLimitsRepository for TRR queries
 
 - Query position_limits table for tail risk data
 - Add get_limits() for single ticker lookup
@@ -333,12 +333,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 1.3: Integrate TRR into TickerAnalysisAgent
 
 **Files:**
-- Modify: `6.0/src/agents/ticker_analysis.py`
-- Test: `6.0/tests/test_ticker_analysis_trr.py` (new)
+- Modify: `agents/src/agents/ticker_analysis.py`
+- Test: `agents/tests/test_ticker_analysis_trr.py` (new)
 
 **Step 1: Write the failing test**
 
-Create `6.0/tests/test_ticker_analysis_trr.py`:
+Create `agents/tests/test_ticker_analysis_trr.py`:
 
 ```python
 #!/usr/bin/env python
@@ -386,13 +386,13 @@ def test_high_risk_ticker_flagged():
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_ticker_analysis_trr.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_ticker_analysis_trr.py -v`
 
 Expected: FAIL with "KeyError: 'position_limits'"
 
 **Step 3: Modify TickerAnalysisAgent**
 
-In `6.0/src/agents/ticker_analysis.py`:
+In `agents/src/agents/ticker_analysis.py`:
 
 1. Add import at top:
 ```python
@@ -421,14 +421,14 @@ from ..integration.position_limits import PositionLimitsRepository
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_ticker_analysis_trr.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_ticker_analysis_trr.py -v`
 
 Expected: PASS (2 tests)
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/agents/ticker_analysis.py 6.0/tests/test_ticker_analysis_trr.py && git commit -m "feat(6.0): integrate TRR into TickerAnalysisAgent
+cd "$PROJECT_ROOT" && git add agents/src/agents/ticker_analysis.py agents/tests/test_ticker_analysis_trr.py && git commit -m "feat(6.0): integrate TRR into TickerAnalysisAgent
 
 - Add position_limits field to analysis response
 - Query PositionLimitsRepository for tail risk data
@@ -442,12 +442,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 1.4: Add TRR Badge to Whisper Formatter
 
 **Files:**
-- Modify: `6.0/src/utils/formatter.py`
-- Test: `6.0/tests/test_formatter_trr.py` (new)
+- Modify: `agents/src/utils/formatter.py`
+- Test: `agents/tests/test_formatter_trr.py` (new)
 
 **Step 1: Write the failing test**
 
-Create `6.0/tests/test_formatter_trr.py`:
+Create `agents/tests/test_formatter_trr.py`:
 
 ```python
 #!/usr/bin/env python
@@ -505,13 +505,13 @@ def test_normal_trr_no_badge():
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_formatter_trr.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_formatter_trr.py -v`
 
 Expected: FAIL with "AssertionError" (HIGH TRR not in output)
 
 **Step 3: Modify formatter.py**
 
-In `6.0/src/utils/formatter.py`, modify the `format_whisper_results` function.
+In `agents/src/utils/formatter.py`, modify the `format_whisper_results` function.
 
 Replace the row building section (lines 54-65) with:
 
@@ -538,14 +538,14 @@ Replace the row building section (lines 54-65) with:
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_formatter_trr.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_formatter_trr.py -v`
 
 Expected: PASS (2 tests)
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/utils/formatter.py 6.0/tests/test_formatter_trr.py && git commit -m "feat(6.0): add HIGH TRR badge to whisper output
+cd "$PROJECT_ROOT" && git add agents/src/utils/formatter.py agents/tests/test_formatter_trr.py && git commit -m "feat(6.0): add HIGH TRR badge to whisper output
 
 - Show 'HIGH TRR (max N)' badge for high-risk tickers
 - Only display badge for tail_risk_level == HIGH
@@ -559,12 +559,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 1.5: Add Position Limits Section to Analyze Output
 
 **Files:**
-- Modify: `6.0/src/orchestrators/analyze.py`
-- Test: `6.0/tests/test_analyze_trr.py` (new)
+- Modify: `agents/src/orchestrators/analyze.py`
+- Test: `agents/tests/test_analyze_trr.py` (new)
 
 **Step 1: Write the failing test**
 
-Create `6.0/tests/test_analyze_trr.py`:
+Create `agents/tests/test_analyze_trr.py`:
 
 ```python
 #!/usr/bin/env python
@@ -630,13 +630,13 @@ def test_analyze_output_includes_position_limits():
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_analyze_trr.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_analyze_trr.py -v`
 
 Expected: FAIL with "AssertionError" (Position Limits not in output)
 
 **Step 3: Modify analyze.py format_results**
 
-In `6.0/src/orchestrators/analyze.py`, add position limits section in `format_results` method.
+In `agents/src/orchestrators/analyze.py`, add position limits section in `format_results` method.
 
 Add after the Liquidity section (around line 504, after `output.append("")`):
 
@@ -661,14 +661,14 @@ Also update `_synthesize_report` to include position_limits. Add after line 326 
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_analyze_trr.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_analyze_trr.py -v`
 
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/orchestrators/analyze.py 6.0/tests/test_analyze_trr.py && git commit -m "feat(6.0): add Position Limits section to analyze output
+cd "$PROJECT_ROOT" && git add agents/src/orchestrators/analyze.py agents/tests/test_analyze_trr.py && git commit -m "feat(6.0): add Position Limits section to analyze output
 
 - Show TRR details for HIGH risk tickers
 - Display max contracts and notional limits
@@ -682,12 +682,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 1.6: Update __init__.py exports and run full test suite
 
 **Files:**
-- Modify: `6.0/src/integration/__init__.py`
-- Modify: `6.0/src/utils/__init__.py`
+- Modify: `agents/src/integration/__init__.py`
+- Modify: `agents/src/utils/__init__.py`
 
 **Step 1: Update integration/__init__.py**
 
-Add to `6.0/src/integration/__init__.py`:
+Add to `agents/src/integration/__init__.py`:
 
 ```python
 from .position_limits import PositionLimitsRepository
@@ -702,7 +702,7 @@ __all__ = [
 
 **Step 2: Update utils/__init__.py**
 
-Add `PositionLimits` to exports in `6.0/src/utils/__init__.py`:
+Add `PositionLimits` to exports in `agents/src/utils/__init__.py`:
 
 ```python
 from .schemas import (
@@ -717,14 +717,14 @@ from .schemas import (
 
 **Step 3: Run full test suite**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/ -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/ -v`
 
 Expected: All tests pass (16+ tests)
 
 **Step 4: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/integration/__init__.py 6.0/src/utils/__init__.py && git commit -m "chore(6.0): update exports for TRR integration
+cd "$PROJECT_ROOT" && git add agents/src/integration/__init__.py agents/src/utils/__init__.py && git commit -m "chore(6.0): update exports for TRR integration
 
 - Export PositionLimitsRepository from integration
 - Export PositionLimits schema from utils
@@ -739,12 +739,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 2.1: Add TickerMetadata Schema
 
 **Files:**
-- Modify: `6.0/src/utils/schemas.py`
-- Test: `6.0/tests/test_schemas.py`
+- Modify: `agents/src/utils/schemas.py`
+- Test: `agents/tests/test_schemas.py`
 
 **Step 1: Write the failing test**
 
-Add to `6.0/tests/test_schemas.py`:
+Add to `agents/tests/test_schemas.py`:
 
 ```python
 from src.utils.schemas import TickerMetadata
@@ -778,13 +778,13 @@ class TestTickerMetadata:
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_schemas.py::TestTickerMetadata -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_schemas.py::TestTickerMetadata -v`
 
 Expected: FAIL with "cannot import name 'TickerMetadata'"
 
 **Step 3: Write minimal implementation**
 
-Add to `6.0/src/utils/schemas.py`:
+Add to `agents/src/utils/schemas.py`:
 
 ```python
 class TickerMetadata(BaseModel):
@@ -799,14 +799,14 @@ class TickerMetadata(BaseModel):
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_schemas.py::TestTickerMetadata -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_schemas.py::TestTickerMetadata -v`
 
 Expected: PASS (2 tests)
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/utils/schemas.py 6.0/tests/test_schemas.py && git commit -m "feat(6.0): add TickerMetadata schema
+cd "$PROJECT_ROOT" && git add agents/src/utils/schemas.py agents/tests/test_schemas.py && git commit -m "feat(6.0): add TickerMetadata schema
 
 - Add schema for sector/industry data
 - Market cap is optional
@@ -819,12 +819,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 2.2: Create Ticker Metadata Repository
 
 **Files:**
-- Create: `6.0/src/integration/ticker_metadata.py`
-- Test: `6.0/tests/test_ticker_metadata.py`
+- Create: `agents/src/integration/ticker_metadata.py`
+- Test: `agents/tests/test_ticker_metadata.py`
 
 **Step 1: Write the failing test**
 
-Create `6.0/tests/test_ticker_metadata.py`:
+Create `agents/tests/test_ticker_metadata.py`:
 
 ```python
 #!/usr/bin/env python
@@ -880,13 +880,13 @@ class TestTickerMetadataRepository:
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_ticker_metadata.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_ticker_metadata.py -v`
 
 Expected: FAIL with "cannot import name 'TickerMetadataRepository'"
 
 **Step 3: Write minimal implementation**
 
-Create `6.0/src/integration/ticker_metadata.py`:
+Create `agents/src/integration/ticker_metadata.py`:
 
 ```python
 """Ticker metadata integration - sector and industry data.
@@ -1037,14 +1037,14 @@ class TickerMetadataRepository:
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_ticker_metadata.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_ticker_metadata.py -v`
 
 Expected: PASS (3 tests)
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/integration/ticker_metadata.py 6.0/tests/test_ticker_metadata.py && git commit -m "feat(6.0): add TickerMetadataRepository for sector data
+cd "$PROJECT_ROOT" && git add agents/src/integration/ticker_metadata.py agents/tests/test_ticker_metadata.py && git commit -m "feat(6.0): add TickerMetadataRepository for sector data
 
 - CRUD operations for ticker_metadata table
 - Industry-to-sector mapping for Finnhub data
@@ -1058,12 +1058,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 2.3: Create SectorFetchAgent
 
 **Files:**
-- Create: `6.0/src/agents/sector_fetch.py`
-- Test: `6.0/tests/test_sector_fetch.py`
+- Create: `agents/src/agents/sector_fetch.py`
+- Test: `agents/tests/test_sector_fetch.py`
 
 **Step 1: Write the failing test**
 
-Create `6.0/tests/test_sector_fetch.py`:
+Create `agents/tests/test_sector_fetch.py`:
 
 ```python
 #!/usr/bin/env python
@@ -1111,13 +1111,13 @@ class TestSectorFetchAgent:
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_sector_fetch.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_sector_fetch.py -v`
 
 Expected: FAIL with "cannot import name 'SectorFetchAgent'"
 
 **Step 3: Write minimal implementation**
 
-Create `6.0/src/agents/sector_fetch.py`:
+Create `agents/src/agents/sector_fetch.py`:
 
 ```python
 """SectorFetchAgent - Fetches company sector/industry from Finnhub.
@@ -1259,14 +1259,14 @@ class SectorFetchAgent:
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_sector_fetch.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_sector_fetch.py -v`
 
 Expected: PASS (2 tests)
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/agents/sector_fetch.py 6.0/tests/test_sector_fetch.py && git commit -m "feat(6.0): add SectorFetchAgent for company profiles
+cd "$PROJECT_ROOT" && git add agents/src/agents/sector_fetch.py agents/tests/test_sector_fetch.py && git commit -m "feat(6.0): add SectorFetchAgent for company profiles
 
 - Check cache first, then fetch from Finnhub
 - Batch fetch with rate limiting
@@ -1280,12 +1280,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 2.4: Update Cross-Ticker Warnings to Use Real Sectors
 
 **Files:**
-- Modify: `6.0/src/orchestrators/whisper.py`
-- Test: `6.0/tests/test_whisper_sectors.py`
+- Modify: `agents/src/orchestrators/whisper.py`
+- Test: `agents/tests/test_whisper_sectors.py`
 
 **Step 1: Write the failing test**
 
-Create `6.0/tests/test_whisper_sectors.py`:
+Create `agents/tests/test_whisper_sectors.py`:
 
 ```python
 #!/usr/bin/env python
@@ -1336,13 +1336,13 @@ def test_no_warning_for_different_sectors():
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_whisper_sectors.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_whisper_sectors.py -v`
 
 Expected: FAIL (still using first-letter grouping)
 
 **Step 3: Modify whisper.py**
 
-In `6.0/src/orchestrators/whisper.py`:
+In `agents/src/orchestrators/whisper.py`:
 
 1. Add import at top:
 ```python
@@ -1404,14 +1404,14 @@ from ..integration.ticker_metadata import TickerMetadataRepository
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_whisper_sectors.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_whisper_sectors.py -v`
 
 Expected: PASS (2 tests)
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/orchestrators/whisper.py 6.0/tests/test_whisper_sectors.py && git commit -m "feat(6.0): use real sector data in cross-ticker warnings
+cd "$PROJECT_ROOT" && git add agents/src/orchestrators/whisper.py agents/tests/test_whisper_sectors.py && git commit -m "feat(6.0): use real sector data in cross-ticker warnings
 
 - Replace first-letter placeholder with actual sector names
 - Query ticker_metadata for sector information
@@ -1425,7 +1425,7 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 2.5: Add sector-sync Maintenance Command
 
 **Files:**
-- Modify: `6.0/src/cli/maintenance.py`
+- Modify: `agents/src/cli/maintenance.py`
 
 **Step 1: Add sector-sync command**
 
@@ -1528,14 +1528,14 @@ def run_sector_sync():
 
 **Step 3: Test manually**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ./agent.sh maintenance sector-sync`
+Run: `cd $PROJECT_ROOT/agents && ./agent.sh maintenance sector-sync`
 
 Expected: Shows tickers needing sector data
 
 **Step 4: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/cli/maintenance.py && git commit -m "feat(6.0): add sector-sync maintenance command
+cd "$PROJECT_ROOT" && git add agents/src/cli/maintenance.py && git commit -m "feat(6.0): add sector-sync maintenance command
 
 - List tickers needing sector data
 - Check existing cache before fetching
@@ -1551,12 +1551,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 3.1: Create DataQualityAgent
 
 **Files:**
-- Create: `6.0/src/agents/data_quality.py`
-- Test: `6.0/tests/test_data_quality_agent.py`
+- Create: `agents/src/agents/data_quality.py`
+- Test: `agents/tests/test_data_quality_agent.py`
 
 **Step 1: Write the failing test**
 
-Create `6.0/tests/test_data_quality_agent.py`:
+Create `agents/tests/test_data_quality_agent.py`:
 
 ```python
 #!/usr/bin/env python
@@ -1601,13 +1601,13 @@ class TestDataQualityAgent:
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_data_quality_agent.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_data_quality_agent.py -v`
 
 Expected: FAIL with "cannot import name 'DataQualityAgent'"
 
 **Step 3: Write minimal implementation**
 
-Create `6.0/src/agents/data_quality.py`:
+Create `agents/src/agents/data_quality.py`:
 
 ```python
 """DataQualityAgent - Automated data quality checks and fixes.
@@ -1819,14 +1819,14 @@ class DataQualityAgent:
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_data_quality_agent.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_data_quality_agent.py -v`
 
 Expected: PASS (3 tests)
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/agents/data_quality.py 6.0/tests/test_data_quality_agent.py && git commit -m "feat(6.0): add DataQualityAgent for automated fixes
+cd "$PROJECT_ROOT" && git add agents/src/agents/data_quality.py agents/tests/test_data_quality_agent.py && git commit -m "feat(6.0): add DataQualityAgent for automated fixes
 
 - report/dry-run/fix modes
 - Auto-fix duplicates
@@ -1840,7 +1840,7 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 3.2: Add --fix and --dry-run flags to maintenance CLI
 
 **Files:**
-- Modify: `6.0/src/cli/maintenance.py`
+- Modify: `agents/src/cli/maintenance.py`
 
 **Step 1: Update argument parsing**
 
@@ -1953,14 +1953,14 @@ Update the error messages to include new flags:
 
 **Step 4: Test manually**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ./agent.sh maintenance data-quality --dry-run`
+Run: `cd $PROJECT_ROOT/agents && ./agent.sh maintenance data-quality --dry-run`
 
 Expected: Shows what would be fixed
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/cli/maintenance.py && git commit -m "feat(6.0): add --fix and --dry-run to data-quality command
+cd "$PROJECT_ROOT" && git add agents/src/cli/maintenance.py && git commit -m "feat(6.0): add --fix and --dry-run to data-quality command
 
 - --dry-run shows what would be fixed
 - --fix applies safe fixes
@@ -1976,12 +1976,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 4.1: Add PatternResult Schema
 
 **Files:**
-- Modify: `6.0/src/utils/schemas.py`
-- Test: `6.0/tests/test_schemas.py`
+- Modify: `agents/src/utils/schemas.py`
+- Test: `agents/tests/test_schemas.py`
 
 **Step 1: Write the failing test**
 
-Add to `6.0/tests/test_schemas.py`:
+Add to `agents/tests/test_schemas.py`:
 
 ```python
 from src.utils.schemas import PatternResult
@@ -2040,13 +2040,13 @@ class TestPatternResult:
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_schemas.py::TestPatternResult -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_schemas.py::TestPatternResult -v`
 
 Expected: FAIL with "cannot import name 'PatternResult'"
 
 **Step 3: Write minimal implementation**
 
-Add to `6.0/src/utils/schemas.py`:
+Add to `agents/src/utils/schemas.py`:
 
 ```python
 class PatternResult(BaseModel):
@@ -2094,14 +2094,14 @@ class PatternResult(BaseModel):
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_schemas.py::TestPatternResult -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_schemas.py::TestPatternResult -v`
 
 Expected: PASS (3 tests)
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/utils/schemas.py 6.0/tests/test_schemas.py && git commit -m "feat(6.0): add PatternResult schema for pattern recognition
+cd "$PROJECT_ROOT" && git add agents/src/utils/schemas.py agents/tests/test_schemas.py && git commit -m "feat(6.0): add PatternResult schema for pattern recognition
 
 - Directional bias (BULLISH/BEARISH/NEUTRAL)
 - Streak tracking
@@ -2116,12 +2116,12 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 4.2: Create PatternRecognitionAgent
 
 **Files:**
-- Create: `6.0/src/agents/pattern_recognition.py`
-- Test: `6.0/tests/test_pattern_recognition.py`
+- Create: `agents/src/agents/pattern_recognition.py`
+- Test: `agents/tests/test_pattern_recognition.py`
 
 **Step 1: Write the failing test**
 
-Create `6.0/tests/test_pattern_recognition.py`:
+Create `agents/tests/test_pattern_recognition.py`:
 
 ```python
 #!/usr/bin/env python
@@ -2182,13 +2182,13 @@ class TestPatternRecognitionAgent:
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_pattern_recognition.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_pattern_recognition.py -v`
 
 Expected: FAIL with "cannot import name 'PatternRecognitionAgent'"
 
 **Step 3: Write implementation**
 
-Create `6.0/src/agents/pattern_recognition.py`:
+Create `agents/src/agents/pattern_recognition.py`:
 
 ```python
 """PatternRecognitionAgent - Analyzes historical earnings patterns.
@@ -2240,7 +2240,7 @@ class PatternRecognitionAgent:
     MAGNITUDE_CHANGE_THRESHOLD = 0.20  # 20% change for trend
 
     def __init__(self):
-        """Initialize with 2.0 container for data access."""
+        """Initialize with core container for data access."""
         self.container = Container2_0()
 
     def analyze(self, ticker: str) -> Optional[Dict[str, Any]]:
@@ -2384,14 +2384,14 @@ class PatternRecognitionAgent:
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_pattern_recognition.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_pattern_recognition.py -v`
 
 Expected: PASS (3 tests)
 
 **Step 5: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/agents/pattern_recognition.py 6.0/tests/test_pattern_recognition.py && git commit -m "feat(6.0): add PatternRecognitionAgent
+cd "$PROJECT_ROOT" && git add agents/src/agents/pattern_recognition.py agents/tests/test_pattern_recognition.py && git commit -m "feat(6.0): add PatternRecognitionAgent
 
 - Directional bias detection (>65% threshold)
 - Streak tracking (consecutive same-direction moves)
@@ -2406,7 +2406,7 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 4.3: Integrate Patterns into AnalyzeOrchestrator
 
 **Files:**
-- Modify: `6.0/src/orchestrators/analyze.py`
+- Modify: `agents/src/orchestrators/analyze.py`
 
 **Step 1: Add PatternRecognitionAgent import**
 
@@ -2489,14 +2489,14 @@ In `format_results`, add after the Anomalies section (around line 554):
 
 **Step 5: Run tests**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/test_analyze_live.py -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/test_analyze_live.py -v`
 
 Expected: PASS
 
 **Step 6: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/orchestrators/analyze.py && git commit -m "feat(6.0): integrate PatternRecognitionAgent into analyze
+cd "$PROJECT_ROOT" && git add agents/src/orchestrators/analyze.py && git commit -m "feat(6.0): integrate PatternRecognitionAgent into analyze
 
 - Run pattern analysis in parallel with other agents
 - Add Historical Patterns section to output
@@ -2510,8 +2510,8 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ### Task 4.4: Update exports and run final test suite
 
 **Files:**
-- Modify: `6.0/src/agents/__init__.py`
-- Modify: `6.0/src/utils/__init__.py`
+- Modify: `agents/src/agents/__init__.py`
+- Modify: `agents/src/utils/__init__.py`
 
 **Step 1: Update agents/__init__.py**
 
@@ -2554,14 +2554,14 @@ from .schemas import (
 
 **Step 3: Run full test suite**
 
-Run: `cd /Users/prashant/PycharmProjects/Trading\ Desk/6.0 && ../2.0/venv/bin/python -m pytest tests/ -v`
+Run: `cd $PROJECT_ROOT/agents && ../core/venv/bin/python -m pytest tests/ -v`
 
 Expected: All tests pass (25+ tests)
 
 **Step 4: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/src/agents/__init__.py 6.0/src/utils/__init__.py && git commit -m "chore(6.0): update exports for Phase 3 completion
+cd "$PROJECT_ROOT" && git add agents/src/agents/__init__.py agents/src/utils/__init__.py && git commit -m "chore(6.0): update exports for Phase 3 completion
 
 - Export all new agents
 - Export all new schemas
@@ -2573,11 +2573,11 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 
 ## Final Steps
 
-### Update 6.0 README
+### Update agents README
 
 **Step 1: Update README.md Phase 3 status**
 
-In `6.0/README.md`, update the Phase 3 section to show completion:
+In `agents/README.md`, update the Phase 3 section to show completion:
 
 ```markdown
 ### ✅ Phase 3: Enhanced Intelligence (Complete - Jan 2026)
@@ -2593,7 +2593,7 @@ In `6.0/README.md`, update the Phase 3 section to show completion:
 **Step 2: Commit**
 
 ```bash
-cd "$PROJECT_ROOT" && git add 6.0/README.md && git commit -m "docs(6.0): update README for Phase 3 completion
+cd "$PROJECT_ROOT" && git add agents/README.md && git commit -m "docs(6.0): update README for Phase 3 completion
 
 - Mark all Phase 3 features as complete
 - Update architecture diagram
@@ -2613,4 +2613,4 @@ After completing all tasks, verify:
 - [ ] `./agent.sh analyze AAPL` shows Position Limits and Patterns sections
 - [ ] `./agent.sh maintenance data-quality --dry-run` works
 - [ ] `./agent.sh maintenance sector-sync` shows tickers needing data
-- [ ] All tests pass: `../2.0/venv/bin/python -m pytest tests/ -v`
+- [ ] All tests pass: `../core/venv/bin/python -m pytest tests/ -v`

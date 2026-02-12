@@ -66,7 +66,7 @@ class TestSpreadCalculation:
         """Normal bid-ask spread calculation."""
         option = make_option(bid=2.00, ask=2.10)
         spread_pct = scorer.calculate_spread_pct(option)
-        # Spread = 0.10, Mid = 2.05, Spread% = 0.10/2.05 * 100 ≈ 4.88%
+        # Spread = 0.10, Mid = 2.05, Spread% = 0.10/core5 * 100 ≈ 4.88%
         assert 4.8 < spread_pct < 5.0
 
     def test_wide_spread(self, scorer):

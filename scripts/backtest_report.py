@@ -15,7 +15,7 @@ import statistics
 
 def get_db_path() -> Path:
     """Get path to ivcrush database."""
-    return Path(__file__).parent.parent / "2.0" / "data" / "ivcrush.db"
+    return Path(__file__).parent.parent / "core" / "data" / "ivcrush.db"
 
 
 def get_journal_path() -> Path:

@@ -92,5 +92,5 @@ def print_strategy_stats(db_path: str):
 
 if __name__ == "__main__":
     project_root = Path(__file__).parent.parent
-    db_path = project_root / "2.0" / "data" / "ivcrush.db"
+    db_path = project_root / "core" / "data" / "ivcrush.db"
     print_strategy_stats(str(db_path))

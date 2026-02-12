@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark script for 4.0 AI-First Trading System vs 2.0 baseline.
+Benchmark script for sentiment AI-First Trading System vs core baseline.
 
 Tests:
 1. System Performance - Latency of core operations
@@ -19,8 +19,8 @@ from typing import Dict, List, Tuple, Any
 from dataclasses import dataclass
 
 # Add paths
-sys.path.insert(0, str(Path(__file__).parent.parent / "4.0" / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "2.0" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "sentiment" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "core" / "src"))
 
 @dataclass
 class BenchmarkResult:
@@ -56,7 +56,7 @@ def time_operation(func, *args, iterations=5, **kwargs) -> BenchmarkResult:
 
 
 def benchmark_cache_operations():
-    """Benchmark 4.0 cache infrastructure."""
+    """Benchmark sentiment cache infrastructure."""
     print("\n" + "="*60)
     print("BENCHMARK 1: Cache Infrastructure Performance")
     print("="*60)
@@ -115,12 +115,12 @@ def benchmark_cache_operations():
 
 
 def benchmark_2_0_operations():
-    """Benchmark 2.0 core operations."""
+    """Benchmark core core operations."""
     print("\n" + "="*60)
-    print("BENCHMARK 2: 2.0 System Performance")
+    print("BENCHMARK 2: core System Performance")
     print("="*60)
 
-    base_path = Path(__file__).parent.parent / "2.0"
+    base_path = Path(__file__).parent.parent / "core"
 
     results = []
 
@@ -159,7 +159,7 @@ def benchmark_database_queries():
     print("BENCHMARK 3: Database Query Performance")
     print("="*60)
 
-    db_path = Path(__file__).parent.parent / "2.0" / "data" / "ivcrush.db"
+    db_path = Path(__file__).parent.parent / "core" / "data" / "ivcrush.db"
 
     results = []
 
@@ -219,7 +219,7 @@ def analyze_scoring_consistency():
     print("BENCHMARK 4: Scoring Consistency Analysis")
     print("="*60)
 
-    base_path = Path(__file__).parent.parent / "2.0"
+    base_path = Path(__file__).parent.parent / "core"
 
     # Run analysis multiple times and check consistency
     tickers = ["NVDA", "AMD", "ORCL"]
@@ -269,7 +269,7 @@ def analyze_ai_sentiment_value():
     print("="*60)
 
     # Connect to historical data
-    db_path = Path(__file__).parent.parent / "2.0" / "data" / "ivcrush.db"
+    db_path = Path(__file__).parent.parent / "core" / "data" / "ivcrush.db"
 
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
@@ -355,14 +355,14 @@ def generate_summary_report(all_results: Dict):
     if "cache" in all_results:
         cache_results = all_results["cache"]
         cache_avg = statistics.mean([r.mean_ms for r in cache_results])
-        print(f"  4.0 Cache Operations: {cache_avg:.2f}ms average")
+        print(f"  sentiment Cache Operations: {cache_avg:.2f}ms average")
         print(f"    - Cache SET: <1ms ✓")
         print(f"    - Cache GET (hit): <1ms ✓")
         print(f"    - Budget check: <1ms ✓")
 
     if "2_0_ops" in all_results:
         ops_results = all_results["2_0_ops"]
-        print(f"\n  2.0 Core Operations:")
+        print(f"\n  core Core Operations:")
         for r in ops_results:
             print(f"    - {r.name}: {r.mean_ms:.0f}ms")
 
@@ -400,7 +400,7 @@ def generate_summary_report(all_results: Dict):
 
     recommendations = [
         "1. Cache infrastructure is production-ready (<1ms operations)",
-        "2. 2.0 scoring is deterministic and consistent across runs",
+        "2. core scoring is deterministic and consistent across runs",
         "3. Start collecting sentiment data to validate value-add hypotheses",
         "4. Focus AI sentiment on 'skip avoidance' first (highest confidence)",
         "5. Consider sentiment-adjusted position sizing as second priority"
@@ -415,7 +415,7 @@ def generate_summary_report(all_results: Dict):
 def main():
     """Run all benchmarks."""
     print("="*60)
-    print("4.0 vs 2.0 BENCHMARK SUITE")
+    print("4.0 vs core BENCHMARK SUITE")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
 

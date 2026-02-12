@@ -1,5 +1,5 @@
 """
-Unit tests for 4.0 sentiment-adjusted directional bias.
+Unit tests for sentiment sentiment-adjusted directional bias.
 
 Tests the 3-rule system:
 1. Neutral skew + sentiment → sentiment breaks tie
@@ -11,7 +11,7 @@ import pytest
 import sys
 from pathlib import Path
 
-# Add 4.0/src to path
+# Add sentiment/src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from sentiment_direction import (

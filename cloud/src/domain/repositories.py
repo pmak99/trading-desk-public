@@ -284,7 +284,7 @@ class HistoricalMovesRepository:
         if not moves:
             return None
 
-        # Use intraday_move_pct by default (matches 2.0 behavior)
+        # Use intraday_move_pct by default (matches core behavior)
         move_key = "intraday_move_pct" if metric == "intraday" else "gap_move_pct"
         abs_moves = [abs(m[move_key]) for m in moves if m.get(move_key)]
         if not abs_moves:

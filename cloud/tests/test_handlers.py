@@ -1,5 +1,5 @@
 """
-Comprehensive tests for job handlers in 5.0/src/jobs/handlers.py.
+Comprehensive tests for job handlers in cloud/src/jobs/handlers.py.
 
 Tests the actual business logic inside each handler, not just that mocks are called.
 Covers:

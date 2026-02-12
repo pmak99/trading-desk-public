@@ -21,9 +21,9 @@ from datetime import datetime
 
 # Database paths
 DB_PATHS = [
-    Path(__file__).parent.parent / "4.0" / "data" / "sentiment_cache.db",
-    Path(__file__).parent.parent / "5.0" / "data" / "ivcrush.db",
-    Path(__file__).parent.parent / "2.0" / "data" / "ivcrush.db",
+    Path(__file__).parent.parent / "sentiment" / "data" / "sentiment_cache.db",
+    Path(__file__).parent.parent / "cloud" / "data" / "ivcrush.db",
+    Path(__file__).parent.parent / "core" / "data" / "ivcrush.db",
 ]
 
 # New columns to add

@@ -1,4 +1,4 @@
-"""Cache utilities for 4.0 AI-First Trading System."""
+"""Cache utilities for sentiment AI-First Trading System."""
 
 from .sentiment_cache import (
     SentimentCache,

@@ -178,7 +178,7 @@ class TestVRPCalculator:
         # VRP ratio = 10% / 5% = 2.0x (marginal since excellent threshold is 7.0x)
         assert vrp.vrp_ratio == pytest.approx(2.0, abs=0.01)
         # Note: Default thresholds are excellent=7.0x, good=4.0x, marginal=1.5x
-        # 2.0x falls in MARGINAL category (>= 1.5x but < 4.0x)
+        # corex falls in MARGINAL category (>= 1.5x but < 4.0x)
         assert vrp.recommendation == Recommendation.MARGINAL
         # MARGINAL is NOT tradeable - only EXCELLENT and GOOD are
         assert not vrp.is_tradeable

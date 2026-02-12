@@ -4,7 +4,7 @@
 import sys
 from pathlib import Path
 
-# Add 6.0/ to path
+# Add agents/ to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest

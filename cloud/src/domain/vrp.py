@@ -1,7 +1,7 @@
 """
 VRP (Volatility Risk Premium) Calculator.
 
-Ported from 2.0/src/application/metrics/vrp.py with simplified interface.
+Ported from core/src/application/metrics/vrp.py with simplified interface.
 Thresholds imported from common/constants.py.
 """
 

@@ -389,4 +389,4 @@ XYZ - Score 35/100
 ---
 
 *Last Updated: November 2025*
-*Version: 2.0 - IV Expansion Scoring*
+*Version: core - IV Expansion Scoring*

@@ -1,7 +1,7 @@
 """
 Liquidity tier classification.
 
-Ported from 2.0/src/application/metrics/liquidity_scorer.py with simplified interface.
+Ported from core/src/application/metrics/liquidity_scorer.py with simplified interface.
 Thresholds imported from common/constants.py.
 
 4-Tier System (RELAXED Feb 2026):

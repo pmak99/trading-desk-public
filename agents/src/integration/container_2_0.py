@@ -15,10 +15,10 @@ from ..utils.paths import MAIN_REPO, REPO_2_0
 # Thread lock for container initialization
 _container_lock = threading.RLock()
 
-# Add 2.0/ to Python path with highest priority
-# 2.0's code uses "from src.config..." imports, so it needs 2.0/ in path, not 2.0/src/
+# Add core/ to Python path with highest priority
+# core's code uses "from src.config..." imports, so it needs core/ in path, not core/src/
 _main_repo = MAIN_REPO
-_2_0_dir = _main_repo / "2.0"
+_2_0_dir = _main_repo / "core"
 _2_0_dir_str = str(_2_0_dir)
 
 # Double-checked locking for thread-safe sys.path initialization
@@ -27,7 +27,7 @@ _path_init_lock = threading.Lock()
 
 
 def _ensure_paths():
-    """Ensure 2.0/ is in sys.path exactly once, thread-safe."""
+    """Ensure core/ is in sys.path exactly once, thread-safe."""
     global _paths_initialized
     if _paths_initialized:
         return
@@ -37,12 +37,12 @@ def _ensure_paths():
         # Remove if already in path (so we can re-insert at position 0)
         if _2_0_dir_str in sys.path:
             sys.path.remove(_2_0_dir_str)
-        # Insert at position 0 for highest priority (before 6.0/src)
+        # Insert at position 0 for highest priority (before agents/src)
         sys.path.insert(0, _2_0_dir_str)
         _paths_initialized = True
 
 
-# Note: We don't import at module level to avoid namespace collision with 6.0/src
+# Note: We don't import at module level to avoid namespace collision with agents/src
 # Imports happen inside __init__ after sys.path is properly configured
 
 
@@ -70,10 +70,10 @@ class Container2_0:
 
         # Set DB_PATH to point to main repo's database
         # This is necessary because Config.from_env() uses relative paths
-        # and we're running from 6.0/ worktree
+        # and we're running from agents/ worktree
         import os
         if 'DB_PATH' not in os.environ:
-            db_path = _main_repo / "2.0" / "data" / "ivcrush.db"
+            db_path = _main_repo / "core" / "data" / "ivcrush.db"
             os.environ['DB_PATH'] = str(db_path)
 
         self.config = Config.from_env()
@@ -90,15 +90,15 @@ class Container2_0:
         return self._container
 
     def _initialize_container(self):
-        """Initialize the 2.0 container (called under lock)."""
+        """Initialize the core container (called under lock)."""
         _ensure_paths()
-        # Critical: Remove 6.0/ from sys.path temporarily to avoid namespace collision
-        # Both 6.0 and 2.0 use 'src' as top-level package, causing import conflicts
-        _6_0_paths = [p for p in sys.path if '6.0' in p]
+        # Critical: Remove agents/ from sys.path temporarily to avoid namespace collision
+        # Both agents and core use 'src' as top-level package, causing import conflicts
+        _6_0_paths = [p for p in sys.path if 'agents' in p]
         for p in _6_0_paths:
             sys.path.remove(p)
 
-        # Ensure 2.0/ is at position 0
+        # Ensure core/ is at position 0
         if _2_0_dir_str not in sys.path:
             sys.path.insert(0, _2_0_dir_str)
         elif sys.path.index(_2_0_dir_str) != 0:
@@ -112,7 +112,7 @@ class Container2_0:
             init_error = None
             try:
                 # Clear cached imports of 'src' package to avoid using 6.0's cached version
-                # This is necessary because both 6.0 and 2.0 use 'src' as top-level package
+                # This is necessary because both agents and core use 'src' as top-level package
                 if 'src' in sys.modules:
                     # Save 6.0's src modules
                     _6_0_src_modules = {
@@ -132,7 +132,7 @@ class Container2_0:
                 # SECURITY FIX: Capture exception to re-raise after cleanup
                 init_error = e
             finally:
-                # Restore 6.0/ paths after import
+                # Restore agents/ paths after import
                 for p in _6_0_paths:
                     if p not in sys.path:
                         sys.path.append(p)
@@ -317,15 +317,15 @@ class Container2_0:
             }
 
     def get_db_path(self) -> str:
-        """Get database path from 2.0 container."""
+        """Get database path from core container."""
         if self._container is None:
             self._initialize_container()
         # Access DB path from environment or default
         import os
         db_path = os.environ.get('DB_PATH', 'data/ivcrush.db')
-        # Make absolute relative to 2.0 directory
+        # Make absolute relative to core directory
         main_repo = MAIN_REPO
-        return str(main_repo / "2.0" / db_path)
+        return str(main_repo / "core" / db_path)
 
     def get_all_historical_moves(self) -> list:
         """

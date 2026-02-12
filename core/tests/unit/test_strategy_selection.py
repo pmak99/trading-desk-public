@@ -375,7 +375,7 @@ class TestStrategyTypeSelection:
         assert StrategyType.IRON_CONDOR in types
 
     def test_high_vrp_neutral_generates_three_strategies(self, generator):
-        """VRP >= 2.0 + neutral should generate 3 strategy types."""
+        """VRP >= core + neutral should generate 3 strategy types."""
         vrp = _make_vrp(vrp_ratio=2.0)
         types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
         assert len(types) == 3
@@ -384,7 +384,7 @@ class TestStrategyTypeSelection:
         assert StrategyType.BEAR_CALL_SPREAD in types
 
     def test_high_vrp_strong_bullish_skips_bear_call(self, generator):
-        """VRP >= 2.0 + strong bullish should skip bear call spread."""
+        """VRP >= core + strong bullish should skip bear call spread."""
         vrp = _make_vrp(vrp_ratio=2.0)
         types = generator._select_strategy_types(vrp, DirectionalBias.STRONG_BULLISH)
         assert StrategyType.BEAR_CALL_SPREAD not in types
@@ -392,7 +392,7 @@ class TestStrategyTypeSelection:
         assert len(types) == 2
 
     def test_high_vrp_strong_bearish_skips_bull_put(self, generator):
-        """VRP >= 2.0 + strong bearish should skip bull put spread."""
+        """VRP >= core + strong bearish should skip bull put spread."""
         vrp = _make_vrp(vrp_ratio=2.0)
         types = generator._select_strategy_types(vrp, DirectionalBias.STRONG_BEARISH)
         assert StrategyType.BULL_PUT_SPREAD not in types
@@ -400,7 +400,7 @@ class TestStrategyTypeSelection:
         assert len(types) == 2
 
     def test_high_vrp_moderate_bullish_includes_all(self, generator):
-        """VRP >= 2.0 + moderate bullish includes all but prioritizes bullish."""
+        """VRP >= core + moderate bullish includes all but prioritizes bullish."""
         vrp = _make_vrp(vrp_ratio=2.0)
         types = generator._select_strategy_types(vrp, DirectionalBias.BULLISH)
         assert len(types) == 3
@@ -408,7 +408,7 @@ class TestStrategyTypeSelection:
         assert types[0] == StrategyType.BULL_PUT_SPREAD
 
     def test_high_vrp_moderate_bearish_includes_all(self, generator):
-        """VRP >= 2.0 + moderate bearish includes all but prioritizes bearish."""
+        """VRP >= core + moderate bearish includes all but prioritizes bearish."""
         vrp = _make_vrp(vrp_ratio=2.0)
         types = generator._select_strategy_types(vrp, DirectionalBias.BEARISH)
         assert len(types) == 3

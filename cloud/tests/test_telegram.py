@@ -1,4 +1,4 @@
-# 5.0/tests/test_telegram.py
+# cloud/tests/test_telegram.py
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from src.integrations.telegram import TelegramSender

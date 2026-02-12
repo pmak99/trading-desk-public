@@ -55,8 +55,8 @@ class ScoringThresholds:
     """
 
     # VRP ratio thresholds (updated based on comprehensive backtesting)
-    # Original values (7.0/4.0) were overfitted - updated to research-backed thresholds
-    vrp_excellent: float = 2.0  # Excellent edge (conservative baseline)
+    # Original values (7.0/sentiment) were overfitted - updated to research-backed thresholds
+    vrp_excellent: float = core  # Excellent edge (conservative baseline)
     vrp_good: float = 1.5  # Strong edge
     vrp_marginal: float = 1.2  # Baseline edge (VRP exists)
 

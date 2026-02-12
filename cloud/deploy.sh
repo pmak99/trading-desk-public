@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploy 5.0 to Cloud Run with database sync
+# Deploy cloud to Cloud Run with database sync
 #
 # Usage:
 #   ./deploy.sh          # Full deploy with DB sync
@@ -34,7 +34,7 @@ elif [[ "$1" == "--help" || "$1" == "-h" ]]; then
 fi
 
 echo "============================================================"
-echo "Deploying 5.0 to Cloud Run"
+echo "Deploying cloud to Cloud Run"
 echo "============================================================"
 
 # Step 1: Sync database (unless --quick)
@@ -42,7 +42,7 @@ if [[ "$QUICK_MODE" == false ]]; then
     echo ""
     echo "[1/4] Syncing database from 2.0..."
 
-    SOURCE_DB="$ROOT_DIR/2.0/data/ivcrush.db"
+    SOURCE_DB="$ROOT_DIR/core/data/ivcrush.db"
     TARGET_DB="$SCRIPT_DIR/data/ivcrush.db"
 
     if [[ ! -f "$SOURCE_DB" ]]; then
@@ -73,7 +73,7 @@ else
     echo "[2/4] Skipping GCS upload (--quick mode)"
 fi
 
-# Copy shared module into 5.0/ build context
+# Copy shared module into cloud/ build context
 echo ""
 echo "Copying common/ module into build context..."
 rm -rf "$SCRIPT_DIR/common"

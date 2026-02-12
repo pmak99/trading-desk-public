@@ -1,5 +1,5 @@
 """
-Sentiment Cache for 4.0 AI-First Trading System
+Sentiment Cache for sentiment AI-First Trading System
 
 Caches Perplexity/WebSearch sentiment results to avoid duplicate API calls.
 Uses SQLite for persistence across sessions.

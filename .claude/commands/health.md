@@ -11,7 +11,7 @@ Verify all connections and system dependencies before trading.
 ```
 [1/5] Checking market day status...
 [2/5] Testing MCP server connectivity...
-[3/5] Running 2.0 system health...
+[3/5] Running core system health...
 [4/5] Checking Perplexity budget...
 [5/5] Checking sentiment cache stats...
 ```
@@ -49,9 +49,9 @@ mcp__memory__read_graph
 
 **NOTE:** Do NOT call mcp__alpaca or mcp__alphavantage - they may not be available as MCP servers. If either errors, skip silently.
 
-### Step 3: Check 2.0 System Health
+### Step 3: Check core System Health
 ```bash
-cd "$PROJECT_ROOT/2.0" && ./trade.sh health
+cd "$PROJECT_ROOT/core" && ./trade.sh health
 ```
 
 This verifies:
@@ -62,13 +62,13 @@ This verifies:
 
 ### Step 4: Check Perplexity Budget
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT date, calls, cost FROM api_budget ORDER BY date DESC LIMIT 5;"
 ```
 
 Also show monthly totals:
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT strftime('%Y-%m', date) as month, SUM(calls) as total_calls,
           ROUND(SUM(cost), 2) as total_cost
    FROM api_budget GROUP BY month ORDER BY month DESC LIMIT 3;"
@@ -78,21 +78,21 @@ If table doesn't exist: report "Budget tracking not initialized (first run)".
 
 ### Step 5: Check Sentiment Cache Stats
 ```bash
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT source, COUNT(*) as count FROM sentiment_cache GROUP BY source;"
 ```
 
 Also check DB sizes:
 ```bash
-ls -lh "$PROJECT_ROOT/2.0/data/ivcrush.db"
-ls -lh "$PROJECT_ROOT/4.0/data/sentiment_cache.db"
+ls -lh "$PROJECT_ROOT/core/data/ivcrush.db"
+ls -lh "$PROJECT_ROOT/sentiment/data/sentiment_cache.db"
 ```
 
 Record counts:
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT COUNT(*) FROM historical_moves;"
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT COUNT(*) FROM earnings_calendar WHERE earnings_date >= date('now');"
 ```
 
@@ -123,8 +123,8 @@ Budget (Perplexity):
   [WARNING if > 80% daily usage (32+ calls)]
 
 Database:
-  2.0 ivcrush.db:          X.X MB (X,XXX historical moves)
-  4.0 sentiment_cache.db:  X KB (X cached entries)
+  core ivcrush.db:          X.X MB (X,XXX historical moves)
+  sentiment sentiment_cache.db:  X KB (X cached entries)
 
 Sentiment Cache:
   Cached entries: X (perplexity: Y, websearch: Z)
@@ -135,6 +135,6 @@ Overall: [check] ALL SYSTEMS OPERATIONAL / [warning] ISSUES DETECTED
 
 ## Error Handling
 - If any MCP fails, show the error but continue checking others
-- If 2.0 health check fails, show error output
+- If core health check fails, show error output
 - Always complete the full health check even if some components fail
 - At the end, summarize which components need attention

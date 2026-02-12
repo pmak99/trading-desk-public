@@ -1,7 +1,7 @@
 """
 Test suite for domain types (Money, Percentage, Strike, etc.).
 
-Tests the fundamental value objects used throughout the 2.0 system.
+Tests the fundamental value objects used throughout the core system.
 """
 
 import pytest

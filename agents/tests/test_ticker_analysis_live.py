@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# Add 6.0/ to path (parent of src/)
+# Add agents/ to path (parent of src/)
 _6_0_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(_6_0_dir))
 
@@ -103,9 +103,9 @@ def test_ticker_analysis_live():
 
 
 def inspect_2_0_result():
-    """Inspect what 2.0 actually returns to understand structure."""
+    """Inspect what core actually returns to understand structure."""
     print("=" * 60)
-    print("INSPECTING 2.0 RESULT STRUCTURE")
+    print("INSPECTING core RESULT STRUCTURE")
     print("=" * 60)
     print()
 
@@ -119,7 +119,7 @@ def inspect_2_0_result():
     earnings_date = datetime.strptime(earnings_date_str, '%Y-%m-%d').date()
     expiration = datetime.strptime(expiration_str, '%Y-%m-%d').date()
 
-    print(f"Calling 2.0 analyzer for {ticker}...")
+    print(f"Calling core analyzer for {ticker}...")
     print()
 
     try:
@@ -177,7 +177,7 @@ def inspect_2_0_result():
 
 if __name__ == '__main__':
     print()
-    print("Running inspection first to understand 2.0 result structure...")
+    print("Running inspection first to understand core result structure...")
     print()
     inspect_2_0_result()
     print()

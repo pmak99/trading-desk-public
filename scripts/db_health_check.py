@@ -320,7 +320,7 @@ Checks performed:
         "--db", "-d",
         type=Path,
         default=None,
-        help="Path to database file (default: 2.0/data/ivcrush.db)"
+        help="Path to database file (default: core/data/ivcrush.db)"
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -330,7 +330,7 @@ Checks performed:
     args = parser.parse_args()
 
     project_root = Path(__file__).parent.parent
-    db_path = args.db if args.db else project_root / "2.0" / "data" / "ivcrush.db"
+    db_path = args.db if args.db else project_root / "core" / "data" / "ivcrush.db"
 
     if not db_path.exists():
         print(f"ERROR: Database not found at {db_path}")

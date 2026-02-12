@@ -45,7 +45,7 @@ TARGET_FRIDAY=$(date -v+4d -j -f '%Y-%m-%d' "$TARGET_MONDAY" '+%Y-%m-%d' 2>/dev/
 
 ### Step 2: Load Earnings from Database
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT e.ticker, e.earnings_date, e.timing, e.confirmed,
           COALESCE(p.tail_risk_ratio, 0) as trr,
           COALESCE(p.tail_risk_level, 'UNKNOWN') as trr_level,
@@ -72,7 +72,7 @@ Merge any new tickers not already in the database results.
 
 ### Step 5: Check Historical Data Availability
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT e.ticker, COUNT(h.ticker) as historical_quarters
    FROM earnings_calendar e
    LEFT JOIN historical_moves h ON e.ticker = h.ticker
@@ -83,7 +83,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 6: Check Previous Trade History
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT e.ticker,
           COUNT(s.id) as prev_trades,
           ROUND(SUM(s.gain_loss), 0) as prev_pnl,

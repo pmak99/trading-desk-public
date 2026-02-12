@@ -47,7 +47,7 @@ class PatternRecognitionAgent:
     MAGNITUDE_CHANGE_THRESHOLD = 0.20  # 20% change for trend
 
     def __init__(self):
-        """Initialize with 2.0 container for data access."""
+        """Initialize with core container for data access."""
         self.container = Container2_0()
 
     def _extract_value(self, val) -> float:

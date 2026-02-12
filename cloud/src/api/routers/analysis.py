@@ -637,7 +637,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
                                 # Later: API shows next quarter (earnings already reported or DB date was wrong)
                                 # Earlier: DB has next quarter date but API shows current quarter (rare edge case)
                                 # Either way, don't blindly accept - skip this ticker
-                                # Note: 5.0 is stateless per-request, doesn't update DB (sync handled separately)
+                                # Note: cloud is stateless per-request, doesn't update DB (sync handled separately)
                                 NEXT_QUARTER_THRESHOLD_DAYS = 45
                                 if abs(date_diff_days) >= NEXT_QUARTER_THRESHOLD_DAYS:
                                     direction = "later" if date_diff_days > 0 else "earlier"

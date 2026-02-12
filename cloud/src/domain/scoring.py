@@ -2,7 +2,7 @@
 Composite scoring system for IV Crush 5.0.
 
 2.0 Score = VRP (55%) + Move Difficulty (25%) + Liquidity (20%)
-4.0 Score = 2.0 Score x (1 + Sentiment Modifier)
+4.0 Score = core Score x (1 + Sentiment Modifier)
 
 Weights and thresholds imported from common/constants.py.
 """
@@ -88,7 +88,7 @@ def apply_sentiment_modifier(
     Apply sentiment modifier to base score.
 
     Args:
-        base_score: 2.0 composite score
+        base_score: core composite score
         sentiment_score: -1.0 to +1.0
 
     Returns:

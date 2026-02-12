@@ -5,7 +5,7 @@ import pytest
 import sys
 from pathlib import Path
 
-# Add 6.0/ to path (not 6.0/src/ to allow "from src.agents..." imports)
+# Add agents/ to path (not agents/src/ to allow "from src.agents..." imports)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.agents.explanation import ExplanationAgent
@@ -87,4 +87,4 @@ class TestExplanationAgent:
         assert result['ticker'] == 'FAKESYM'
         assert result['explanation']  # Has some explanation
         # VRP ratio should be mentioned
-        assert '5.0' in result['explanation']
+        assert 'cloud' in result['explanation']

@@ -30,7 +30,7 @@ Examples:
 
 ### Step 2: Load Recent Strategies (Open/Recent Positions)
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT s.symbol, s.strategy_type, s.acquired_date, s.sale_date, s.days_held,
           s.quantity, s.net_credit, s.net_debit, s.gain_loss, s.is_winner,
           s.trade_type, s.campaign_id, s.trr_at_entry, s.position_limit_at_entry,
@@ -45,7 +45,7 @@ Replace `$TICKER_FILTER` with `AND s.symbol = 'TICKER'` if ticker provided.
 
 ### Step 3: Load Campaign Chains (Linked Trades)
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT campaign_id, symbol,
           COUNT(*) as legs,
           SUM(gain_loss) as campaign_pnl,
@@ -61,7 +61,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 4: Exposure Summary
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT symbol,
           COUNT(*) as total_trades,
           SUM(CASE WHEN trade_type = 'NEW' THEN 1 ELSE 0 END) as new_trades,
@@ -77,7 +77,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 5: Check Position Limits
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT p.ticker, p.tail_risk_ratio, p.tail_risk_level,
           p.max_contracts, p.max_notional
    FROM position_limits p
@@ -91,7 +91,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 ### Step 6: Trade Journal Details (if ticker specified)
 If a specific ticker was requested:
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT tj.symbol, tj.option_type, tj.strike, tj.expiration,
           tj.quantity, tj.cost_basis, tj.proceeds, tj.gain_loss,
           tj.acquired_date, tj.sale_date

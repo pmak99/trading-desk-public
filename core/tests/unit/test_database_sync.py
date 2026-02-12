@@ -22,7 +22,7 @@ _FIXED_TIMESTAMP = datetime(2026, 3, 16, 10, 30, 0)
 
 import sys
 # Add scripts/ to path so we can import sync_databases
-# From 2.0/tests/unit/ -> ../../.. = project root, then /scripts
+# From core/tests/unit/ -> ../../.. = project root, then /scripts
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "scripts"))
 
 from sync_databases import (

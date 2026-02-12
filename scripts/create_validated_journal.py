@@ -343,7 +343,7 @@ def write_journal_csv(entries: List[Dict], filepath: str):
 
 def main():
     # Paths
-    input_file = "/Users/prashant/Desktop/transaction_log.txt"
+    input_file = "/path/to/transaction_log.txt"
     output_dir = "$PROJECT_ROOT/docs/2025 Trades"
 
     print("=" * 60)

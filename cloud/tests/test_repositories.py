@@ -1,4 +1,4 @@
-# 5.0/tests/test_repositories.py
+# cloud/tests/test_repositories.py
 """Tests for domain repositories."""
 
 import pytest

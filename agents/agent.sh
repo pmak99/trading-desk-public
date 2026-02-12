@@ -1,5 +1,5 @@
 #!/bin/bash
-# 6.0 Agent System CLI Entry Point
+# agents Agent System CLI Entry Point
 #
 # Usage:
 #   ./agent.sh prime [DATE]           # Pre-cache sentiment
@@ -34,9 +34,9 @@ fi
 # Load environment variables from existing .env files (secrets interpolation)
 # This avoids duplicating secrets - sources from existing secure locations
 #
-# Strategy: Load 5.0 first (for PERPLEXITY_API_KEY), then 2.0 (for DB_PATH, TRADIER, etc.)
-# 2.0 loaded last so its paths take priority
-for ENV_FILE in "${MAIN_REPO}/5.0/.env" "${MAIN_REPO}/2.0/.env" "${SCRIPT_DIR}/.env"; do
+# Strategy: Load cloud first (for PERPLEXITY_API_KEY), then core (for DB_PATH, TRADIER, etc.)
+# core loaded last so its paths take priority
+for ENV_FILE in "${MAIN_REPO}/cloud/.env" "${MAIN_REPO}/core/.env" "${SCRIPT_DIR}/.env"; do
     if [ -f "$ENV_FILE" ]; then
         # Validate .env contains only VAR=VALUE lines (no commands)
         if grep -qvE '^\s*(#.*|[A-Za-z_][A-Za-z0-9_]*=.*|)\s*$' "$ENV_FILE"; then
@@ -49,18 +49,18 @@ for ENV_FILE in "${MAIN_REPO}/5.0/.env" "${MAIN_REPO}/2.0/.env" "${SCRIPT_DIR}/.
     fi
 done
 
-# Ensure DB_PATH is absolute (relative paths cause issues when running from 6.0/)
+# Ensure DB_PATH is absolute (relative paths cause issues when running from agents/)
 if [[ "$DB_PATH" != /* ]]; then
-    export DB_PATH="${MAIN_REPO}/2.0/${DB_PATH}"
+    export DB_PATH="${MAIN_REPO}/core/${DB_PATH}"
 fi
 
-# Python from 2.0 venv in main repo
-PYTHON="${MAIN_REPO}/2.0/venv/bin/python"
+# Python from core venv in main repo
+PYTHON="${MAIN_REPO}/core/venv/bin/python"
 
 # Check if Python venv exists
 if [ ! -f "$PYTHON" ]; then
     echo "Error: Python venv not found at $PYTHON"
-    echo "Please run: cd ../2.0 && python -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
+    echo "Please run: cd ../core && python -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
     exit 1
 fi
 
@@ -119,7 +119,7 @@ case "$COMMAND" in
 
     help|-h|--help)
         echo "═══════════════════════════════════════════════════════════════"
-        echo "  6.0 Agent System - Trading Desk"
+        echo "  agents Agent System - Trading Desk"
         echo "  Agent-based orchestration with parallel processing"
         echo "═══════════════════════════════════════════════════════════════"
         echo ""

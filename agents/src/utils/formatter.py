@@ -17,7 +17,7 @@ def _format_earnings_date(date_str: str) -> str:
 
 
 def _vrp_icon(vrp: float) -> str:
-    """VRP tier icon matching 4.0 format."""
+    """VRP tier icon matching sentiment format."""
     if vrp >= 1.8:
         return '\u2b50'  # star
     elif vrp >= 1.4:
@@ -28,7 +28,7 @@ def _vrp_icon(vrp: float) -> str:
 
 
 def _liquidity_display(tier: str) -> str:
-    """Format liquidity tier matching 4.0 format."""
+    """Format liquidity tier matching sentiment format."""
     mapping = {
         'EXCELLENT': 'EXCELLENT',
         'GOOD': 'GOOD',
@@ -40,7 +40,7 @@ def _liquidity_display(tier: str) -> str:
 
 def format_whisper_results(results: List[Dict[str, Any]]) -> str:
     """
-    Format whisper orchestrator results as ASCII table matching 4.0 output style.
+    Format whisper orchestrator results as ASCII table matching sentiment output style.
 
     Args:
         results: List of ticker analysis results with explanations

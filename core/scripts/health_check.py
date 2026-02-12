@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Health check script for IV Crush 2.0 system.
+Health check script for IV Crush core system.
 
 Verifies that all critical services are operational:
 - Tradier API (market data)
@@ -30,7 +30,7 @@ async def main():
     """Run health checks on all system components."""
     setup_logging("INFO")
 
-    logger.info("Starting IV Crush 2.0 health check...")
+    logger.info("Starting IV Crush core health check...")
 
     try:
         # Load configuration
@@ -46,7 +46,7 @@ async def main():
         results = await health_service.check_all()
 
         # Display results
-        print("\n📊 IV Crush 2.0 - System Health")
+        print("\n📊 IV Crush core - System Health")
         print("=" * 60)
 
         all_healthy = all(h.healthy for h in results.values())

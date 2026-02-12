@@ -168,7 +168,7 @@ def main():
 
     project_root = Path(__file__).parent.parent
     default_csv = project_root / "docs" / "2025 Trades" / "trading_journal_enhanced.csv"
-    default_db = project_root / "2.0" / "data" / "ivcrush.db"
+    default_db = project_root / "core" / "data" / "ivcrush.db"
 
     parser = argparse.ArgumentParser(description='Import enhanced CSV into trade_journal')
     parser.add_argument('--csv', default=str(default_csv), help='Path to enhanced CSV')

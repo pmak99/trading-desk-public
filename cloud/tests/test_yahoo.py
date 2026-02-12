@@ -1,4 +1,4 @@
-# 5.0/tests/test_yahoo.py
+# cloud/tests/test_yahoo.py
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from src.integrations.yahoo import YahooFinanceClient

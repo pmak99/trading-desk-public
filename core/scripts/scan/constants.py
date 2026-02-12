@@ -45,7 +45,7 @@ API_CALL_DELAY = 0.2             # Delay between API calls to respect rate limit
 
 # VRP Factor (55 points) - PRIMARY edge signal
 SCORE_VRP_MAX_POINTS = 55                   # Dominant weight - VRP is the core edge metric
-SCORE_VRP_TARGET = 4.0                      # Higher bar for full points - more selective
+SCORE_VRP_TARGET = sentiment                      # Higher bar for full points - more selective
 SCORE_VRP_USE_LINEAR = True                 # Continuous scaling, no hard cap at target
 
 # Edge Factor (DISABLED) - Removed due to redundancy with VRP

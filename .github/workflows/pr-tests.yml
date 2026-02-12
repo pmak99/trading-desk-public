@@ -24,30 +24,30 @@ jobs:
       run: |
         python -m pip install --upgrade pip setuptools wheel
         pip install -r requirements.txt
-        pip install -e 2.0/
+        pip install -e core/
 
-    - name: Run 2.0 tests
+    - name: Run core tests
       run: |
-        cd 2.0
+        cd core
         python -m pytest tests/ -v --tb=short --no-cov
       continue-on-error: false
 
-    - name: Run 4.0 tests
+    - name: Run sentiment tests
       run: |
-        cd 4.0
+        cd sentiment
         python -m pytest tests/ -v --tb=short --no-cov
       continue-on-error: false
 
-    - name: Run 5.0 tests
+    - name: Run cloud tests
       run: |
-        cd 5.0
+        cd cloud
         pip install -r requirements.txt
         python -m pytest tests/ -v --tb=short --no-cov
       continue-on-error: false
 
-    - name: Run 6.0 tests
+    - name: Run agents tests
       run: |
-        cd 6.0
+        cd agents
         python -m pytest tests/ -v --tb=short --no-cov
       continue-on-error: false
 

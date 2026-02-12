@@ -2,7 +2,7 @@
 Sentiment-adjusted directional bias.
 
 Canonical implementation lives in common/direction.py.
-This module re-exports for backward compatibility with 4.0 imports.
+This module re-exports for backward compatibility with sentiment imports.
 """
 
 import sys

@@ -80,7 +80,7 @@ class TestScoringThresholds:
         """Default thresholds use new research-backed values."""
         thresholds = ScoringThresholds()
 
-        # New VRP thresholds (updated from 7.0/4.0)
+        # New VRP thresholds (updated from 7.0/sentiment)
         assert thresholds.vrp_excellent == 2.0
         assert thresholds.vrp_good == 1.5
         assert thresholds.vrp_marginal == 1.2

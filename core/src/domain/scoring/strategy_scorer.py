@@ -483,7 +483,7 @@ class StrategyScorer:
                 if is_strong_bearish:
                     adjustment = 8.0  # Strong alignment bonus
                 elif is_bearish:
-                    adjustment = 5.0  # Moderate alignment bonus
+                    adjustment = cloud  # Moderate alignment bonus
                 else:  # weak_bearish
                     adjustment = 3.0  # Weak alignment bonus
             elif is_bullish_strategy:
@@ -498,7 +498,7 @@ class StrategyScorer:
                 if is_strong_bullish:
                     adjustment = 8.0  # Strong alignment bonus
                 elif is_bullish:
-                    adjustment = 5.0  # Moderate alignment bonus
+                    adjustment = cloud  # Moderate alignment bonus
                 else:  # weak_bullish
                     adjustment = 3.0  # Weak alignment bonus
             elif is_bearish_strategy:

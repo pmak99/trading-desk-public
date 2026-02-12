@@ -4,7 +4,7 @@ Tests for weekly options detection filter.
 Tests both the standalone detection function and its integration
 with fetch_real_implied_move.
 
-Note: Weekly options detection is imported from 2.0 (follows "Import 2.0, Don't Copy" pattern).
+Note: Weekly options detection is imported from core (follows "Import 2.0, Don't Copy" pattern).
 """
 
 import pytest
@@ -12,8 +12,8 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Import from 2.0 (the source of truth)
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "2.0"))
+# Import from core (the source of truth)
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "core"))
 from src.application.filters.weekly_options import (
     has_weekly_options,
     WEEKLY_DETECTION_WINDOW_DAYS,

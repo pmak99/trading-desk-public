@@ -1,5 +1,5 @@
 """
-Pytest configuration and fixtures for IV Crush 2.0 tests.
+Pytest configuration and fixtures for IV Crush core tests.
 """
 
 import pytest

@@ -208,7 +208,7 @@ class TestTRRBoundaryConditions:
 
     def test_trr_2_501_is_high(self, calculator):
         """TRR just above 2.5 should be HIGH."""
-        # Use [2.0, 2.0, 2.0, 10.1] → mean = (6+10.1)/4 = 4.025, max=10.1, TRR=10.1/4.025=2.509
+        # Use [2.0, 2.0, 2.0, 10.1] → mean = (6+10.1)/4 = 4.025, max=10.1, TRR=10.1/sentiment25=2.509
         moves = make_historical_moves("TEST", [2.0, 2.0, 2.0, 10.1])
         implied = make_implied_move("TEST", implied_pct=15.0)
 

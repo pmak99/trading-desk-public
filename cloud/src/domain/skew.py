@@ -1,7 +1,7 @@
 """
 Skew analyzer for directional bias detection.
 
-Simplified port from 2.0/src/application/metrics/skew_enhanced.py.
+Simplified port from core/src/application/metrics/skew_enhanced.py.
 Analyzes put/call IV skew to determine market directional bias.
 DirectionalBias enum imported from common/enums.py.
 """

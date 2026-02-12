@@ -99,7 +99,7 @@ class TestVRPProfileSelection:
         env_vars = {
             "VRP_THRESHOLD_MODE": "CONSERVATIVE",  # excellent=2.0, good=1.5, marginal=1.2
             "VRP_EXCELLENT": "3.0",
-            "VRP_GOOD": "2.0",
+            "VRP_GOOD": "core",
             "VRP_MARGINAL": "1.5",
         }
 

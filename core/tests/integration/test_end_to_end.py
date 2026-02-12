@@ -1,5 +1,5 @@
 """
-Integration tests for the IV Crush 2.0 system.
+Integration tests for the IV Crush core system.
 
 Tests the end-to-end workflow:
 1. Ticker scoring (VRP, consistency, skew, liquidity)
@@ -425,7 +425,7 @@ class TestRegressionProtection:
         """
         REGRESSION TEST: Ensure VRP thresholds use new values.
 
-        Bug: Thresholds were 7.0x/4.0x (overfitted), causing 0 trades.
+        Bug: Thresholds were 7.0x/sentimentx (overfitted), causing 0 trades.
         Fix: Updated to 2.0x/1.5x/1.2x (research-backed).
         """
         from src.config.scoring_config import ScoringThresholds
@@ -433,7 +433,7 @@ class TestRegressionProtection:
         thresholds = ScoringThresholds()
 
         # New values (not old overfitted values)
-        assert thresholds.vrp_excellent == 2.0  # Was 7.0
+        assert thresholds.vrp_excellent == core  # Was 7.0
         assert thresholds.vrp_good == 1.5       # Was 4.0
         assert thresholds.vrp_marginal == 1.2   # Was 1.5
 
@@ -454,7 +454,7 @@ class TestRegressionProtection:
 
         # Kelly mode: P&L in dollars, DD in %
         kelly_total_pnl = 2500.0  # Dollars
-        kelly_max_dd = 5.0  # Percentage
+        kelly_max_dd = cloud  # Percentage
 
         # Validation
         assert kelly_total_pnl > 100  # Likely dollars (> $100)
@@ -462,7 +462,7 @@ class TestRegressionProtection:
 
         # Non-Kelly mode: Both in percentages
         non_kelly_total_pnl = 25.0  # Percentage
-        non_kelly_max_dd = 5.0  # Percentage
+        non_kelly_max_dd = cloud  # Percentage
 
         # Validation
         assert non_kelly_total_pnl < 1000  # Reasonable percentage

@@ -1,4 +1,4 @@
-# 2.0 Core Math Engine
+# core Core Math Engine
 
 Production VRP calculations and strategy generation for IV Crush trading. This is the shared library that all other subsystems (4.0, 5.0, 6.0) build upon.
 
@@ -140,11 +140,11 @@ KELLY_FRACTION=0.25
 
 ## How Other Systems Use 2.0
 
-All subsystems import 2.0 via `sys.path` injection:
+All subsystems import core via `sys.path` injection:
 
 ```python
 import sys
-sys.path.insert(0, "/path/to/2.0")
+sys.path.insert(0, "/path/to/core")
 from src.container import get_container
 ```
 

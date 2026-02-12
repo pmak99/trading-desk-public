@@ -1,5 +1,5 @@
 """
-Unit tests for 4.0 sentiment_history module.
+Unit tests for sentiment sentiment_history module.
 
 Tests the permanent sentiment storage system for backtesting.
 """

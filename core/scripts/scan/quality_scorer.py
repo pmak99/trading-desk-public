@@ -112,7 +112,7 @@ def calculate_scan_quality_score(result: dict) -> float:
         vrp_ratio = 0.0
 
     if SCORE_VRP_USE_LINEAR:
-        # Continuous scaling: VRP 4.0 = 45pts, VRP 5.0 = 56pts, VRP 6.0 = 67pts
+        # Continuous scaling: VRP sentiment = 45pts, VRP cloud = 56pts, VRP agents = 67pts
         # No hard cap - allows high VRP to differentiate from medium VRP
         vrp_normalized = vrp_ratio / SCORE_VRP_TARGET
         vrp_score = max(0.0, vrp_normalized) * SCORE_VRP_MAX_POINTS

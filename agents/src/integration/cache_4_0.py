@@ -18,9 +18,9 @@ CACHE_AGE_UNKNOWN = float('inf')
 
 from ..utils.paths import MAIN_REPO, REPO_4_0
 
-# Add 4.0/src to Python path
+# Add sentiment/src to Python path
 _main_repo = MAIN_REPO
-_4_0_src = _main_repo / "4.0" / "src"
+_4_0_src = _main_repo / "sentiment" / "src"
 _4_0_src_str = str(_4_0_src)
 
 # Remove if already in path (so we can re-insert)
@@ -28,9 +28,9 @@ if _4_0_src_str in sys.path:
     sys.path.remove(_4_0_src_str)
 
 # Insert with priority
-sys.path.insert(1, _4_0_src_str)  # Position 1 (2.0/ should be at 0)
+sys.path.insert(1, _4_0_src_str)  # Position 1 (core/ should be at 0)
 
-# Import 4.0 components
+# Import sentiment components
 from cache.sentiment_cache import SentimentCache
 from cache.budget_tracker import BudgetTracker
 
@@ -204,7 +204,7 @@ class Cache4_0:
 
         # Get cache database connection
         import sqlite3
-        cache_db = _main_repo / "4.0" / "data" / "sentiment_cache.db"
+        cache_db = _main_repo / "sentiment" / "data" / "sentiment_cache.db"
 
         with sqlite3.connect(str(cache_db)) as conn:
             conn.row_factory = sqlite3.Row
@@ -246,7 +246,7 @@ class Cache4_0:
         cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
 
         import sqlite3
-        cache_db = _main_repo / "4.0" / "data" / "sentiment_cache.db"
+        cache_db = _main_repo / "sentiment" / "data" / "sentiment_cache.db"
 
         with sqlite3.connect(str(cache_db)) as conn:
             conn.row_factory = sqlite3.Row
@@ -278,7 +278,7 @@ class Cache4_0:
         cutoff_date = datetime.now() - timedelta(days=max_age_days)
 
         import sqlite3
-        budget_db = _main_repo / "4.0" / "data" / "perplexity_budget.db"
+        budget_db = _main_repo / "sentiment" / "data" / "perplexity_budget.db"
 
         with sqlite3.connect(str(budget_db)) as conn:
             conn.row_factory = sqlite3.Row
@@ -313,7 +313,7 @@ class Cache4_0:
         """
         import sqlite3
 
-        cache_db = _main_repo / "4.0" / "data" / "sentiment_cache.db"
+        cache_db = _main_repo / "sentiment" / "data" / "sentiment_cache.db"
 
         try:
             with sqlite3.connect(str(cache_db)) as conn:

@@ -29,9 +29,9 @@ class TestRealisticPnLModel:
             use_realistic_model=False,  # Use simple model
         )
 
-        # Implied move = 5.0 * 1.3 = 6.5%
+        # Implied move = cloud * 1.3 = 6.5%
         # Premium = 6.5 * 0.5 = 3.25%
-        # Loss = max(0, 5.0 - 6.5) = 0
+        # Loss = max(0, cloud - 6.5) = 0
         # P&L = 3.25 - 0 = 3.25%
         assert abs(pnl - 3.25) < 0.01
 
@@ -48,10 +48,10 @@ class TestRealisticPnLModel:
         )
 
         # Should be profitable (but less than simple model due to costs)
-        # Implied = 5.0 * 1.3 = 6.5%
+        # Implied = cloud * 1.3 = 6.5%
         # Premium collected ~3.09%, exit cost ~0.68%, commission ~0.026%
         # Expected P&L ~2.38%
-        assert pnl > 2.0  # Profitable after costs
+        assert pnl > core  # Profitable after costs
 
     def test_realistic_model_losing_trade(self, engine):
         """Test realistic model with losing trade (actual > implied)."""
@@ -86,7 +86,7 @@ class TestRealisticPnLModel:
         # Should be slightly profitable (premium > residual)
         # Premium ~3.09%, residual IV + slippage ~0.68%, commission ~0.026%
         # Net should be small profit ~2.38%
-        assert pnl_exact > 2.0  # Still profitable even at implied move
+        assert pnl_exact > core  # Still profitable even at implied move
 
     def test_realistic_model_commission_impact(self, engine):
         """Test commission impact on P&L."""

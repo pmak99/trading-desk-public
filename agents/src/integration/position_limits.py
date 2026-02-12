@@ -14,7 +14,7 @@ class PositionLimitsRepository:
     """Repository for querying position limits from database."""
 
     def __init__(self):
-        """Initialize with database path from 2.0 container."""
+        """Initialize with database path from core container."""
         container = Container2_0()
         self.db_path = container.get_db_path()
 

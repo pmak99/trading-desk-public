@@ -1,4 +1,4 @@
-# Trading Desk 5.0 - GCP Monitoring Infrastructure
+# Trading Desk cloud - GCP Monitoring Infrastructure
 
 Terraform configuration for uptime monitoring and alerting.
 

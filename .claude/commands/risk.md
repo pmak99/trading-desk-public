@@ -33,7 +33,7 @@ Examples:
 
 ### Step 2: TRR Exposure Analysis
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT CASE
             WHEN trr_at_entry > 2.5 THEN 'HIGH'
             WHEN trr_at_entry >= 1.5 THEN 'NORMAL'
@@ -53,7 +53,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 3: Strategy Type Concentration
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT strategy_type,
           COUNT(*) as trades,
           ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM strategies WHERE sale_date >= date('now', '-$DAYS days')), 1) as pct,
@@ -67,7 +67,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 4: Ticker Concentration (Top Exposure)
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT symbol,
           COUNT(*) as trades,
           ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM strategies WHERE sale_date >= date('now', '-$DAYS days')), 1) as pct_of_trades,
@@ -82,7 +82,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 5: Loss Pattern Analysis
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT symbol, strategy_type, gain_loss, trade_type, campaign_id,
           acquired_date, sale_date
    FROM strategies
@@ -94,7 +94,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 6: Trade Type Risk (NEW vs REPAIR vs ROLL)
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT COALESCE(trade_type, 'NEW') as trade_type,
           COUNT(*) as trades,
           ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate,
@@ -108,7 +108,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 7: Drawdown Analysis
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "WITH running AS (
      SELECT sale_date,
             SUM(gain_loss) OVER (ORDER BY sale_date) as cumulative_pnl
@@ -123,7 +123,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 8: Consecutive Losses
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "WITH numbered AS (
      SELECT symbol, sale_date, is_winner, gain_loss,
             ROW_NUMBER() OVER (ORDER BY sale_date) as rn,
@@ -142,7 +142,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 
 ### Step 9: HIGH TRR Tickers Currently in Position Limits
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT ticker, tail_risk_ratio, tail_risk_level, max_contracts, max_notional,
           max_move, avg_move
    FROM position_limits

@@ -16,7 +16,7 @@ import asyncio
 import time
 from datetime import datetime, timedelta
 
-# Add 6.0/ to path (parent of src/)
+# Add agents/ to path (parent of src/)
 _6_0_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(_6_0_dir))
 

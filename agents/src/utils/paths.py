@@ -1,4 +1,4 @@
-"""Shared path utilities for 6.0 integration modules.
+"""Shared path utilities for agents integration modules.
 
 Provides common path resolution functions used across integration modules.
 """
@@ -21,7 +21,7 @@ def find_main_repo(reference_path: Path = None) -> Path:
 
     Example:
         main_repo = find_main_repo()
-        db_path = main_repo / "2.0" / "data" / "ivcrush.db"
+        db_path = main_repo / "core" / "data" / "ivcrush.db"
     """
     if reference_path is None:
         reference_path = Path(__file__).parent
@@ -47,7 +47,7 @@ def find_main_repo(reference_path: Path = None) -> Path:
 
     except (subprocess.CalledProcessError, FileNotFoundError, OSError) as e:
         # Fallback: assume we're in main repo structure
-        # Navigate up from 6.0/src/utils to find project root
+        # Navigate up from agents/src/utils to find project root
         fallback = Path(__file__).parent.parent.parent.parent
         return fallback
 
@@ -61,8 +61,8 @@ if _root_str not in sys.path:
     sys.path.insert(0, _root_str)
 
 # Common paths used by integration modules
-REPO_2_0 = MAIN_REPO / "2.0"
-REPO_4_0 = MAIN_REPO / "4.0"
-REPO_5_0 = MAIN_REPO / "5.0"
+REPO_2_0 = MAIN_REPO / "core"
+REPO_4_0 = MAIN_REPO / "sentiment"
+REPO_5_0 = MAIN_REPO / "cloud"
 DB_PATH = REPO_2_0 / "data" / "ivcrush.db"
 SENTIMENT_CACHE_DB = REPO_4_0 / "data" / "sentiment_cache.db"

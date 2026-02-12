@@ -1,6 +1,6 @@
-# Deploy 5.0 to Cloud Run
+# Deploy cloud to Cloud Run
 
-One-command deployment of the 5.0 Cloud Autopilot to Google Cloud Run with pre-flight checks and health verification.
+One-command deployment of the cloud Cloud Autopilot to Google Cloud Run with pre-flight checks and health verification.
 
 ## Arguments
 $ARGUMENTS (optional: --quick | --status | --logs | --rollback)
@@ -43,16 +43,16 @@ gcloud config get-value project 2>/dev/null
 gcloud run revisions list --service=trading-desk --region=us-east1 --project=your-gcp-project --format="table(name,status.conditions[0].status,metadata.creationTimestamp)" --limit=3 2>/dev/null
 ```
 
-#### Step 2: Run 5.0 Tests
+#### Step 2: Run cloud Tests
 ```bash
-cd "$PROJECT_ROOT/5.0" && ../2.0/venv/bin/python -m pytest tests/ -q --tb=short 2>&1 | tail -15
+cd "$PROJECT_ROOT/cloud" && ../core/venv/bin/python -m pytest tests/ -q --tb=short 2>&1 | tail -15
 ```
 
 **If tests fail: STOP and show errors. Do NOT deploy with failing tests.**
 
 #### Step 3: Check Database State
 ```bash
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT COUNT(*) as historical_moves FROM historical_moves;
    SELECT COUNT(*) as earnings FROM earnings_calendar WHERE earnings_date >= date('now');
    SELECT COUNT(*) as strategies FROM strategies;
@@ -65,9 +65,9 @@ Show record counts as pre-deploy snapshot.
 Show the user what will happen:
 ```
 DEPLOY PLAN:
-  1. Copy ivcrush.db from 2.0/data/ to 5.0/data/
+  1. Copy ivcrush.db from core/data/ to cloud/data/
   2. Upload to GCS (gs://your-gcs-bucket/ivcrush.db)
-  3. Copy common/ module to 5.0 build context
+  3. Copy common/ module to cloud build context
   4. Build and deploy to Cloud Run (us-east1)
   5. Health check the new revision
 
@@ -76,12 +76,12 @@ Proceed with deployment?
 
 Then run:
 ```bash
-cd "$PROJECT_ROOT/5.0" && ./deploy.sh 2>&1
+cd "$PROJECT_ROOT/cloud" && ./deploy.sh 2>&1
 ```
 
 For `--quick`:
 ```bash
-cd "$PROJECT_ROOT/5.0" && ./deploy.sh --quick 2>&1
+cd "$PROJECT_ROOT/cloud" && ./deploy.sh --quick 2>&1
 ```
 
 #### Step 5: Post-Deploy Health Check
@@ -132,13 +132,13 @@ gcloud run services update-traffic trading-desk --region=us-east1 --project=your
 
 ```
 ==============================================================
-DEPLOY: 5.0 Cloud Autopilot
+DEPLOY: cloud Cloud Autopilot
 ==============================================================
 
 PRE-FLIGHT
   [check] gcloud authenticated (project: your-gcp-project)
   [check] Current revision: trading-desk-00090-pnk (ACTIVE)
-  [check] 5.0 tests: {N} passed, 0 failed
+  [check] cloud tests: {N} passed, 0 failed
 
 DATABASE SNAPSHOT
   Historical moves: {N}
@@ -147,7 +147,7 @@ DATABASE SNAPSHOT
   Position limits:   {N}
 
 DEPLOYMENT
-  [check] Database synced to 5.0/data/
+  [check] Database synced to cloud/data/
   [check] Uploaded to gs://your-gcs-bucket/ivcrush.db
   [check] common/ copied to build context
   [check] Cloud Run deploy complete

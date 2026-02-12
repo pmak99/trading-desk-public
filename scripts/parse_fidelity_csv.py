@@ -772,7 +772,7 @@ def main():
 
     parser = argparse.ArgumentParser(description='Parse Fidelity CSV exports')
     parser.add_argument('csv_file', nargs='?', help='Path to Fidelity CSV export')
-    parser.add_argument('--db', default=str(project_root / '2.0' / 'data' / 'ivcrush.db'),
+    parser.add_argument('--db', default=str(project_root / 'core' / 'data' / 'ivcrush.db'),
                        help='Path to ivcrush database for VRP correlation')
     parser.add_argument('--output', default=str(project_root / 'docs' / '2025 Trades'),
                        help='Output directory')

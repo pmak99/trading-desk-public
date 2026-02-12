@@ -1,5 +1,5 @@
 """
-Unit tests for 4.0 sentiment_cache module.
+Unit tests for sentiment sentiment_cache module.
 
 Tests the SQLite-backed caching system with 3-hour TTL.
 """

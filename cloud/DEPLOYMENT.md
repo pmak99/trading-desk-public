@@ -1,4 +1,4 @@
-# Trading Desk 5.0 - Deployment Guide
+# Trading Desk cloud - Deployment Guide
 
 Complete walkthrough for deploying the autopilot system to GCP with Telegram notifications.
 
@@ -113,7 +113,7 @@ You should receive the message in Telegram.
 ### 2.1 Create Environment File
 
 ```bash
-cd "$PROJECT_ROOT/5.0"
+cd "$PROJECT_ROOT/cloud"
 cp .env.template .env
 ```
 
@@ -254,7 +254,7 @@ gcloud secrets versions access latest --secret=trading-desk-secrets
 ### 5.1 Manual First Deploy
 
 ```bash
-cd "$PROJECT_ROOT/5.0"
+cd "$PROJECT_ROOT/cloud"
 
 # Build and push image
 gcloud builds submit --tag gcr.io/your-gcp-project/trading-desk
@@ -385,7 +385,7 @@ gcloud scheduler jobs run trading-desk-dispatch --location=us-east1
    - Event: Push to branch
    - Branch: `^main$`
    - Configuration: Cloud Build configuration file
-   - Location: `5.0/cloudbuild.yaml`
+   - Location: `cloud/cloudbuild.yaml`
 
 ### 8.2 Test Deployment
 
@@ -428,7 +428,7 @@ gcloud services enable monitoring.googleapis.com
 ### 9.2 Deploy Terraform Infrastructure
 
 ```bash
-cd "$PROJECT_ROOT/5.0/terraform"
+cd "$PROJECT_ROOT/cloud/terraform"
 
 # Copy and configure variables
 cp terraform.tfvars.example terraform.tfvars
@@ -641,7 +641,7 @@ gcloud builds submit --tag gcr.io/your-gcp-project/trading-desk
 gcloud run deploy trading-desk --image gcr.io/your-gcp-project/trading-desk --region us-east1
 
 # Sync database manually
-cp ../2.0/data/ivcrush.db data/ivcrush.db
+cp ../core/data/ivcrush.db data/ivcrush.db
 gsutil cp data/ivcrush.db gs://your-gcs-bucket/ivcrush.db
 
 # Update secrets

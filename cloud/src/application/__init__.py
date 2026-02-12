@@ -1,1 +1,1 @@
-"""Application layer for 5.0 Cloud Autopilot."""
+"""Application layer for cloud Cloud Autopilot."""

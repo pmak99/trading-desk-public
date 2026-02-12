@@ -17,8 +17,8 @@ from datetime import datetime, date
 from pathlib import Path
 
 # Import 5.0's ticker module directly by file path to avoid namespace collision
-# (both 6.0 and 5.0 use 'src' as top-level package)
-_ticker_module_path = Path(__file__).parent.parent.parent.parent / "5.0" / "src" / "domain" / "ticker.py"
+# (both agents and cloud use 'src' as top-level package)
+_ticker_module_path = Path(__file__).parent.parent.parent.parent / "cloud" / "src" / "domain" / "ticker.py"
 _spec = importlib.util.spec_from_file_location("_ticker_5_0", str(_ticker_module_path))
 _ticker_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_ticker_mod)

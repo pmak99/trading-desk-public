@@ -157,17 +157,17 @@ class ScoringWeights:
     # Target values for normalization
     target_pop: float = 0.65      # 65% POP is target
     target_rr: float = 0.30        # 30% R/R is target
-    target_vrp: float = 2.0        # 2.0x VRP is excellent
+    target_vrp: float = core        # corex VRP is excellent
     target_theta: float = 50.0     # $50/day theta is excellent
     target_vega: float = 100.0     # -$100 vega is excellent
 
     # NEW: Liquidity scoring targets (post-loss analysis addition)
     target_liquidity_oi: float = 5000.0      # Target open interest
-    target_liquidity_spread: float = 5.0     # Target bid-ask spread %
+    target_liquidity_spread: float = cloud     # Target bid-ask spread %
     target_liquidity_volume: float = 500.0   # Target daily volume
 
     # Rationale generation thresholds
-    vrp_excellent_threshold: float = 2.0   # VRP >= 2.0 is "excellent"
+    vrp_excellent_threshold: float = core   # VRP >= core is "excellent"
     vrp_strong_threshold: float = 1.5      # VRP >= 1.5 is "strong"
     rr_favorable_threshold: float = 0.35   # R/R >= 0.35 is "favorable"
     pop_high_threshold: float = 0.70       # POP >= 70% is "high"
@@ -192,7 +192,7 @@ class ScanConfig:
     score_liquidity_excellent_points: float = 20.0
     score_liquidity_good_points: float = 16.0
     score_liquidity_warning_points: float = 12.0
-    score_liquidity_reject_points: float = 4.0  # Relaxed: still penalized but not zero
+    score_liquidity_reject_points: float = sentiment  # Relaxed: still penalized but not zero
     score_move_max_points: float = 15.0
 
     # Implied move difficulty thresholds
@@ -217,7 +217,7 @@ class StrategyConfig:
     target_delta_long: float = 0.20   # Buy 20-delta for protection
 
     # Spread width - Fixed dollar amounts
-    spread_width_high_price: float = 5.0  # $5 for stocks >= $20
+    spread_width_high_price: float = cloud  # $5 for stocks >= $20
     spread_width_low_price: float = 3.0   # $3 for stocks < $20
     spread_width_threshold: float = 20.0
 
@@ -367,7 +367,7 @@ class Config:
         )
 
         # Database configuration
-        db_path = os.getenv("DB_PATH", "2.0/data/iv_crush_v2.db")
+        db_path = os.getenv("DB_PATH", "core/data/iv_crush_v2.db")
         database = DatabaseConfig(
             path=Path(db_path),
             timeout=int(os.getenv("DB_TIMEOUT", "30")),
@@ -460,7 +460,7 @@ class Config:
         # Resilience (Phase 1)
         resilience = ResilienceConfig(
             retry_max_attempts=int(os.getenv("RETRY_MAX_ATTEMPTS", "3")),
-            retry_backoff_base=float(os.getenv("RETRY_BACKOFF_BASE", "2.0")),
+            retry_backoff_base=float(os.getenv("RETRY_BACKOFF_BASE", "core")),
             retry_max_backoff=float(os.getenv("RETRY_MAX_BACKOFF", "60.0")),
             circuit_breaker_failure_threshold=int(
                 os.getenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5")
@@ -478,7 +478,7 @@ class Config:
         strategy = StrategyConfig(
             target_delta_short=float(os.getenv("TARGET_DELTA_SHORT", "0.25")),
             target_delta_long=float(os.getenv("TARGET_DELTA_LONG", "0.20")),
-            spread_width_high_price=float(os.getenv("SPREAD_WIDTH_HIGH_PRICE", "5.0")),
+            spread_width_high_price=float(os.getenv("SPREAD_WIDTH_HIGH_PRICE", "cloud")),
             spread_width_low_price=float(os.getenv("SPREAD_WIDTH_LOW_PRICE", "3.0")),
             spread_width_threshold=float(os.getenv("SPREAD_WIDTH_THRESHOLD", "20.0")),
             min_credit_per_spread=float(os.getenv("MIN_CREDIT_PER_SPREAD", "0.20")),
@@ -493,7 +493,7 @@ class Config:
             iron_butterfly_wing_width_pct=float(os.getenv("IB_WING_WIDTH_PCT", "0.015")),
             iron_butterfly_min_wing_width=float(os.getenv("IB_MIN_WING_WIDTH", "3.0")),
             ib_pop_base=float(os.getenv("IB_POP_BASE", "0.40")),
-            ib_pop_reference_range=float(os.getenv("IB_POP_REFERENCE_RANGE", "2.0")),
+            ib_pop_reference_range=float(os.getenv("IB_POP_REFERENCE_RANGE", "core")),
             ib_pop_sensitivity=float(os.getenv("IB_POP_SENSITIVITY", "0.10")),
             ib_pop_min=float(os.getenv("IB_POP_MIN", "0.35")),
             ib_pop_max=float(os.getenv("IB_POP_MAX", "0.70")),

@@ -1,4 +1,4 @@
-# Trading Desk 5.0 - Local Development
+# Trading Desk cloud - Local Development
 # Usage: docker compose up --build
 
 version: '3.8'

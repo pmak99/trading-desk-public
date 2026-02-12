@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 from src.utils.logging import setup_logging
 
-# Load .env from project root (2.0/)
+# Load .env from project root (core/)
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
@@ -723,7 +723,7 @@ Data sources:
     setup_logging(level=args.log_level)
 
     logger.info("=" * 80)
-    logger.info("IV Crush 2.0 - Accurate Historical Data Backfill")
+    logger.info("IV Crush core - Accurate Historical Data Backfill")
     logger.info("=" * 80)
     logger.info(f"Data sources: Database (timing) + Twelve Data (prices)")
     logger.info(f"Tickers: {len(tickers)}")

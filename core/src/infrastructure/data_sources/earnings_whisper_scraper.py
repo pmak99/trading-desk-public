@@ -246,7 +246,7 @@ class EarningsWhisperScraper:
 
         # Rate limiting for Twitter scraping (avoid triggering anti-bot measures)
         self._last_twitter_request: Optional[float] = None
-        self._min_request_interval = 5.0  # minimum seconds between requests
+        self._min_request_interval = cloud  # minimum seconds between requests
 
         # OCR result cache: {url_hash: (tickers, timestamp)}
         # Bounded to prevent memory leaks; protected by lock for thread safety
@@ -509,7 +509,7 @@ class EarningsWhisperScraper:
 
                     # Set user agent to avoid bot detection
                     page.set_extra_http_headers({
-                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+                        'User-Agent': 'Mozilla/cloud (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
                     })
 
                     # Navigate to @eWhispers Twitter profile
@@ -805,7 +805,7 @@ class EarningsWhisperScraper:
             Exception: If download fails or size exceeds limit
         """
         headers = {
-            'User-Agent': 'iv-crush-trading-bot/2.0 (Python/requests)'
+            'User-Agent': 'iv-crush-trading-bot/core (Python/requests)'
         }
         response = requests.get(
             image_url,

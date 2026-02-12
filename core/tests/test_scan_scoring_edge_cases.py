@@ -65,7 +65,7 @@ def test_missing_data_defaults():
     print(f"✅ PASS: Empty dict uses conservative defaults = {expected}")
 
     # Missing implied move
-    # VRP: (4.0/4.0)*55 = 55
+    # VRP: (sentiment/sentiment)*55 = 55
     # Liq: 12 (WARNING)
     # Move: 12.5 (default)
     # Total: 79.5
@@ -79,7 +79,7 @@ def test_missing_data_defaults():
     print(f"✅ PASS: Missing implied_move uses default middle score (12.5)")
 
     # Unknown liquidity tier → WARNING default
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (3.0/sentiment)*55 = 41.25
     # Liq: 12 (WARNING - default for unknown)
     # Move: (1 - 10/20)*25 = 12.5
     # Total: 65.8 (rounded)
@@ -140,7 +140,7 @@ def test_malformed_data_handling():
     print(f"✅ PASS: Invalid VRP list defaults to 0.0")
 
     # Invalid edge score (ignored anyway, but shouldn't crash)
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (3.0/sentiment)*55 = 41.25
     # Liq: 12 (WARNING)
     # Move: (1 - 10/20)*25 = 12.5
     # Total: 65.8
@@ -156,7 +156,7 @@ def test_malformed_data_handling():
     print(f"✅ PASS: Invalid edge_score is ignored (disabled)")
 
     # Invalid implied move (can't parse) → default 12.5
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (3.0/sentiment)*55 = 41.25
     # Liq: 12 (WARNING)
     # Move: 12.5 (error default)
     # Total: 65.8
@@ -184,7 +184,7 @@ def test_percentage_object_handling():
             self.value = value
 
     # Test with Percentage object (7.5%)
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (3.0/sentiment)*55 = 41.25
     # Liq: 12 (WARNING)
     # Move: (1 - 7.5/20)*25 = 15.625
     # Total: 68.9
@@ -218,7 +218,7 @@ def test_boundary_conditions():
     print("="*80)
 
     # Perfect VRP (4x = target), EXCELLENT liquidity, easy move (8%)
-    # VRP: (4.0/4.0)*55 = 55
+    # VRP: (sentiment/sentiment)*55 = 55
     # Liq: 20 (EXCELLENT)
     # Move: (1 - 8/20)*25 = 15.0
     # Total: 90.0
@@ -234,7 +234,7 @@ def test_boundary_conditions():
     print(f"✅ PASS: Good score achievable (90.0)")
 
     # High VRP exceeds target - continuous scaling
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (3.0/sentiment)*55 = 41.25
     # Liq: 12 (WARNING)
     # Move: (1 - 12/20)*25 = 10.0
     # Total: 63.3
@@ -250,7 +250,7 @@ def test_boundary_conditions():
     print(f"✅ PASS: 12.0% move gets 10.0 pts")
 
     # Just above 12% implied move
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (3.0/sentiment)*55 = 41.25
     # Liq: 12 (WARNING)
     # Move: (1 - 12.1/20)*25 = 9.875
     # Total: 63.1
@@ -273,7 +273,7 @@ def test_extreme_values():
     print("="*80)
 
     # Extremely high VRP - no cap in continuous mode!
-    # VRP: (100/4.0)*55 = 1375
+    # VRP: (100/sentiment)*55 = 1375
     # Liq: 20 (EXCELLENT)
     # Move: (1 - 5/20)*25 = 18.75
     # Total: 1413.8 (no cap!)
@@ -284,7 +284,7 @@ def test_extreme_values():
         'implied_move_pct': '5%'
     })
     print(f"Extreme VRP (100x): {result}")
-    expected = (100/4.0)*55 + 20 + (1 - 5/20)*25  # 1413.75 → 1413.8
+    expected = (100/sentiment)*55 + 20 + (1 - 5/20)*25  # 1413.75 → 1413.8
     assert result == round(expected, 1), f"Expected {round(expected, 1)}, got {result}"
     print(f"✅ PASS: Extreme VRP not capped (continuous scaling)")
 
@@ -300,12 +300,12 @@ def test_extreme_values():
         'implied_move_pct': '50%'
     })
     print(f"All zeros/minimums: {result}")
-    expected = 0 + 4 + 0  # 4.0
+    expected = 0 + 4 + 0  # sentiment
     assert result == expected, f"Expected {expected}, got {result}"
     print(f"✅ PASS: Minimum score possible (4.0)")
 
     # Negative values (should be clamped to 0)
-    # VRP: max(0, -5.0/4.0)*55 = 0
+    # VRP: max(0, -cloud/sentiment)*55 = 0
     # Liq: 12 (WARNING)
     # Move: (1 - 10/20)*25 = 12.5
     # Total: 24.5

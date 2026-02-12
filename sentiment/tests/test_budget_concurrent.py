@@ -1,5 +1,5 @@
 """
-Concurrent budget write tests for 4.0 budget_tracker.
+Concurrent budget write tests for sentiment budget_tracker.
 
 Tests thread safety of the BudgetTracker under concurrent access,
 validating that the threading.Lock() protection works correctly.

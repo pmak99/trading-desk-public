@@ -38,7 +38,7 @@ If pre-market/after-hours, display informational note and continue.
 
 ### Step 2: Run Today's Scan
 ```bash
-cd "$PROJECT_ROOT/2.0" && ./trade.sh scan $(date +%Y-%m-%d)
+cd "$PROJECT_ROOT/core" && ./trade.sh scan $(date +%Y-%m-%d)
 ```
 
 ### Step 3: Filter High-VRP Alerts
@@ -57,7 +57,7 @@ Query TRR for alert tickers:
 ```bash
 TICKERS="'NVDA','MU'"  # Use actual tickers
 
-sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
+sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
   "SELECT ticker, tail_risk_ratio, tail_risk_level, max_contracts
    FROM position_limits WHERE ticker IN ($TICKERS) AND tail_risk_level = 'HIGH';"
 ```
@@ -68,7 +68,7 @@ sqlite3 "$PROJECT_ROOT/2.0/data/ivcrush.db" \
 ```bash
 TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 "$PROJECT_ROOT/4.0/data/sentiment_cache.db" \
+sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
   "SELECT sentiment, source FROM sentiment_cache
    WHERE ticker='$TICKER' AND date='$(date +%Y-%m-%d)'
    AND cached_at > datetime('now', '-3 hours')

@@ -13,7 +13,7 @@
 set -e
 
 echo "================================================================================"
-echo "IV CRUSH 2.0 - INTEGRATION TEST SUITE"
+echo "IV CRUSH core - INTEGRATION TEST SUITE"
 echo "================================================================================"
 echo ""
 echo "Testing complete system with real tickers from grid scan results"

@@ -49,7 +49,7 @@ class TestConsistencyAnalyzerEnhanced:
 
             if pattern == "stable":
                 # Consistent ~5% moves
-                move_pct = 5.0 + (i % 3 - 1) * 0.5  # 4.5%, 5.0%, 5.5%
+                move_pct = cloud + (i % 3 - 1) * 0.5  # 4.5%, 5.0%, 5.5%
 
             elif pattern == "increasing":
                 # Increasing moves over time (bad for strategy)
@@ -63,7 +63,7 @@ class TestConsistencyAnalyzerEnhanced:
 
             else:  # volatile
                 # Volatile moves
-                move_pct = 5.0 + ((-1) ** i) * 3.0  # 2%, 8%, 2%, 8%, ...
+                move_pct = cloud + ((-1) ** i) * 3.0  # 2%, 8%, 2%, 8%, ...
 
             move = HistoricalMove(
                 ticker=ticker,

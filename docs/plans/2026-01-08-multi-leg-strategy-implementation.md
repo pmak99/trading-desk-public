@@ -13,7 +13,7 @@
 ## Task 1: Create Strategies Table
 
 **Files:**
-- Modify: `2.0/data/ivcrush.db` (via SQL)
+- Modify: `core/data/ivcrush.db` (via SQL)
 - Create: `scripts/migrations/001_add_strategies.py`
 
 **Step 1: Write migration script**
@@ -91,7 +91,7 @@ def migrate(db_path: str, dry_run: bool = False) -> bool:
 
 if __name__ == "__main__":
     project_root = Path(__file__).parent.parent.parent
-    db_path = project_root / "2.0" / "data" / "ivcrush.db"
+    db_path = project_root / "core" / "data" / "ivcrush.db"
 
     dry_run = "--dry-run" in sys.argv
     success = migrate(str(db_path), dry_run=dry_run)
@@ -118,8 +118,8 @@ Expected: "Migration successful: created strategies table..."
 **Step 4: Verify migration**
 
 ```bash
-sqlite3 2.0/data/ivcrush.db ".schema strategies"
-sqlite3 2.0/data/ivcrush.db "PRAGMA table_info(trade_journal)" | grep strategy_id
+sqlite3 core/data/ivcrush.db ".schema strategies"
+sqlite3 core/data/ivcrush.db "PRAGMA table_info(trade_journal)" | grep strategy_id
 ```
 
 Expected: Table schema displayed, strategy_id column present
@@ -283,7 +283,7 @@ class TestGroupLegsIntoStrategies:
 **Step 2: Run test to verify it fails**
 
 ```bash
-cd /Users/prashant/PycharmProjects/Trading\ Desk
+cd $PROJECT_ROOT
 python -m pytest scripts/tests/test_strategy_grouper.py -v
 ```
 
@@ -902,7 +902,7 @@ def main():
     import argparse
 
     project_root = Path(__file__).parent.parent
-    default_db = project_root / "2.0" / "data" / "ivcrush.db"
+    default_db = project_root / "core" / "data" / "ivcrush.db"
 
     parser = argparse.ArgumentParser(description='Backfill strategies from trade journal')
     parser.add_argument('--db', default=str(default_db), help='Database path')
@@ -941,7 +941,7 @@ git commit -m "feat: add backfill script for existing trades"
 ## Task 4: Fix Current APLD Trade Data
 
 **Files:**
-- Modify: `2.0/data/ivcrush.db` (via backfill)
+- Modify: `core/data/ivcrush.db` (via backfill)
 
 The current APLD trade is stored as a single combined row. We need to:
 1. Delete the combined row
@@ -951,13 +951,13 @@ The current APLD trade is stored as a single combined row. We need to:
 **Step 1: Delete combined APLD trade**
 
 ```bash
-sqlite3 2.0/data/ivcrush.db "DELETE FROM trade_journal WHERE symbol='APLD' AND sale_date='2026-01-08'"
+sqlite3 core/data/ivcrush.db "DELETE FROM trade_journal WHERE symbol='APLD' AND sale_date='2026-01-08'"
 ```
 
 **Step 2: Insert individual legs**
 
 ```bash
-sqlite3 2.0/data/ivcrush.db "
+sqlite3 core/data/ivcrush.db "
 INSERT INTO trade_journal
 (symbol, acquired_date, sale_date, days_held, option_type, strike, expiration,
  quantity, cost_basis, proceeds, gain_loss, is_winner, term)
@@ -972,7 +972,7 @@ VALUES
 **Step 3: Verify legs inserted**
 
 ```bash
-sqlite3 2.0/data/ivcrush.db "SELECT id, symbol, strike, gain_loss FROM trade_journal WHERE symbol='APLD' AND sale_date='2026-01-08'"
+sqlite3 core/data/ivcrush.db "SELECT id, symbol, strike, gain_loss FROM trade_journal WHERE symbol='APLD' AND sale_date='2026-01-08'"
 ```
 
 Expected: Two rows with strikes 25.0 and 23.0
@@ -997,7 +997,7 @@ git commit -m "fix: restore APLD individual legs for proper strategy tracking"
 ## Task 5: Run Full Backfill
 
 **Files:**
-- Modify: `2.0/data/ivcrush.db`
+- Modify: `core/data/ivcrush.db`
 
 **Step 1: Run migration if not done**
 
@@ -1022,7 +1022,7 @@ python scripts/backfill_strategies.py
 **Step 4: Verify results**
 
 ```bash
-sqlite3 2.0/data/ivcrush.db "
+sqlite3 core/data/ivcrush.db "
 SELECT strategy_type, COUNT(*) as count,
        ROUND(SUM(gain_loss), 2) as total_pnl,
        ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) as win_rate
@@ -1034,7 +1034,7 @@ GROUP BY strategy_type
 **Step 5: Verify no orphan legs**
 
 ```bash
-sqlite3 2.0/data/ivcrush.db "SELECT COUNT(*) FROM trade_journal WHERE strategy_id IS NULL"
+sqlite3 core/data/ivcrush.db "SELECT COUNT(*) FROM trade_journal WHERE strategy_id IS NULL"
 ```
 
 Expected: 0 (all legs linked) or list of items needing manual review
@@ -1129,7 +1129,7 @@ def print_strategy_stats(db_path: str):
 
 if __name__ == "__main__":
     project_root = Path(__file__).parent.parent
-    db_path = project_root / "2.0" / "data" / "ivcrush.db"
+    db_path = project_root / "core" / "data" / "ivcrush.db"
     print_strategy_stats(str(db_path))
 ```
 

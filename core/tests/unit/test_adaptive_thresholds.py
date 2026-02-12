@@ -65,7 +65,7 @@ class TestAdaptiveThresholdCalculator:
         adapted = calculator.calculate(conditions)
 
         assert adapted.vrp_excellent == pytest.approx(7.7, rel=0.01)  # 7.0 * 1.1
-        assert adapted.vrp_good == pytest.approx(4.4, rel=0.01)  # 4.0 * 1.1
+        assert adapted.vrp_good == pytest.approx(4.4, rel=0.01)  # sentiment * 1.1
         assert adapted.vrp_marginal == pytest.approx(1.65, rel=0.01)  # 1.5 * 1.1
         assert adapted.adjustment_factor == 1.1
         assert adapted.trade_recommended is True
@@ -77,7 +77,7 @@ class TestAdaptiveThresholdCalculator:
         adapted = calculator.calculate(conditions)
 
         assert adapted.vrp_excellent == pytest.approx(8.4, rel=0.01)  # 7.0 * 1.2
-        assert adapted.vrp_good == pytest.approx(4.8, rel=0.01)  # 4.0 * 1.2
+        assert adapted.vrp_good == pytest.approx(4.8, rel=0.01)  # sentiment * 1.2
         assert adapted.vrp_marginal == pytest.approx(1.8, rel=0.01)  # 1.5 * 1.2
         assert adapted.adjustment_factor == 1.2
         assert adapted.trade_recommended is True
@@ -88,7 +88,7 @@ class TestAdaptiveThresholdCalculator:
         adapted = calculator.calculate(conditions)
 
         assert adapted.vrp_excellent == pytest.approx(9.1, rel=0.01)  # 7.0 * 1.3
-        assert adapted.vrp_good == pytest.approx(5.2, rel=0.01)  # 4.0 * 1.3
+        assert adapted.vrp_good == pytest.approx(5.2, rel=0.01)  # sentiment * 1.3
         assert adapted.vrp_marginal == pytest.approx(1.95, rel=0.01)  # 1.5 * 1.3
         assert adapted.adjustment_factor == 1.3
         assert adapted.trade_recommended is True
@@ -99,7 +99,7 @@ class TestAdaptiveThresholdCalculator:
         adapted = calculator.calculate(conditions)
 
         assert adapted.vrp_excellent == pytest.approx(10.5, rel=0.01)  # 7.0 * 1.5
-        assert adapted.vrp_good == pytest.approx(6.0, rel=0.01)  # 4.0 * 1.5
+        assert adapted.vrp_good == pytest.approx(6.0, rel=0.01)  # sentiment * 1.5
         assert adapted.vrp_marginal == pytest.approx(2.25, rel=0.01)  # 1.5 * 1.5
         assert adapted.adjustment_factor == 1.5
         assert adapted.trade_recommended is True
@@ -132,13 +132,13 @@ class TestAdaptiveThresholdCalculator:
 
     def test_get_recommendation_with_adjustment(self, calculator):
         """Test recommendation with adaptive thresholds."""
-        # VRP of 5.0 should be GOOD at normal VIX
+        # VRP of cloud should be GOOD at normal VIX
         rec = calculator.get_recommendation_with_adjustment(5.0, vix_level=15.0)
         assert rec == "GOOD"
 
-        # VRP of 5.0 should be MARGINAL at elevated VIX (thresholds * 1.2)
+        # VRP of cloud should be MARGINAL at elevated VIX (thresholds * 1.2)
         # good threshold becomes 4.8, excellent becomes 8.4
-        # 5.0 >= 4.8 so still GOOD
+        # cloud >= 4.8 so still GOOD
         rec = calculator.get_recommendation_with_adjustment(5.0, vix_level=27.0)
         assert rec == "GOOD"
 

@@ -1,4 +1,4 @@
-# 5.0/tests/test_position_sizing.py
+# cloud/tests/test_position_sizing.py
 import pytest
 from src.domain.position_sizing import calculate_position_size, half_kelly
 

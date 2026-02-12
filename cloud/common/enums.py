@@ -1,7 +1,7 @@
 """Shared enumerations for domain concepts.
 
 Canonical source for all enums used across subsystems.
-2.0/src/domain/enums.py re-exports these for backward compatibility.
+core/src/domain/enums.py re-exports these for backward compatibility.
 """
 
 from enum import Enum

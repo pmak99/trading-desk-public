@@ -1,4 +1,4 @@
-# 5.0/tests/test_metrics.py
+# cloud/tests/test_metrics.py
 """Tests for Grafana Cloud metrics module."""
 import pytest
 import time

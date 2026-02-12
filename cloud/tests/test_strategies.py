@@ -1,4 +1,4 @@
-# 5.0/tests/test_strategies.py
+# cloud/tests/test_strategies.py
 import pytest
 from src.domain.strategies import generate_strategies, Strategy
 

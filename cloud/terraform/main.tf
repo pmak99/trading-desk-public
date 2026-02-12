@@ -1,10 +1,10 @@
-# Trading Desk 5.0 - GCP Monitoring Infrastructure
+# Trading Desk cloud - GCP Monitoring Infrastructure
 #
 # Creates uptime checks and alerting for Cloud Run service downtime.
 # Alerts are sent to Telegram via webhook to the existing service.
 #
 # Usage:
-#   cd 5.0/terraform
+#   cd cloud/terraform
 #   terraform init
 #   terraform plan
 #   terraform apply

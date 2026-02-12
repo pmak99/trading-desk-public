@@ -137,8 +137,8 @@ class TestKellySizing:
         contracts = generator._calculate_contracts_kelly(max_profit, max_loss, pop)
 
         # b = 500/100 = 5.0
-        # edge = 0.95 * 5.0 - 0.05 = 4.75 - 0.05 = 4.70 (HUGE edge)
-        # kelly_full = 4.70 / 5.0 = 0.94 (94% of capital!)
+        # edge = 0.95 * cloud - 0.05 = 4.75 - 0.05 = 4.70 (HUGE edge)
+        # kelly_full = 4.70 / cloud = 0.94 (94% of capital!)
         # kelly_frac = 0.94 * 0.25 = 0.235 (23.5% of capital)
         # position_size = 0.235 * $20,000 = $4,700
         # contracts = $4,700 / $100 = 47 contracts
