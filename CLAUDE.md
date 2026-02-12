@@ -34,11 +34,29 @@ VRP Ratio = Implied Move / Historical Mean Move
 
 ## Scoring System
 
-| Factor | Weight | Description |
-|--------|--------|-------------|
-| VRP Edge | 55% | Core signal quality |
-| Implied Move Difficulty | 25% | Easier moves get bonus |
-| Liquidity Quality | 20% | Open interest, bid-ask spreads |
+**Two scoring layers:**
+
+**Ticker Selection** (`scoring_config.py` — scan mode, ranks tickers):
+
+| Preset | VRP | Consistency | Skew | Liquidity |
+|--------|-----|-------------|------|-----------|
+| **Balanced** (default) | 40% | 25% | 15% | 20% |
+| VRP-Dominant | 70% | 20% | 5% | 5% |
+| Liquidity-First | 30% | 20% | 15% | 35% |
+
+8 presets available for A/B testing. Min composite score: 60.
+
+**Strategy Scoring** (`config.py ScoringWeights` — scores individual option strategies):
+
+| Factor | With Greeks | Without Greeks |
+|--------|-------------|----------------|
+| Probability of Profit (POP) | 40% | 45% |
+| Liquidity Quality | 22% | 26% |
+| VRP Edge | 17% | 17% |
+| Kelly Edge (R/R x POP) | 13% | 12% |
+| Greeks (theta/vega) | 8% | — |
+
+Rebalanced Dec 2025 after significant loss: POP raised to 40%, liquidity added at 22%.
 
 **Sentiment Modifier:** `Sentiment Score = Core Score x (1 + sentiment_modifier)` where modifiers range from -12% (strong bearish) to +12% (strong bullish).
 
@@ -131,8 +149,8 @@ Rate limit: 60 req/min per IP.
 ## Databases
 
 **ivcrush.db** (`core/data/ivcrush.db` | `gs://your-gcs-bucket/ivcrush.db`) — 15 tables, schema v6:
-- `historical_moves` (6,861) | `earnings_calendar` (6,762) | `strategies` (203)
-- `trade_journal` (556) | `position_limits` (428) | `bias_predictions` (28) | `iv_log` (16)
+- `historical_moves` (6,921) | `earnings_calendar` (6,762) | `strategies` (235)
+- `trade_journal` (634) | `position_limits` (428) | `bias_predictions` (28) | `iv_log` (16)
 - Empty: `analysis_log`, `cache`, `rate_limits`, `backtest_runs`, `backtest_trades`, `job_status`, `ticker_metadata`
 - Note: ~239 trade_journal rows have sale_date < acquired_date — this is Fidelity's convention for credit trades (sell-to-open), not a bug. Strategies table is normalized to chronological order (acquired=open, sale=close).
 
@@ -199,9 +217,9 @@ DB_PATH=data/ivcrush.db
 ## Testing
 
 ```bash
-cd core && ./venv/bin/python -m pytest tests/ -v    # 690 tests
+cd core && ./venv/bin/python -m pytest tests/ -v    # 766 tests
 cd sentiment && ../core/venv/bin/python -m pytest tests/  # 221 tests
-cd cloud && ../core/venv/bin/python -m pytest tests/  # 311 tests
+cd cloud && ../core/venv/bin/python -m pytest tests/  # 449 tests
 cd agents && ../core/venv/bin/python -m pytest tests/  # 82 tests
 ```
 
