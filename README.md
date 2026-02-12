@@ -4,7 +4,11 @@
 
 ## What This Is
 
-A real trading system used daily for options trading around earnings announcements. It exploits the **Implied Volatility Crush** — selling options when IV is elevated before earnings, profiting from the volatility collapse after the announcement.
+A real trading system used daily for options trading around earnings announcements. It exploits the **Implied Volatility (IV) Crush** — selling options when IV is elevated before earnings, profiting from the volatility collapse after the announcement.
+
+**How it works:** Before a company reports earnings, options prices inflate because traders expect a big move. The system identifies stocks where this inflation (measured by the **Volatility Risk Premium**, or VRP — the ratio of implied move to historical average move) is unusually high, then sells options to capture the premium as it deflates post-earnings.
+
+The system also tracks **Tail Risk Ratio (TRR)** — how extreme a stock's worst historical earnings move is compared to its average — to size positions safely and avoid outsized losses.
 
 **570+ commits** of iterative AI pair-programming development (Oct 2025 – Feb 2026).
 
@@ -76,7 +80,7 @@ All 570+ commits show AI-assisted development patterns:
 | **Budget-aware AI** | Hard $5/month cap on Perplexity API prevents runaway costs |
 | **DDD architecture** | Domain/application/infrastructure separation in core enables testing |
 | **YAML agent config** | Agent behavior (models, tools, prompts) configured without code changes |
-| **Tail Risk Ratio (TRR)** | Position sizing based on historical tail risk, not just VRP |
+| **TRR-based position sizing** | Size positions based on historical tail risk, not just volatility premium |
 
 ## Getting Started
 
@@ -124,6 +128,20 @@ trading-desk/
 ├── CLAUDE.md          Domain knowledge base for Claude Code
 └── .github/           CI workflows and Dependabot config
 ```
+
+## Glossary
+
+| Term | Definition |
+|------|-----------|
+| **IV (Implied Volatility)** | The market's forecast of how much a stock will move, reflected in options prices |
+| **IV Crush** | The sharp drop in implied volatility after an earnings announcement removes uncertainty |
+| **VRP (Volatility Risk Premium)** | Ratio of implied move to historical average move — measures how overpriced options are |
+| **TRR (Tail Risk Ratio)** | Ratio of a stock's worst historical earnings move to its average — flags outsized risk |
+| **POP (Probability of Profit)** | Estimated chance a trade will be profitable at expiration |
+| **DDD (Domain-Driven Design)** | Architecture pattern separating domain logic from infrastructure concerns |
+| **MCP (Model Context Protocol)** | Anthropic's protocol for giving AI tools access to external services |
+| **GCS (Google Cloud Storage)** | Cloud object storage used to sync SQLite databases |
+| **P&L (Profit & Loss)** | Net financial result of trades |
 
 ---
 
