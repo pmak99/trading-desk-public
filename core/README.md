@@ -2,6 +2,8 @@
 
 Production VRP calculations and strategy generation for IV Crush trading. This is the shared library that all other subsystems (4.0, 5.0, 6.0) build upon.
 
+> **Note:** Application logic (scoring, strategy generation, backtesting) and tests have been removed from this public version. Infrastructure, domain types, and utility patterns are preserved.
+
 ## Quick Start
 
 ```bash
@@ -36,32 +38,11 @@ Domain-Driven Design with clean separation of concerns:
 
 ```
 src/
-├── config/                  # Configuration and scoring parameters
-│   ├── config.py            # Environment-based config loading
-│   ├── scoring_config.py    # VRP thresholds, weights, tier definitions
-│   └── validation.py        # Config validation
 ├── domain/                  # Core domain models and value objects
-│   └── scoring/             # Scoring domain logic
-├── application/             # Business logic layer
-│   ├── metrics/             # VRP, liquidity, skew, implied move calculators
-│   │   ├── vrp.py           # VRP ratio calculation
-│   │   ├── liquidity_scorer.py  # 4-tier liquidity scoring
-│   │   ├── skew_enhanced.py     # IV skew analysis (polynomial fit)
-│   │   ├── implied_move.py      # Implied move from options chains
-│   │   ├── consistency_enhanced.py  # Historical consistency scoring
-│   │   ├── term_structure_analyzer.py  # IV term structure
-│   │   ├── market_conditions.py  # Market regime detection
-│   │   └── adaptive_thresholds.py  # Dynamic threshold adjustment
-│   ├── async_metrics/       # Async VRP analysis
-│   ├── filters/             # Weekly options filtering
-│   ├── services/            # Application services
-│   │   ├── analyzer.py      # Main analysis orchestration
-│   │   ├── scorer.py        # Score aggregation (55/25/20 weights)
-│   │   ├── strategy_generator.py  # Strategy recommendation engine
-│   │   ├── backtest_engine.py     # Backtesting service
-│   │   ├── health.py        # Health check service
-│   │   └── earnings_date_validator.py  # Earnings date validation
-│   └── handlers/            # Command handlers
+│   ├── types.py             # Type definitions
+│   ├── enums.py             # Domain enumerations
+│   ├── protocols.py         # Interface protocols
+│   └── errors.py            # Domain errors
 ├── infrastructure/          # External integrations
 │   ├── api/                 # API clients
 │   │   ├── tradier.py       # Options chains, Greeks, IV
@@ -86,36 +67,6 @@ src/
 └── container.py             # Dependency injection container
 ```
 
-## Database
-
-SQLite at `data/ivcrush.db` with 15 tables. See root [README](../README.md#databases) for full table list.
-
-Key schema:
-
-```sql
-CREATE TABLE strategies (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol TEXT NOT NULL,
-    strategy_type TEXT NOT NULL CHECK(strategy_type IN ('SINGLE','SPREAD','IRON_CONDOR','STRANGLE')),
-    acquired_date DATE NOT NULL,
-    sale_date DATE NOT NULL,
-    days_held INTEGER,
-    expiration DATE,
-    quantity INTEGER,
-    net_credit REAL,
-    net_debit REAL,
-    gain_loss REAL NOT NULL,
-    is_winner BOOLEAN NOT NULL,
-    earnings_date DATE,
-    actual_move REAL,
-    trade_type TEXT CHECK(trade_type IN ('NEW','ROLL','REPAIR','ADJUSTMENT')),
-    parent_strategy_id INTEGER REFERENCES strategies(id),
-    campaign_id TEXT,
-    trr_at_entry REAL,
-    position_limit_at_entry INTEGER
-);
-```
-
 ## Configuration
 
 ```bash
@@ -123,19 +74,6 @@ CREATE TABLE strategies (
 TRADIER_API_KEY=xxx           # Options chains, Greeks, IV
 ALPHA_VANTAGE_KEY=xxx         # Earnings calendar
 DB_PATH=data/ivcrush.db
-
-# Optional
-VRP_THRESHOLD_MODE=BALANCED   # CONSERVATIVE, BALANCED, AGGRESSIVE
-USE_KELLY_SIZING=true
-KELLY_FRACTION=0.25
-```
-
-## Testing
-
-```bash
-./venv/bin/python -m pytest tests/ -v           # All 690 tests
-./venv/bin/python -m pytest tests/unit/ -v      # Unit tests only
-./venv/bin/python -m pytest tests/ --cov=src    # With coverage
 ```
 
 ## How Other Systems Use 2.0

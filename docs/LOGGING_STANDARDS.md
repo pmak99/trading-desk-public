@@ -194,8 +194,7 @@ logger.info(f"Cleaned up {count} old reports (>15 days)")
 
 ### Medium Priority:
 4. `src/ai/sentiment_analyzer.py`
-5. `src/ai/strategy_generator.py`
-6. `src/data/calendars/alpha_vantage.py`
+5. `src/data/calendars/alpha_vantage.py`
 
 ### Low Priority:
 7. All other `src/` files
