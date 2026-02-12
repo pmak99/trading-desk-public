@@ -31,27 +31,7 @@ Show progress updates as you work:
 
 ## Reference: Scoring & Thresholds
 
-**Cutoffs:**
-- core Score >= 50 (pre-sentiment filter)
-- sentiment Score >= 55 (post-sentiment filter)
-
-**4.0 Formula:** `4.0 Score = core Score * (1 + Sentiment_Modifier)`
-
-| Sentiment | Score Range | Modifier |
-|-----------|-------------|----------|
-| Strong Bullish | +0.7 to +1.0 | +12% |
-| Bullish | +0.3 to +0.6 | +7% |
-| Neutral | -0.2 to +0.2 | 0% |
-| Bearish | -0.6 to -0.3 | -7% |
-| Strong Bearish | -1.0 to -0.7 | -12% |
-
-**TRR Levels:**
-
-| Level | TRR | Max Contracts | Action |
-|-------|-----|---------------|--------|
-| HIGH | > 2.5x | 50 | Warning badge in table |
-| NORMAL | 1.5-2.5x | 100 | No badge |
-| LOW | < 1.5x | 100 | No badge |
+> Proprietary scoring cutoffs, sentiment modifier values, and TRR tier tables removed from public version.
 
 ## Step-by-Step Instructions
 

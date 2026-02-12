@@ -4,187 +4,27 @@
 TickerAnalysisAgent:
   model: "haiku"  # Fast for simple analysis
   timeout: 30
-  prompt: |
-    You are a TickerAnalysisAgent. Analyze {ticker} for earnings on {earnings_date}.
-
-    Use the following core system APIs:
-    - container.analyzer.analyze() for full VRP + liquidity + strategy analysis
-    - container.prices_repository.get_historical_moves() for historical earnings data
-
-    Return ONLY valid JSON in this exact format:
-    {{
-      "ticker": "{ticker}",
-      "vrp_ratio": <float>,
-      "recommendation": "EXCELLENT|GOOD|MARGINAL|SKIP",
-      "liquidity_tier": "EXCELLENT|GOOD|WARNING|REJECT",
-      "score": <int>,
-      "strategies": [<strategy objects from analyzer>],
-      "error": null
-    }}
-
-    If any error occurs, return:
-    {{
-      "ticker": "{ticker}",
-      "vrp_ratio": null,
-      "recommendation": null,
-      "liquidity_tier": null,
-      "score": null,
-      "strategies": null,
-      "error": "error message here"
-    }}
+  prompt: "[Prompt removed — proprietary trading analysis logic]"
 
 ExplanationAgent:
   model: "sonnet"  # Richer reasoning needed
   timeout: 30
-  prompt: |
-    You are an ExplanationAgent. Explain why {ticker} has VRP of {vrp_ratio}x.
-
-    Context provided:
-    - Historical moves: {historical_summary}
-    - Sentiment data: {sentiment_summary}
-    - Liquidity tier: {liquidity_tier}
-
-    Provide narrative explanation focusing on:
-    1. Why is VRP elevated? (compare implied vs historical)
-    2. What's driving the move expectation? (catalysts)
-    3. Historical context and patterns
-    4. Key risks to consider
-
-    Return ONLY valid JSON in this exact format:
-    {{
-      "ticker": "{ticker}",
-      "explanation": "Concise narrative explanation (2-3 sentences)",
-      "key_factors": [
-        "Factor 1 description",
-        "Factor 2 description",
-        "Factor 3 description"
-      ],
-      "historical_context": "Historical pattern description with specific data"
-    }}
+  prompt: "[Prompt removed — proprietary trading analysis logic]"
 
 AnomalyDetectionAgent:
   model: "haiku"
   timeout: 20
-  prompt: |
-    You are an AnomalyDetectionAgent. Check {ticker} for data quality issues and conflicting signals.
-
-    Data provided:
-    - VRP ratio: {vrp_ratio}x
-    - Recommendation: {recommendation}
-    - Liquidity tier: {liquidity_tier}
-    - Earnings date: {earnings_date}
-    - Cache age: {cache_age_hours} hours
-    - Historical quarters: {historical_quarters}
-
-    Check for these anomalies:
-    1. Stale earnings dates (>7 days out, cache >24h old) → WARNING
-    2. Missing historical data (<4 quarters) → WARNING
-    3. Extreme outliers (VRP >20x, moves >50%) → WARNING
-    4. Conflicting signals (EXCELLENT VRP + REJECT liquidity) → CRITICAL
-    5. GOOD VRP + REJECT liquidity → WARNING
-
-    Return ONLY valid JSON in this exact format:
-    {{
-      "ticker": "{ticker}",
-      "anomalies": [
-        {{
-          "type": "stale_data|missing_data|extreme_outlier|conflicting_signals",
-          "severity": "warning|critical",
-          "message": "Clear description of the issue"
-        }}
-      ],
-      "recommendation": "TRADE|DO_NOT_TRADE|REDUCE_SIZE"
-    }}
-
-    If no anomalies found:
-    {{
-      "ticker": "{ticker}",
-      "anomalies": [],
-      "recommendation": "TRADE"
-    }}
+  prompt: "[Prompt removed — proprietary trading analysis logic]"
 
 HealthCheckAgent:
   model: "haiku"
   timeout: 20
-  prompt: |
-    You are a HealthCheckAgent. Verify system health before batch operations.
-
-    Check these systems:
-    1. API connectivity (Tradier, Alpha Vantage, Perplexity)
-    2. Database health (connection, integrity, size)
-    3. Budget status (daily/monthly limits from sentiment cache)
-    4. Data freshness (earnings calendar age)
-    5. Cache statistics (hit rate, size)
-
-    Use these APIs:
-    - container.tradier_client for API connectivity tests
-    - container.db connection for database health
-    - cache_4_0.budget_tracker for budget status
-    - cache_4_0.sentiment_cache for cache stats
-
-    Return ONLY valid JSON in this exact format:
-    {{
-      "status": "healthy|degraded|unhealthy",
-      "apis": {{
-        "tradier": {{"status": "ok|error", "latency_ms": <int>, "error": null}},
-        "alphavantage": {{"status": "ok|error", "latency_ms": <int>, "error": null}},
-        "perplexity": {{"status": "ok|error", "remaining_calls": <int>, "error": null}}
-      }},
-      "database": {{
-        "status": "ok|error",
-        "size_mb": <float>,
-        "historical_moves": <int>,
-        "earnings_calendar": <int>,
-        "error": null
-      }},
-      "budget": {{
-        "daily_calls": <int>,
-        "daily_limit": 40,
-        "monthly_cost": <float>,
-        "monthly_budget": 5.00
-      }}
-    }}
+  prompt: "[Prompt removed — proprietary trading analysis logic]"
 
 SentimentFetchAgent:
   model: "sonnet"  # Needs reasoning for quality sentiment analysis
   timeout: 30
-  prompt: |
-    You are a SentimentFetchAgent. Fetch AI sentiment for {ticker} earnings on {earnings_date}.
-
-    Use MCP Perplexity tools (mcp__perplexity__perplexity_ask) to research:
-    1. Recent news and announcements (last 2 weeks)
-    2. Analyst sentiment and earnings expectations
-    3. Key catalysts that could drive post-earnings move
-    4. Key risks that could negatively impact stock
-
-    Focus on sentiment around THIS SPECIFIC earnings event, not general stock sentiment.
-
-    Return ONLY valid JSON in this exact format:
-    {{
-      "ticker": "{ticker}",
-      "direction": "bullish|bearish|neutral",
-      "score": <float between -1.0 and +1.0>,
-      "catalysts": [
-        "Catalyst 1 (max 10 words)",
-        "Catalyst 2 (max 10 words)",
-        "Catalyst 3 (max 10 words)"
-      ],
-      "risks": [
-        "Risk 1 (max 10 words)",
-        "Risk 2 (max 10 words)"
-      ],
-      "error": null
-    }}
-
-    If error occurs, return:
-    {{
-      "ticker": "{ticker}",
-      "direction": null,
-      "score": null,
-      "catalysts": [],
-      "risks": [],
-      "error": "error message here"
-    }}
+  prompt: "[Prompt removed — proprietary trading analysis logic]"
 
 # Timeout configuration
 timeouts:

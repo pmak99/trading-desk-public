@@ -91,11 +91,9 @@ sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
 3. Fall back to `mcp__perplexity__perplexity_search`
 4. Graceful skip if all fail
 
-Calculate sentiment Score for each:
-```
-Modifier: Strong Bullish +0.12, Bullish +0.07, Neutral 0.00, Bearish -0.07, Strong Bearish -0.12
-4.0 Score = core Score * (1 + modifier)
-```
+Calculate sentiment-adjusted score for each ticker.
+
+> Specific modifier values and score formulas removed from public version.
 
 ## Output Format
 

@@ -1,16 +1,12 @@
 # Trading Desk
 
-> Production quantitative options trading system for IV Crush strategies, built iteratively with Claude Code as an AI pair-programming partner.
+> **Portfolio showcase** — proprietary trading algorithms have been removed from this public version. This repository demonstrates Claude Code integration patterns: custom slash commands, MCP servers, agent orchestration, and AI-assisted development methodology.
 
 ## What This Is
 
 A real trading system used daily for options trading around earnings announcements. It exploits the **Implied Volatility Crush** — selling options when IV is elevated before earnings, profiting from the volatility collapse after the announcement.
 
-- **200+ strategies** tracked with full P&L accounting
-- **~55-60% win rate** across all strategy types
-- **6,800+ historical earnings moves** for backtesting and pattern analysis
-- **1,300+ tests** across four subsystems
-- **570+ commits** of iterative development (Oct 2025 – Feb 2026)
+**570+ commits** of iterative AI pair-programming development (Oct 2025 – Feb 2026).
 
 ## Architecture
 
@@ -19,18 +15,9 @@ agents  Agent Orchestration ──→ Parallel Claude Code agents for analysis
 cloud   Cloud Autopilot     ──→ 24/7 Cloud Run + Telegram bot
 sentiment AI Sentiment      ──→ Perplexity-powered sentiment layer
 core    Core Math Engine    ──→ VRP/strategy calculations (shared library)
-────────────────────────────────────────────────────────────────────
-SQLite (ivcrush.db)         ──→ 15 tables, 6,861 historical moves
 ```
 
 All subsystems import core as a shared library via `sys.path` injection. Sentiment, cloud, and agents never duplicate core's math.
-
-| Subsystem | Purpose | Tests | Key Tech |
-|-----------|---------|------:|----------|
-| [core](core/) | VRP math, scoring, strategy generation | 690 | SQLite, DDD, configurable scoring |
-| [sentiment](sentiment/) | AI sentiment with budget tracking | 221 | Perplexity API, 3hr TTL cache |
-| [cloud](cloud/) | 24/7 autopilot with Telegram alerts | 311 | FastAPI, Cloud Run, GCS sync |
-| [agents](agents/) | Parallel agent orchestration | 82 | Claude Code agents, YAML config |
 
 ## Claude Code Integration
 
@@ -72,13 +59,12 @@ A [budget-aware Perplexity MCP server](mcp-servers/perplexity-tracked/) that:
 
 ### CLAUDE.md as Living Documentation
 
-The [`CLAUDE.md`](CLAUDE.md) file serves as a domain knowledge base for Claude Code — VRP thresholds, scoring weights, strategy performance data, liquidity tiers, and critical trading rules. This means every Claude Code session starts with full domain context.
+The [`CLAUDE.md`](CLAUDE.md) file serves as a domain knowledge base for Claude Code — VRP thresholds, trading rules, and system architecture. This means every Claude Code session starts with full domain context.
 
 ### Development Methodology
 
 All 570+ commits show AI-assisted development patterns:
 - Test-driven development with Claude Code running tests iteratively
-- Architectural decisions documented in [`docs/plans/`](docs/plans/)
 - Progressive system evolution from local CLI to cloud autopilot to agent orchestration
 
 ## Key Technical Decisions
@@ -91,16 +77,6 @@ All 570+ commits show AI-assisted development patterns:
 | **DDD architecture** | Domain/application/infrastructure separation in core enables testing |
 | **YAML agent config** | Agent behavior (models, tools, prompts) configured without code changes |
 | **Tail Risk Ratio (TRR)** | Position sizing based on historical tail risk, not just VRP |
-
-## Performance Highlights
-
-| Metric | Value |
-|--------|-------|
-| Overall win rate | ~55-60% |
-| Strategies tracked | 200+ |
-| Best strategy type | SINGLE options (~60-65% win rate) |
-| Best TRR tier | LOW TRR (~70% win rate, strong profit) |
-| Historical moves DB | 6,861 records across 400+ tickers |
 
 ## Getting Started
 
@@ -118,15 +94,6 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # Add your API keys
-
-# Run tests
-python -m pytest tests/ -v
-
-# Analyze a ticker
-./trade.sh NVDA 2026-02-10
-
-# Scan all earnings on a date
-./trade.sh scan 2026-02-10
 ```
 
 ### Agent System
@@ -149,28 +116,14 @@ cd cloud/
 ```
 trading-desk/
 ├── core/              Core math engine (VRP, liquidity, strategies)
-├── sentiment/         AI sentiment layer (Perplexity integration)
 ├── cloud/             Cloud autopilot (FastAPI + Telegram)
 ├── agents/            Agent orchestration (parallel Claude Code)
-├── common/            Shared constants and enums
-├── scripts/           Data pipelines and utilities
-├── docs/              Architecture docs and implementation plans
 ├── mcp-servers/       Custom MCP server (Perplexity budget tracker)
+├── docs/              Architecture documentation
 ├── .claude/           Claude Code commands (19 slash commands)
 ├── CLAUDE.md          Domain knowledge base for Claude Code
 └── .github/           CI workflows and Dependabot config
 ```
-
-## Testing
-
-```bash
-cd core && ./venv/bin/python -m pytest tests/ -v          # 690 tests
-cd sentiment && ../core/venv/bin/python -m pytest tests/  # 221 tests
-cd cloud && ../core/venv/bin/python -m pytest tests/      # 311 tests
-cd agents && ../core/venv/bin/python -m pytest tests/     # 82 tests
-```
-
-Total: **1,304 tests** across all subsystems.
 
 ---
 

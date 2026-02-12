@@ -32,28 +32,7 @@ Examples:
 
 ## Reference Tables
 
-### VRP Tiers (BALANCED mode - default)
-| Tier | Threshold | Action |
-|------|-----------|--------|
-| EXCELLENT | >= 1.8x | Full size, high confidence |
-| GOOD | >= 1.4x | Full size |
-| MARGINAL | >= 1.2x | Reduced size |
-| SKIP | < 1.2x | No trade |
-
-### Liquidity Tiers (Relaxed Feb 2026)
-| Tier | OI/Position | Spread | Action |
-|------|-------------|--------|--------|
-| EXCELLENT | >=5x | <=12% | Full size |
-| GOOD | 2-5x | 12-18% | Full size |
-| WARNING | 1-2x | 18-25% | Reduce size |
-| REJECT | <1x | >25% | Reduce size (allowed but penalized) |
-
-### TRR Levels
-| Level | TRR | Max Contracts | Max Notional |
-|-------|-----|---------------|--------------|
-| HIGH | > 2.5x | 50 | $25,000 |
-| NORMAL | 1.5-2.5x | 100 | $50,000 |
-| LOW | < 1.5x | 100 | $50,000 |
+> Proprietary scoring thresholds and tier tables removed from public version.
 
 ## Step-by-Step Instructions
 
@@ -188,20 +167,9 @@ Skip sentiment ONLY if:
 
 ### Step 4: Sentiment-Adjusted Direction (4.0)
 
-**Apply the 3-Rule System:**
-| Original Skew | Sentiment | Result | Rule |
-|---------------|-----------|--------|------|
-| NEUTRAL | Bullish (>=+0.3) | BULLISH | Sentiment breaks tie |
-| NEUTRAL | Bearish (<=-0.3) | BEARISH | Sentiment breaks tie |
-| BULLISH | Bearish (<=-0.3) | NEUTRAL | Conflict -> hedge |
-| BEARISH | Bullish (>=+0.3) | NEUTRAL | Conflict -> hedge |
-| Any | Aligned/Neutral | Keep original | Skew dominates |
+Apply the 3-Rule directional bias system (sentiment breaks ties, conflicts hedge to neutral, otherwise skew dominates) and calculate sentiment-adjusted score.
 
-**Calculate sentiment Score:**
-```
-Modifier: Strong Bullish +0.12, Bullish +0.07, Neutral 0.00, Bearish -0.07, Strong Bearish -0.12
-4.0 Score = core Score * (1 + modifier)
-```
+> Specific modifier values and score formulas removed from public version.
 
 ## Output Format
 

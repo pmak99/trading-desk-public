@@ -99,12 +99,7 @@ Risks: [2 bullets, max 10 words each]"
 - **bearish**: Downgrades, concerns about guidance, miss expected
 - **neutral**: Mixed signals, no clear direction
 
-Score mapping:
-- Strong bullish: +0.7 to +1.0
-- Mild bullish: +0.2 to +0.6
-- Neutral: -0.2 to +0.2
-- Mild bearish: -0.6 to -0.2
-- Strong bearish: -1.0 to -0.7
+> Score mapping ranges removed from public version.
 
 ### Step 6: Save to Sentiment History
 ```bash
