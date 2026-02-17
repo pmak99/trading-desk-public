@@ -222,7 +222,7 @@ DB_PATH=data/ivcrush.db
 ```bash
 cd 2.0 && ./venv/bin/python -m pytest tests/ -v    # 766 tests
 cd 4.0 && ../2.0/venv/bin/python -m pytest tests/  # 221 tests
-cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 502 tests
+cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 503 tests
 cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 82 tests
 ```
 

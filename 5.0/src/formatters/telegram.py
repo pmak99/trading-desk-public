@@ -4,9 +4,9 @@ Telegram message formatter.
 Creates HTML-formatted messages with emoji for Telegram notifications.
 """
 
+import html
 from typing import List, Dict, Any
 from datetime import datetime
-from dataclasses import asdict
 
 
 def format_ticker_line(ticker_data: Dict[str, Any], rank: int) -> str:
@@ -201,7 +201,7 @@ def format_council(result) -> str:
     status = get("status", "")
 
     if status != "success":
-        msg = get("status", "Unknown error")
+        msg = html.escape(get("status", "Unknown error"))
         return f"\U0001f3db <b>COUNCIL: {ticker}</b>\n\n{msg}"
 
     # Header
@@ -230,7 +230,7 @@ def format_council(result) -> str:
 
         # Abbreviate direction
         dir_short = {"bullish": "BULL", "bearish": "BEAR", "neutral": "NEUT"}.get(direction, direction[:4].upper())
-        status_suffix = f"  ({m_status})" if m_status else ""
+        status_suffix = f"  ({html.escape(m_status)})" if m_status else ""
         lines.append(f"  {name[:20]:<20} {dir_short:<4}  {score:+.2f}{status_suffix}")
 
     lines.append("")
@@ -257,13 +257,13 @@ def format_council(result) -> str:
     rule_applied = get("rule_applied", "")
     lines.append(f"Direction: {direction}")
     if rule_applied:
-        lines.append(f"  {rule_applied}")
+        lines.append(f"  {html.escape(rule_applied)}")
 
     # Risk flags
     risk_flags = get("risk_flags", [])
     if risk_flags:
         lines.append("")
         for flag in risk_flags:
-            lines.append(f"\u26a0\ufe0f {flag}")
+            lines.append(f"\u26a0\ufe0f {html.escape(flag)}")
 
     return "\n".join(lines)

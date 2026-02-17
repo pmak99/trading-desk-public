@@ -19,7 +19,7 @@ All subsystems import 2.0 as a shared library via `sys.path` injection. 4.0, 5.0
 |-----------|---------|------:|--------|
 | [2.0](2.0/) | Core VRP math and strategy generation | 766 | Production |
 | [4.0](4.0/) | AI sentiment layer (Perplexity) | 221 | Production |
-| [5.0](5.0/) | Cloud autopilot (Cloud Run + Telegram) | 502 | Production |
+| [5.0](5.0/) | Cloud autopilot (Cloud Run + Telegram) | 503 | Production |
 | [6.0](6.0/) | Agent orchestration (parallel processing) | 82 | Production |
 
 ## Quick Start
@@ -128,11 +128,11 @@ TELEGRAM_CHAT_ID=xxx          # Telegram chat (5.0)
 ```bash
 cd 2.0 && ./venv/bin/python -m pytest tests/ -v    # 766 tests
 cd 4.0 && ../2.0/venv/bin/python -m pytest tests/  # 221 tests
-cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 502 tests
+cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 503 tests
 cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 82 tests
 ```
 
-Total: 1,571 tests across all subsystems.
+Total: 1,572 tests across all subsystems.
 
 ## Scripts
 

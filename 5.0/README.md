@@ -163,7 +163,7 @@ GCS_BUCKET=trading-desk-data
 
 ```bash
 cd 5.0
-../2.0/venv/bin/python -m pytest tests/ -v    # 502 tests
+../2.0/venv/bin/python -m pytest tests/ -v    # 503 tests
 ```
 
 ---

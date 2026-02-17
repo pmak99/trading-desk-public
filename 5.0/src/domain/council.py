@@ -8,7 +8,7 @@ options skew, and historical patterns into a weighted consensus.
 import asyncio
 import json
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 
 from src.core.logging import log
@@ -17,7 +17,7 @@ from src.core import metrics
 
 # Council member weights (renormalized from 85% to 100% — WebSearch dropped)
 WEIGHTS = {
-    "perplexity_research": 0.294,
+    "perplexity_research": 0.293,
     "finnhub_analysts": 0.235,
     "perplexity_quick": 0.118,
     "finnhub_news": 0.118,
@@ -129,14 +129,14 @@ def calculate_news_score(articles: List[Dict[str, Any]]) -> float:
         headline = article.get("headline", "").lower()
         summary = article.get("summary", "").lower()
         text = headline + " " + summary
-        for kw in BULLISH_KEYWORDS:
-            if kw in text:
-                bull += 1
-                break
-        for kw in BEARISH_KEYWORDS:
-            if kw in text:
-                bear += 1
-                break
+        # Classify each article as bull, bear, or neutral (not both)
+        is_bull = any(kw in text for kw in BULLISH_KEYWORDS)
+        is_bear = any(kw in text for kw in BEARISH_KEYWORDS)
+        if is_bull and not is_bear:
+            bull += 1
+        elif is_bear and not is_bull:
+            bear += 1
+        # Mixed signals (both bull and bear keywords) → neutral, skip
 
     total = bull + bear
     if total == 0:
@@ -433,7 +433,7 @@ async def run_council(
                     f"Key Risk: [1 bullet, max 20 words]\n"
                     f"Analyst Trend: [upgrading/stable/downgrading]"
                 )
-                response = await perplexity._request([
+                response = await perplexity.query([
                     {"role": "system", "content": "You are a financial analyst providing pre-earnings sentiment analysis."},
                     {"role": "user", "content": prompt},
                 ])
@@ -475,8 +475,8 @@ async def run_council(
 
     consensus_direction = score_to_direction(consensus_score)
 
-    # 6. Agreement metrics
-    agreement, agreement_count, agreement_total = calculate_agreement(members)
+    # 6. Agreement metrics (pass only active members)
+    agreement, agreement_count, agreement_total = calculate_agreement(active)
 
     # 7. Apply 3-rule direction system
     skew_member = next((m for m in members if m.name == "Options Skew" and not m.failed), None)
@@ -515,8 +515,9 @@ async def run_council(
             )
             base_score = score_data["total_score"]
 
-    modifier_pct = consensus_score * 0.12  # Max ±12%
     final_score = apply_sentiment_modifier(base_score, consensus_score) if base_score > 0 else 0
+    # Derive actual modifier from the stepped calculation (matches apply_sentiment_modifier)
+    actual_modifier = (final_score - base_score) / base_score if base_score > 0 else 0.0
 
     # 9. Cache result
     try:
@@ -547,7 +548,7 @@ async def run_council(
         agreement=agreement,
         agreement_count=agreement_count,
         active_count=active_count,
-        modifier=round(modifier_pct, 3),
+        modifier=round(actual_modifier, 3),
         base_score=round(base_score, 1),
         final_score=round(final_score, 1),
         direction=direction,

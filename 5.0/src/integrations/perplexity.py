@@ -129,6 +129,14 @@ class PerplexityClient:
         metrics.api_call("perplexity", duration_ms, success=False)
         return {"error": "All retries failed"}
 
+    async def query(self, messages: list) -> Dict[str, Any]:
+        """
+        Send a raw chat completion request.
+
+        Returns the full API response dict. Caller manages budget.
+        """
+        return await self._request(messages)
+
     # Model-specific pricing (per token) as of 2025
     PRICING = {
         "sonar": {"input": 0.000001, "output": 0.000001},           # $1/M input, $1/M output

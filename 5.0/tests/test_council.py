@@ -382,3 +382,67 @@ async def test_run_council_cached_sentiment():
     assert quick is not None
     assert quick.status == "cached"
     assert not quick.failed
+
+
+@pytest.mark.asyncio
+async def test_run_council_deep_research():
+    """Phase 2 Perplexity Research fires when budget allows."""
+    repo = MagicMock()
+    repo.get_next_earnings.return_value = {"earnings_date": "2026-03-01", "timing": "AMC"}
+    repo.get_position_limits.return_value = {"tail_risk_ratio": 1.8, "tail_risk_level": "NORMAL"}
+    repo.get_moves.return_value = [{"intraday_move_pct": 5.0}] * 8
+
+    finnhub = AsyncMock()
+    finnhub.get_recommendations.return_value = {
+        "strongBuy": 10, "buy": 15, "hold": 5, "sell": 2, "strongSell": 1, "period": "2026-02-01",
+    }
+    finnhub.get_company_news.return_value = [
+        {"headline": "Strong earnings beat expectations", "summary": "Growth accelerating", "source": "Reuters", "datetime": 0},
+    ]
+
+    tradier = AsyncMock()
+    tradier.get_quote.return_value = {"last": 150.0}
+    tradier.get_expirations.return_value = ["2026-03-07"]
+    tradier.get_options_chain.return_value = []
+
+    cache = MagicMock()
+    cache.get_sentiment.return_value = {"score": 0.4, "direction": "bullish"}
+    cache.save_sentiment.return_value = True
+
+    budget = MagicMock()
+    budget.can_call.return_value = True  # Allow Phase 2
+    budget.try_acquire_call_async = AsyncMock(return_value=True)
+
+    perplexity = MagicMock()
+    perplexity.query = AsyncMock(return_value={
+        "choices": [{"message": {"content": (
+            "Direction: bullish\n"
+            "Score: +0.6\n"
+            "Bull Case: Strong cloud growth; AI revenue expanding\n"
+            "Bear Case: High valuation; Competition increasing\n"
+            "Key Risk: Regulatory scrutiny\n"
+            "Analyst Trend: upgrading"
+        )}}],
+    })
+
+    result = await run_council(
+        ticker="NVDA",
+        finnhub=finnhub,
+        perplexity=perplexity,
+        tradier=tradier,
+        repo=repo,
+        cache=cache,
+        budget=budget,
+    )
+
+    # Perplexity Research should be active (not failed)
+    research = next((m for m in result.members if m.name == "Perplexity Research"), None)
+    assert research is not None
+    assert not research.failed
+    assert research.status == "fresh"
+    assert research.score == 0.6
+    assert research.direction == "bullish"
+
+    # Budget should have been acquired
+    budget.try_acquire_call_async.assert_called_once()
+    perplexity.query.assert_called_once()

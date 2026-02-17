@@ -253,6 +253,8 @@ async def lifespan(app: FastAPI):
     log("info", "Shutting down Trading Desk 5.0")
 
     # Close HTTP clients
+    if state.finnhub:
+        await state.finnhub.close()
     if state.twelvedata:
         await state.twelvedata.close()
 

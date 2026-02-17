@@ -18,10 +18,15 @@ BASE_URL = "https://finnhub.io/api/v1"
 
 
 class FinnhubClient:
-    """Async Finnhub API client."""
+    """Async Finnhub API client with connection pooling."""
 
     def __init__(self, api_key: str):
         self.api_key = api_key
+        self._client = httpx.AsyncClient(timeout=30)
+
+    async def close(self):
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
 
     async def _request(self, path: str, params: Dict[str, str] = None) -> Any:
         """Make request to Finnhub API with retry handling."""
@@ -33,23 +38,22 @@ class FinnhubClient:
 
         for attempt in range(3):
             try:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    response = await client.get(url, params=query)
+                response = await self._client.get(url, params=query)
 
-                    if response.status_code != 200:
-                        log("warn", "Finnhub API error",
-                            path=path, status=response.status_code,
-                            response=response.text[:200] if response.text else "empty")
-                        if response.status_code in (429, 500, 502, 503) and attempt < 2:
-                            await asyncio.sleep(2 ** attempt)
-                            continue
-                        duration_ms = (time.time() - start_time) * 1000
-                        metrics.api_call("finnhub", duration_ms, success=False)
-                        return {"error": f"API error: {response.status_code}"}
-
+                if response.status_code != 200:
+                    log("warn", "Finnhub API error",
+                        path=path, status=response.status_code,
+                        response=response.text[:200] if response.text else "empty")
+                    if response.status_code in (429, 500, 502, 503) and attempt < 2:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
                     duration_ms = (time.time() - start_time) * 1000
-                    metrics.api_call("finnhub", duration_ms, success=True)
-                    return response.json()
+                    metrics.api_call("finnhub", duration_ms, success=False)
+                    return {"error": f"API error: {response.status_code}"}
+
+                duration_ms = (time.time() - start_time) * 1000
+                metrics.api_call("finnhub", duration_ms, success=True)
+                return response.json()
 
             except (httpx.TimeoutException, httpx.ConnectError) as e:
                 log("warn", "Finnhub request failed", error=str(e), attempt=attempt + 1)

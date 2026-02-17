@@ -28,7 +28,11 @@ router = APIRouter(tags=["webhooks"])
 
 
 def _strategy_type(description: str) -> str:
-    """Extract short strategy type from strategy description."""
+    """Extract short strategy type from generate_strategies() description.
+
+    Expects formatted descriptions like "Sell 200P / Buy 195P" from strategies.py.
+    Not safe for arbitrary strings (e.g. tickers ending in P/C).
+    """
     if not description:
         return ""
     # Iron Condor: has both P and C with slash separators
@@ -292,9 +296,21 @@ async def telegram_webhook(request: Request):
                     return {"ok": True}
                 try:
                     await telegram.send_message(f"\U0001f3db Running council for <b>{ticker}</b>...")
-                    from src.api.routers.analysis import council
-                    result = await council(ticker=ticker, format="json", fresh=True)
+                    from src.domain.council import run_council
                     from src.formatters.telegram import format_council
+                    from src.api.dependencies import (
+                        get_finnhub, get_tradier, get_historical_repo,
+                        get_sentiment_cache,
+                    )
+                    result = await run_council(
+                        ticker=ticker,
+                        finnhub=get_finnhub(),
+                        perplexity=get_perplexity(),
+                        tradier=get_tradier(),
+                        repo=get_historical_repo(),
+                        cache=get_sentiment_cache(),
+                        budget=get_budget_tracker(),
+                    )
                     await telegram.send_message(format_council(result))
                 except Exception as e:
                     log("error", "Telegram council failed", ticker=ticker, error=type(e).__name__)
