@@ -263,18 +263,34 @@ async def telegram_webhook(request: Request):
                     from src.api.routers.analysis import analyze
                     result = await analyze(ticker=ticker, format="json", fresh=True)
                     if result.get("status") == "success":
+                        vrp = result.get("vrp", {})
+                        sentiment = result.get("sentiment", {})
+                        strat = result["strategies"][0] if result.get("strategies") else {}
+                        tail = result.get("tail_risk", {})
                         alert_data = {
                             "ticker": ticker,
-                            "vrp_ratio": result["vrp"]["ratio"],
+                            "price": result.get("price", 0),
+                            "earnings_date": result.get("earnings_date", ""),
+                            "timing": result.get("timing") or "",
+                            "vrp_ratio": vrp.get("ratio", 0),
+                            "vrp_tier": vrp.get("tier", ""),
                             "score": result["score"]["final"],
                             "direction": result["direction"],
-                            "sentiment_score": result.get("sentiment", {}).get("score", 0),
-                            "tailwinds": "",
-                            "headwinds": "",
-                            "strategy": result["strategies"][0]["name"] if result["strategies"] else "No strategy",
-                            "credit": result["strategies"][0]["max_profit"] / 100 if result["strategies"] else 0,
-                            "max_risk": result["strategies"][0]["max_risk"] if result["strategies"] else 0,
-                            "pop": result["strategies"][0]["pop"] if result["strategies"] else 0,
+                            "sentiment_score": sentiment.get("score", 0),
+                            "tailwinds": sentiment.get("tailwinds", ""),
+                            "headwinds": sentiment.get("headwinds", ""),
+                            "strategy": strat.get("name", "No strategy"),
+                            "strategy_desc": strat.get("description", ""),
+                            "credit": strat.get("max_profit", 0) / 100 if strat else 0,
+                            "max_risk": strat.get("max_risk", 0),
+                            "pop": strat.get("pop", 0),
+                            "liquidity_tier": result.get("liquidity_tier", ""),
+                            "implied_move_pct": vrp.get("implied_move_pct", 0),
+                            "hist_mean_pct": round(vrp.get("historical_mean", 0), 1),
+                            "hist_count": vrp.get("historical_count", 0),
+                            "trr_ratio": tail.get("ratio", 0),
+                            "trr_level": tail.get("level", ""),
+                            "skew_bias": result.get("skew", {}).get("bias", ""),
                         }
                         await telegram.send_message(format_alert(alert_data))
                     else:

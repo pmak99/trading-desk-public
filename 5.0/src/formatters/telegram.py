@@ -145,34 +145,88 @@ def _format_digest_grouped(
 
 def format_alert(ticker_data: Dict[str, Any]) -> str:
     """
-    Format critical alert for high-VRP opportunity.
+    Format deep analysis result for Telegram /analyze command.
 
     Args:
-        ticker_data: Ticker analysis data
+        ticker_data: Full analysis data from analyze endpoint
 
     Returns:
-        HTML-formatted alert message
+        HTML-formatted Telegram message
     """
     ticker = ticker_data.get("ticker", "???")
     vrp = ticker_data.get("vrp_ratio", 0)
+    vrp_tier = ticker_data.get("vrp_tier", "")
     score = ticker_data.get("score", 0)
     direction = ticker_data.get("direction", "NEUTRAL")
+    price = ticker_data.get("price", 0)
+    earnings_date = ticker_data.get("earnings_date", "")
+    timing = ticker_data.get("timing", "")
     sentiment_score = ticker_data.get("sentiment_score", 0)
     tailwinds = ticker_data.get("tailwinds", "")
     headwinds = ticker_data.get("headwinds", "")
-    strategy = ticker_data.get("strategy", "")
+    strategy_desc = ticker_data.get("strategy_desc", "")
+    strategy_name = ticker_data.get("strategy", "")
     credit = ticker_data.get("credit", 0)
     risk = ticker_data.get("max_risk", 0)
     pop = ticker_data.get("pop", 0)
+    liquidity_tier = ticker_data.get("liquidity_tier", "")
+    implied_move = ticker_data.get("implied_move_pct", 0)
+    hist_mean = ticker_data.get("hist_mean_pct", 0)
+    hist_count = ticker_data.get("hist_count", 0)
+    trr_ratio = ticker_data.get("trr_ratio", 0)
+    trr_level = ticker_data.get("trr_level", "")
+    skew_bias = ticker_data.get("skew_bias", "")
 
-    return f"""\U0001f6a8 <b>{ticker}</b> | VRP {vrp}x | Score {score}
+    # Header: ticker + VRP tier + score + direction
+    score_mark = " \u2705" if score >= 55 else ""
+    lines = [f"\U0001f6a8 <b>{html.escape(ticker)}</b> | {vrp_tier} {vrp:.1f}x | Score {score:.0f}{score_mark} | {direction}"]
 
-\U0001f4ca {direction} | Sentiment {sentiment_score:+.1f}
-\u2705 {tailwinds}
-\u26a0\ufe0f {headwinds}
+    # Earnings date + timing + price
+    date_parts = []
+    if earnings_date:
+        date_parts.append(earnings_date)
+    if timing:
+        date_parts.append(f"({timing})")
+    if price:
+        date_parts.append(f"| ${price:.2f}")
+    if date_parts:
+        lines.append(f"\U0001f4c5 {' '.join(date_parts)}")
 
-\U0001f4b0 <b>{strategy}</b>
-   Credit ${credit:.2f} | Risk ${risk:.2f} | POP {pop}%"""
+    # Sentiment + skew
+    sent_parts = [f"Sentiment {sentiment_score:+.1f}"]
+    if skew_bias:
+        sent_parts.append(f"Skew: {skew_bias}")
+    lines.append(f"\U0001f4ca {' | '.join(sent_parts)}")
+
+    # Tailwinds/headwinds (only show if non-empty)
+    if tailwinds:
+        lines.append(f"\u2705 {html.escape(tailwinds)}")
+    if headwinds:
+        lines.append(f"\u26a0\ufe0f {html.escape(headwinds)}")
+
+    # Strategy with strikes
+    if strategy_desc:
+        lines.append(f"\n\U0001f4b0 <b>{html.escape(strategy_name)}</b> \u2014 {html.escape(strategy_desc)}")
+    elif strategy_name:
+        lines.append(f"\n\U0001f4b0 <b>{html.escape(strategy_name)}</b>")
+    if credit or risk:
+        lines.append(f"  Credit ${credit:.2f} | Risk ${risk:.2f} | POP {pop}%")
+
+    # Historical context + TRR + liquidity
+    context_parts = []
+    if hist_count:
+        context_parts.append(f"{hist_count}Q avg {hist_mean:.1f}%")
+    if implied_move:
+        context_parts.append(f"implied {implied_move:.1f}%")
+    if trr_ratio:
+        trr_warn = " \u26a0\ufe0f" if trr_level == "HIGH" else ""
+        context_parts.append(f"TRR {trr_ratio:.1f}x {trr_level}{trr_warn}")
+    if liquidity_tier:
+        context_parts.append(f"Liq: {liquidity_tier}")
+    if context_parts:
+        lines.append(f"\n\U0001f4c8 {' | '.join(context_parts)}")
+
+    return "\n".join(lines)
 
 
 def format_council(result) -> str:

@@ -1,5 +1,5 @@
 import pytest
-from src.formatters.telegram import format_ticker_line, format_digest, format_council
+from src.formatters.telegram import format_ticker_line, format_digest, format_alert, format_council
 from src.formatters.cli import format_ticker_line_cli, format_digest_cli, format_council_cli
 from src.domain.council import CouncilMember, CouncilResult
 
@@ -295,6 +295,120 @@ def test_format_digest_fallback_without_earnings_date():
     digest_cli = format_digest_cli("2025-12-12", cli_tickers, 12, 4.85)
     assert "Dec 12 EARNINGS" in digest_cli
     assert "EARNINGS DIGEST" not in digest_cli
+
+
+def test_format_alert_full():
+    """Format /analyze result with all data populated."""
+    alert_data = {
+        "ticker": "PANW",
+        "price": 163.50,
+        "earnings_date": "2026-02-17",
+        "timing": "AMC",
+        "vrp_ratio": 2.01,
+        "vrp_tier": "EXCELLENT",
+        "score": 48,
+        "direction": "BEARISH",
+        "sentiment_score": -0.3,
+        "tailwinds": "Revenue guidance beats consensus",
+        "headwinds": "EPS guidance misses consensus",
+        "strategy": "Bear Call Spread",
+        "strategy_desc": "Sell 180C / Buy 190C",
+        "credit": 2.27,
+        "max_risk": 7.73,
+        "pop": 68,
+        "liquidity_tier": "GOOD",
+        "implied_move_pct": 7.9,
+        "hist_mean_pct": 3.9,
+        "hist_count": 12,
+        "trr_ratio": 2.09,
+        "trr_level": "NORMAL",
+        "skew_bias": "neutral",
+    }
+
+    output = format_alert(alert_data)
+
+    # Header has ticker, VRP tier, score, direction
+    assert "PANW" in output
+    assert "EXCELLENT" in output
+    assert "2.0x" in output
+    assert "48" in output
+    assert "BEARISH" in output
+
+    # Earnings date + timing + price
+    assert "2026-02-17" in output
+    assert "AMC" in output
+    assert "$163.50" in output
+
+    # Sentiment + skew
+    assert "-0.3" in output
+    assert "neutral" in output
+
+    # Tailwinds/headwinds shown
+    assert "Revenue guidance" in output
+    assert "EPS guidance" in output
+
+    # Strategy with strikes
+    assert "Bear Call Spread" in output
+    assert "Sell 180C / Buy 190C" in output
+    assert "$2.27" in output
+    assert "$7.73" in output
+    assert "68%" in output
+
+    # Historical context
+    assert "12Q" in output
+    assert "3.9%" in output
+    assert "7.9%" in output
+    assert "TRR 2.1x" in output
+    assert "GOOD" in output
+
+
+def test_format_alert_empty_tailwinds():
+    """Empty tailwinds/headwinds should not show bare emoji."""
+    alert_data = {
+        "ticker": "TEST",
+        "vrp_ratio": 1.5,
+        "vrp_tier": "GOOD",
+        "score": 50,
+        "direction": "NEUTRAL",
+        "tailwinds": "",
+        "headwinds": "",
+    }
+    output = format_alert(alert_data)
+    # Should NOT have lonely checkmark or warning emoji lines
+    lines = output.split("\n")
+    for line in lines:
+        stripped = line.strip()
+        assert stripped != "\u2705"      # No bare checkmark
+        assert stripped != "\u26a0\ufe0f"  # No bare warning
+
+
+def test_format_alert_trr_high_warning():
+    """HIGH TRR shows warning emoji."""
+    alert_data = {
+        "ticker": "TSLA",
+        "vrp_ratio": 3.5,
+        "vrp_tier": "EXCELLENT",
+        "score": 62,
+        "direction": "NEUTRAL",
+        "trr_ratio": 3.8,
+        "trr_level": "HIGH",
+    }
+    output = format_alert(alert_data)
+    assert "HIGH" in output
+    assert "\u26a0\ufe0f" in output
+
+
+def test_format_alert_minimal():
+    """Minimal data produces clean output without crashes."""
+    alert_data = {
+        "ticker": "X",
+        "vrp_ratio": 1.0,
+        "score": 30,
+        "direction": "NEUTRAL",
+    }
+    output = format_alert(alert_data)
+    assert "X" in output
+    assert "1.0x" in output
 
 
 def test_format_council():
