@@ -139,7 +139,7 @@ Skip sentiment ONLY if:
      "SELECT sentiment, source, cached_at FROM sentiment_cache
       WHERE ticker='$TICKER' AND date='$EARNINGS_DATE'
       AND cached_at > datetime('now', '-3 hours')
-      ORDER BY CASE source WHEN 'perplexity' THEN 0 ELSE 1 END LIMIT 1;"
+      ORDER BY CASE source WHEN 'council' THEN 0 WHEN 'perplexity' THEN 1 ELSE 2 END LIMIT 1;"
    ```
 
 2. **If cache miss, check budget:**

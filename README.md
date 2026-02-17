@@ -27,7 +27,7 @@ All subsystems import core as a shared library via `sys.path` injection. Sentime
 
 This project was built almost entirely through AI pair-programming with Claude Code. The integration goes beyond simple code generation:
 
-### 19 Custom Slash Commands
+### 20 Custom Slash Commands
 
 Every daily workflow is a Claude Code slash command in [`.claude/commands/`](.claude/commands/):
 
@@ -36,6 +36,7 @@ Every daily workflow is a Claude Code slash command in [`.claude/commands/`](.cl
 | `/whisper` | Find most anticipated earnings with VRP analysis |
 | `/analyze TICKER` | Deep dive single ticker for trade decision |
 | `/scan DATE` | Scan all earnings on a specific date |
+| `/council TICKER` | 7-source AI sentiment consensus for earnings |
 | `/prime` | Pre-cache sentiment for upcoming earnings week |
 | `/alert` | Today's high-VRP trading alerts |
 | `/health` | System status (APIs, DB, budget) |
@@ -124,7 +125,7 @@ trading-desk/
 ├── agents/            Agent orchestration (parallel Claude Code)
 ├── mcp-servers/       Custom MCP server (Perplexity budget tracker)
 ├── docs/              Architecture documentation
-├── .claude/           Claude Code commands (19 slash commands)
+├── .claude/           Claude Code commands (20 slash commands)
 ├── CLAUDE.md          Domain knowledge base for Claude Code
 └── .github/           CI workflows and Dependabot config
 ```

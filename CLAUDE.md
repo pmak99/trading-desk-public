@@ -39,6 +39,7 @@ All subsystems import core via `sys.path` injection. Sentiment, cloud, and agent
 | `/calendar [DATE]` | Weekly earnings calendar with history and TRR flags |
 | `/pnl [PERIOD]` | P&L summary (week/month/ytd/year/quarter/N days) |
 | `/postmortem TICKER` | Post-earnings: predicted vs actual move analysis |
+| `/council TICKER` | 7-source AI sentiment consensus for earnings |
 | `/deploy [--quick\|--status\|--logs\|--rollback]` | Deploy cloud to Cloud Run |
 
 ## CLI Commands

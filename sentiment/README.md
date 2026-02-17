@@ -1,6 +1,6 @@
 # sentiment AI Sentiment Layer
 
-AI-enhanced layer on top of 2.0's VRP system. Adds Perplexity-powered sentiment analysis with intelligent caching and budget tracking.
+AI-enhanced layer on top of 2.0's VRP system. Adds multi-source sentiment analysis (council consensus, Perplexity, WebSearch) with intelligent caching and budget tracking.
 
 ## Design Principles
 
@@ -44,7 +44,7 @@ AI-enhanced layer on top of 2.0's VRP system. Adds Perplexity-powered sentiment 
 | Monthly budget | ~$5.00 |
 
 ```
-1. Check cache (3hr TTL)
+1. Check cache (3hr TTL, council > perplexity > websearch)
    HIT  -> Return cached (FREE)
    MISS -> Continue
 
@@ -59,6 +59,8 @@ AI-enhanced layer on top of 2.0's VRP system. Adds Perplexity-powered sentiment 
 4. WebSearch (free fallback)
    SUCCESS -> Cache + return
    FAIL    -> Graceful degradation (analysis continues without sentiment)
+
+Council mode (/council command) runs 7 sources in parallel for deeper consensus.
 ```
 
 ## Architecture
@@ -69,7 +71,7 @@ sentiment/
 │   ├── __init__.py               # Imports from 2.0
 │   ├── sentiment_direction.py    # 3-rule directional bias
 │   └── cache/
-│       ├── sentiment_cache.py    # 3-hour TTL cache
+│       ├── sentiment_cache.py    # 3-hour TTL cache (council/perplexity/websearch)
 │       ├── budget_tracker.py     # API budget (40/day)
 │       └── sentiment_history.py  # Permanent backtesting data
 ├── data/
