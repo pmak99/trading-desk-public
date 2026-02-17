@@ -342,12 +342,13 @@ async def run_council(
             analysis = analyze_skew(ticker, price, chain)
             if not analysis:
                 return CouncilMember(name="Options Skew", weight=WEIGHTS["options_skew"], failed=True, status="insufficient data")
-            score = calculate_skew_score(analysis.directional_bias.value)
+            bias_value = analysis.directional_bias.value.upper()
+            score = calculate_skew_score(bias_value)
             return CouncilMember(
                 name="Options Skew", weight=WEIGHTS["options_skew"],
                 score=score, direction=score_to_direction(score),
-                status=analysis.directional_bias.value,
-                details={"bias": analysis.directional_bias.value, "slope": round(analysis.slope, 2), "confidence": round(analysis.confidence, 3)},
+                status=bias_value,
+                details={"bias": bias_value, "slope": round(analysis.slope, 2), "confidence": round(analysis.confidence, 3)},
             )
         except Exception as e:
             return CouncilMember(name="Options Skew", weight=WEIGHTS["options_skew"], failed=True, status=str(e)[:50])
