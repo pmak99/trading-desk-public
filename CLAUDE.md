@@ -66,6 +66,7 @@ cd agents/ && ./agent.sh analyze TICKER # Deep dive
 | `/api/analyze?ticker=XXX` | Deep analysis |
 | `/api/whisper` | High-VRP opportunities |
 | `/api/scan?date=YYYY-MM-DD` | Scan date |
+| `/api/council?ticker=XXX` | 6-source AI sentiment council |
 | `/api/health` | System health |
 
 Rate limit: 60 req/min per IP.
@@ -77,12 +78,13 @@ TRADIER_API_KEY=xxx          # Options data (primary)
 ALPHA_VANTAGE_KEY=xxx        # Earnings calendar
 TWELVE_DATA_KEY=xxx          # Historical prices
 PERPLEXITY_API_KEY=xxx       # AI sentiment
+FINNHUB_API_KEY=xxx          # Analyst data + news (council)
 DB_PATH=data/ivcrush.db
 ```
 
 ## Testing
 
-> Tests have been removed from this public version. The full system has 1,300+ tests across all subsystems.
+> Tests have been removed from this public version. The full system has 1,576 tests across all subsystems.
 
 ## Working Style Preferences
 
