@@ -137,7 +137,7 @@ class SentimentHistory:
         print(f"Sentiment accuracy: {stats['accuracy']:.1%}")
     """
 
-    VALID_SOURCES = {"perplexity", "websearch", "finnhub", "manual"}
+    VALID_SOURCES = {"perplexity", "websearch", "finnhub", "manual", "council"}
     VALID_DIRECTIONS = {"UP", "DOWN"}  # Valid actual_direction values
     VALID_TRADE_OUTCOMES = {"WIN", "LOSS", "SKIP"}  # Valid trade_outcome values
 
@@ -214,7 +214,7 @@ class SentimentHistory:
         Args:
             ticker: Stock ticker (will be uppercased)
             earnings_date: Date string (YYYY-MM-DD format)
-            source: "perplexity", "websearch", "finnhub", or "manual"
+            source: "council", "perplexity", "websearch", "finnhub", or "manual"
             sentiment_text: The sentiment analysis text
             sentiment_score: Optional normalized score (-1 to +1)
             sentiment_direction: Optional direction classification

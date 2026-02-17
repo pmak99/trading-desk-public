@@ -131,11 +131,12 @@ class TestSentimentHistory:
 
     def test_valid_sources_constant(self, temp_history):
         """VALID_SOURCES should contain expected sources."""
+        assert "council" in temp_history.VALID_SOURCES
         assert "perplexity" in temp_history.VALID_SOURCES
         assert "websearch" in temp_history.VALID_SOURCES
         assert "finnhub" in temp_history.VALID_SOURCES
         assert "manual" in temp_history.VALID_SOURCES
-        assert len(temp_history.VALID_SOURCES) == 4
+        assert len(temp_history.VALID_SOURCES) == 5
 
 
 class TestRecordSentiment:

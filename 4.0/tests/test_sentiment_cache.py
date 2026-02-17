@@ -356,10 +356,11 @@ class TestSentimentCache:
         assert stats['valid'] == 1
 
     def test_valid_sources_constant(self, temp_cache):
-        """VALID_SOURCES should contain perplexity and websearch."""
+        """VALID_SOURCES should contain council, perplexity, and websearch."""
+        assert "council" in temp_cache.VALID_SOURCES
         assert "perplexity" in temp_cache.VALID_SOURCES
         assert "websearch" in temp_cache.VALID_SOURCES
-        assert len(temp_cache.VALID_SOURCES) == 2
+        assert len(temp_cache.VALID_SOURCES) == 3
 
 
 class TestConvenienceFunctions:

@@ -43,23 +43,30 @@ curl -H "X-API-Key: $KEY" https://trading-desk-vquzm76kja-ue.a.run.app/api/whisp
 
 ## Claude Code Commands
 
-All 13 slash commands for interactive analysis:
+20 slash commands for interactive analysis:
 
 | Command | Purpose |
 |---------|---------|
 | `/whisper` | Find most anticipated earnings with VRP analysis |
 | `/analyze TICKER` | Deep dive single ticker for trade decision |
 | `/scan DATE` | Scan all earnings on a specific date |
+| `/council TICKER` | 7-source AI sentiment consensus for earnings |
 | `/prime` | Pre-cache sentiment for the upcoming week |
 | `/alert` | Today's high-VRP trading alerts |
 | `/health` | System status (APIs, DB, budget) |
-| `/maintenance MODE` | System maintenance (sync, backup, backfill, cleanup) |
+| `/maintenance MODE` | System maintenance (sync, backup, backfill, cleanup, validate) |
 | `/journal FILE` | Parse Fidelity CSV/PDF trade statements |
 | `/backtest [TICKER]` | Performance analysis from strategies DB |
 | `/history TICKER` | Historical earnings moves with pattern analysis |
 | `/backfill ARGS` | Record post-earnings outcomes for sentiment accuracy |
 | `/collect TICKER` | Collect and store pre-earnings sentiment |
 | `/export-report [MODE]` | Export scan results, journal, or performance to CSV |
+| `/positions [TICKER]` | Open positions and 30-day exposure dashboard |
+| `/risk [DAYS]` | Portfolio risk assessment (TRR, concentration, drawdown) |
+| `/calendar [DATE]` | Weekly earnings calendar with history and TRR flags |
+| `/pnl [PERIOD]` | P&L summary (week/month/ytd/year/quarter/N days) |
+| `/postmortem TICKER` | Post-earnings: predicted vs actual move analysis |
+| `/deploy [--quick]` | Deploy 5.0 to Cloud Run |
 
 ## Directory Structure
 

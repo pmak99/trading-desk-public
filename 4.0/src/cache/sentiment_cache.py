@@ -25,7 +25,7 @@ class CachedSentiment:
     """Cached sentiment result."""
     ticker: str
     date: str
-    source: str  # "perplexity" or "websearch"
+    source: str  # "council", "perplexity", or "websearch"
     sentiment: str  # The actual sentiment text/analysis
     cached_at: datetime
 
@@ -80,7 +80,7 @@ class SentimentCache:
     """
 
     DEFAULT_TTL_HOURS = 3
-    VALID_SOURCES = {"perplexity", "websearch"}
+    VALID_SOURCES = {"perplexity", "websearch", "council"}
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize cache with optional custom database path.
@@ -126,7 +126,7 @@ class SentimentCache:
         """
         Get cached sentiment for ticker on date.
 
-        Returns the newest non-expired entry, preferring perplexity over websearch.
+        Returns the newest non-expired entry, preferring council > perplexity > websearch.
         Returns None if no valid cache entry exists or if earnings have already passed.
 
         Args:
@@ -159,7 +159,7 @@ class SentimentCache:
                     FROM sentiment_cache
                     WHERE ticker = ? AND date = ?
                     ORDER BY
-                        CASE source WHEN 'perplexity' THEN 0 ELSE 1 END,
+                        CASE source WHEN 'council' THEN 0 WHEN 'perplexity' THEN 1 ELSE 2 END,
                         cached_at DESC
                 """, (ticker, date))
 
@@ -185,11 +185,11 @@ class SentimentCache:
         Args:
             ticker: Stock ticker (will be uppercased)
             date: Date string (YYYY-MM-DD format)
-            source: "perplexity" or "websearch"
+            source: "council", "perplexity", or "websearch"
             sentiment: The sentiment analysis text
 
         Raises:
-            ValueError: If source is not "perplexity" or "websearch"
+            ValueError: If source is not in VALID_SOURCES
         """
         if source not in self.VALID_SOURCES:
             raise ValueError(f"Invalid source '{source}'. Must be one of: {self.VALID_SOURCES}")
@@ -292,11 +292,11 @@ def cache_sentiment(ticker: str, sentiment: str, source: str = "perplexity", dat
     Args:
         ticker: Stock ticker
         sentiment: Sentiment analysis text
-        source: "perplexity" or "websearch"
+        source: "council", "perplexity", or "websearch"
         date: Optional date (defaults to today)
 
     Raises:
-        ValueError: If source is not "perplexity" or "websearch"
+        ValueError: If source is not in VALID_SOURCES
     """
     if date is None:
         date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
