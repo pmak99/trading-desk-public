@@ -1,18 +1,19 @@
 import pytest
-from src.formatters.telegram import format_ticker_line, format_digest
-from src.formatters.cli import format_ticker_line_cli, format_digest_cli
+from src.formatters.telegram import format_ticker_line, format_digest, format_council
+from src.formatters.cli import format_ticker_line_cli, format_digest_cli, format_council_cli
+from src.domain.council import CouncilMember, CouncilResult
+
 
 def test_format_ticker_line():
-    """Format single ticker for digest."""
+    """Format single ticker for digest — compact one-line format."""
     ticker_data = {
         "ticker": "AVGO",
         "vrp_ratio": 7.2,
         "score": 82,
         "direction": "BULLISH",
-        "tailwinds": "AI demand",
-        "headwinds": "China risk",
-        "strategy": "Bull Put 165/160",
+        "strategy_type": "Put",
         "credit": 2.10,
+        "timing": "AMC",
     }
 
     line = format_ticker_line(ticker_data, rank=1)
@@ -20,21 +21,93 @@ def test_format_ticker_line():
     assert "AVGO" in line
     assert "7.2x" in line
     assert "82" in line
-    assert "BULLISH" in line
-    assert "AI demand" in line or "✅" in line
+    assert "BULL" in line
+    assert "Put $2.10" in line
+    assert "AMC" in line
+    # Should be a single line
+    assert "\n" not in line
+
+
+def test_format_ticker_line_with_timing():
+    """BMO/AMC timing shows in output."""
+    ticker_data = {
+        "ticker": "MCO",
+        "vrp_ratio": 1.8,
+        "score": 47,
+        "direction": "NEUTRAL",
+        "strategy_type": "IC",
+        "credit": 7.88,
+        "timing": "BMO",
+    }
+    line = format_ticker_line(ticker_data, rank=5)
+    assert "BMO" in line
+    assert "5." in line
+
+
+def test_format_ticker_line_trr_warning():
+    """TRR HIGH flag shows warning emoji."""
+    ticker_data = {
+        "ticker": "TSLA",
+        "vrp_ratio": 3.5,
+        "score": 62,
+        "direction": "NEUTRAL",
+        "strategy_type": "IC",
+        "credit": 5.00,
+        "trr_high": True,
+    }
+    line = format_ticker_line(ticker_data, rank=1)
+    assert "\u26a0\ufe0f" in line  # Warning emoji
+
+
+def test_format_ticker_line_tradeable_marker():
+    """Score >= 55 shows tradeable checkmark."""
+    # Above threshold
+    high = format_ticker_line({"ticker": "X", "vrp_ratio": 2, "score": 56, "direction": "NEUTRAL"}, 1)
+    assert "\u2705" in high
+
+    # Below threshold
+    low = format_ticker_line({"ticker": "X", "vrp_ratio": 2, "score": 54, "direction": "NEUTRAL"}, 1)
+    assert "\u2705" not in low
+
+
+def test_format_ticker_line_no_tailwinds_headwinds():
+    """New format has no tailwinds/headwinds lines."""
+    ticker_data = {
+        "ticker": "AVGO",
+        "vrp_ratio": 7.2,
+        "score": 82,
+        "direction": "BULLISH",
+        "strategy_type": "Put",
+        "credit": 2.10,
+    }
+    line = format_ticker_line(ticker_data, rank=1)
+    # Should NOT have old format artifacts
+    assert "tailwinds" not in line.lower()
+    assert "headwinds" not in line.lower()
+
+
+def test_format_ticker_line_abbreviated_direction():
+    """Direction is abbreviated to save space."""
+    for direction, expected in [
+        ("BULLISH", "BULL"),
+        ("BEARISH", "BEAR"),
+        ("NEUTRAL", "NEUT"),
+        ("STRONG_BULLISH", "STR BULL"),
+    ]:
+        line = format_ticker_line({"ticker": "X", "vrp_ratio": 2, "score": 50, "direction": direction}, 1)
+        assert expected in line
+
 
 def test_format_digest():
-    """Format full morning digest."""
+    """Format full morning digest with new compact format."""
     tickers = [
         {
             "ticker": "AVGO", "vrp_ratio": 7.2, "score": 82,
-            "direction": "BULLISH", "tailwinds": "AI demand", "headwinds": "China risk",
-            "strategy": "Bull Put 165/160", "credit": 2.10
+            "direction": "BULLISH", "strategy_type": "Put", "credit": 2.10
         },
         {
             "ticker": "LULU", "vrp_ratio": 4.8, "score": 71,
-            "direction": "NEUTRAL", "tailwinds": "Holiday", "headwinds": "Inventory",
-            "strategy": "IC 380/420", "credit": 3.50
+            "direction": "NEUTRAL", "strategy_type": "IC", "credit": 3.50
         },
     ]
 
@@ -43,7 +116,8 @@ def test_format_digest():
     assert "Dec 12" in digest or "2025-12-12" in digest
     assert "AVGO" in digest
     assert "LULU" in digest
-    assert "12/40" in digest or "12" in digest
+    assert "12/40" in digest
+
 
 def test_format_ticker_line_cli():
     """Format single ticker for CLI."""
@@ -77,7 +151,7 @@ def test_format_digest_cli():
     digest = format_digest_cli("2025-12-12", tickers, 12, 4.85)
 
     # Should have ASCII borders
-    assert "═" in digest or "─" in digest
+    assert "=" in digest or "-" in digest
     assert "AVGO" in digest
 
 
@@ -86,23 +160,19 @@ def test_format_digest_grouped_by_date():
     tickers = [
         {
             "ticker": "SBUX", "earnings_date": "2026-01-27", "vrp_ratio": 3.73, "score": 62.1,
-            "direction": "NEUTRAL", "tailwinds": "Revenue growth", "headwinds": "EPS decline",
-            "strategy": "80.0P/85.0P - 105.0C/110.0C", "credit": 1.79
+            "direction": "NEUTRAL", "strategy_type": "IC", "credit": 1.79
         },
         {
             "ticker": "MSFT", "earnings_date": "2026-01-28", "vrp_ratio": 2.63, "score": 68.5,
-            "direction": "BULLISH", "tailwinds": "Cloud growth", "headwinds": "Valuation",
-            "strategy": "Bull Put 400/395", "credit": 2.10
+            "direction": "BULLISH", "strategy_type": "Put", "credit": 2.10
         },
         {
             "ticker": "TXN", "earnings_date": "2026-01-27", "vrp_ratio": 3.0, "score": 58.7,
-            "direction": "NEUTRAL", "tailwinds": "Auto demand", "headwinds": "Inventory",
-            "strategy": "IC 180/200", "credit": 1.50
+            "direction": "NEUTRAL", "strategy_type": "IC", "credit": 1.50
         },
         {
             "ticker": "IBM", "earnings_date": "2026-01-28", "vrp_ratio": 3.81, "score": 65.5,
-            "direction": "NEUTRAL", "tailwinds": "AI consulting", "headwinds": "Legacy drag",
-            "strategy": "IC 220/240", "credit": 1.80
+            "direction": "NEUTRAL", "strategy_type": "IC", "credit": 1.80
         },
     ]
 
@@ -133,7 +203,7 @@ def test_format_digest_grouped_by_date():
 
     # Global sequential numbering: SBUX=1, TXN=2, MSFT=3, IBM=4
     lines = digest.split("\n")
-    ticker_lines = [l for l in lines if "<b>" in l and "|" in l]
+    ticker_lines = [l for l in lines if "<b>" in l and "x |" in l]
     assert ticker_lines[0].startswith("1.")
     assert ticker_lines[1].startswith("2.")
     assert ticker_lines[2].startswith("3.")
@@ -188,7 +258,7 @@ def test_format_digest_cli_grouped_by_date():
     assert "<b>" not in digest
 
     # ASCII borders
-    assert "═" in digest
+    assert "\u2550" in digest
 
 
 def test_format_digest_fallback_without_earnings_date():
@@ -196,13 +266,11 @@ def test_format_digest_fallback_without_earnings_date():
     tickers = [
         {
             "ticker": "AVGO", "vrp_ratio": 7.2, "score": 82,
-            "direction": "BULLISH", "tailwinds": "AI demand", "headwinds": "China risk",
-            "strategy": "Bull Put 165/160", "credit": 2.10
+            "direction": "BULLISH", "strategy_type": "Put", "credit": 2.10
         },
         {
             "ticker": "LULU", "vrp_ratio": 4.8, "score": 71,
-            "direction": "NEUTRAL", "tailwinds": "Holiday", "headwinds": "Inventory",
-            "strategy": "IC 380/420", "credit": 3.50
+            "direction": "NEUTRAL", "strategy_type": "IC", "credit": 3.50
         },
     ]
 
@@ -212,6 +280,159 @@ def test_format_digest_fallback_without_earnings_date():
     assert "Earnings Digest" not in digest_tg
 
     # CLI fallback
-    digest_cli = format_digest_cli("2025-12-12", tickers, 12, 4.85)
+    cli_tickers = [
+        {
+            "ticker": "AVGO", "vrp_ratio": 7.2, "score": 82,
+            "direction": "BULLISH", "tailwinds": "AI demand", "headwinds": "China risk",
+            "strategy": "Bull Put 165/160"
+        },
+        {
+            "ticker": "LULU", "vrp_ratio": 4.8, "score": 71,
+            "direction": "NEUTRAL", "tailwinds": "Holiday", "headwinds": "Inventory",
+            "strategy": "IC 380/420"
+        },
+    ]
+    digest_cli = format_digest_cli("2025-12-12", cli_tickers, 12, 4.85)
     assert "Dec 12 EARNINGS" in digest_cli
     assert "EARNINGS DIGEST" not in digest_cli
+
+
+def test_format_council():
+    """Format council result for Telegram."""
+    result = CouncilResult(
+        ticker="NVDA",
+        earnings_date="2026-02-26",
+        timing="AMC",
+        price=131.28,
+        members=[
+            CouncilMember(name="Perplexity Research", weight=0.294, score=0.60, direction="bullish", status="fresh"),
+            CouncilMember(name="Finnhub Analysts", weight=0.235, score=0.55, direction="bullish", status="33 analysts"),
+            CouncilMember(name="Perplexity Quick", weight=0.118, score=0.15, direction="neutral", status="cached"),
+            CouncilMember(name="Finnhub News", weight=0.118, score=0.30, direction="bullish", status="10 articles"),
+            CouncilMember(name="Options Skew", weight=0.118, score=0.70, direction="bullish", status="STRONG_BULLISH"),
+            CouncilMember(name="Historical Pattern", weight=0.118, score=0.34, direction="bullish", status="12Q"),
+        ],
+        consensus_score=0.42,
+        consensus_direction="bullish",
+        agreement="HIGH",
+        agreement_count=5,
+        active_count=6,
+        modifier=0.05,
+        base_score=62,
+        final_score=67,
+        direction="STRONG_BULLISH",
+        skew_bias="STRONG_BULLISH",
+        rule_applied="Rule 3: Skew confirms sentiment",
+        tail_risk={"ratio": 3.78, "level": "HIGH", "max_move": 15.2},
+        risk_flags=["TRR 3.78x HIGH \u2014 max 50 contracts"],
+        status="success",
+    )
+
+    output = format_council(result)
+
+    assert "COUNCIL: NVDA" in output
+    assert "Feb 26" in output or "2026-02-26" in output
+    assert "AMC" in output
+    assert "$131.28" in output
+    assert "Perplexity Research" in output
+    assert "Finnhub Analysts" in output
+    assert "HIGH" in output
+    assert "5/6" in output
+    assert len(output) <= 4096  # Telegram limit
+
+
+def test_format_council_minimal():
+    """Council with only 3 members still formats."""
+    result = CouncilResult(
+        ticker="AAPL",
+        earnings_date="2026-03-01",
+        timing="BMO",
+        price=200.0,
+        members=[
+            CouncilMember(name="Perplexity Quick", weight=0.3, score=0.2, direction="neutral", status="cached"),
+            CouncilMember(name="Historical Pattern", weight=0.3, score=0.1, direction="neutral", status="8Q"),
+            CouncilMember(name="Options Skew", weight=0.3, score=-0.1, direction="neutral", status="NEUTRAL"),
+        ],
+        consensus_score=0.07,
+        consensus_direction="neutral",
+        agreement="HIGH",
+        agreement_count=3,
+        active_count=3,
+        modifier=0,
+        base_score=50,
+        final_score=50,
+        direction="NEUTRAL",
+        skew_bias="NEUTRAL",
+        rule_applied="Rule 3: Default",
+        tail_risk={},
+        risk_flags=[],
+        status="success",
+    )
+
+    output = format_council(result)
+    assert "AAPL" in output
+    assert "3/3" in output
+
+
+def test_format_council_error():
+    """Council error status formats gracefully."""
+    result = CouncilResult(
+        ticker="ZZZZZ",
+        earnings_date="",
+        timing="",
+        price=0,
+        members=[],
+        consensus_score=0,
+        consensus_direction="neutral",
+        agreement="LOW",
+        agreement_count=0,
+        active_count=0,
+        modifier=0,
+        base_score=0,
+        final_score=0,
+        direction="NEUTRAL",
+        skew_bias="",
+        rule_applied="",
+        tail_risk={},
+        risk_flags=[],
+        status="no_earnings",
+    )
+
+    output = format_council(result)
+    assert "ZZZZZ" in output
+    assert "no_earnings" in output
+
+
+def test_format_council_cli():
+    """Format council result for CLI."""
+    result = CouncilResult(
+        ticker="NVDA",
+        earnings_date="2026-02-26",
+        timing="AMC",
+        price=131.28,
+        members=[
+            CouncilMember(name="Perplexity Research", weight=0.294, score=0.60, direction="bullish", status="fresh"),
+            CouncilMember(name="Finnhub Analysts", weight=0.235, score=0.55, direction="bullish", status="33 analysts"),
+        ],
+        consensus_score=0.42,
+        consensus_direction="bullish",
+        agreement="HIGH",
+        agreement_count=2,
+        active_count=2,
+        modifier=0.05,
+        base_score=62,
+        final_score=67,
+        direction="BULLISH",
+        skew_bias="",
+        rule_applied="Rule 1: Sentiment breaks tie",
+        tail_risk={},
+        risk_flags=[],
+        status="success",
+    )
+
+    output = format_council_cli(result)
+
+    assert "COUNCIL: NVDA" in output
+    assert "BULL" in output
+    assert "<b>" not in output  # No HTML
+    assert "=" in output  # ASCII borders

@@ -10,17 +10,17 @@ Production options trading system for **IV Crush** strategies - selling options 
 4.0 AI Sentiment        ──→ Perplexity-powered sentiment layer
 2.0 Core Math Engine    ──→ VRP/strategy calculations (shared library)
 ────────────────────────────────────────────────────────────────────
-SQLite (ivcrush.db)     ──→ 15 tables, 6,861 historical moves
+SQLite (ivcrush.db)     ──→ 15 tables, 7,074 historical moves
 ```
 
 All subsystems import 2.0 as a shared library via `sys.path` injection. 4.0, 5.0, and 6.0 never duplicate 2.0's math.
 
 | Subsystem | Purpose | Tests | Status |
 |-----------|---------|------:|--------|
-| [2.0](2.0/) | Core VRP math and strategy generation | 690 | Production |
+| [2.0](2.0/) | Core VRP math and strategy generation | 766 | Production |
 | [4.0](4.0/) | AI sentiment layer (Perplexity) | 221 | Production |
-| [5.0](5.0/) | Cloud autopilot (Cloud Run + Telegram) | 311 | Production |
-| [6.0](6.0/) | Agent orchestration (parallel processing) | 48 | Production |
+| [5.0](5.0/) | Cloud autopilot (Cloud Run + Telegram) | 502 | Production |
+| [6.0](6.0/) | Agent orchestration (parallel processing) | 82 | Production |
 
 ## Quick Start
 
@@ -50,7 +50,7 @@ curl -H "X-API-Key: $KEY" https://trading-desk-vquzm76kja-ue.a.run.app/api/whisp
 | `/whisper` | Find most anticipated earnings with VRP analysis |
 | `/analyze TICKER` | Deep dive single ticker for trade decision |
 | `/scan DATE` | Scan all earnings on a specific date |
-| `/council TICKER` | 7-source AI sentiment consensus for earnings |
+| `/council TICKER` | AI sentiment consensus (7-source local, 6-source cloud) |
 | `/prime` | Pre-cache sentiment for the upcoming week |
 | `/alert` | Today's high-VRP trading alerts |
 | `/health` | System status (APIs, DB, budget) |
@@ -90,10 +90,10 @@ Primary database shared by all subsystems.
 
 | Table | Records | Purpose |
 |-------|--------:|---------|
-| `historical_moves` | 6,861 | Post-earnings price movements for VRP |
+| `historical_moves` | 7,074 | Post-earnings price movements for VRP |
 | `earnings_calendar` | 6,762 | Upcoming and past earnings dates |
-| `strategies` | 203 | Grouped trades with P&L tracking |
-| `trade_journal` | 556 | Individual option legs |
+| `strategies` | 238 | Grouped trades with P&L tracking |
+| `trade_journal` | 645 | Individual option legs |
 | `position_limits` | 428 | TRR-based position sizing |
 | `bias_predictions` | 28 | Directional bias predictions |
 
@@ -118,6 +118,7 @@ TRADIER_API_KEY=xxx           # Options chains, Greeks, IV
 ALPHA_VANTAGE_KEY=xxx         # Earnings calendar
 TWELVE_DATA_KEY=xxx           # Historical prices
 PERPLEXITY_API_KEY=xxx        # AI sentiment (4.0/5.0)
+FINNHUB_API_KEY=xxx           # Analyst data + news (5.0 council)
 TELEGRAM_BOT_TOKEN=xxx        # Telegram notifications (5.0)
 TELEGRAM_CHAT_ID=xxx          # Telegram chat (5.0)
 ```
@@ -125,13 +126,13 @@ TELEGRAM_CHAT_ID=xxx          # Telegram chat (5.0)
 ## Testing
 
 ```bash
-cd 2.0 && ./venv/bin/python -m pytest tests/ -v    # 690 tests
+cd 2.0 && ./venv/bin/python -m pytest tests/ -v    # 766 tests
 cd 4.0 && ../2.0/venv/bin/python -m pytest tests/  # 221 tests
-cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 311 tests
-cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 48 tests
+cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 502 tests
+cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 82 tests
 ```
 
-Total: 1,270 tests across all subsystems.
+Total: 1,571 tests across all subsystems.
 
 ## Scripts
 

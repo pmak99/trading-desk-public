@@ -85,7 +85,7 @@ def generate_strategies(
 
         strategies.append(Strategy(
             name="Bull Put Spread",
-            description=f"Sell {short_strike}P / Buy {long_strike}P",
+            description=f"Sell {short_strike:g}P / Buy {long_strike:g}P",
             short_strike=short_strike,
             long_strike=long_strike,
             expiration=expiration,
@@ -105,7 +105,7 @@ def generate_strategies(
 
         strategies.append(Strategy(
             name="Bear Call Spread",
-            description=f"Sell {short_strike}C / Buy {long_strike}C",
+            description=f"Sell {short_strike:g}C / Buy {long_strike:g}C",
             short_strike=short_strike,
             long_strike=long_strike,
             expiration=expiration,
@@ -127,7 +127,7 @@ def generate_strategies(
 
         strategies.append(Strategy(
             name="Iron Condor",
-            description=f"{put_long}P/{put_short}P - {call_short}C/{call_long}C",
+            description=f"{put_long:g}P/{put_short:g}P - {call_short:g}C/{call_long:g}C",
             short_strike=put_short,  # Lower short strike for reference
             long_strike=call_short,  # Upper short strike
             expiration=expiration,

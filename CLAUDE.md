@@ -142,6 +142,7 @@ cd 6.0/ && ./agent.sh analyze TICKER # Deep dive
 | `/api/analyze?ticker=XXX` | Deep analysis |
 | `/api/whisper` | High-VRP opportunities |
 | `/api/scan?date=YYYY-MM-DD` | Scan date |
+| `/api/council?ticker=XXX` | 6-source AI sentiment council |
 | `/api/health` | System health |
 
 Rate limit: 60 req/min per IP.
@@ -202,7 +203,7 @@ GROUP BY campaign_id ORDER BY total;
 | `/calendar [DATE]` | Weekly earnings calendar with history and TRR flags |
 | `/pnl [PERIOD]` | P&L summary (week/month/ytd/year/quarter/N days) |
 | `/postmortem TICKER` | Post-earnings: predicted vs actual move analysis |
-| `/council TICKER` | 7-source AI sentiment consensus for earnings |
+| `/council TICKER` | AI sentiment consensus (7-source local, 6-source cloud) |
 | `/deploy [--quick\|--status\|--logs\|--rollback]` | Deploy 5.0 to Cloud Run |
 
 ## Environment Variables
@@ -212,6 +213,7 @@ TRADIER_API_KEY=xxx          # Options data (primary)
 ALPHA_VANTAGE_KEY=xxx        # Earnings calendar
 TWELVE_DATA_KEY=xxx          # Historical prices
 PERPLEXITY_API_KEY=xxx       # AI sentiment
+FINNHUB_API_KEY=xxx          # Analyst data + news (5.0 council)
 DB_PATH=data/ivcrush.db
 ```
 
@@ -220,7 +222,7 @@ DB_PATH=data/ivcrush.db
 ```bash
 cd 2.0 && ./venv/bin/python -m pytest tests/ -v    # 766 tests
 cd 4.0 && ../2.0/venv/bin/python -m pytest tests/  # 221 tests
-cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 449 tests
+cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 502 tests
 cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 82 tests
 ```
 
