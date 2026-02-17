@@ -624,10 +624,12 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
 
         # Determine earnings date - use provided date or look up from calendar
         target_date = date
+        earnings_timing = ""
         if not target_date:
             earnings_info = repo.get_next_earnings(ticker)
             if earnings_info:
                 target_date = earnings_info["earnings_date"]
+                earnings_timing = earnings_info.get("timing", "")
                 log("info", "Found earnings date from calendar", ticker=ticker, date=target_date)
 
                 # Freshness validation: if earnings within 7 days, validate against Alpha Vantage
@@ -871,6 +873,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
             "status": "success",
             "price": price,
             "earnings_date": target_date,
+            "timing": earnings_timing,
             "expiration": nearest_exp,
             "vrp": {
                 "ratio": vrp_data["vrp_ratio"],
