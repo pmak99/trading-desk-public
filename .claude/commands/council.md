@@ -181,15 +181,15 @@ From news articles, determine:
 **2e. Options Skew (10% weight):**
 ```bash
 sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
-  "SELECT bias, confidence FROM bias_predictions
+  "SELECT directional_bias, bias_confidence FROM bias_predictions
    WHERE ticker='$TICKER' AND earnings_date='$EARNINGS_DATE'
-   ORDER BY created_at DESC LIMIT 1;"
+   ORDER BY predicted_at DESC LIMIT 1;"
 ```
 
 If no match for exact date, try most recent entry:
 ```bash
 sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
-  "SELECT bias, confidence, earnings_date FROM bias_predictions
+  "SELECT directional_bias, bias_confidence, earnings_date FROM bias_predictions
    WHERE ticker='$TICKER'
    ORDER BY earnings_date DESC LIMIT 1;"
 ```
@@ -322,10 +322,10 @@ sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.d
 **Save to sentiment_history (permanent):**
 ```bash
 sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-  "INSERT INTO sentiment_history (ticker, date, sentiment, source, created_at)
-   VALUES ('$TICKER', '$EARNINGS_DATE',
-           '{\"direction\": \"$DIRECTION\", \"score\": $SCORE, \"source\": \"council\", \"members_active\": $ACTIVE_COUNT}',
-           'council', datetime('now'));"
+  "INSERT OR REPLACE INTO sentiment_history (ticker, earnings_date, collected_at, source, sentiment_text, sentiment_score, sentiment_direction)
+   VALUES ('$TICKER', '$EARNINGS_DATE', datetime('now'), 'council',
+           '{\"members_active\": $ACTIVE_COUNT, \"agreement\": \"$AGREEMENT\", \"modifier\": $MODIFIER}',
+           $SCORE, '$DIRECTION');"
 ```
 
 **Update api_budget if Perplexity was called:**
