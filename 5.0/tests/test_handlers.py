@@ -48,7 +48,7 @@ def mock_settings():
         s.VRP_DISCOVERY = 1.8
         s.require_weekly_options = False
         s.gcs_bucket = "test-bucket"
-        s.PERPLEXITY_DAILY_LIMIT = 40
+        s.PERPLEXITY_DAILY_LIMIT = 60
         s.PERPLEXITY_MONTHLY_BUDGET = 5.0
         yield s
 

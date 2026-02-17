@@ -118,9 +118,9 @@ MCP Servers:
   [check/x] Alpha Vantage  [Healthy/Error]
 
 Budget (Perplexity):
-  Today: X/40 calls ($X.XX spent)
+  Today: X/60 calls ($X.XX spent)
   Month: X calls ($X.XX of $5.00)
-  [WARNING if > 80% daily usage (32+ calls)]
+  [WARNING if > 80% daily usage (48+ calls)]
 
 Database:
   2.0 ivcrush.db:          X.X MB (X,XXX historical moves)

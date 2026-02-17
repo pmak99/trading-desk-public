@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 
 from src.core.logging import log
 from src.core import metrics
+from src.core.budget import DEFAULT_COST_ESTIMATE
 
 
 # Council member weights (renormalized from 85% to 100% — WebSearch dropped)
@@ -417,7 +418,7 @@ async def run_council(
 
     if budget.can_call("perplexity"):
         try:
-            acquired = await budget.try_acquire_call_async("perplexity", cost=0.006)
+            acquired = await budget.try_acquire_call_async("perplexity", cost=DEFAULT_COST_ESTIMATE)
             if acquired:
                 prompt = (
                     f"For {ticker} earnings on {earnings_date}, analyze:\n"

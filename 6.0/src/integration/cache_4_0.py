@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 CACHE_AGE_UNKNOWN = float('inf')
 
 from ..utils.paths import MAIN_REPO, REPO_4_0
+from common.constants import PERPLEXITY_DAILY_LIMIT, PERPLEXITY_MONTHLY_BUDGET, PERPLEXITY_COST_PER_CALL_ESTIMATE
 
 # Add 4.0/src to Python path
 _main_repo = MAIN_REPO
@@ -48,7 +49,7 @@ class Cache4_0:
         sentiment = cache.get_cached_sentiment("NVDA", "2026-02-05")
         if cache.can_call_perplexity():
             # Make Perplexity API call
-            cache.record_call("perplexity", cost=0.006)
+            cache.record_call("perplexity", cost=PERPLEXITY_COST_PER_CALL_ESTIMATE)
     """
 
     def __init__(self):
@@ -116,7 +117,7 @@ class Cache4_0:
 
     def record_call(
         self,
-        cost: float = 0.006
+        cost: float = PERPLEXITY_COST_PER_CALL_ESTIMATE
     ):
         """
         Record an API call for budget tracking.
@@ -138,13 +139,13 @@ class Cache4_0:
 
         return {
             'daily_calls': info.calls_today,
-            'daily_limit': 40,
+            'daily_limit': PERPLEXITY_DAILY_LIMIT,
             'monthly_cost': monthly_summary.get('month_cost', 0.0),
-            'monthly_budget': 5.00,
+            'monthly_budget': PERPLEXITY_MONTHLY_BUDGET,
             'daily_remaining': info.calls_remaining,
             'monthly_remaining': max(
                 0.0,
-                5.00 - monthly_summary.get('month_cost', 0.0)
+                PERPLEXITY_MONTHLY_BUDGET - monthly_summary.get('month_cost', 0.0)
             )
         }
 

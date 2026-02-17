@@ -8,6 +8,10 @@ import html
 from typing import List, Dict, Any
 from datetime import datetime
 
+from src.core.config import Settings
+
+settings = Settings()
+
 
 def format_ticker_line(ticker_data: Dict[str, Any], rank: int) -> str:
     """
@@ -58,7 +62,7 @@ def format_digest(
     date: str,
     tickers: List[Dict[str, Any]],
     budget_calls: int = 0,
-    budget_remaining: float = 5.00,
+    budget_remaining: float = settings.PERPLEXITY_MONTHLY_BUDGET,
 ) -> str:
     """
     Format morning digest message.
@@ -94,7 +98,7 @@ def format_digest(
         lines.append(format_ticker_line(ticker_data, i))
 
     lines.append("")
-    lines.append(f"Budget: {budget_calls}/40 | ${budget_remaining:.2f}")
+    lines.append(f"Budget: {budget_calls}/{settings.PERPLEXITY_DAILY_LIMIT} | ${budget_remaining:.2f}")
 
     return "\n".join(lines)
 
@@ -138,7 +142,7 @@ def _format_digest_grouped(
             rank += 1
 
     lines.append("")
-    lines.append(f"Budget: {budget_calls}/40 | ${budget_remaining:.2f}")
+    lines.append(f"Budget: {budget_calls}/{settings.PERPLEXITY_DAILY_LIMIT} | ${budget_remaining:.2f}")
 
     return "\n".join(lines)
 

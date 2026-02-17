@@ -30,11 +30,11 @@ ERROR - TRADIER_ACCESS_TOKEN not set - required for real IV data
 
 ---
 
-### ❌ "Daily limit reached (40/40 calls)"
+### ❌ "Daily limit reached (60/60 calls)"
 
 **Error Message**:
 ```
-ERROR - Daily API limit reached (40/40 calls used today)
+ERROR - Daily API limit reached (60/60 calls used today)
 ```
 
 **Cause**: Hit the daily API call budget limit

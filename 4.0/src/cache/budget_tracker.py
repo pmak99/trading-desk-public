@@ -2,7 +2,7 @@
 Budget Tracker for Perplexity API Usage
 
 Tracks daily API calls, tokens, and cost to stay within $5/month budget.
-Daily limits (40 calls) reset automatically at midnight based on date comparison.
+Daily limits reset automatically at midnight based on date comparison.
 Monthly cost tracking resets on the 1st of each month.
 
 Token-Based Pricing (from actual Perplexity invoice January 2025):
@@ -19,8 +19,8 @@ MCP Tool Estimates (since MCP doesn't return token counts):
 
 Limits:
 - Monthly budget: $5.00
-- Max: 40 calls/day
-- Warn: At 80% (32 calls)
+- Max: 60 calls/day (PERPLEXITY_DAILY_LIMIT in common/constants.py)
+- Warn: At 80% (48 calls)
 - Hard stop: At 100% (graceful degradation to WebSearch)
 """
 
@@ -407,7 +407,7 @@ class BudgetTracker:
                     "total_cost": row['total_cost'] or 0.0,
                     "avg_calls_per_day": row['avg_calls_per_day'] or 0.0,
                     "max_calls_day": row['max_calls_day'] or 0,
-                    "budget_remaining": 5.00 - (row['total_cost'] or 0.0),
+                    "budget_remaining": self.MONTHLY_BUDGET - (row['total_cost'] or 0.0),
                     # Token breakdown
                     "total_output_tokens": row['total_output_tokens'] or 0,
                     "total_reasoning_tokens": row['total_reasoning_tokens'] or 0,
@@ -479,7 +479,7 @@ def check_budget() -> Tuple[bool, str]:
     return True, f"Budget OK: {info.calls_remaining} calls remaining today."
 
 
-def record_perplexity_call(cost: float = 0.006) -> None:
+def record_perplexity_call(cost: float = PERPLEXITY_COST_PER_CALL_ESTIMATE) -> None:
     """Quick helper to record a Perplexity API call.
 
     Default cost matches COST_PER_CALL_ESTIMATE in BudgetTracker.
@@ -497,7 +497,7 @@ def get_budget_status() -> str:
     # Base status
     status = f"""Budget Status:
   Today: {info.calls_today}/{tracker.MAX_DAILY_CALLS} calls (${info.cost_today:.4f})
-  Month: {monthly['total_calls']} calls (${monthly['total_cost']:.4f} of $5.00)
+  Month: {monthly['total_calls']} calls (${monthly['total_cost']:.4f} of ${PERPLEXITY_MONTHLY_BUDGET:.2f})
   Status: {info.status.value.upper()}"""
 
     # Add token breakdown if any tokens tracked

@@ -49,27 +49,29 @@ class TestBudgetInfo:
             date="2025-12-09",
             calls_today=0,
             cost_today=0.0,
-            calls_remaining=40,
+            calls_remaining=BudgetTracker.MAX_DAILY_CALLS,
             status=BudgetStatus.OK
         )
         assert info.usage_percent == 0.0
 
     def test_usage_percent_half(self):
-        """usage_percent should be 50 when 20 of 40 calls made."""
+        """usage_percent should be 50 when half of daily limit calls made."""
+        half = BudgetTracker.MAX_DAILY_CALLS // 2
         info = BudgetInfo(
             date="2025-12-09",
-            calls_today=20,
+            calls_today=half,
             cost_today=0.12,
-            calls_remaining=20,
+            calls_remaining=half,
             status=BudgetStatus.OK
         )
-        assert info.usage_percent == 50.0
+        assert info.usage_percent == pytest.approx(50.0, abs=1.0)
 
     def test_usage_percent_full(self):
         """usage_percent should be 100 when all calls exhausted."""
+        limit = BudgetTracker.MAX_DAILY_CALLS
         info = BudgetInfo(
             date="2025-12-09",
-            calls_today=40,
+            calls_today=limit,
             cost_today=0.24,
             calls_remaining=0,
             status=BudgetStatus.EXHAUSTED
@@ -78,11 +80,13 @@ class TestBudgetInfo:
 
     def test_usage_percent_warning_threshold(self):
         """usage_percent should be 80 at warning threshold."""
+        warn_calls = int(BudgetTracker.MAX_DAILY_CALLS * BudgetTracker.WARN_THRESHOLD)
+        remaining = BudgetTracker.MAX_DAILY_CALLS - warn_calls
         info = BudgetInfo(
             date="2025-12-09",
-            calls_today=32,
+            calls_today=warn_calls,
             cost_today=0.192,
-            calls_remaining=8,
+            calls_remaining=remaining,
             status=BudgetStatus.WARNING
         )
         assert info.usage_percent == 80.0
@@ -100,7 +104,7 @@ class TestBudgetTracker:
     def test_constants(self):
         """Verify budget constants are set correctly."""
         assert BudgetTracker.MONTHLY_BUDGET == 5.00
-        assert BudgetTracker.MAX_DAILY_CALLS == 40
+        assert BudgetTracker.MAX_DAILY_CALLS == 60
         assert BudgetTracker.WARN_THRESHOLD == 0.80
         assert BudgetTracker.COST_PER_CALL_ESTIMATE == 0.006
 
@@ -124,7 +128,7 @@ class TestBudgetTracker:
         info = temp_tracker.get_info()
         assert info.calls_today == 0
         assert info.cost_today == 0.0
-        assert info.calls_remaining == 40
+        assert info.calls_remaining == BudgetTracker.MAX_DAILY_CALLS
         assert info.status == BudgetStatus.OK
 
     def test_can_call_when_ok(self, temp_tracker):
@@ -164,9 +168,9 @@ class TestBudgetTracker:
         assert info.cost_today == pytest.approx(0.04, rel=0.01)
 
     def test_warning_status_at_80_percent(self, temp_tracker):
-        """Should enter WARNING status at 80% usage (32 calls)."""
-        # Record 32 calls
-        for _ in range(32):
+        """Should enter WARNING status at 80% usage."""
+        warn_calls = int(BudgetTracker.MAX_DAILY_CALLS * BudgetTracker.WARN_THRESHOLD)
+        for _ in range(warn_calls):
             temp_tracker.record_call(cost=0.006)
 
         info = temp_tracker.get_info()
@@ -175,16 +179,18 @@ class TestBudgetTracker:
         assert temp_tracker.can_call() is True
 
     def test_warning_status_at_79_percent(self, temp_tracker):
-        """Should remain OK at 79% usage (31 calls)."""
-        for _ in range(31):
+        """Should remain OK just below warning threshold."""
+        warn_calls = int(BudgetTracker.MAX_DAILY_CALLS * BudgetTracker.WARN_THRESHOLD)
+        for _ in range(warn_calls - 1):
             temp_tracker.record_call(cost=0.006)
 
         info = temp_tracker.get_info()
         assert info.status == BudgetStatus.OK
 
     def test_exhausted_status_at_100_percent(self, temp_tracker):
-        """Should enter EXHAUSTED status at 100% usage (40 calls)."""
-        for _ in range(40):
+        """Should enter EXHAUSTED status at 100% usage."""
+        limit = BudgetTracker.MAX_DAILY_CALLS
+        for _ in range(limit):
             temp_tracker.record_call(cost=0.006)
 
         info = temp_tracker.get_info()
@@ -193,7 +199,7 @@ class TestBudgetTracker:
 
     def test_can_call_false_when_exhausted(self, temp_tracker):
         """can_call should return False when exhausted."""
-        for _ in range(40):
+        for _ in range(BudgetTracker.MAX_DAILY_CALLS):
             temp_tracker.record_call(cost=0.006)
 
         assert temp_tracker.can_call() is False
@@ -204,11 +210,11 @@ class TestBudgetTracker:
             temp_tracker.record_call(cost=0.006)
 
         info = temp_tracker.get_info()
-        assert info.calls_remaining == 25
+        assert info.calls_remaining == BudgetTracker.MAX_DAILY_CALLS - 15
 
     def test_calls_remaining_zero_when_exhausted(self, temp_tracker):
         """calls_remaining should be 0 when exhausted."""
-        for _ in range(45):  # Over limit
+        for _ in range(BudgetTracker.MAX_DAILY_CALLS + 5):  # Over limit
             temp_tracker.record_call(cost=0.006)
 
         info = temp_tracker.get_info()
@@ -297,7 +303,7 @@ class TestConvenienceFunctions:
             mock_info.usage_percent = 87.5
             mock_info.status = BudgetStatus.WARNING
             mock_instance.get_info.return_value = mock_info
-            mock_instance.MAX_DAILY_CALLS = 40
+            mock_instance.MAX_DAILY_CALLS = BudgetTracker.MAX_DAILY_CALLS
 
             can_call, message = check_budget()
             assert can_call is True
@@ -309,12 +315,12 @@ class TestConvenienceFunctions:
             mock_instance = MockTracker.return_value
             mock_instance.get_info.return_value = BudgetInfo(
                 date="2025-12-09",
-                calls_today=40,
+                calls_today=BudgetTracker.MAX_DAILY_CALLS,
                 cost_today=0.24,
                 calls_remaining=0,
                 status=BudgetStatus.EXHAUSTED
             )
-            mock_instance.MAX_DAILY_CALLS = 40
+            mock_instance.MAX_DAILY_CALLS = BudgetTracker.MAX_DAILY_CALLS
 
             can_call, message = check_budget()
             assert can_call is False
@@ -482,32 +488,34 @@ class TestWarningThreshold:
         db_path = tmp_path / "test_budget.db"
         return BudgetTracker(db_path=db_path)
 
-    def test_exactly_32_calls_is_warning(self, temp_tracker):
-        """32 calls (80%) should trigger WARNING."""
-        for _ in range(32):
+    def test_exactly_at_warn_threshold(self, temp_tracker):
+        """Exactly at 80% should trigger WARNING."""
+        warn_calls = int(BudgetTracker.MAX_DAILY_CALLS * BudgetTracker.WARN_THRESHOLD)
+        for _ in range(warn_calls):
             temp_tracker.record_call(cost=0.006)
 
         assert temp_tracker.get_info().status == BudgetStatus.WARNING
 
-    def test_33_calls_still_warning(self, temp_tracker):
-        """33 calls should still be WARNING."""
-        for _ in range(33):
+    def test_one_above_warn_threshold(self, temp_tracker):
+        """One call above warn threshold should still be WARNING."""
+        warn_calls = int(BudgetTracker.MAX_DAILY_CALLS * BudgetTracker.WARN_THRESHOLD) + 1
+        for _ in range(warn_calls):
             temp_tracker.record_call(cost=0.006)
 
         assert temp_tracker.get_info().status == BudgetStatus.WARNING
 
-    def test_39_calls_still_warning(self, temp_tracker):
-        """39 calls should still be WARNING."""
-        for _ in range(39):
+    def test_one_below_limit_still_warning(self, temp_tracker):
+        """One below limit should still be WARNING."""
+        for _ in range(BudgetTracker.MAX_DAILY_CALLS - 1):
             temp_tracker.record_call(cost=0.006)
 
         info = temp_tracker.get_info()
         assert info.status == BudgetStatus.WARNING
         assert info.calls_remaining == 1
 
-    def test_40_calls_is_exhausted(self, temp_tracker):
-        """40 calls should be EXHAUSTED."""
-        for _ in range(40):
+    def test_at_limit_is_exhausted(self, temp_tracker):
+        """At daily limit should be EXHAUSTED."""
+        for _ in range(BudgetTracker.MAX_DAILY_CALLS):
             temp_tracker.record_call(cost=0.006)
 
         assert temp_tracker.get_info().status == BudgetStatus.EXHAUSTED
@@ -515,8 +523,8 @@ class TestWarningThreshold:
     def test_warning_threshold_constant(self):
         """WARN_THRESHOLD should be 0.80 (80%)."""
         assert BudgetTracker.WARN_THRESHOLD == 0.80
-        # 80% of 40 = 32
-        assert int(BudgetTracker.MAX_DAILY_CALLS * BudgetTracker.WARN_THRESHOLD) == 32
+        warn_calls = int(BudgetTracker.MAX_DAILY_CALLS * BudgetTracker.WARN_THRESHOLD)
+        assert warn_calls == 48  # 80% of 60
 
 
 class TestTokenTracking:

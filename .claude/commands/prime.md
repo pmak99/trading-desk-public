@@ -79,7 +79,7 @@ sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.d
 
 If near budget limit (>35 calls):
 ```
-Budget warning: {calls}/40 calls used today
+Budget warning: {calls}/60 calls used today
    Limiting priming to top {remaining} tickers
 ```
 
@@ -99,7 +99,7 @@ If exists: skip, mark as "already cached"
 
 **6b. If cache miss, fetch via fallback chain:**
 
-1. **Try Perplexity (if budget OK, < 40 calls):**
+1. **Try Perplexity (if budget OK, < 60 calls):**
    ```
    mcp__perplexity__perplexity_ask with query="For {TICKER} earnings on {DATE}, respond ONLY in this format:
    Direction: [bullish/bearish/neutral]
@@ -172,7 +172,7 @@ PRIMING COMPLETE
    New caches:     4
    Cache hits:     1 (skipped)
    Failures:       0
-   API calls today: 4/40
+   API calls today: 4/60
    Monthly budget: $4.95 left
 
 System primed! All commands will use cached sentiment.

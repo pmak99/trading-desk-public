@@ -235,7 +235,7 @@ iv/health?format=cli
  3  ORCL     3.9x   65     BEARISH  Bear Call 145/150
     + Cloud growth          - Competition
 ───────────────────────────────────────────────────────
- Budget: 12/40 calls | $4.85 remaining
+ Budget: 12/60 calls | $4.85 remaining
 ═══════════════════════════════════════════════════════
 ```
 
@@ -394,7 +394,7 @@ tradier_key = secrets["TRADIER_API_KEY"]
    ✅ Cloud growth  ⚠️ Competition
    → Bear Call 145/150 @ $1.85
 
-Budget: 12/40 calls | $4.85 left
+Budget: 12/60 calls | $4.85 left
 ```
 
 **Format Key:**
@@ -821,7 +821,7 @@ uvicorn main:app --reload --port 8080
 | Metric | Target |
 |--------|--------|
 | Morning digest delivery | Before 6:30 AM ET |
-| API call budget | <40 calls/day |
+| API call budget | <60 calls/day |
 | Job success rate | >99% |
 | On-demand response time | <5 seconds |
 | Monthly infrastructure cost | $0 |

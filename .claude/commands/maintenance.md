@@ -187,7 +187,7 @@ VALIDATION
    [check] Sentiment history: X records (Y with outcomes)
 
 BUDGET STATUS
-   Today:     X/40 calls ($X.XX)
+   Today:     X/60 calls ($X.XX)
    This month: X calls ($X.XX of $5.00)
 
 SYNC

@@ -15,7 +15,7 @@ logger.error(f"{ticker}: Failed to fetch data: {error}", exc_info=True)
 
 # For system-level operations
 logger.info("Initializing Earnings Analyzer...")
-logger.warning("Daily API limit approaching (35/40 calls)")
+logger.warning("Daily API limit approaching (47/60 calls)")
 logger.error("Failed to load config file", exc_info=True)
 ```
 

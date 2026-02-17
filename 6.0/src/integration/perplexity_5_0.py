@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 from typing import Dict, Any
 
+from common.constants import PERPLEXITY_COST_PER_CALL_ESTIMATE
 from ..utils.paths import MAIN_REPO, REPO_5_0
 
 # Thread lock for sys.path manipulation (not thread-safe by default)
@@ -165,6 +166,6 @@ class Perplexity5_0:
         """Check if budget allows Perplexity API call."""
         return self.client.budget.can_call()
 
-    def record_call(self, cost: float = 0.006):
+    def record_call(self, cost: float = PERPLEXITY_COST_PER_CALL_ESTIMATE):
         """Record an API call for budget tracking."""
         self.client.budget.record_call(cost)

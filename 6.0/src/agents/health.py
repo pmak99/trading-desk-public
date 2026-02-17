@@ -9,6 +9,7 @@ This agent verifies system health before batch operations:
 
 from typing import Dict, Any
 
+from common.constants import PERPLEXITY_DAILY_LIMIT, PERPLEXITY_MONTHLY_BUDGET
 from ..integration.container_2_0 import Container2_0
 from ..integration.cache_4_0 import Cache4_0
 from ..utils.schemas import HealthCheckResponse, APIHealthStatus, DatabaseHealthStatus, BudgetStatus
@@ -83,7 +84,7 @@ class HealthCheckAgent:
                 'status': 'unhealthy',
                 'apis': {},
                 'database': {'status': 'error', 'error': str(e)},
-                'budget': {'daily_calls': 0, 'daily_limit': 40, 'monthly_cost': 0.0, 'monthly_budget': 5.0}
+                'budget': {'daily_calls': 0, 'daily_limit': PERPLEXITY_DAILY_LIMIT, 'monthly_cost': 0.0, 'monthly_budget': PERPLEXITY_MONTHLY_BUDGET}
             }
 
     def _check_apis(self) -> Dict[str, Dict[str, Any]]:
@@ -176,9 +177,9 @@ class HealthCheckAgent:
         except Exception as e:
             return {
                 'daily_calls': 0,
-                'daily_limit': 40,
+                'daily_limit': PERPLEXITY_DAILY_LIMIT,
                 'monthly_cost': 0.0,
-                'monthly_budget': 5.0
+                'monthly_budget': PERPLEXITY_MONTHLY_BUDGET
             }
 
     def _determine_overall_status(

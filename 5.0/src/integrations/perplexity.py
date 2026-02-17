@@ -12,7 +12,7 @@ import httpx
 from typing import Dict, Any, Optional
 
 from src.core.logging import log, get_request_id
-from src.core.budget import BudgetTracker, BudgetExhausted
+from src.core.budget import BudgetTracker, BudgetExhausted, DEFAULT_COST_ESTIMATE
 from src.core import metrics
 
 BASE_URL = "https://api.perplexity.ai"
@@ -186,7 +186,7 @@ class PerplexityClient:
             Parsed sentiment with direction, score, tailwinds, headwinds
         """
         # Atomic check-and-acquire with estimated cost (~$0.006/call for sonar model)
-        if not await self.budget.try_acquire_call_async("perplexity", cost=0.006):
+        if not await self.budget.try_acquire_call_async("perplexity", cost=DEFAULT_COST_ESTIMATE):
             log("warn", "Perplexity budget exceeded", ticker=ticker)
             raise BudgetExhausted(
                 service="perplexity",

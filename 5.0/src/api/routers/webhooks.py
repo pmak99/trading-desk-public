@@ -239,7 +239,7 @@ async def telegram_webhook(request: Request):
                     result["target_dates"][0],
                     ticker_data,
                     budget.get("calls_today", 0),
-                    budget.get("remaining", 5.0),
+                    budget.get("remaining", settings.PERPLEXITY_MONTHLY_BUDGET),
                 )
                 await telegram.send_message(digest)
             else:

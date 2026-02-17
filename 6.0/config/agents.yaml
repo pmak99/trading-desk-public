@@ -139,7 +139,7 @@ HealthCheckAgent:
       }},
       "budget": {{
         "daily_calls": <int>,
-        "daily_limit": 40,
+        "daily_limit": 60,
         "monthly_cost": <float>,
         "monthly_budget": 5.00
       }}

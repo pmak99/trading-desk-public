@@ -148,7 +148,7 @@ If found: use cached sentiment, note "(cached)"
 sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
 ```
-If calls >= 40: skip to WebSearch fallback (daily limit: 40 calls, monthly cap: $5)
+If calls >= 60: skip to WebSearch fallback (daily limit: 60 calls, monthly cap: $5)
 
 **5c. Try Perplexity (if budget OK):**
 ```
@@ -219,7 +219,7 @@ HIGH TAIL RISK (if any):
 CACHE STATUS
    Hits: X (instant, free)
    Misses: Y (fetched fresh)
-   Budget: Z/40 calls today | $X.XX left this month
+   Budget: Z/60 calls today | $X.XX left this month
 
 NEXT STEPS
    Run /analyze {TOP_TICKER} for full strategy recommendations

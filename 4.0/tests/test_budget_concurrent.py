@@ -126,8 +126,10 @@ class TestConcurrentRecordCalls:
 
     def test_concurrent_race_near_budget_limit(self, temp_tracker):
         """Near budget limit, concurrent writes should not cause data corruption."""
-        # Pre-fill to 38 calls (2 remaining)
-        for _ in range(38):
+        # Pre-fill to near-limit (limit - 2 remaining)
+        limit = temp_tracker.MAX_DAILY_CALLS
+        prefill = limit - 2
+        for _ in range(prefill):
             temp_tracker.record_call(cost=0.006)
 
         errors = []
@@ -148,7 +150,7 @@ class TestConcurrentRecordCalls:
         assert not errors
         info = temp_tracker.get_info()
         # All 5 writes should succeed (budget tracking doesn't prevent writes)
-        assert info.calls_today == 43
+        assert info.calls_today == prefill + n_threads
         assert info.status == BudgetStatus.EXHAUSTED
 
     def test_concurrent_mcp_operations(self, temp_tracker):

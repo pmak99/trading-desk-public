@@ -9,6 +9,7 @@ import asyncio
 from typing import Dict, Any, Optional
 from pydantic import ValidationError
 
+from common.constants import PERPLEXITY_DAILY_LIMIT
 from ..integration.cache_4_0 import Cache4_0
 from ..integration.perplexity_5_0 import Perplexity5_0
 from ..utils.schemas import SentimentFetchResponse
@@ -94,7 +95,7 @@ class SentimentFetchAgent:
                     'score': None,
                     'catalysts': [],
                     'risks': [],
-                    'error': 'Perplexity API budget limit reached (40 calls/day)'
+                    'error': f'Perplexity API budget limit reached ({PERPLEXITY_DAILY_LIMIT} calls/day)'
                 }
 
             # Check if Perplexity client is available

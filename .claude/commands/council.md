@@ -244,7 +244,7 @@ sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.d
   "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
 ```
 
-**If calls < 40:** Run Perplexity Research:
+**If calls < 60:** Run Perplexity Research:
 ```
 mcp__perplexity__perplexity_research with query="For {TICKER} earnings on {EARNINGS_DATE}, analyze:
 1. Analyst consensus (Buy/Hold/Sell) and recent changes (30 days)
@@ -264,7 +264,7 @@ Analyst Trend: [upgrading/stable/downgrading]"
 
 Parse response for direction, score, and details. Status: "fresh"
 
-**If calls >= 40:** Skip Perplexity Research, mark member as failed, redistribute 25% weight to others.
+**If calls >= 60:** Skip Perplexity Research, mark member as failed, redistribute 25% weight to others.
 
 ### Step 4: Calculate Weighted Consensus [4/8]
 
@@ -422,7 +422,7 @@ RISK FLAGS
 CACHE STATUS
    Council cached as source="council" (3hr TTL)
    Saved to sentiment_history (permanent)
-   Budget: {N}/40 calls today
+   Budget: {N}/60 calls today
 
 NEXT STEPS
    Run /analyze {TICKER} for strategy recommendations
@@ -443,7 +443,7 @@ NEXT STEPS
 - Maximum 2 Perplexity calls per invocation (research + quick)
 - 5 of 7 sources are completely free
 - Perplexity Quick checks cache first (3hr TTL)
-- Budget gate: skip Perplexity if daily calls >= 40
+- Budget gate: skip Perplexity if daily calls >= 60
 - Council result is cached and reused by /analyze, /whisper, /alert, /scan
 
 ## Typical Workflow

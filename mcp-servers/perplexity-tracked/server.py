@@ -33,12 +33,14 @@ import httpx
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "4.0" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 from perplexity_client import PerplexityClient, PerplexityResponse
+from common.constants import PERPLEXITY_DAILY_LIMIT, PERPLEXITY_MONTHLY_BUDGET
 
 
 # Perplexity token pricing (per token, from invoice)
@@ -62,9 +64,9 @@ class BudgetLogger:
     Uses the same schema as the 4.0 budget tracker for consistency.
     """
 
-    # Budget limits (matching 4.0 BudgetTracker)
-    MAX_DAILY_CALLS = 40
-    MONTHLY_BUDGET = 5.00
+    # Budget limits (from common/constants.py)
+    MAX_DAILY_CALLS = PERPLEXITY_DAILY_LIMIT
+    MONTHLY_BUDGET = PERPLEXITY_MONTHLY_BUDGET
 
     def __init__(self, db_path: str = None):
         if db_path is None:

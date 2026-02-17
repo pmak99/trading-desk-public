@@ -7,7 +7,7 @@ AI-enhanced layer on top of 2.0's VRP system. Adds multi-source sentiment analys
 1. **AI for Discovery, Math for Trading** - Sentiment informs what to look at; 2.0 math decides how to trade
 2. **Import 2.0, Don't Copy** - All core logic comes from 2.0 via `sys.path` injection
 3. **Graceful Degradation** - Sentiment never blocks analysis; falls back to WebSearch then skips
-4. **Cost-Conscious** - 40 calls/day budget, 3-hour TTL caching, free fallbacks first
+4. **Cost-Conscious** - 60 calls/day budget, 3-hour TTL caching, free fallbacks first
 
 ## Sentiment-Adjusted Scoring
 
@@ -39,7 +39,7 @@ AI-enhanced layer on top of 2.0's VRP system. Adds multi-source sentiment analys
 
 | Limit | Value |
 |-------|-------|
-| Daily max | 40 calls |
+| Daily max | 60 calls |
 | Warning threshold | 32 calls (80%) |
 | Monthly budget | ~$5.00 |
 
@@ -48,7 +48,7 @@ AI-enhanced layer on top of 2.0's VRP system. Adds multi-source sentiment analys
    HIT  -> Return cached (FREE)
    MISS -> Continue
 
-2. Check budget (< 40 calls/day)
+2. Check budget (< 60 calls/day)
    OK       -> Try Perplexity
    EXHAUSTED -> Skip to WebSearch
 

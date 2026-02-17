@@ -1086,7 +1086,7 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
         metrics.request_success("whisper", duration_ms)
         metrics.tickers_qualified(len(results))
         metrics.budget_update(
-            remaining_calls=40 - summary["today_calls"],
+            remaining_calls=settings.PERPLEXITY_DAILY_LIMIT - summary["today_calls"],
             remaining_dollars=summary["budget_remaining"]
         )
 
