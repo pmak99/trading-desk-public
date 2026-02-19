@@ -7,6 +7,7 @@ This script proactively discovers and validates upcoming earnings dates by:
 2. Cross-validating new/changed dates with Yahoo Finance
 3. Detecting conflicts and using consensus (Yahoo Finance priority)
 4. Updating database with validated dates
+5. Deduplicating stale entries (same ticker, same quarter)
 
 Designed to run as a daily cron job (recommended: 8 PM ET after market close)
 
@@ -22,6 +23,10 @@ Usage:
 
     # Check staleness only
     python scripts/sync_earnings_calendar.py --check-staleness --threshold 14
+
+    # Cleanup duplicate entries only (no sync)
+    python scripts/sync_earnings_calendar.py --cleanup-dupes
+    python scripts/sync_earnings_calendar.py --cleanup-dupes --dry-run
 """
 
 import sys
@@ -54,6 +59,9 @@ VALIDATION_SKIP_HOURS = 48
 # Data is considered stale if not updated within this threshold
 STALENESS_THRESHOLD_DAYS = 14
 
+# Max days apart for two entries to be considered the same earnings event
+DEDUP_QUARTER_WINDOW_DAYS = 90
+
 
 def should_skip_validation(last_validated_at: datetime | None) -> bool:
     """
@@ -80,9 +88,11 @@ class SyncStats:
         self.unchanged_dates = 0
         self.conflicts_detected = 0
         self.validation_skipped = 0  # Tickers skipped due to recent validation
+        self.dupes_removed = 0
         self.errors = 0
         self.tickers_processed: Set[str] = set()
         self.changes: List[Dict] = []
+        self.dedup_details: List[Dict] = []
 
     def log_summary(self):
         """Log summary statistics."""
@@ -95,6 +105,7 @@ class SyncStats:
         logger.info(f"  = Unchanged: {self.unchanged_dates}")
         logger.info(f"  ⏭️  Validation skipped (recent): {self.validation_skipped}")
         logger.info(f"  ⚠️  Conflicts detected: {self.conflicts_detected}")
+        logger.info(f"  🗑️  Duplicates removed: {self.dupes_removed}")
         logger.info(f"  ✗ Errors: {self.errors}")
 
         if self.changes:
@@ -103,6 +114,16 @@ class SyncStats:
                 logger.info(
                     f"  {change['ticker']}: {change['old_date']} → {change['new_date']} "
                     f"({change['timing'].value}) {change['reason']}"
+                )
+
+        if self.dedup_details:
+            logger.info(f"\nDUPLICATES REMOVED:")
+            for d in self.dedup_details:
+                logger.info(
+                    f"  {d['ticker']}: removed {d['removed_date']} "
+                    f"({d['removed_timing']}, confirmed={d['removed_confirmed']}) "
+                    f"— kept {d['kept_date']} (confirmed={d['kept_confirmed']}, "
+                    f"{d['days_apart']}d apart)"
                 )
 
 
@@ -191,6 +212,241 @@ def check_staleness(db_path: str, threshold_days: int = STALENESS_THRESHOLD_DAYS
 
     conn.close()
     return stale
+
+
+def cleanup_duplicate_earnings(db_path: str, dry_run: bool = False) -> List[Dict]:
+    """
+    Remove duplicate earnings entries for the same ticker within the same quarter.
+
+    Companies report once per quarter (~90 days). When multiple entries exist
+    for the same ticker, this removes stale duplicates using three rules:
+
+    1. Confirmed beats unconfirmed: if a confirmed entry exists, remove any
+       unconfirmed entry within 90 days of it (stale echo of the same event).
+    2. Confirmed-vs-confirmed tiebreak: if two confirmed entries are within
+       30 days (same event, source disagreement), keep the one with known
+       timing (BMO/AMC > UNKNOWN), then most recently updated.
+    3. Unconfirmed-vs-unconfirmed: if no confirmed entry exists, keep the
+       most recently updated one.
+
+    Two confirmed entries >30 days apart are treated as different quarters
+    and both are kept.
+
+    Args:
+        db_path: Path to ivcrush.db
+        dry_run: If True, report duplicates without deleting
+
+    Returns:
+        List of dicts describing each removed entry
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+
+        # Look at entries from 14 days ago through 120 days ahead.
+        # Past window catches recently-reported earnings that still have stale future dupes.
+        cutoff_past = (date.today() - timedelta(days=14)).isoformat()
+        cutoff_future = (date.today() + timedelta(days=120)).isoformat()
+
+        # Find tickers with multiple entries in the window
+        cursor.execute(
+            """
+            SELECT ticker, COUNT(*) as cnt
+            FROM earnings_calendar
+            WHERE earnings_date >= ? AND earnings_date <= ?
+            GROUP BY ticker
+            HAVING cnt > 1
+            """,
+            (cutoff_past, cutoff_future),
+        )
+        dupes = cursor.fetchall()
+
+        if not dupes:
+            logger.info("No duplicate earnings entries found.")
+            return []
+
+        logger.info(f"Found {len(dupes)} tickers with multiple entries in window")
+
+        removed = []
+
+        # Tighter window for confirmed-vs-confirmed (same event, source disagreement)
+        CONFIRMED_DEDUP_DAYS = 30
+
+        def _parse_date(d):
+            return datetime.strptime(d, "%Y-%m-%d").date() if isinstance(d, str) else d
+
+        def _timing_rank(timing):
+            """Lower = better. BMO/AMC (known) < DMH (during market) < UNKNOWN."""
+            return 0 if timing in ("BMO", "AMC") else (1 if timing == "DMH" else 2)
+
+        def _log_removal(ticker, entry, keeper, days_apart, is_dry_run):
+            prefix = "[DRY RUN] " if is_dry_run else ""
+            verb = "would remove" if is_dry_run else "removed"
+            logger.info(
+                f"  {prefix}{ticker}: {verb} {entry['date']} "
+                f"({entry['timing']}, confirmed={entry['confirmed']}) "
+                f"— keeping {keeper['date']} (confirmed={keeper['confirmed']}, "
+                f"{days_apart}d apart)"
+            )
+
+        for ticker, count in dupes:
+            cursor.execute(
+                """
+                SELECT ticker, earnings_date, timing, confirmed, updated_at
+                FROM earnings_calendar
+                WHERE ticker = ? AND earnings_date >= ? AND earnings_date <= ?
+                ORDER BY earnings_date
+                """,
+                (ticker, cutoff_past, cutoff_future),
+            )
+            rows = cursor.fetchall()
+
+            entries = []
+            for row in rows:
+                entries.append({
+                    "date": row[1],
+                    "date_obj": _parse_date(row[1]),
+                    "timing": row[2],
+                    "confirmed": row[3],
+                    "updated_at": row[4],
+                })
+
+            confirmed = [e for e in entries if e["confirmed"]]
+            unconfirmed = [e for e in entries if not e["confirmed"]]
+            to_remove = set()  # indices into entries list
+            # Deferred Rule 1 details — populated after Rule 2 determines which
+            # confirmed entries actually survive, so the logged "keeper" is accurate.
+            rule1_pending: List[Tuple[int, int]] = []  # (unconfirmed_idx, confirmed_idx)
+
+            # Rule 1: Mark unconfirmed entries near a confirmed entry (stale echoes)
+            for i, uc in enumerate(entries):
+                if uc["confirmed"]:
+                    continue
+                for j, c in enumerate(entries):
+                    if not c["confirmed"]:
+                        continue
+                    days_apart = abs((uc["date_obj"] - c["date_obj"]).days)
+                    if days_apart <= DEDUP_QUARTER_WINDOW_DAYS:
+                        to_remove.add(i)
+                        rule1_pending.append((i, j))
+                        break
+
+            # Rule 2: Dedup confirmed entries only if within 30 days (same event)
+            kept_confirmed = []
+            if len(confirmed) > 1:
+                # Sort by quality: known timing first, then most recently updated.
+                # Python sort is stable, so two passes achieve (timing ASC, updated DESC).
+                sorted_confirmed = sorted(confirmed, key=lambda e: e["updated_at"] or "", reverse=True)
+                sorted_confirmed.sort(key=lambda e: _timing_rank(e["timing"]))
+                for c in sorted_confirmed:
+                    c_idx = entries.index(c)
+                    if c_idx in to_remove:
+                        continue
+                    # Check if this is within 30 days of any already-kept confirmed entry
+                    is_dup = False
+                    for kept in kept_confirmed:
+                        days_apart = abs((c["date_obj"] - kept["date_obj"]).days)
+                        if days_apart <= CONFIRMED_DEDUP_DAYS:
+                            to_remove.add(c_idx)
+                            detail = {
+                                "ticker": ticker,
+                                "removed_date": c["date"],
+                                "removed_timing": c["timing"],
+                                "removed_confirmed": c["confirmed"],
+                                "kept_date": kept["date"],
+                                "kept_timing": kept["timing"],
+                                "kept_confirmed": kept["confirmed"],
+                                "days_apart": days_apart,
+                            }
+                            removed.append(detail)
+                            _log_removal(ticker, c, kept, days_apart, dry_run)
+                            is_dup = True
+                            break
+                    if not is_dup:
+                        kept_confirmed.append(c)
+            else:
+                kept_confirmed = list(confirmed)
+
+            # Now resolve Rule 1 details: find the actual surviving confirmed keeper
+            # for each removed unconfirmed entry, so the audit trail is accurate.
+            for uc_idx, original_c_idx in rule1_pending:
+                uc = entries[uc_idx]
+                original_c = entries[original_c_idx]
+
+                # If the original confirmed match survived Rule 2, use it
+                if original_c_idx not in to_remove:
+                    keeper = original_c
+                else:
+                    # Original was deduped by Rule 2 — find the nearest surviving confirmed
+                    keeper = None
+                    best_gap = None
+                    for kc in kept_confirmed:
+                        gap = abs((uc["date_obj"] - kc["date_obj"]).days)
+                        if best_gap is None or gap < best_gap:
+                            best_gap = gap
+                            keeper = kc
+                    if keeper is None:
+                        keeper = original_c  # fallback (shouldn't happen)
+
+                days_apart = abs((uc["date_obj"] - keeper["date_obj"]).days)
+                detail = {
+                    "ticker": ticker,
+                    "removed_date": uc["date"],
+                    "removed_timing": uc["timing"],
+                    "removed_confirmed": uc["confirmed"],
+                    "kept_date": keeper["date"],
+                    "kept_timing": keeper["timing"],
+                    "kept_confirmed": keeper["confirmed"],
+                    "days_apart": days_apart,
+                }
+                removed.append(detail)
+                _log_removal(ticker, uc, keeper, days_apart, dry_run)
+
+            # Rule 3: Multiple unconfirmed with no confirmed sibling — keep newest
+            remaining_unconfirmed = [
+                e for e in unconfirmed if entries.index(e) not in to_remove
+            ]
+            if len(remaining_unconfirmed) > 1:
+                # Sort by updated_at descending, keep first
+                sorted_uc = sorted(
+                    remaining_unconfirmed,
+                    key=lambda e: e["updated_at"] or "",
+                    reverse=True,
+                )
+                keeper = sorted_uc[0]
+                for uc in sorted_uc[1:]:
+                    uc_idx = entries.index(uc)
+                    days_apart = abs((uc["date_obj"] - keeper["date_obj"]).days)
+                    if days_apart <= DEDUP_QUARTER_WINDOW_DAYS:
+                        to_remove.add(uc_idx)
+                        detail = {
+                            "ticker": ticker,
+                            "removed_date": uc["date"],
+                            "removed_timing": uc["timing"],
+                            "removed_confirmed": uc["confirmed"],
+                            "kept_date": keeper["date"],
+                            "kept_timing": keeper["timing"],
+                            "kept_confirmed": keeper["confirmed"],
+                            "days_apart": days_apart,
+                        }
+                        removed.append(detail)
+                        _log_removal(ticker, uc, keeper, days_apart, dry_run)
+
+            # Execute deletions
+            if not dry_run:
+                for i in to_remove:
+                    entry = entries[i]
+                    cursor.execute(
+                        "DELETE FROM earnings_calendar WHERE ticker = ? AND earnings_date = ?",
+                        (ticker, entry["date"]),
+                    )
+
+        if not dry_run and removed:
+            conn.commit()
+
+        return removed
+    finally:
+        conn.close()
 
 
 def sync_earnings_calendar(
@@ -471,6 +727,12 @@ def sync_earnings_calendar(
                 logger.error(f"  ✗ Validation failed: {result.error}")
                 stats.errors += 1
 
+    # Dedup after sync — remove stale duplicate entries
+    logger.info("\nRunning post-sync deduplication...")
+    dedup_results = cleanup_duplicate_earnings(db_path, dry_run=dry_run)
+    stats.dupes_removed = len(dedup_results)
+    stats.dedup_details = dedup_results
+
     return stats
 
 
@@ -495,6 +757,11 @@ def main():
         "-s",
         action="store_true",
         help="Check for stale data and exit",
+    )
+    parser.add_argument(
+        "--cleanup-dupes",
+        action="store_true",
+        help="Remove duplicate earnings entries (same ticker, same quarter) and exit",
     )
     parser.add_argument(
         "--threshold",
@@ -536,6 +803,26 @@ def main():
         else:
             logger.info(f"✓ All upcoming earnings data is fresh (<{args.threshold} days)")
             sys.exit(0)
+
+    # Cleanup duplicates only
+    if args.cleanup_dupes:
+        logger.info("=" * 80)
+        logger.info("EARNINGS CALENDAR DEDUP")
+        logger.info("=" * 80)
+        logger.info(f"Mode: {'DRY RUN' if args.dry_run else 'LIVE CLEANUP'}")
+        logger.info(f"Database: {db_path}")
+        logger.info(f"Quarter window: {DEDUP_QUARTER_WINDOW_DAYS} days")
+        logger.info("=" * 80)
+
+        removed = cleanup_duplicate_earnings(db_path, dry_run=args.dry_run)
+
+        if removed:
+            logger.info(f"\n{'DRY RUN: Would remove' if args.dry_run else 'Removed'} "
+                        f"{len(removed)} duplicate entries")
+        else:
+            logger.info("\n✓ No duplicates found")
+
+        sys.exit(0)
 
     # Regular sync
     logger.info("=" * 80)
