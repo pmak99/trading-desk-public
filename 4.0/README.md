@@ -17,8 +17,8 @@ AI-enhanced layer on top of 2.0's VRP system. Adds multi-source sentiment analys
 
 | Sentiment | Score Range | Modifier |
 |-----------|-------------|----------|
-| Strong Bullish | >= +0.6 | +12% |
-| Bullish | +0.2 to +0.6 | +7% |
+| Strong Bullish | >= +0.6 | +5% |
+| Bullish | +0.2 to +0.6 | +3% |
 | Neutral | -0.2 to +0.2 | 0% |
 | Bearish | -0.6 to -0.2 | -7% |
 | Strong Bearish | <= -0.6 | -12% |

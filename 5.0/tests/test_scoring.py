@@ -40,9 +40,9 @@ def test_calculate_score_reject_liquidity():
     assert reject_result["total_score"] < 90  # Penalized from perfect score
 
 def test_apply_sentiment_modifier_bullish():
-    """Strong bullish adds +12%."""
+    """Strong bullish adds +5% (dampened from +12%)."""
     modified = apply_sentiment_modifier(80, sentiment_score=0.8)
-    assert modified == 89.6  # 80 * 1.12
+    assert modified == 84.0  # 80 * 1.05
 
 def test_apply_sentiment_modifier_bearish():
     """Strong bearish subtracts -12%."""

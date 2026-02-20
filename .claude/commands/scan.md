@@ -93,7 +93,7 @@ sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.d
 
 Calculate 4.0 Score for each:
 ```
-Modifier: Strong Bullish +0.12, Bullish +0.07, Neutral 0.00, Bearish -0.07, Strong Bearish -0.12
+Modifier: Strong Bullish +0.05, Bullish +0.03, Neutral 0.00, Bearish -0.07, Strong Bearish -0.12
 4.0 Score = 2.0 Score * (1 + modifier)
 ```
 

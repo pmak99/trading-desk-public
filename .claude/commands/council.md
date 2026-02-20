@@ -50,8 +50,8 @@ Total: 2 Perplexity calls max per invocation.
 ### Sentiment Tiers
 | Consensus Score | Tier | Modifier |
 |----------------|------|----------|
-| >= +0.6 | Strong Bullish | +12% |
-| >= +0.2 | Bullish | +7% |
+| >= +0.6 | Strong Bullish | +5% |
+| >= +0.2 | Bullish | +3% |
 | -0.2 to +0.2 | Neutral | 0% |
 | <= -0.2 | Bearish | -7% |
 | <= -0.6 | Strong Bearish | -12% |
@@ -289,8 +289,8 @@ consensus_score = weighted_sum / sum_of_active_weights
 
 **Map consensus score to sentiment tier:**
 ```
->= +0.6: Strong Bullish -> modifier = +0.12
->= +0.2: Bullish        -> modifier = +0.07
+>= +0.6: Strong Bullish -> modifier = +0.05
+>= +0.2: Bullish        -> modifier = +0.03
 > -0.2 and < +0.2: Neutral -> modifier = 0.00
 <= -0.2: Bearish        -> modifier = -0.07
 <= -0.6: Strong Bearish -> modifier = -0.12

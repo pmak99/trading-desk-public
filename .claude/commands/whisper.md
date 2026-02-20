@@ -39,8 +39,8 @@ Show progress updates as you work:
 
 | Sentiment | Score Range | Modifier |
 |-----------|-------------|----------|
-| Strong Bullish | +0.7 to +1.0 | +12% |
-| Bullish | +0.3 to +0.6 | +7% |
+| Strong Bullish | +0.7 to +1.0 | +5% |
+| Bullish | +0.3 to +0.6 | +3% |
 | Neutral | -0.2 to +0.2 | 0% |
 | Bearish | -0.6 to -0.3 | -7% |
 | Strong Bearish | -1.0 to -0.7 | -12% |
