@@ -31,6 +31,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# Claude Code
+.claude/settings.json
+.claude/settings.local.json
+
 # IDEs
 .vscode/
 .idea/
