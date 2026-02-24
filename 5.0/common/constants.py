@@ -60,8 +60,8 @@ SENTIMENT_STRONG_BEARISH_THRESHOLD = -0.6
 SENTIMENT_MODIFIER_STRONG_BULLISH = 0.05   # +5% (dampened: bullish accuracy ~55%)
 SENTIMENT_MODIFIER_BULLISH = 0.03          # +3% (dampened: bullish accuracy ~55%)
 SENTIMENT_MODIFIER_NEUTRAL = 0.0           # 0%
-SENTIMENT_MODIFIER_BEARISH = -0.07         # -7%
-SENTIMENT_MODIFIER_STRONG_BEARISH = -0.12  # -12%
+SENTIMENT_MODIFIER_BEARISH = -0.03         # -3% (dampened: bearish accuracy 0/4, Feb 2026)
+SENTIMENT_MODIFIER_STRONG_BEARISH = -0.05  # -5% (dampened: bearish accuracy 0/4, Feb 2026)
 
 
 # =============================================================================

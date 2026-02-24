@@ -45,9 +45,9 @@ def test_apply_sentiment_modifier_bullish():
     assert modified == 84.0  # 80 * 1.05
 
 def test_apply_sentiment_modifier_bearish():
-    """Strong bearish subtracts -12%."""
+    """Strong bearish subtracts -5% (dampened Feb 2026)."""
     modified = apply_sentiment_modifier(80, sentiment_score=-0.8)
-    assert modified == 70.4  # 80 * 0.88
+    assert modified == 76.0  # 80 * 0.95
 
 def test_apply_sentiment_modifier_neutral():
     """Neutral sentiment has no effect."""
