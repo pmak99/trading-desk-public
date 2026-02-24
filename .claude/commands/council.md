@@ -47,7 +47,23 @@ Total: 2 Perplexity calls max per invocation.
 
 ## Reference Tables
 
-> Specific scoring thresholds and modifier values removed from public version. See CLAUDE.md for the sentiment tier and 3-rule direction system.
+### Sentiment Tiers
+| Consensus Score | Tier | Modifier |
+|----------------|------|----------|
+| >= +0.6 | Strong Bullish | +5% |
+| >= +0.2 | Bullish | +3% |
+| -0.2 to +0.2 | Neutral | 0% |
+| <= -0.2 | Bearish | -7% |
+| <= -0.6 | Strong Bearish | -12% |
+
+### 3-Rule Direction System
+| Original Skew | Council | Result | Rule |
+|---------------|---------|--------|------|
+| NEUTRAL | Bullish (>=+0.3) | BULLISH | Sentiment breaks tie |
+| NEUTRAL | Bearish (<=-0.3) | BEARISH | Sentiment breaks tie |
+| BULLISH | Bearish (<=-0.3) | NEUTRAL | Conflict -> hedge |
+| BEARISH | Bullish (>=+0.3) | NEUTRAL | Conflict -> hedge |
+| Any | Aligned/Neutral | Keep original | Skew dominates |
 
 ## Step-by-Step Instructions
 
@@ -60,7 +76,7 @@ TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
 **Look up next earnings date from database:**
 ```bash
-sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT earnings_date, timing, CAST(julianday(earnings_date) - julianday('now') AS INTEGER) as days_until
    FROM earnings_calendar WHERE ticker='$TICKER' AND earnings_date >= date('now')
    ORDER BY earnings_date ASC LIMIT 1;"
@@ -91,7 +107,7 @@ mcp__finnhub__finnhub_stock_market_data with:
 
 **Get VRP and TRR context (for report header):**
 ```bash
-sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT tail_risk_ratio, tail_risk_level FROM position_limits WHERE ticker='$TICKER';"
 ```
 
@@ -101,7 +117,7 @@ Run these 5 queries concurrently — they are all free and independent:
 
 **2a. Perplexity Quick (10% weight) — check cache first:**
 ```bash
-sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "SELECT sentiment, source, cached_at FROM sentiment_cache
    WHERE ticker='$TICKER' AND date='$EARNINGS_DATE'
    AND cached_at > datetime('now', '-3 hours')
@@ -129,7 +145,7 @@ mcp__finnhub__finnhub_stock_estimates with:
 
 **Normalize score:**
 ```
-raw = (strongBuy*2 + buy*1 - sell*1 - strongSell*2) / total_analysts
+raw = (strongBuy×2 + buy×1 - sell×1 - strongSell×2) / total_analysts
 score = clamp(raw / 2.0, -1.0, +1.0)
 ```
 Map to direction: score >= +0.3 = BULLISH, <= -0.3 = BEARISH, else NEUTRAL.
@@ -164,7 +180,7 @@ From news articles, determine:
 
 **2e. Options Skew (10% weight):**
 ```bash
-sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT directional_bias, bias_confidence FROM bias_predictions
    WHERE ticker='$TICKER' AND earnings_date='$EARNINGS_DATE'
    ORDER BY predicted_at DESC LIMIT 1;"
@@ -172,7 +188,7 @@ sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
 
 If no match for exact date, try most recent entry:
 ```bash
-sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT directional_bias, bias_confidence, earnings_date FROM bias_predictions
    WHERE ticker='$TICKER'
    ORDER BY earnings_date DESC LIMIT 1;"
@@ -190,7 +206,7 @@ If no bias_predictions exist for ticker: mark member as failed, redistribute wei
 
 **2f. Historical Pattern (10% weight):**
 ```bash
-sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT earnings_date, gap_move_pct FROM historical_moves
    WHERE ticker='$TICKER'
    ORDER BY earnings_date DESC LIMIT 12;"
@@ -214,7 +230,7 @@ Status: "{N} quarters"
 
 Also get TRR from position_limits:
 ```bash
-sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT tail_risk_ratio, tail_risk_level FROM position_limits WHERE ticker='$TICKER';"
 ```
 
@@ -224,11 +240,11 @@ If no historical_moves exist for ticker: mark member as failed, redistribute wei
 
 **Budget gate:**
 ```bash
-sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
 ```
 
-**If calls < 40:** Run Perplexity Research:
+**If calls < 60:** Run Perplexity Research:
 ```
 mcp__perplexity__perplexity_research with query="For {TICKER} earnings on {EARNINGS_DATE}, analyze:
 1. Analyst consensus (Buy/Hold/Sell) and recent changes (30 days)
@@ -248,7 +264,7 @@ Analyst Trend: [upgrading/stable/downgrading]"
 
 Parse response for direction, score, and details. Status: "fresh"
 
-**If calls >= 40:** Skip Perplexity Research, mark member as failed, redistribute 25% weight to others.
+**If calls >= 60:** Skip Perplexity Research, mark member as failed, redistribute 25% weight to others.
 
 ### Step 4: Calculate Weighted Consensus [4/8]
 
@@ -271,15 +287,32 @@ consensus_score = weighted_sum / sum_of_active_weights
 
 ### Step 5: Determine Direction and Modifiers [5/8]
 
-Map consensus score to sentiment tier and apply the 3-rule direction system (skew vs council consensus). Calculate sentiment-adjusted score.
+**Map consensus score to sentiment tier:**
+```
+>= +0.6: Strong Bullish -> modifier = +0.05
+>= +0.2: Bullish        -> modifier = +0.03
+> -0.2 and < +0.2: Neutral -> modifier = 0.00
+<= -0.2: Bearish        -> modifier = -0.07
+<= -0.6: Strong Bearish -> modifier = -0.12
+```
 
-> Specific modifier values removed from public version.
+**Apply 3-rule direction system:**
+Use the Options Skew member's direction as the "2.0 skew" and the consensus direction as "sentiment":
+- Rule 1: Neutral skew + council signal (>=+0.3 or <=-0.3) -> use council direction
+- Rule 2: Skew conflicts with council -> go NEUTRAL (hedge)
+- Rule 3: Otherwise -> keep original skew
+
+**Calculate 4.0 Score:**
+To get the 2.0 Score, run a quick analysis or estimate from VRP/liquidity context. If unavailable, note "2.0 Score: run /analyze for full scoring".
+```
+4.0 Score = 2.0 Score * (1 + modifier)
+```
 
 ### Step 6: Cache Council Result [6/8]
 
 **Cache in sentiment_cache (3hr TTL):**
 ```bash
-sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "INSERT OR REPLACE INTO sentiment_cache (ticker, date, sentiment, source, cached_at)
    VALUES ('$TICKER', '$EARNINGS_DATE',
            '{\"direction\": \"$DIRECTION\", \"score\": $SCORE, \"modifier\": $MODIFIER, \"agreement\": \"$AGREEMENT\", \"members\": {$MEMBER_JSON}}',
@@ -288,7 +321,7 @@ sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
 
 **Save to sentiment_history (permanent):**
 ```bash
-sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "INSERT OR REPLACE INTO sentiment_history (ticker, earnings_date, collected_at, source, sentiment_text, sentiment_score, sentiment_direction)
    VALUES ('$TICKER', '$EARNINGS_DATE', datetime('now'), 'council',
            '{\"members_active\": $ACTIVE_COUNT, \"agreement\": \"$AGREEMENT\", \"modifier\": $MODIFIER}',
@@ -298,7 +331,7 @@ sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
 **Update api_budget if Perplexity was called:**
 ```bash
 # Add 1 for each Perplexity call made (max 2: research + quick)
-sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "INSERT INTO api_budget (date, calls) VALUES ('$(date +%Y-%m-%d)', $PERPLEXITY_CALLS)
    ON CONFLICT(date) DO UPDATE SET calls = calls + $PERPLEXITY_CALLS;"
 ```
@@ -337,12 +370,14 @@ Historical Pattern          BULLISH    +0.34   10%     12 quarters
 -------------------------------------------------------------
 WEIGHTED CONSENSUS          BULLISH    +0.42   100%    HIGH (6/7)
 
-SCORING
-   Consensus:    +0.42 -> Bullish
-   Tradeable:    YES/NO
+4.0 SCORING
+   Consensus:    +0.42 -> Bullish (+7% modifier)
+   2.0 Score:    62.5
+   4.0 Score:    66.9 (62.5 x 1.07)
+   Tradeable:    YES (>= 55)
 
 DIRECTION (3-Rule System)
-   Skew (core):  {BIAS} | Council: {DIRECTION}
+   Skew (2.0):   {BIAS} | Council: {DIRECTION}
    Rule:         {rule_name}
    Final:        {DIRECTION} {* if changed}
 
@@ -387,7 +422,7 @@ RISK FLAGS
 CACHE STATUS
    Council cached as source="council" (3hr TTL)
    Saved to sentiment_history (permanent)
-   Budget: {N}/40 calls today
+   Budget: {N}/60 calls today
 
 NEXT STEPS
    Run /analyze {TICKER} for strategy recommendations
@@ -408,7 +443,7 @@ NEXT STEPS
 - Maximum 2 Perplexity calls per invocation (research + quick)
 - 5 of 7 sources are completely free
 - Perplexity Quick checks cache first (3hr TTL)
-- Budget gate: skip Perplexity if daily calls >= 40
+- Budget gate: skip Perplexity if daily calls >= 60
 - Council result is cached and reused by /analyze, /whisper, /alert, /scan
 
 ## Typical Workflow

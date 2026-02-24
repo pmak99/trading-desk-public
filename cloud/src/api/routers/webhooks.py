@@ -27,6 +27,30 @@ from src.api.dependencies import (
 router = APIRouter(tags=["webhooks"])
 
 
+def _strategy_type(description: str) -> str:
+    """Extract short strategy type from generate_strategies() description.
+
+    Expects formatted descriptions like "Sell 200P / Buy 195P" from strategies.py.
+    Not safe for arbitrary strings (e.g. tickers ending in P/C).
+    """
+    if not description:
+        return ""
+    # Iron Condor: has both P and C with slash separators
+    if ("P/" in description or "P " in description) and ("C/" in description or "C " in description):
+        return "IC"
+    if "Put" in description or description.strip().endswith("P"):
+        return "Put"
+    if "Call" in description or description.strip().endswith("C"):
+        return "Call"
+    if "Iron Condor" in description:
+        return "IC"
+    if "Bull Put" in description:
+        return "Put"
+    if "Bear Call" in description:
+        return "Call"
+    return description[:10]
+
+
 @router.post("/alerts/ingest")
 async def alerts_ingest(
     request: Request,
@@ -203,19 +227,19 @@ async def telegram_webhook(request: Request):
                         "vrp_ratio": t["vrp_ratio"],
                         "score": t["score"],
                         "direction": t.get("direction", "NEUTRAL"),
-                        "tailwinds": t.get("name", "")[:20],
-                        "headwinds": "",
-                        "strategy": t.get("strategy", f"VRP {t['vrp_tier']}"),
+                        "strategy_type": _strategy_type(t.get("strategy", "")),
                         "credit": t.get("credit", 0),
+                        "timing": t.get("timing", ""),
+                        "trr_high": t.get("trr_high", False),
                     }
-                    for t in result["tickers"][:5]
+                    for t in result["tickers"][:7]
                 ]
                 budget = result.get("budget", {})
                 digest = format_digest(
                     result["target_dates"][0],
                     ticker_data,
                     budget.get("calls_today", 0),
-                    budget.get("remaining", 5.0),
+                    budget.get("remaining", settings.PERPLEXITY_MONTHLY_BUDGET),
                 )
                 await telegram.send_message(digest)
             else:
@@ -239,18 +263,34 @@ async def telegram_webhook(request: Request):
                     from src.api.routers.analysis import analyze
                     result = await analyze(ticker=ticker, format="json", fresh=True)
                     if result.get("status") == "success":
+                        vrp = result.get("vrp", {})
+                        sentiment = result.get("sentiment", {})
+                        strat = result["strategies"][0] if result.get("strategies") else {}
+                        tail = result.get("tail_risk", {})
                         alert_data = {
                             "ticker": ticker,
-                            "vrp_ratio": result["vrp"]["ratio"],
+                            "price": result.get("price", 0),
+                            "earnings_date": result.get("earnings_date", ""),
+                            "timing": result.get("timing") or "",
+                            "vrp_ratio": vrp.get("ratio", 0),
+                            "vrp_tier": vrp.get("tier", ""),
                             "score": result["score"]["final"],
                             "direction": result["direction"],
-                            "sentiment_score": result.get("sentiment", {}).get("score", 0),
-                            "tailwinds": "",
-                            "headwinds": "",
-                            "strategy": result["strategies"][0]["name"] if result["strategies"] else "No strategy",
-                            "credit": result["strategies"][0]["max_profit"] / 100 if result["strategies"] else 0,
-                            "max_risk": result["strategies"][0]["max_risk"] if result["strategies"] else 0,
-                            "pop": result["strategies"][0]["pop"] if result["strategies"] else 0,
+                            "sentiment_score": sentiment.get("score", 0),
+                            "tailwinds": sentiment.get("tailwinds", ""),
+                            "headwinds": sentiment.get("headwinds", ""),
+                            "strategy": strat.get("name", "No strategy"),
+                            "strategy_desc": strat.get("description", ""),
+                            "credit": strat.get("max_profit", 0) / 100 if strat else 0,
+                            "max_risk": strat.get("max_risk", 0),
+                            "pop": strat.get("pop", 0),
+                            "liquidity_tier": result.get("liquidity_tier", ""),
+                            "implied_move_pct": vrp.get("implied_move_pct", 0),
+                            "hist_mean_pct": round(vrp.get("historical_mean", 0), 1),
+                            "hist_count": vrp.get("historical_count", 0),
+                            "trr_ratio": tail.get("ratio", 0),
+                            "trr_level": tail.get("level", ""),
+                            "skew_bias": result.get("skew", {}).get("bias", ""),
                         }
                         await telegram.send_message(format_alert(alert_data))
                     else:
@@ -259,6 +299,38 @@ async def telegram_webhook(request: Request):
                     # Log error type only - str(e) could contain API keys from HTTP errors
                     log("error", "Telegram analyze failed", ticker=ticker, error=type(e).__name__)
                     await telegram.send_message(f"Error analyzing {ticker}: {type(e).__name__}")
+
+        elif text.startswith("/council"):
+            parts = text.split()
+            if len(parts) < 2:
+                await telegram.send_message("Usage: /council TICKER")
+            else:
+                try:
+                    ticker = normalize_ticker(parts[1][:10])
+                except InvalidTickerError:
+                    await telegram.send_message("Invalid ticker. Use 1-5 letter symbols (e.g., NVDA).")
+                    return {"ok": True}
+                try:
+                    await telegram.send_message(f"\U0001f3db Running council for <b>{ticker}</b>...")
+                    from src.domain.council import run_council
+                    from src.formatters.telegram import format_council
+                    from src.api.dependencies import (
+                        get_finnhub, get_tradier, get_historical_repo,
+                        get_sentiment_cache,
+                    )
+                    result = await run_council(
+                        ticker=ticker,
+                        finnhub=get_finnhub(),
+                        perplexity=get_perplexity(),
+                        tradier=get_tradier(),
+                        repo=get_historical_repo(),
+                        cache=get_sentiment_cache(),
+                        budget=get_budget_tracker(),
+                    )
+                    await telegram.send_message(format_council(result))
+                except Exception as e:
+                    log("error", "Telegram council failed", ticker=ticker, error=type(e).__name__)
+                    await telegram.send_message(f"Council failed for {ticker}: {type(e).__name__}")
 
         elif text.startswith("/dashboard"):
             grafana_url = settings.grafana_dashboard_url
@@ -273,6 +345,7 @@ async def telegram_webhook(request: Request):
                 "/health - System status\n"
                 "/whisper - Today's opportunities\n"
                 "/analyze TICKER - Deep analysis\n"
+                "/council TICKER - 6-source sentiment consensus\n"
                 "/dashboard - Metrics dashboard"
             )
 

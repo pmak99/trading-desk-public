@@ -8,15 +8,16 @@ import threading
 from pathlib import Path
 from typing import Dict, Any
 
+from common.constants import PERPLEXITY_COST_PER_CALL_ESTIMATE
 from ..utils.paths import MAIN_REPO, REPO_5_0
 
 # Thread lock for sys.path manipulation (not thread-safe by default)
 _path_lock = threading.Lock()
 
-# Add cloud/ to Python path
-# cloud's code uses "from src.core..." imports, so it needs cloud/ in path, not cloud/src/
+# Add 5.0/ to Python path
+# 5.0's code uses "from src.core..." imports, so it needs 5.0/ in path, not 5.0/src/
 _main_repo = MAIN_REPO
-_5_0_dir = _main_repo / "cloud"
+_5_0_dir = _main_repo / "5.0"
 _5_0_dir_str = str(_5_0_dir)
 
 with _path_lock:
@@ -24,7 +25,7 @@ with _path_lock:
     if _5_0_dir_str in sys.path:
         sys.path.remove(_5_0_dir_str)
 
-    # Insert with priority (after core and 4.0)
+    # Insert with priority (after 2.0 and 4.0)
     sys.path.insert(2, _5_0_dir_str)
 
 
@@ -52,13 +53,13 @@ class Perplexity5_0:
             )
 
         with _path_lock:
-            # Critical: Remove agents/ from sys.path temporarily to avoid namespace collision
-            # Both agents and cloud use 'src' as top-level package
-            _6_0_paths = [p for p in sys.path if 'agents' in p]
+            # Critical: Remove 6.0/ from sys.path temporarily to avoid namespace collision
+            # Both 6.0 and 5.0 use 'src' as top-level package
+            _6_0_paths = [p for p in sys.path if '6.0' in p]
             for p in _6_0_paths:
                 sys.path.remove(p)
 
-            # Ensure cloud/src is at position 0
+            # Ensure 5.0/src is at position 0
             if _5_0_dir_str not in sys.path:
                 sys.path.insert(0, _5_0_dir_str)
             elif sys.path.index(_5_0_dir_str) != 0:
@@ -83,7 +84,7 @@ class Perplexity5_0:
                 from src.integrations.perplexity import PerplexityClient
 
                 # Set database path to main repo
-                db_path = _main_repo / "sentiment" / "data" / "perplexity_budget.db"
+                db_path = _main_repo / "4.0" / "data" / "perplexity_budget.db"
 
                 self.client = PerplexityClient(
                     api_key=self.api_key,
@@ -91,7 +92,7 @@ class Perplexity5_0:
                     model="sonar"  # Use basic sonar model
                 )
             finally:
-                # Restore agents/ paths after import
+                # Restore 6.0/ paths after import
                 for p in _6_0_paths:
                     if p not in sys.path:
                         sys.path.append(p)
@@ -130,7 +131,7 @@ class Perplexity5_0:
             # Parse response (import already done in __init__)
             # We have to import here because parse_sentiment_response is in 5.0's module
             with _path_lock:
-                _6_0_paths = [p for p in sys.path if 'agents' in p]
+                _6_0_paths = [p for p in sys.path if '6.0' in p]
                 for p in _6_0_paths:
                     if p in sys.path:
                         sys.path.remove(p)
@@ -165,6 +166,6 @@ class Perplexity5_0:
         """Check if budget allows Perplexity API call."""
         return self.client.budget.can_call()
 
-    def record_call(self, cost: float = 0.006):
+    def record_call(self, cost: float = PERPLEXITY_COST_PER_CALL_ESTIMATE):
         """Record an API call for budget tracking."""
         self.client.budget.record_call(cost)

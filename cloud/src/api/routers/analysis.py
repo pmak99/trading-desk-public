@@ -33,7 +33,7 @@ from src.domain.implied_move import (
 )
 from src.domain.skew import analyze_skew
 from src.domain.direction import get_direction
-from src.formatters.cli import format_digest_cli, format_analyze_cli
+from src.formatters.cli import format_digest_cli, format_analyze_cli, format_council_cli
 from src.api.state import _mask_sensitive
 from src.api.dependencies import (
     verify_api_key,
@@ -45,6 +45,7 @@ from src.api.dependencies import (
     get_historical_repo,
     get_sentiment_cache,
     get_vrp_cache,
+    get_finnhub,
 )
 
 from datetime import timedelta
@@ -70,7 +71,8 @@ async def _analyze_single_ticker(
     semaphore: asyncio.Semaphore,
     prefetched_moves: Optional[List[Dict[str, Any]]] = None,
     filter_mode: str = "filter",
-    fresh: bool = False
+    fresh: bool = False,
+    timing: str = "",
 ) -> Optional[Dict[str, Any]]:
     """
     Analyze a single ticker for VRP opportunity.
@@ -220,6 +222,15 @@ async def _analyze_single_ticker(
                     strategy_name = top_strategy.description
                     credit = top_strategy.max_profit / 100  # Convert to per-contract
 
+            # Check TRR for high-risk flag
+            trr_high = False
+            if prefetched_moves:
+                pcts = [abs(m["intraday_move_pct"]) for m in prefetched_moves if m.get("intraday_move_pct")]
+                if pcts:
+                    avg = sum(pcts) / len(pcts)
+                    if avg > 0 and max(pcts) / avg > 2.5:
+                        trr_high = True
+
             return {
                 "ticker": ticker,
                 "name": name,
@@ -234,6 +245,8 @@ async def _analyze_single_ticker(
                 "direction": direction,
                 "strategy": strategy_name,
                 "credit": credit,
+                "timing": timing,
+                "trr_high": trr_high,
                 "has_weekly_options": has_weekly,
                 "weekly_warning": weekly_warning,
             }
@@ -318,7 +331,8 @@ async def _scan_tickers_for_whisper(
                 vrp_cache=vrp_cache,
                 semaphore=semaphore,
                 prefetched_moves=prefetched_moves,
-                fresh=fresh
+                fresh=fresh,
+                timing=e.get("timing", ""),
             )
         )
         tasks.append(task)
@@ -610,10 +624,12 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
 
         # Determine earnings date - use provided date or look up from calendar
         target_date = date
+        earnings_timing = ""
         if not target_date:
             earnings_info = repo.get_next_earnings(ticker)
             if earnings_info:
                 target_date = earnings_info["earnings_date"]
+                earnings_timing = earnings_info.get("timing", "")
                 log("info", "Found earnings date from calendar", ticker=ticker, date=target_date)
 
                 # Freshness validation: if earnings within 7 days, validate against Alpha Vantage
@@ -637,7 +653,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
                                 # Later: API shows next quarter (earnings already reported or DB date was wrong)
                                 # Earlier: DB has next quarter date but API shows current quarter (rare edge case)
                                 # Either way, don't blindly accept - skip this ticker
-                                # Note: cloud is stateless per-request, doesn't update DB (sync handled separately)
+                                # Note: 5.0 is stateless per-request, doesn't update DB (sync handled separately)
                                 NEXT_QUARTER_THRESHOLD_DAYS = 45
                                 if abs(date_diff_days) >= NEXT_QUARTER_THRESHOLD_DAYS:
                                     direction = "later" if date_diff_days > 0 else "earlier"
@@ -857,6 +873,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
             "status": "success",
             "price": price,
             "earnings_date": target_date,
+            "timing": earnings_timing,
             "expiration": nearest_exp,
             "vrp": {
                 "ratio": vrp_data["vrp_ratio"],
@@ -1045,10 +1062,10 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
                     "earnings_date": t.get("earnings_date", ""),
                     "vrp_ratio": t["vrp_ratio"],
                     "score": t["score"],
-                    "direction": "NEUTRAL",
+                    "direction": t.get("direction", "NEUTRAL"),
                     "tailwinds": "",
                     "headwinds": "",
-                    "strategy": f"VRP {t['vrp_tier']}",
+                    "strategy": t.get("strategy", f"VRP {t['vrp_tier']}"),
                 }
                 for t in results[:10]
             ]
@@ -1069,7 +1086,7 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
         metrics.request_success("whisper", duration_ms)
         metrics.tickers_qualified(len(results))
         metrics.budget_update(
-            remaining_calls=40 - summary["today_calls"],
+            remaining_calls=settings.PERPLEXITY_DAILY_LIMIT - summary["today_calls"],
             remaining_dollars=summary["budget_remaining"]
         )
 
@@ -1080,3 +1097,50 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
         metrics.request_error("whisper", duration_ms)
         log("error", "Whisper failed", error=type(e).__name__, details=_mask_sensitive(str(e)))
         raise HTTPException(500, "Whisper failed")
+
+
+@router.get("/council")
+async def council(ticker: str, format: str = "json", fresh: bool = False, _: bool = Depends(verify_api_key)):
+    """
+    6-source AI sentiment council for pre-earnings consensus.
+
+    Aggregates Finnhub analysts, Finnhub news, Perplexity (quick + deep),
+    options skew, and historical patterns into a weighted consensus.
+    """
+    # Validate and normalize ticker
+    try:
+        ticker = normalize_ticker(ticker)
+    except InvalidTickerError as e:
+        raise HTTPException(400, str(e))
+
+    log("info", "Council request", ticker=ticker)
+    start_time = time.time()
+
+    try:
+        from src.domain.council import run_council
+        from dataclasses import asdict
+
+        finnhub = get_finnhub()
+        perplexity = get_perplexity()
+        tradier = get_tradier()
+        repo = get_historical_repo()
+        cache = get_sentiment_cache()
+        budget = get_budget_tracker()
+
+        result = await run_council(ticker, finnhub, perplexity, tradier, repo, cache, budget)
+
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_success("council", duration_ms)
+
+        if format == "cli":
+            return {"output": format_council_cli(result)}
+
+        # Convert dataclass to dict for JSON serialization
+        result_dict = asdict(result)
+        return result_dict
+
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        metrics.request_error("council", duration_ms)
+        log("error", "Council failed", ticker=ticker, error=type(e).__name__, details=_mask_sensitive(str(e)))
+        raise HTTPException(500, "Council failed")

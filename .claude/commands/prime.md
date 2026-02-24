@@ -59,9 +59,9 @@ DAY_OF_WEEK=$(date '+%A')
 - Holiday: Same as weekend
 - Weekday: Continue with full priming
 
-### Step 3: Run core Whisper Mode
+### Step 3: Run 2.0 Whisper Mode
 ```bash
-cd "$PROJECT_ROOT/core" && ./trade.sh whisper $TARGET_MONDAY
+cd "/Users/prashant/PycharmProjects/Trading Desk/2.0" && ./trade.sh whisper $TARGET_MONDAY
 ```
 
 **IMPORTANT:** Always pass the date argument to whisper. Without it, whisper may default to the wrong week.
@@ -73,13 +73,13 @@ From whisper results, filter to tickers where:
 
 ### Step 5: Check Budget Status
 ```bash
-sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "SELECT COALESCE((SELECT calls FROM api_budget WHERE date='$(date +%Y-%m-%d)'), 0) as calls;"
 ```
 
 If near budget limit (>35 calls):
 ```
-Budget warning: {calls}/40 calls used today
+Budget warning: {calls}/60 calls used today
    Limiting priming to top {remaining} tickers
 ```
 
@@ -91,7 +91,7 @@ For EACH qualified ticker (in order of VRP score):
 ```bash
 TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "SELECT 1 FROM sentiment_cache WHERE ticker='$TICKER' AND date='$EARNINGS_DATE'
    AND cached_at > datetime('now', '-3 hours');"
 ```
@@ -99,7 +99,7 @@ If exists: skip, mark as "already cached"
 
 **6b. If cache miss, fetch via fallback chain:**
 
-1. **Try Perplexity (if budget OK, < 40 calls):**
+1. **Try Perplexity (if budget OK, < 60 calls):**
    ```
    mcp__perplexity__perplexity_ask with query="For {TICKER} earnings on {DATE}, respond ONLY in this format:
    Direction: [bullish/bearish/neutral]
@@ -119,7 +119,7 @@ If exists: skip, mark as "already cached"
 
 **6c. Save to sentiment_history (permanent storage for backtesting):**
 ```bash
-sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "INSERT OR REPLACE INTO sentiment_history
    (ticker, earnings_date, collected_at, source, sentiment_text,
     sentiment_score, sentiment_direction, vrp_ratio, implied_move_pct, updated_at)
@@ -138,7 +138,7 @@ sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
 
 ### Step 7: Update Budget Tracker
 ```bash
-sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "INSERT INTO api_budget (date, calls, cost, last_updated)
    VALUES ('$(date +%Y-%m-%d)', $NEW_CALLS, $NEW_COST, datetime('now'))
    ON CONFLICT(date) DO UPDATE SET
@@ -172,7 +172,7 @@ PRIMING COMPLETE
    New caches:     4
    Cache hits:     1 (skipped)
    Failures:       0
-   API calls today: 4/40
+   API calls today: 4/60
    Monthly budget: $4.95 left
 
 System primed! All commands will use cached sentiment.

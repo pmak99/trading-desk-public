@@ -22,16 +22,36 @@ Examples:
 Show progress updates as you work:
 ```
 [1/6] Determining target week...
-[2/6] Running core whisper analysis...
+[2/6] Running 2.0 whisper analysis...
 [3/6] Filtering qualified tickers (2.0 Score >= 50)...
 [4/6] Checking tail risk ratios...
 [5/6] Fetching sentiment for top 5...
-[6/6] Calculating sentiment scores and ranking...
+[6/6] Calculating 4.0 scores and ranking...
 ```
 
 ## Reference: Scoring & Thresholds
 
-> Proprietary scoring cutoffs, sentiment modifier values, and TRR tier tables removed from public version.
+**Cutoffs:**
+- 2.0 Score >= 50 (pre-sentiment filter)
+- 4.0 Score >= 55 (post-sentiment filter)
+
+**4.0 Formula:** `4.0 Score = 2.0 Score * (1 + Sentiment_Modifier)`
+
+| Sentiment | Score Range | Modifier |
+|-----------|-------------|----------|
+| Strong Bullish | +0.7 to +1.0 | +5% |
+| Bullish | +0.3 to +0.6 | +3% |
+| Neutral | -0.2 to +0.2 | 0% |
+| Bearish | -0.6 to -0.3 | -7% |
+| Strong Bearish | -1.0 to -0.7 | -12% |
+
+**TRR Levels:**
+
+| Level | TRR | Max Contracts | Action |
+|-------|-----|---------------|--------|
+| HIGH | > 2.5x | 50 | Warning badge in table |
+| NORMAL | 1.5-2.5x | 100 | No badge |
+| LOW | < 1.5x | 100 | No badge |
 
 ## Step-by-Step Instructions
 
@@ -65,21 +85,21 @@ CURRENT_HOUR=$(date '+%H')
 - Weekday after 4:00 PM ET: Show "After-hours - Using today's close data"
 - Otherwise: Show "Market hours"
 
-### Step 2: Run core Whisper Analysis
+### Step 2: Run 2.0 Whisper Analysis
 
 ```bash
-cd "$PROJECT_ROOT/core" && ./trade.sh whisper $TARGET_MONDAY
+cd "/Users/prashant/PycharmProjects/Trading Desk/2.0" && ./trade.sh whisper $TARGET_MONDAY
 ```
 
 Or if date argument was provided:
 ```bash
-cd "$PROJECT_ROOT/core" && ./trade.sh whisper $PROVIDED_DATE
+cd "/Users/prashant/PycharmProjects/Trading Desk/2.0" && ./trade.sh whisper $PROVIDED_DATE
 ```
 
 This discovers earnings from Yahoo Finance and runs VRP analysis on each ticker.
 
-### Step 3: Filter by core Score >= 50
-Parse the whisper output and filter to tickers with core Score >= 50.
+### Step 3: Filter by 2.0 Score >= 50
+Parse the whisper output and filter to tickers with 2.0 Score >= 50.
 
 **IMPORTANT:** Do NOT suppress REJECT liquidity tickers from display. Show ALL qualified tickers (VRP >= 1.8x EXCELLENT tier) in the results table, clearly marking REJECT ones. This gives visibility into what opportunities exist even if liquidity is poor.
 
@@ -88,17 +108,17 @@ Take TOP 5 from filtered results for sentiment enrichment (skip REJECT for senti
 ### Step 4: Check TRR for All Qualified Tickers
 Query tail risk for all qualified tickers in one batch:
 ```bash
-# Tickers should already be sanitized (alphanumeric, uppercase) from core output
+# Tickers should already be sanitized (alphanumeric, uppercase) from 2.0 output
 TICKERS="'NVDA','AAPL','MU'"  # Use actual qualified tickers
 
-sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT ticker, tail_risk_ratio, tail_risk_level, max_contracts
    FROM position_limits WHERE ticker IN ($TICKERS) AND tail_risk_level = 'HIGH';"
 ```
 
 If ticker not in position_limits, calculate from historical_moves:
 ```bash
-sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT ticker,
           MAX(ABS(gap_move_pct)) / AVG(ABS(gap_move_pct)) as trr
    FROM historical_moves
@@ -115,7 +135,7 @@ For EACH of the top 5 qualified non-REJECT tickers:
 ```bash
 TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "SELECT sentiment, source, cached_at FROM sentiment_cache
    WHERE ticker='$TICKER' AND date='$EARNINGS_DATE'
    AND cached_at > datetime('now', '-3 hours')
@@ -125,10 +145,10 @@ If found: use cached sentiment, note "(cached)"
 
 **5b. If cache miss, check budget:**
 ```bash
-sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
 ```
-If calls >= 40: skip to WebSearch fallback (daily limit: 40 calls, monthly cap: $5)
+If calls >= 60: skip to WebSearch fallback (daily limit: 60 calls, monthly cap: $5)
 
 **5c. Try Perplexity (if budget OK):**
 ```
@@ -153,15 +173,15 @@ mcp__perplexity__perplexity_search with query="{TICKER} earnings sentiment analy
 Sentiment unavailable for {TICKER}
 ```
 
-### Step 6: Calculate sentiment Scores & Adjusted Direction
+### Step 6: Calculate 4.0 Scores & Adjusted Direction
 For each ticker with sentiment:
-1. Apply sentiment modifier to get sentiment Score
+1. Apply sentiment modifier to get 4.0 Score
 2. Apply the 3-rule direction system:
    - Rule 1: Neutral skew + sentiment signal -> use sentiment direction
    - Rule 2: Skew conflicts with sentiment -> go Neutral (hedge)
    - Rule 3: Otherwise -> keep original skew
-3. Drop any ticker with sentiment Score < 55
-4. Re-rank by sentiment Score (descending)
+3. Drop any ticker with 4.0 Score < 55
+4. Re-rank by 4.0 Score (descending)
 
 ## Output Format
 
@@ -174,18 +194,18 @@ Market Status: [Pre-market/Open/After-hours/Weekend - time info]
 
 4.0 SENTIMENT-ADJUSTED RESULTS
 
- #  TICKER  Earnings     VRP      Imp Move  core   Sentiment      sentiment   DIR(4.0)    LIQUIDITY  TRR
+ #  TICKER  Earnings     VRP      Imp Move  2.0   Sentiment      4.0   DIR(4.0)    LIQUIDITY  TRR
  1  LULU    Feb 11 AMC   4.67x    12.04%    95.1  Bear (-0.6)    88.5  NEUTRAL*    REJECT
  2  MU      Feb 10 AMC   3.53x    8.01%     88.2  Bull (+0.7)    98.8  BULLISH     GOOD       HIGH
  3  AVGO    Feb 11 AMC   2.72x    7.85%     87.0  Bull (+0.6)    93.1  BULLISH     GOOD       HIGH
  4  ORCL    Feb 10 AMC   3.87x    10.96%    85.9  Bull (+0.4)    91.9  NEUTRAL     EXCELLENT
 
 Legend: VRP EXCELLENT (>=1.8x) | GOOD (>=1.4x) | MARGINAL (>=1.2x)
-        * = direction changed from core skew (sentiment conflict -> hedge)
+        * = direction changed from 2.0 skew (sentiment conflict -> hedge)
         TRR HIGH = elevated tail risk (max 50 contracts)
 
 TOP PICK: {TICKER} ({Date} {BMO/AMC})
-   VRP: {X.X}x | Implied Move: {X.X}% | sentiment Score: {X.X}
+   VRP: {X.X}x | Implied Move: {X.X}% | 4.0 Score: {X.X}
    Sentiment: {1-line summary, max 30 words}
    Direction: {2.0 Skew} -> {4.0 Adjusted} ({rule applied})
 
@@ -199,7 +219,7 @@ HIGH TAIL RISK (if any):
 CACHE STATUS
    Hits: X (instant, free)
    Misses: Y (fetched fresh)
-   Budget: Z/40 calls today | $X.XX left this month
+   Budget: Z/60 calls today | $X.XX left this month
 
 NEXT STEPS
    Run /analyze {TOP_TICKER} for full strategy recommendations

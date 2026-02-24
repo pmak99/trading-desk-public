@@ -99,7 +99,8 @@ dmypy.json
 # Exclude sensitive trade statements and analysis
 docs/2025 Trades/
 
-# Claude Code local settings (may contain API keys in allowlist)
+# Claude Code settings (may contain API keys in allowlist)
+.claude/settings.json
 .claude/settings.local.json
 **/settings.local.json
 

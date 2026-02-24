@@ -197,9 +197,9 @@ async def budget_status(_: bool = Depends(verify_api_key)):
             "daily_limit": summary["daily_limit"],
             "can_call": summary["can_call"],
             "month_cost": summary["month_cost"],
-            "monthly_budget": 5.00,
+            "monthly_budget": settings.PERPLEXITY_MONTHLY_BUDGET,
             "budget_remaining": summary["budget_remaining"],
-            "budget_utilization_pct": round((5.00 - summary["budget_remaining"]) / 5.00 * 100, 1),
+            "budget_utilization_pct": round((settings.PERPLEXITY_MONTHLY_BUDGET - summary["budget_remaining"]) / settings.PERPLEXITY_MONTHLY_BUDGET * 100, 1),
         },
         "recent_spending": recent_spending,
     }

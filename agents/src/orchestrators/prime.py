@@ -11,6 +11,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 
+from common.constants import PERPLEXITY_DAILY_LIMIT
 from .base import BaseOrchestrator
 from ..agents.sentiment_fetch import SentimentFetchAgent
 from ..agents.health import HealthCheckAgent
@@ -82,7 +83,7 @@ class PrimeOrchestrator(BaseOrchestrator):
 
         # Get budget status (don't block yet - may be all cached)
         budget_status = health_result.get('budget', {})
-        daily_limit = budget_status.get('daily_limit', 40)
+        daily_limit = budget_status.get('daily_limit', PERPLEXITY_DAILY_LIMIT)
         daily_calls = budget_status.get('daily_calls', 0)
         daily_remaining = daily_limit - daily_calls
 
@@ -141,7 +142,7 @@ class PrimeOrchestrator(BaseOrchestrator):
             logger.error("Perplexity API budget exhausted and uncached tickers remain")
             return {
                 'success': False,
-                'error': f'Perplexity API budget exhausted (40 calls/day limit). Cannot fetch {len(to_fetch)} uncached tickers.',
+                'error': f'Perplexity API budget exhausted ({PERPLEXITY_DAILY_LIMIT} calls/day limit). Cannot fetch {len(to_fetch)} uncached tickers.',
                 'tickers_cached': len(already_cached),
                 'uncached_tickers': len(to_fetch),
                 'budget': budget_status

@@ -27,7 +27,9 @@ from src.integrations import (
     TelegramSender,
     YahooFinanceClient,
     TwelveDataClient,
+    FinnhubClient,
 )
+from typing import Optional
 from src.api.state import AppState, get_app_state, set_app_state
 
 
@@ -55,6 +57,7 @@ def _get_state() -> AppState:
             historical_repo=HistoricalMovesRepository(settings.DB_PATH),
             sentiment_cache=SentimentCacheRepository(settings.DB_PATH),
             vrp_cache=VRPCacheRepository(settings.DB_PATH),
+            finnhub=FinnhubClient(settings.finnhub_api_key) if settings.finnhub_api_key else None,
         )
         set_app_state(state)
     return state
@@ -106,6 +109,10 @@ def get_sentiment_cache() -> SentimentCacheRepository:
 
 def get_vrp_cache() -> VRPCacheRepository:
     return _get_state().vrp_cache
+
+
+def get_finnhub() -> Optional[FinnhubClient]:
+    return _get_state().finnhub
 
 
 def reset_app_state():

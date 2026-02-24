@@ -2,7 +2,7 @@
 API budget tracker for rate-limited services.
 
 Tracks daily calls, tokens, and monthly spend against configured limits.
-Prevents exceeding Perplexity's 40 calls/day, $5/month budget.
+Prevents exceeding Perplexity's daily/monthly budget (limits from common/constants.py).
 
 Pricing constants imported from common/budget_constants.py.
 """
@@ -227,7 +227,7 @@ class BudgetTracker:
     def try_acquire_call(
         self,
         service: str = "perplexity",
-        cost: float = 0.006,
+        cost: float = DEFAULT_COST_ESTIMATE,
         output_tokens: int = 0,
         reasoning_tokens: int = 0,
         search_requests: int = 0
@@ -385,7 +385,7 @@ class BudgetTracker:
     async def try_acquire_call_async(
         self,
         service: str = "perplexity",
-        cost: float = 0.006,
+        cost: float = DEFAULT_COST_ESTIMATE,
         output_tokens: int = 0,
         reasoning_tokens: int = 0,
         search_requests: int = 0

@@ -10,7 +10,7 @@ Usage:
 
 Environment variables:
     PERPLEXITY_API_KEY: Perplexity API key (required)
-    BUDGET_DB_PATH: Path to budget tracker database (optional, defaults to sentiment db)
+    BUDGET_DB_PATH: Path to budget tracker database (optional, defaults to 4.0 db)
 
 The server exposes the same tools as the standard perplexity MCP:
 - perplexity_ask: Basic chat completion
@@ -32,13 +32,15 @@ import httpx
 
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "sentiment" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "4.0" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 from perplexity_client import PerplexityClient, PerplexityResponse
+from common.constants import PERPLEXITY_DAILY_LIMIT, PERPLEXITY_MONTHLY_BUDGET
 
 
 # Perplexity token pricing (per token, from invoice)
@@ -59,18 +61,18 @@ class BudgetLogger:
     """
     Logs API usage to budget tracker database.
 
-    Uses the same schema as the sentiment budget tracker for consistency.
+    Uses the same schema as the 4.0 budget tracker for consistency.
     """
 
-    # Budget limits (matching sentiment BudgetTracker)
-    MAX_DAILY_CALLS = 40
-    MONTHLY_BUDGET = 5.00
+    # Budget limits (from common/constants.py)
+    MAX_DAILY_CALLS = PERPLEXITY_DAILY_LIMIT
+    MONTHLY_BUDGET = PERPLEXITY_MONTHLY_BUDGET
 
     def __init__(self, db_path: str = None):
         if db_path is None:
-            # Default to sentiment sentiment_cache.db
+            # Default to 4.0 sentiment_cache.db
             db_path = str(
-                Path(__file__).parent.parent.parent / "sentiment" / "data" / "sentiment_cache.db"
+                Path(__file__).parent.parent.parent / "4.0" / "data" / "sentiment_cache.db"
             )
         self.db_path = db_path
         self._ensure_schema()

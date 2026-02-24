@@ -7,9 +7,10 @@
 ## Features
 
 - **12 Scheduled Jobs** - Pre-market prep, sentiment scan, morning digest, outcome recording
-- **Telegram Bot** - Mobile access via `/health`, `/whisper`, `/analyze TICKER`
+- **Telegram Bot** - Mobile access via `/health`, `/whisper`, `/analyze TICKER`, `/council TICKER`
 - **Full VRP Stack** - VRP, liquidity, skew, and 3-rule direction system (ported from core/sentiment)
-- **AI Sentiment** - Perplexity-powered with budget tracking
+- **AI Sentiment** - Perplexity + Finnhub powered with budget tracking
+- **Council** - 6-source AI sentiment consensus for pre-earnings analysis
 - **Performance Optimized** - Parallel analysis (5 concurrent), VRP caching (1-6hr TTL)
 
 ## Quick Start
@@ -45,6 +46,7 @@ docker compose -f docker-compose.yml up --build
 | `/api/analyze?ticker=XXX` | GET | API Key | Deep ticker analysis |
 | `/api/whisper` | GET | API Key | High-VRP opportunities |
 | `/api/scan?date=YYYY-MM-DD` | GET | API Key | Scan specific date |
+| `/api/council?ticker=XXX` | GET | API Key | 6-source AI sentiment council |
 | `/api/budget` | GET | API Key | 7-day spending history |
 | `/prime` | POST | API Key | Pre-cache sentiment |
 | `/dispatch` | POST | API Key | Job scheduler trigger |
@@ -61,6 +63,7 @@ docker compose -f docker-compose.yml up --build
 | `/health` | System status and budget |
 | `/whisper` | Today's high-VRP opportunities |
 | `/analyze TICKER` | Deep analysis |
+| `/council TICKER` | 6-source AI sentiment consensus |
 | `/dashboard` | Grafana metrics link |
 
 **Aliases:** `NIKE`->`NKE`, `GOOGLE`->`GOOGL`, `FACEBOOK`->`META`
@@ -102,7 +105,7 @@ cloud/
 │   │   └── state.py         # Application state management
 │   ├── core/                # Config, logging, metrics, job manager, database
 │   ├── domain/              # VRP, liquidity, scoring, skew, direction, strategies
-│   ├── integrations/        # Tradier, Perplexity, Telegram, Yahoo, AlphaVantage
+│   ├── integrations/        # Tradier, Perplexity, Finnhub, Telegram, Yahoo, AlphaVantage
 │   ├── formatters/          # Telegram HTML, CLI ASCII formatters
 │   ├── application/         # Business logic (filters)
 │   └── jobs/                # Scheduled job implementations
@@ -132,6 +135,7 @@ cd cloud
 TRADIER_API_KEY=xxx
 ALPHA_VANTAGE_KEY=xxx
 PERPLEXITY_API_KEY=xxx
+FINNHUB_API_KEY=xxx
 TELEGRAM_BOT_TOKEN=xxx
 TELEGRAM_CHAT_ID=xxx
 
@@ -159,7 +163,7 @@ GCS_BUCKET=your-gcs-bucket
 
 ```bash
 cd cloud
-../core/venv/bin/python -m pytest tests/ -v    # 311 tests
+../core/venv/bin/python -m pytest tests/ -v    # 507 tests
 ```
 
 ---

@@ -7,6 +7,10 @@ Creates ASCII-formatted tables for Mac terminal display.
 from typing import List, Dict, Any
 from datetime import datetime
 
+from src.core.config import Settings
+
+settings = Settings()
+
 
 def format_ticker_line_cli(ticker_data: Dict[str, Any], rank: int) -> str:
     """
@@ -34,7 +38,7 @@ def format_digest_cli(
     date: str,
     tickers: List[Dict[str, Any]],
     budget_calls: int = 0,
-    budget_remaining: float = 5.00,
+    budget_remaining: float = settings.PERPLEXITY_MONTHLY_BUDGET,
 ) -> str:
     """
     Format morning digest for CLI with ASCII borders.
@@ -69,7 +73,7 @@ def format_digest_cli(
 
     lines.extend([
         thin,
-        f" Budget: {budget_calls}/40 calls | ${budget_remaining:.2f} remaining",
+        f" Budget: {budget_calls}/{settings.PERPLEXITY_DAILY_LIMIT} calls | ${budget_remaining:.2f} remaining",
         border,
     ])
 
@@ -123,7 +127,7 @@ def _format_digest_cli_grouped(
 
     lines.extend([
         thin,
-        f" Budget: {budget_calls}/40 calls | ${budget_remaining:.2f} remaining",
+        f" Budget: {budget_calls}/{settings.PERPLEXITY_DAILY_LIMIT} calls | ${budget_remaining:.2f} remaining",
         border,
     ])
 
@@ -172,3 +176,92 @@ def format_analyze_cli(data: Dict[str, Any]) -> str:
  Credit: ${credit:.2f} | Max Risk: ${risk:.2f} | POP: {pop}%
  Size: {size} contracts (Half-Kelly)
 {border}"""
+
+
+def format_council_cli(result) -> str:
+    """
+    Format council consensus result for CLI.
+
+    Args:
+        result: CouncilResult dataclass or dict
+
+    Returns:
+        ASCII-formatted table string
+    """
+    # Support both dataclass and dict
+    if hasattr(result, "ticker"):
+        d = result
+        get = lambda k, default=None: getattr(d, k, default)
+        members = d.members
+    else:
+        get = lambda k, default=None: result.get(k, default)
+        members = result.get("members", [])
+
+    ticker = get("ticker", "???")
+    earnings_date = get("earnings_date", "")
+    timing = get("timing", "")
+    price = get("price", 0)
+    status = get("status", "")
+
+    width = 60
+    border = "=" * width
+    thin = "-" * width
+
+    if status != "success":
+        return f"{border}\n COUNCIL: {ticker} - {status}\n{border}"
+
+    timing_str = f" ({timing})" if timing else ""
+    lines = [
+        border,
+        f" COUNCIL: {ticker} | {earnings_date}{timing_str} | ${price:.2f}",
+        border,
+        f" {'Member':<22} {'Dir':<6} {'Score':>6}  {'Status'}",
+        thin,
+    ]
+
+    for m in members:
+        if hasattr(m, "name"):
+            name, score, direction, failed, m_status = m.name, m.score, m.direction, m.failed, m.status
+        else:
+            name = m.get("name", "")
+            score = m.get("score", 0)
+            direction = m.get("direction", "")
+            failed = m.get("failed", False)
+            m_status = m.get("status", "")
+
+        if failed:
+            lines.append(f" {name:<22} {'--':<6} {'--':>6}  {m_status}")
+        else:
+            dir_short = {"bullish": "BULL", "bearish": "BEAR", "neutral": "NEUT"}.get(direction, direction[:4].upper())
+            lines.append(f" {name:<22} {dir_short:<6} {score:+.2f}  {m_status}")
+
+    lines.append(thin)
+
+    consensus_score = get("consensus_score", 0)
+    consensus_direction = get("consensus_direction", "neutral")
+    agreement = get("agreement", "LOW")
+    agreement_count = get("agreement_count", 0)
+    active_count = get("active_count", 0)
+
+    lines.append(f" Consensus: {consensus_direction.upper()} {consensus_score:+.2f} | {agreement} ({agreement_count}/{active_count})")
+
+    base_score = get("base_score", 0)
+    final_score = get("final_score", 0)
+    modifier = get("modifier", 0)
+    modifier_pct = f"{modifier * 100:+.0f}%" if modifier else "+0%"
+    lines.append(f" Score: {base_score:.0f} -> {final_score:.0f} ({modifier_pct})")
+
+    direction = get("direction", "NEUTRAL")
+    rule_applied = get("rule_applied", "")
+    lines.append(f" Direction: {direction}")
+    if rule_applied:
+        lines.append(f"   {rule_applied}")
+
+    risk_flags = get("risk_flags", [])
+    if risk_flags:
+        lines.append(thin)
+        for flag in risk_flags:
+            lines.append(f" WARNING: {flag}")
+
+    lines.append(border)
+    return "\n".join(lines)

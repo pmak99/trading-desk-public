@@ -24,7 +24,7 @@ Examples:
 ## Progress Display
 ```
 [1/5] Detecting earnings date...
-[2/5] Running core core analysis...
+[2/5] Running 2.0 core analysis...
 [3/5] Fetching news data (Finnhub)...
 [4/5] Loading/fetching sentiment...
 [5/5] Generating final report...
@@ -32,7 +32,28 @@ Examples:
 
 ## Reference Tables
 
-> Proprietary scoring thresholds and tier tables removed from public version.
+### VRP Tiers (BALANCED mode - default)
+| Tier | Threshold | Action |
+|------|-----------|--------|
+| EXCELLENT | >= 1.8x | Full size, high confidence |
+| GOOD | >= 1.4x | Full size |
+| MARGINAL | >= 1.2x | Reduced size |
+| SKIP | < 1.2x | No trade |
+
+### Liquidity Tiers (Relaxed Feb 2026)
+| Tier | OI/Position | Spread | Action |
+|------|-------------|--------|--------|
+| EXCELLENT | >=5x | <=12% | Full size |
+| GOOD | 2-5x | 12-18% | Full size |
+| WARNING | 1-2x | 18-25% | Reduce size |
+| REJECT | <1x | >25% | Reduce size (allowed but penalized) |
+
+### TRR Levels
+| Level | TRR | Max Contracts | Max Notional |
+|-------|-----|---------------|--------------|
+| HIGH | > 2.5x | 50 | $25,000 |
+| NORMAL | 1.5-2.5x | 100 | $50,000 |
+| LOW | < 1.5x | 100 | $50,000 |
 
 ## Step-by-Step Instructions
 
@@ -45,7 +66,7 @@ Parse arguments to extract ticker and optional date:
 # Sanitize ticker (alphanumeric only, uppercase) - CRITICAL for SQL safety
 TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
-sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT earnings_date, timing, CAST(julianday(earnings_date) - julianday('now') AS INTEGER) as days_until
    FROM earnings_calendar WHERE ticker='$TICKER' AND earnings_date >= date('now')
    ORDER BY earnings_date ASC LIMIT 1;"
@@ -67,9 +88,9 @@ No upcoming earnings found for {TICKER}
    Provide date manually: /analyze {TICKER} YYYY-MM-DD
 ```
 
-### Step 1: Run core Core Analysis
+### Step 1: Run 2.0 Core Analysis
 ```bash
-cd "$PROJECT_ROOT/core" && ./trade.sh $TICKER $EARNINGS_DATE
+cd "/Users/prashant/PycharmProjects/Trading Desk/2.0" && ./trade.sh $TICKER $EARNINGS_DATE
 ```
 
 **Parse from output:**
@@ -78,7 +99,7 @@ cd "$PROJECT_ROOT/core" && ./trade.sh $TICKER $EARNINGS_DATE
 - Liquidity tier and details
 - Directional bias (NEUTRAL/BULLISH/BEARISH from skew)
 - Strategy recommendations with Greeks
-- core Score
+- 2.0 Score
 
 **Error handling:** If script fails:
 ```
@@ -88,14 +109,14 @@ cd "$PROJECT_ROOT/core" && ./trade.sh $TICKER $EARNINGS_DATE
 
 ### Step 1b: Check Tail Risk Ratio (TRR)
 ```bash
-sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT tail_risk_ratio, tail_risk_level, max_contracts, max_notional, max_move, avg_move
    FROM position_limits WHERE ticker='$TICKER';"
 ```
 
 If no row returned, calculate TRR from historical_moves:
 ```bash
-sqlite3 "$PROJECT_ROOT/core/data/ivcrush.db" \
+sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
   "SELECT MAX(ABS(gap_move_pct)) as max_move, AVG(ABS(gap_move_pct)) as avg_move,
           COUNT(*) as quarters
    FROM historical_moves WHERE ticker='$TICKER';"
@@ -126,16 +147,16 @@ mcp__finnhub__finnhub_news_sentiment with:
 
 ### Step 3: AI Sentiment (Conditional)
 
-**Fetch sentiment for any ticker where core says "TRADEABLE".**
+**Fetch sentiment for any ticker where 2.0 says "TRADEABLE".**
 Skip sentiment ONLY if:
-- core output says "SKIP" or "NOT TRADEABLE" (VRP below marginal threshold)
+- 2.0 output says "SKIP" or "NOT TRADEABLE" (VRP below marginal threshold)
 - Liquidity = REJECT
 
 **Fallback chain:**
 
 1. **Check sentiment cache (3-hour TTL):**
    ```bash
-   sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+   sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
      "SELECT sentiment, source, cached_at FROM sentiment_cache
       WHERE ticker='$TICKER' AND date='$EARNINGS_DATE'
       AND cached_at > datetime('now', '-3 hours')
@@ -144,7 +165,7 @@ Skip sentiment ONLY if:
 
 2. **If cache miss, check budget:**
    ```bash
-   sqlite3 "$PROJECT_ROOT/sentiment/data/sentiment_cache.db" \
+   sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
      "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
    ```
 
@@ -167,9 +188,20 @@ Skip sentiment ONLY if:
 
 ### Step 4: Sentiment-Adjusted Direction (4.0)
 
-Apply the 3-Rule directional bias system (sentiment breaks ties, conflicts hedge to neutral, otherwise skew dominates) and calculate sentiment-adjusted score.
+**Apply the 3-Rule System:**
+| Original Skew | Sentiment | Result | Rule |
+|---------------|-----------|--------|------|
+| NEUTRAL | Bullish (>=+0.3) | BULLISH | Sentiment breaks tie |
+| NEUTRAL | Bearish (<=-0.3) | BEARISH | Sentiment breaks tie |
+| BULLISH | Bearish (<=-0.3) | NEUTRAL | Conflict -> hedge |
+| BEARISH | Bullish (>=+0.3) | NEUTRAL | Conflict -> hedge |
+| Any | Aligned/Neutral | Keep original | Skew dominates |
 
-> Specific modifier values and score formulas removed from public version.
+**Calculate 4.0 Score:**
+```
+Modifier: Strong Bullish +0.05, Bullish +0.03, Neutral 0.00, Bearish -0.07, Strong Bearish -0.12
+4.0 Score = 2.0 Score * (1 + modifier)
+```
 
 ## Output Format
 
@@ -208,11 +240,11 @@ AI SENTIMENT {(cached/fresh/websearch)}
    Risks: {bullet list, 2 max}
 
 DIRECTION (4.0 Adjusted)
-   core Skew: {NEUTRAL/BULLISH/BEARISH} -> 4.0: {ADJUSTED}
+   2.0 Skew: {NEUTRAL/BULLISH/BEARISH} -> 4.0: {ADJUSTED}
    Rule: {tiebreak|conflict_hedge|skew_dominates}
 
 STRATEGY RECOMMENDATIONS
-   [2-3 ranked strategies from core with:]
+   [2-3 ranked strategies from 2.0 with:]
    - Strategy type and strikes
    - Credit/debit and max profit/loss
    - POP (probability of profit)

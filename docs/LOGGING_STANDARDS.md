@@ -15,7 +15,7 @@ logger.error(f"{ticker}: Failed to fetch data: {error}", exc_info=True)
 
 # For system-level operations
 logger.info("Initializing Earnings Analyzer...")
-logger.warning("Daily API limit approaching (35/40 calls)")
+logger.warning("Daily API limit approaching (47/60 calls)")
 logger.error("Failed to load config file", exc_info=True)
 ```
 
@@ -194,7 +194,8 @@ logger.info(f"Cleaned up {count} old reports (>15 days)")
 
 ### Medium Priority:
 4. `src/ai/sentiment_analyzer.py`
-5. `src/data/calendars/alpha_vantage.py`
+5. `src/ai/strategy_generator.py`
+6. `src/data/calendars/alpha_vantage.py`
 
 ### Low Priority:
 7. All other `src/` files

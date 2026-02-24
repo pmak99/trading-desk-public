@@ -84,7 +84,7 @@ DB_PATH=data/ivcrush.db
 
 ## Testing
 
-> Tests have been removed from this public version. The full system has 1,576 tests across all subsystems.
+> Tests have been removed from this public version. The full system has 1,605 tests across all subsystems.
 
 ## Working Style Preferences
 
@@ -94,3 +94,4 @@ DB_PATH=data/ivcrush.db
 4. **Source env before API calls** — Always check for required environment variables (`TRADIER_API_KEY`, `TWELVE_DATA_KEY`, `PERPLEXITY_API_KEY`, etc.) before executing scripts that need them. Source `.env` if needed.
 5. **Verify data, don't infer** — When checking external sources (job postings, ticker lookups, API responses), verify actual data fields rather than inferring from URLs or titles. Validate ticker symbols against exchange lookup (e.g., "PFIZER" -> "PFE").
 6. **Complete output, no truncation** — Slash commands (`/prime`, `/whisper`, `/analyze`, `/backfill`, `/scan`, etc.) must run to full completion with complete output displayed. Never truncate results.
+7. **Always push after committing** — When creating git commits, always `git push` immediately after. Do not leave commits local-only.

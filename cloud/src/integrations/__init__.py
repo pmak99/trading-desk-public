@@ -6,6 +6,7 @@ from .alphavantage import AlphaVantageClient
 from .yahoo import YahooFinanceClient
 from .twelvedata import TwelveDataClient
 from .telegram import TelegramSender
+from .finnhub import FinnhubClient
 
 __all__ = [
     "TradierClient",
@@ -15,4 +16,5 @@ __all__ = [
     "YahooFinanceClient",
     "TwelveDataClient",
     "TelegramSender",
+    "FinnhubClient",
 ]

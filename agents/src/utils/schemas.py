@@ -6,6 +6,9 @@ Validates JSON responses from agents to ensure type safety and consistency.
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
+from .paths import MAIN_REPO  # noqa: F401 — ensures common/ is on sys.path
+from common.constants import PERPLEXITY_DAILY_LIMIT, PERPLEXITY_MONTHLY_BUDGET
+
 
 class AgentResponse(BaseModel):
     """Base schema for all agent responses."""
@@ -154,9 +157,9 @@ class DatabaseHealthStatus(BaseModel):
 class BudgetStatus(BaseModel):
     """Budget tracking status."""
     daily_calls: int = 0
-    daily_limit: int = 40
+    daily_limit: int = PERPLEXITY_DAILY_LIMIT
     monthly_cost: float = 0.0
-    monthly_budget: float = 5.0
+    monthly_budget: float = PERPLEXITY_MONTHLY_BUDGET
 
     @property
     def daily_remaining(self) -> int:

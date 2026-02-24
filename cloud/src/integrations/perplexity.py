@@ -12,7 +12,7 @@ import httpx
 from typing import Dict, Any, Optional
 
 from src.core.logging import log, get_request_id
-from src.core.budget import BudgetTracker, BudgetExhausted
+from src.core.budget import BudgetTracker, BudgetExhausted, DEFAULT_COST_ESTIMATE
 from src.core import metrics
 
 BASE_URL = "https://api.perplexity.ai"
@@ -129,6 +129,14 @@ class PerplexityClient:
         metrics.api_call("perplexity", duration_ms, success=False)
         return {"error": "All retries failed"}
 
+    async def query(self, messages: list) -> Dict[str, Any]:
+        """
+        Send a raw chat completion request.
+
+        Returns the full API response dict. Caller manages budget.
+        """
+        return await self._request(messages)
+
     # Model-specific pricing (per token) as of 2025
     PRICING = {
         "sonar": {"input": 0.000001, "output": 0.000001},           # $1/M input, $1/M output
@@ -178,7 +186,7 @@ class PerplexityClient:
             Parsed sentiment with direction, score, tailwinds, headwinds
         """
         # Atomic check-and-acquire with estimated cost (~$0.006/call for sonar model)
-        if not await self.budget.try_acquire_call_async("perplexity", cost=0.006):
+        if not await self.budget.try_acquire_call_async("perplexity", cost=DEFAULT_COST_ESTIMATE):
             log("warn", "Perplexity budget exceeded", ticker=ticker)
             raise BudgetExhausted(
                 service="perplexity",

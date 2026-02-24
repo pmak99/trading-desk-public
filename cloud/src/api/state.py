@@ -34,6 +34,7 @@ from src.integrations import (
     TelegramSender,
     YahooFinanceClient,
     TwelveDataClient,
+    FinnhubClient,
 )
 
 
@@ -133,6 +134,7 @@ class AppState:
     historical_repo: Optional[HistoricalMovesRepository] = None
     sentiment_cache: Optional[SentimentCacheRepository] = None
     vrp_cache: Optional[VRPCacheRepository] = None
+    finnhub: Optional[FinnhubClient] = None
 
 
 # Global state reference - set during lifespan, used by getters
@@ -217,6 +219,7 @@ async def lifespan(app: FastAPI):
         historical_repo=HistoricalMovesRepository(settings.DB_PATH),
         sentiment_cache=SentimentCacheRepository(settings.DB_PATH),
         vrp_cache=VRPCacheRepository(settings.DB_PATH),
+        finnhub=FinnhubClient(settings.finnhub_api_key) if settings.finnhub_api_key else None,
     )
 
     # Store in app.state for access via request.app.state
@@ -250,6 +253,8 @@ async def lifespan(app: FastAPI):
     log("info", "Shutting down Trading Desk 5.0")
 
     # Close HTTP clients
+    if state.finnhub:
+        await state.finnhub.close()
     if state.twelvedata:
         await state.twelvedata.close()
 

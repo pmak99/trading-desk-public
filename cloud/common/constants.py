@@ -50,18 +50,18 @@ WEIGHT_LIQUIDITY = 0.20
 
 # =============================================================================
 # Sentiment Modifiers - Applied to base score
-# sentiment Score = core Score x (1 + modifier)
+# 4.0 Score = 2.0 Score x (1 + modifier)
 # =============================================================================
 SENTIMENT_STRONG_BULLISH_THRESHOLD = 0.6
 SENTIMENT_BULLISH_THRESHOLD = 0.2
 SENTIMENT_BEARISH_THRESHOLD = -0.2
 SENTIMENT_STRONG_BEARISH_THRESHOLD = -0.6
 
-SENTIMENT_MODIFIER_STRONG_BULLISH = 0.12   # +12%
-SENTIMENT_MODIFIER_BULLISH = 0.07          # +7%
+SENTIMENT_MODIFIER_STRONG_BULLISH = 0.05   # +5% (dampened: bullish accuracy ~55%)
+SENTIMENT_MODIFIER_BULLISH = 0.03          # +3% (dampened: bullish accuracy ~55%)
 SENTIMENT_MODIFIER_NEUTRAL = 0.0           # 0%
-SENTIMENT_MODIFIER_BEARISH = -0.07         # -7%
-SENTIMENT_MODIFIER_STRONG_BEARISH = -0.12  # -12%
+SENTIMENT_MODIFIER_BEARISH = -0.03         # -3% (dampened: bearish accuracy 0/4, Feb 2026)
+SENTIMENT_MODIFIER_STRONG_BEARISH = -0.05  # -5% (dampened: bearish accuracy 0/4, Feb 2026)
 
 
 # =============================================================================
@@ -83,7 +83,7 @@ HIGH_BULLISH_WARNING_THRESHOLD = 0.7  # Score >= 0.7 triggers warning
 # =============================================================================
 # Budget Limits
 # =============================================================================
-PERPLEXITY_DAILY_LIMIT = 40
+PERPLEXITY_DAILY_LIMIT = 60
 PERPLEXITY_MONTHLY_BUDGET = 5.00
-PERPLEXITY_WARN_THRESHOLD = 0.80  # 80% = 32 calls
+PERPLEXITY_WARN_THRESHOLD = 0.80  # 80% = 48 calls
 PERPLEXITY_COST_PER_CALL_ESTIMATE = 0.006

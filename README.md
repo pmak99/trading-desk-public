@@ -10,7 +10,7 @@ A real trading system used daily for options trading around earnings announcemen
 
 The system also tracks **Tail Risk Ratio (TRR)** — how extreme a stock's worst historical earnings move is compared to its average — to size positions safely and avoid outsized losses.
 
-**580+ commits** of iterative AI pair-programming development (Oct 2025 – Feb 2026).
+**590+ commits** of iterative AI pair-programming development (Oct 2025 – Feb 2026).
 
 ## Architecture
 
@@ -68,7 +68,7 @@ The [`CLAUDE.md`](CLAUDE.md) file serves as a domain knowledge base for Claude C
 
 ### Development Methodology
 
-All 580+ commits show AI-assisted development patterns:
+All 590+ commits show AI-assisted development patterns:
 - Test-driven development with Claude Code running tests iteratively
 - Progressive system evolution from local CLI to cloud autopilot to agent orchestration
 

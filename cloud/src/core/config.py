@@ -77,6 +77,7 @@ class Settings:
             'API_KEY': os.environ.get('API_KEY'),
             'TELEGRAM_WEBHOOK_SECRET': os.environ.get('TELEGRAM_WEBHOOK_SECRET'),
             'TWELVE_DATA_KEY': os.environ.get('TWELVE_DATA_KEY'),
+            'FINNHUB_API_KEY': os.environ.get('FINNHUB_API_KEY'),
         }
 
         # If any individual key is set, use individual env vars
@@ -183,6 +184,13 @@ class Settings:
             logging.getLogger(__name__).warning("TWELVE_DATA_KEY not configured or empty")
             return ''
         return key.strip()
+
+    @property
+    def finnhub_api_key(self) -> str:
+        """Finnhub API key (optional). Empty string is treated as unconfigured."""
+        self._load_secrets()
+        key = self._secrets.get('FINNHUB_API_KEY', '')
+        return key.strip() if key else ''
 
     # Account size bounds (reasonable range for options trading)
     ACCOUNT_SIZE_MIN = 1_000          # $1,000 minimum
