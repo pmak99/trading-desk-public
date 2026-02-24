@@ -12,7 +12,6 @@ import httpx
 from typing import Dict, Any, Optional
 
 from src.core.logging import log, get_request_id
-from src.core.budget import BudgetTracker, BudgetExhausted, DEFAULT_COST_ESTIMATE
 from src.core import metrics
 
 BASE_URL = "https://api.perplexity.ai"
@@ -74,12 +73,10 @@ class PerplexityClient:
         api_key: str,
         db_path: str = "data/ivcrush.db",
         model: str = None,
-        budget_tracker: Optional[BudgetTracker] = None
     ):
         self.api_key = api_key
         self.db_path = db_path
         self.model = model or os.environ.get("PERPLEXITY_MODEL", self.DEFAULT_MODEL)
-        self.budget = budget_tracker or BudgetTracker(db_path=db_path)
 
     async def _request(self, messages: list) -> Dict[str, Any]:
         """Make request to Perplexity API with retry handling."""
@@ -185,14 +182,6 @@ class PerplexityClient:
         Returns:
             Parsed sentiment with direction, score, tailwinds, headwinds
         """
-        # Atomic check-and-acquire with estimated cost (~$0.006/call for sonar model)
-        if not await self.budget.try_acquire_call_async("perplexity", cost=DEFAULT_COST_ESTIMATE):
-            log("warn", "Perplexity budget exceeded", ticker=ticker)
-            raise BudgetExhausted(
-                service="perplexity",
-                reason=f"Budget exhausted before fetching sentiment for {ticker}"
-            )
-
         # Validate ticker format to prevent prompt injection
         if not re.match(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$', ticker.upper()):
             raise ValueError(f"Invalid ticker format: {ticker}")

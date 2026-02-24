@@ -9,7 +9,6 @@ import asyncio
 from typing import Dict, Any, Optional
 from pydantic import ValidationError
 
-from common.constants import PERPLEXITY_DAILY_LIMIT
 from ..integration.cache_4_0 import Cache4_0
 from ..integration.perplexity_5_0 import Perplexity5_0
 from ..utils.schemas import SentimentFetchResponse
@@ -60,18 +59,6 @@ class SentimentFetchAgent:
 
         Returns:
             Sentiment data dict conforming to SentimentFetchResponse schema
-
-        Example:
-            result = await agent.fetch_sentiment("NVDA", "2026-02-05")
-            # Returns:
-            # {
-            #     "ticker": "NVDA",
-            #     "direction": "bullish",
-            #     "score": 0.65,
-            #     "catalysts": ["Datacenter demand strong", "AI growth accelerating"],
-            #     "risks": ["Competition from AMD", "Supply constraints"],
-            #     "error": None
-            # }
         """
         try:
             # Check cache first (unless force refresh)
@@ -87,17 +74,6 @@ class SentimentFetchAgent:
                         logger.warning(f"Invalid cached data for {ticker}, refetching: {e}")
                         # Continue to fetch fresh data below
 
-            # Check if budget allows API call
-            if not self.cache.can_call_perplexity():
-                return {
-                    'ticker': ticker,
-                    'direction': None,
-                    'score': None,
-                    'catalysts': [],
-                    'risks': [],
-                    'error': f'Perplexity API budget limit reached ({PERPLEXITY_DAILY_LIMIT} calls/day)'
-                }
-
             # Check if Perplexity client is available
             if not self.perplexity:
                 return {
@@ -112,13 +88,12 @@ class SentimentFetchAgent:
             # Fetch sentiment via Perplexity API
             sentiment_data = await self._fetch_via_api(ticker, earnings_date)
 
-            # Validate with schema BEFORE recording budget/caching
-            # This ensures we only track successful, valid responses
+            # Validate with schema BEFORE caching
+            # This ensures we only cache successful, valid responses
             validated = SentimentFetchResponse(**sentiment_data)
 
-            # Cache first, then record budget (only after successful cache write)
+            # Cache the result
             self.cache.cache_sentiment(ticker, earnings_date, sentiment_data)
-            self.cache.record_call(cost=0.006)
 
             # Return dict with success field (property not included by default)
             result = validated.model_dump()
@@ -152,9 +127,6 @@ class SentimentFetchAgent:
     ) -> Dict[str, Any]:
         """
         Fetch sentiment via Perplexity API with retry for transient failures.
-
-        Calls Perplexity API directly to get sentiment analysis
-        for the ticker's upcoming earnings. Retries once on transient failure.
 
         Args:
             ticker: Stock ticker symbol
@@ -220,21 +192,3 @@ class SentimentFetchAgent:
             Cached sentiment dict or None if not cached/expired
         """
         return self.cache.get_cached_sentiment(ticker, earnings_date)
-
-    def check_budget_available(self) -> bool:
-        """
-        Check if Perplexity API budget allows more calls.
-
-        Returns:
-            True if budget allows calls, False if limit reached
-        """
-        return self.cache.can_call_perplexity()
-
-    def get_budget_status(self) -> Dict[str, Any]:
-        """
-        Get current budget status.
-
-        Returns:
-            Budget status dict with daily/monthly usage
-        """
-        return self.cache.get_budget_status()

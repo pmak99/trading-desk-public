@@ -9,7 +9,7 @@
 - **12 Scheduled Jobs** - Pre-market prep, sentiment scan, morning digest, outcome recording
 - **Telegram Bot** - Mobile access via `/health`, `/whisper`, `/analyze TICKER`, `/council TICKER`
 - **Full VRP Stack** - VRP, liquidity, skew, and 3-rule direction system (ported from 2.0/4.0)
-- **AI Sentiment** - Perplexity + Finnhub powered with budget tracking
+- **AI Sentiment** - Perplexity + Finnhub powered
 - **Council** - 6-source AI sentiment consensus for pre-earnings analysis
 - **Performance Optimized** - Parallel analysis (5 concurrent), VRP caching (1-6hr TTL)
 
@@ -42,12 +42,11 @@ docker compose -f docker-compose.yml up --build
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/` | GET | None | Health check (public) |
-| `/api/health` | GET | API Key | System health + budget |
+| `/api/health` | GET | API Key | System health |
 | `/api/analyze?ticker=XXX` | GET | API Key | Deep ticker analysis |
 | `/api/whisper` | GET | API Key | High-VRP opportunities |
 | `/api/scan?date=YYYY-MM-DD` | GET | API Key | Scan specific date |
 | `/api/council?ticker=XXX` | GET | API Key | 6-source AI sentiment council |
-| `/api/budget` | GET | API Key | 7-day spending history |
 | `/prime` | POST | API Key | Pre-cache sentiment |
 | `/dispatch` | POST | API Key | Job scheduler trigger |
 | `/telegram` | POST | Webhook | Bot commands |
@@ -60,7 +59,7 @@ docker compose -f docker-compose.yml up --build
 
 | Command | Description |
 |---------|-------------|
-| `/health` | System status and budget |
+| `/health` | System status |
 | `/whisper` | Today's high-VRP opportunities |
 | `/analyze TICKER` | Deep analysis |
 | `/council TICKER` | 6-source AI sentiment consensus |

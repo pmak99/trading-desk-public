@@ -21,7 +21,6 @@ from datetime import timedelta
 
 from src.core.config import settings, now_et, today_et, MARKET_TZ
 from src.core.logging import log
-from src.core.budget import BudgetTracker, BudgetExhausted
 from src.core.database import DatabaseSync
 from src.core import metrics
 from src.integrations import (
@@ -332,7 +331,6 @@ class JobRunner(BaseJobHandler):
 
         # Calculate VRP and filter to candidates worth priming
         cache = SentimentCacheRepository(settings.DB_PATH)
-        budget = BudgetTracker(db_path=settings.DB_PATH)
 
         candidates = []
         failed_tickers = []
@@ -377,16 +375,8 @@ class JobRunner(BaseJobHandler):
 
         primed = 0
         prime_failed = []
-        budget_skipped = []  # Tickers skipped due to budget exhaustion
 
         for i, c in enumerate(candidates[:MAX_PRIME_CALLS]):
-            if not budget.can_call("perplexity"):
-                # Track remaining tickers that won't be primed due to budget
-                budget_skipped = [x["ticker"] for x in candidates[i:MAX_PRIME_CALLS]]
-                log("warn", "Perplexity budget exhausted during prime",
-                    primed_so_far=primed, skipped_tickers=budget_skipped)
-                break
-
             try:
                 # Rate limiting between Perplexity API calls
                 if i > 0 and i % RATE_LIMIT_BATCH_SIZE == 0:
@@ -399,13 +389,6 @@ class JobRunner(BaseJobHandler):
                     log("info", "Primed sentiment", ticker=c["ticker"], vrp=c["vrp_ratio"])
                 else:
                     log("debug", "Empty sentiment response", ticker=c["ticker"])
-            except BudgetExhausted as be:
-                # Budget exhausted mid-loop - track remaining tickers
-                budget_skipped = [x["ticker"] for x in candidates[i:MAX_PRIME_CALLS]]
-                log("warn", "Budget exhausted mid-prime",
-                    ticker=c["ticker"], skipped_tickers=budget_skipped, reason=str(be))
-                metrics.count("ivcrush.budget.exhausted", {"job": "sentiment_scan"})
-                break
             except Exception as ex:
                 prime_failed.append(c["ticker"])
                 log("warn", "Failed to prime ticker",
@@ -423,9 +406,6 @@ class JobRunner(BaseJobHandler):
         }
         if failed_tickers or prime_failed:
             result["failed_tickers"] = failed_tickers + prime_failed
-        if budget_skipped:
-            result["budget_skipped"] = budget_skipped
-            metrics.gauge("ivcrush.job.budget_skipped", len(budget_skipped), {"job": "sentiment_scan"})
 
         return result
 
@@ -481,7 +461,6 @@ class JobRunner(BaseJobHandler):
 
         # Build opportunities list with VRP and sentiment
         cache = SentimentCacheRepository(settings.DB_PATH)
-        budget = BudgetTracker(db_path=settings.DB_PATH)
 
         opportunities: List[Dict[str, Any]] = []
         failed_tickers = []
@@ -585,9 +564,6 @@ class JobRunner(BaseJobHandler):
         # Sort by score descending
         opportunities.sort(key=lambda x: x["score"], reverse=True)
 
-        # Get budget info
-        budget_summary = budget.get_summary("perplexity")
-
         # Format and send digest (only if there are opportunities)
         log("info", "Sending digest", opportunities=len(opportunities))
 
@@ -598,8 +574,6 @@ class JobRunner(BaseJobHandler):
                 digest_msg = format_digest(
                     target_dates[0],
                     opportunities[:10],  # Top 10
-                    budget_summary["today_calls"],
-                    budget_summary["budget_remaining"],
                 )
                 sent = await self.telegram.send_message(digest_msg)
             else:

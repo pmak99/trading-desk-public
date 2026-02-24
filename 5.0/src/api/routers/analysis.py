@@ -41,7 +41,6 @@ from src.api.dependencies import (
     get_alphavantage,
     get_perplexity,
     get_twelvedata,
-    get_budget_tracker,
     get_historical_repo,
     get_sentiment_cache,
     get_vrp_cache,
@@ -811,9 +810,8 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
             liquidity_tier=liquidity_tier,
         )
 
-        # Get sentiment if budget allows
+        # Get sentiment
         sentiment_data = None
-        budget = get_budget_tracker()
         cache = get_sentiment_cache()
 
         # Check cache first (unless fresh=True)
@@ -822,7 +820,7 @@ async def analyze(ticker: str, date: str = None, format: str = "json", fresh: bo
             if cached:
                 sentiment_data = cached
 
-        if not sentiment_data and budget.can_call("perplexity"):
+        if not sentiment_data:
             perplexity = get_perplexity()
             sentiment_data = await perplexity.get_sentiment(ticker, target_date)
             # Save to cache if successful
@@ -998,9 +996,6 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
         # Sort by score descending
         results.sort(key=lambda x: x["score"], reverse=True)
 
-        # Get budget info
-        budget = get_budget_tracker()
-
         # If fresh=True, fetch real-time sentiment for top 5 tickers
         # This provides up-to-date direction for Telegram requests
         if fresh and results:
@@ -1011,12 +1006,6 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
             for i in range(top_n):
                 ticker = results[i]["ticker"]
                 earnings_date = results[i]["earnings_date"]
-
-                # Check budget before each call
-                if not budget.can_call("perplexity"):
-                    log("warn", "Budget exhausted during fresh sentiment fetch",
-                        fetched=i, remaining=top_n-i)
-                    break
 
                 try:
                     sentiment_data = await perplexity.get_sentiment(ticker, earnings_date)
@@ -1039,8 +1028,6 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
                     log("warn", "Failed to fetch fresh sentiment",
                         ticker=ticker, error=type(e).__name__)
 
-        summary = budget.get_summary("perplexity")
-
         response = {
             "status": "success",
             "target_dates": target_dates,
@@ -1048,10 +1035,6 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
             "qualified_count": len(results),
             "error_count": scan_errors,
             "tickers": results[:10],  # Top 10
-            "budget": {
-                "calls_today": summary["today_calls"],
-                "remaining": summary["budget_remaining"],
-            },
         }
 
         # Format for CLI if requested
@@ -1072,8 +1055,6 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
             cli_output = format_digest_cli(
                 target_dates[0],
                 ticker_data,
-                summary["today_calls"],
-                summary["budget_remaining"],
             )
             # Record metrics
             duration_ms = (time.time() - start_time) * 1000
@@ -1085,10 +1066,6 @@ async def whisper(date: str = None, format: str = "json", fresh: bool = False, _
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_success("whisper", duration_ms)
         metrics.tickers_qualified(len(results))
-        metrics.budget_update(
-            remaining_calls=settings.PERPLEXITY_DAILY_LIMIT - summary["today_calls"],
-            remaining_dollars=summary["budget_remaining"]
-        )
 
         return response
 
@@ -1125,9 +1102,8 @@ async def council(ticker: str, format: str = "json", fresh: bool = False, _: boo
         tradier = get_tradier()
         repo = get_historical_repo()
         cache = get_sentiment_cache()
-        budget = get_budget_tracker()
 
-        result = await run_council(ticker, finnhub, perplexity, tradier, repo, cache, budget)
+        result = await run_council(ticker, finnhub, perplexity, tradier, repo, cache)
 
         duration_ms = (time.time() - start_time) * 1000
         metrics.request_success("council", duration_ms)

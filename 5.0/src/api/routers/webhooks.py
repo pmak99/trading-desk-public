@@ -19,7 +19,6 @@ from src.api.state import _mask_sensitive
 from src.api.dependencies import (
     verify_telegram_secret,
     get_telegram,
-    get_budget_tracker,
     get_perplexity,
     get_sentiment_cache,
 )
@@ -203,14 +202,10 @@ async def telegram_webhook(request: Request):
 
         # Parse command
         if text.startswith("/health"):
-            budget = get_budget_tracker()
-            summary = budget.get_summary("perplexity")
             response = (
                 f"🏥 <b>System Health</b>\n\n"
                 f"Status: ✅ Healthy\n"
-                f"Time: {now_et().strftime('%H:%M ET')}\n"
-                f"Budget: {summary['today_calls']}/{summary['daily_limit']} calls\n"
-                f"Remaining: ${summary['budget_remaining']:.2f}"
+                f"Time: {now_et().strftime('%H:%M ET')}"
             )
             await telegram.send_message(response)
 
@@ -234,12 +229,9 @@ async def telegram_webhook(request: Request):
                     }
                     for t in result["tickers"][:7]
                 ]
-                budget = result.get("budget", {})
                 digest = format_digest(
                     result["target_dates"][0],
                     ticker_data,
-                    budget.get("calls_today", 0),
-                    budget.get("remaining", settings.PERPLEXITY_MONTHLY_BUDGET),
                 )
                 await telegram.send_message(digest)
             else:
@@ -325,7 +317,6 @@ async def telegram_webhook(request: Request):
                         tradier=get_tradier(),
                         repo=get_historical_repo(),
                         cache=get_sentiment_cache(),
-                        budget=get_budget_tracker(),
                     )
                     await telegram.send_message(format_council(result))
                 except Exception as e:

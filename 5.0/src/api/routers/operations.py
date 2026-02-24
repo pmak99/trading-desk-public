@@ -1,13 +1,11 @@
 """
 Operations endpoints for Trading Desk 5.0.
 
-Provides sentiment priming, budget status, and alert configuration.
+Provides sentiment priming and alert configuration.
 """
 
-import sqlite3
 import time
 from datetime import timedelta
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -25,7 +23,6 @@ from src.api.dependencies import (
     get_alphavantage,
     get_tradier,
     get_perplexity,
-    get_budget_tracker,
     get_historical_repo,
     get_sentiment_cache,
 )
@@ -39,8 +36,7 @@ async def prime(date: str = None, _: bool = Depends(verify_api_key)):
     Pre-cache sentiment for upcoming earnings.
 
     Fetches and caches sentiment data for all high-VRP tickers with earnings
-    in the target date range. Run this 7-8 AM before market open to ensure
-    predictable API costs and instant /whisper responses.
+    in the target date range. Run this 7-8 AM before market open.
 
     Args:
         date: Optional specific date (YYYY-MM-DD). Defaults to next 5 days.
@@ -68,7 +64,6 @@ async def prime(date: str = None, _: bool = Depends(verify_api_key)):
         # Get dependencies
         repo = get_historical_repo()
         tradier = get_tradier()
-        budget = get_budget_tracker()
         cache = get_sentiment_cache()
         perplexity = get_perplexity()
 
@@ -116,11 +111,6 @@ async def prime(date: str = None, _: bool = Depends(verify_api_key)):
                     skipped_count += 1
                     continue
 
-                # Check budget before calling
-                if not budget.can_call("perplexity"):
-                    log("warn", "Budget exhausted during prime", primed=primed_count)
-                    break
-
                 # Fetch and cache sentiment
                 sentiment_data = await perplexity.get_sentiment(ticker, earnings_date)
                 if sentiment_data and not sentiment_data.get("error"):
@@ -145,10 +135,6 @@ async def prime(date: str = None, _: bool = Depends(verify_api_key)):
             "already_cached": cached_count,
             "skipped": skipped_count,
             "failed": failed_tickers if failed_tickers else None,
-            "budget": {
-                "calls_today": budget.get_summary("perplexity")["today_calls"],
-                "remaining": budget.get_summary("perplexity")["budget_remaining"],
-            },
         }
 
     except Exception as e:
@@ -156,50 +142,3 @@ async def prime(date: str = None, _: bool = Depends(verify_api_key)):
         metrics.request_error("prime", duration_ms)
         log("error", "Prime failed", error=type(e).__name__, details=_mask_sensitive(str(e)))
         raise HTTPException(500, "Prime failed")
-
-
-@router.get("/api/budget")
-async def budget_status(_: bool = Depends(verify_api_key)):
-    """
-    Detailed API budget status.
-
-    Returns current usage, daily/monthly limits, and historical spending.
-    """
-    budget = get_budget_tracker()
-    summary = budget.get_summary("perplexity")
-
-    # Get recent spending history from database
-    try:
-        conn = sqlite3.connect(settings.DB_PATH)
-        try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT date, SUM(cost) as daily_cost, COUNT(*) as calls
-                FROM api_budget
-                WHERE date >= date('now', '-7 days')
-                GROUP BY date
-                ORDER BY date DESC
-            """)
-            recent_spending = [
-                {"date": row[0], "cost": row[1], "calls": row[2]}
-                for row in cursor.fetchall()
-            ]
-        finally:
-            conn.close()
-    except Exception:
-        recent_spending = []
-
-    return {
-        "status": "success",
-        "timestamp_et": now_et().isoformat(),
-        "perplexity": {
-            "calls_today": summary["today_calls"],
-            "daily_limit": summary["daily_limit"],
-            "can_call": summary["can_call"],
-            "month_cost": summary["month_cost"],
-            "monthly_budget": settings.PERPLEXITY_MONTHLY_BUDGET,
-            "budget_remaining": summary["budget_remaining"],
-            "budget_utilization_pct": round((settings.PERPLEXITY_MONTHLY_BUDGET - summary["budget_remaining"]) / settings.PERPLEXITY_MONTHLY_BUDGET * 100, 1),
-        },
-        "recent_spending": recent_spending,
-    }

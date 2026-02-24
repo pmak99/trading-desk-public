@@ -518,7 +518,6 @@ class TestAPIKeyValidation:
             with patch('src.agents.sentiment_fetch.Cache4_0') as mock_cache_cls:
                 mock_cache = MagicMock()
                 mock_cache.get_cached_sentiment.return_value = None
-                mock_cache.can_call_perplexity.return_value = True
                 mock_cache_cls.return_value = mock_cache
 
                 agent = SentimentFetchAgent()

@@ -22,14 +22,13 @@ Examples:
 
 ## Progress Display
 ```
-[1/8] Checking current status...
-[2/8] Syncing DB with cloud (GCS) + Google Drive backup...
-[3/8] Creating local database backups...
-[4/8] Checking for sparse tickers...
-[5/8] Cleaning expired caches...
-[6/8] Validating data integrity...
-[7/8] Checking budget status...
-[8/8] Syncing stale earnings dates...
+[1/7] Checking current status...
+[2/7] Syncing DB with cloud (GCS) + Google Drive backup...
+[3/7] Creating local database backups...
+[4/7] Checking for sparse tickers...
+[5/7] Cleaning expired caches...
+[6/7] Validating data integrity...
+[7/7] Syncing stale earnings dates...
 ```
 
 ## Step-by-Step Instructions
@@ -129,22 +128,7 @@ sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.d
    FROM sentiment_history;"
 ```
 
-### Step 8: Budget Status Check
-
-**8a. Recent budget:**
-```bash
-sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-  "SELECT date, calls, cost FROM api_budget ORDER BY date DESC LIMIT 3;"
-```
-
-**8b. Monthly spend:**
-```bash
-sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-  "SELECT strftime('%Y-%m', date) as month, SUM(calls) as total_calls, ROUND(SUM(cost), 2) as total_cost
-   FROM api_budget GROUP BY month ORDER BY month DESC LIMIT 3;"
-```
-
-### Step 9: Sync Stale Earnings Dates (if running all or `sync`)
+### Step 8: Sync Stale Earnings Dates (if running all or `sync`)
 
 ```bash
 cd "/Users/prashant/PycharmProjects/Trading Desk/2.0" && ./trade.sh sync
@@ -186,10 +170,6 @@ VALIDATION
    [check] No orphaned records
    [check] Sentiment history: X records (Y with outcomes)
 
-BUDGET STATUS
-   Today:     X/60 calls ($X.XX)
-   This month: X calls ($X.XX of $5.00)
-
 SYNC
    [check] Calendar synced - X new earnings discovered
 
@@ -213,4 +193,4 @@ MAINTENANCE COMPLETE
 ## Recommended Schedule
 - **Weekly:** Full `/maintenance` on weekends
 - **After whisper:** Check if new tickers need backfill
-- **Monthly:** Review budget spend and data growth
+- **Monthly:** Review data growth

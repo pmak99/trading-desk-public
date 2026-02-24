@@ -154,19 +154,6 @@ def run_health_check():
             logger.error(f"  Error: {db_status['error']}")
 
         logger.info("")
-
-        # Budget
-        logger.info("Budget Status:")
-        budget = result['budget']
-        logger.info(f"  Daily: {budget['daily_calls']}/{budget['daily_limit']} calls")
-        logger.info(f"  Monthly: ${budget['monthly_cost']:.2f}/${budget['monthly_budget']:.2f}")
-
-        daily_remaining = budget['daily_limit'] - budget['daily_calls']
-        monthly_remaining = budget['monthly_budget'] - budget['monthly_cost']
-
-        logger.info(f"  Remaining: {daily_remaining} calls, ${monthly_remaining:.2f}")
-
-        logger.info("")
         logger.info("=" * 60)
 
         # Exit code based on status
@@ -398,7 +385,7 @@ def run_cache_cleanup():
     try:
         cache = Cache4_0()
 
-        logger.info("[1/4] Analyzing sentiment cache...")
+        logger.info("[1/3] Analyzing sentiment cache...")
 
         # Get cache statistics
         cache_stats = cache.get_cache_stats()
@@ -416,26 +403,19 @@ def run_cache_cleanup():
         logger.info("")
 
         # Cleanup sentiment cache
-        logger.info("[2/4] Cleaning sentiment cache...")
+        logger.info("[2/3] Cleaning sentiment cache...")
         cleaned_sentiment = cache.cleanup_sentiment_cache(max_age_hours=3)
         logger.info(f"  ✓ Removed {cleaned_sentiment} stale entries")
         logger.info("")
 
-        # Cleanup budget tracker
-        logger.info("[3/4] Cleaning budget tracker...")
-        cleaned_budget = cache.cleanup_budget_tracker(max_age_days=30)
-        logger.info(f"  ✓ Removed {cleaned_budget} old entries (>30 days)")
-        logger.info("")
-
         # Calculate disk space freed (rough estimate)
         # Assume ~1KB per cache entry
-        disk_freed_kb = (cleaned_sentiment + cleaned_budget) * 1
+        disk_freed_kb = cleaned_sentiment * 1
         disk_freed_mb = disk_freed_kb / 1024
 
-        logger.info("[4/4] Summary:")
+        logger.info("[3/3] Summary:")
         logger.info("")
         logger.info(f"  Sentiment cache: {cleaned_sentiment} entries removed")
-        logger.info(f"  Budget tracker: {cleaned_budget} entries removed")
         logger.info(f"  Disk space freed: ~{disk_freed_mb:.2f} MB")
         logger.info(f"  Note: Run VACUUM on databases to reclaim space on disk")
         logger.info("")

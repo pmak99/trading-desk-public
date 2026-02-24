@@ -78,12 +78,3 @@ STRONG_BEARISH_THRESHOLD = -0.6  # Score <= -0.6 triggers size increase
 SIZE_MODIFIER_BULLISH = 0.9      # 10% size reduction for strong bullish
 SIZE_MODIFIER_BEARISH = 1.1      # 10% size increase for strong bearish
 HIGH_BULLISH_WARNING_THRESHOLD = 0.7  # Score >= 0.7 triggers warning
-
-
-# =============================================================================
-# Budget Limits
-# =============================================================================
-PERPLEXITY_DAILY_LIMIT = 60
-PERPLEXITY_MONTHLY_BUDGET = 5.00
-PERPLEXITY_WARN_THRESHOLD = 0.80  # 80% = 48 calls
-PERPLEXITY_COST_PER_CALL_ESTIMATE = 0.006

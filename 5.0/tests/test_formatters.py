@@ -111,12 +111,11 @@ def test_format_digest():
         },
     ]
 
-    digest = format_digest("2025-12-12", tickers, budget_calls=12, budget_remaining=4.85)
+    digest = format_digest("2025-12-12", tickers)
 
     assert "Dec 12" in digest or "2025-12-12" in digest
     assert "AVGO" in digest
     assert "LULU" in digest
-    assert "12/60" in digest
 
 
 def test_format_ticker_line_cli():
@@ -148,7 +147,7 @@ def test_format_digest_cli():
         },
     ]
 
-    digest = format_digest_cli("2025-12-12", tickers, 12, 4.85)
+    digest = format_digest_cli("2025-12-12", tickers)
 
     # Should have ASCII borders
     assert "=" in digest or "-" in digest
@@ -176,7 +175,7 @@ def test_format_digest_grouped_by_date():
         },
     ]
 
-    digest = format_digest("2026-01-27", tickers, budget_calls=15, budget_remaining=4.91)
+    digest = format_digest("2026-01-27", tickers)
 
     # Should use grouped header
     assert "Earnings Digest" in digest
@@ -209,10 +208,6 @@ def test_format_digest_grouped_by_date():
     assert ticker_lines[2].startswith("3.")
     assert ticker_lines[3].startswith("4.")
 
-    # Budget line
-    assert "15/60" in digest
-    assert "$4.91" in digest
-
 
 def test_format_digest_cli_grouped_by_date():
     """Format CLI digest grouped by earnings date with ASCII sub-headers."""
@@ -234,7 +229,7 @@ def test_format_digest_cli_grouped_by_date():
         },
     ]
 
-    digest = format_digest_cli("2026-01-27", tickers, budget_calls=15, budget_remaining=4.91)
+    digest = format_digest_cli("2026-01-27", tickers)
 
     # Should use grouped header
     assert "EARNINGS DIGEST" in digest
@@ -275,7 +270,7 @@ def test_format_digest_fallback_without_earnings_date():
     ]
 
     # Telegram fallback
-    digest_tg = format_digest("2025-12-12", tickers, budget_calls=12, budget_remaining=4.85)
+    digest_tg = format_digest("2025-12-12", tickers)
     assert "Dec 12 EARNINGS" in digest_tg
     assert "Earnings Digest" not in digest_tg
 
@@ -292,7 +287,7 @@ def test_format_digest_fallback_without_earnings_date():
             "strategy": "IC 380/420"
         },
     ]
-    digest_cli = format_digest_cli("2025-12-12", cli_tickers, 12, 4.85)
+    digest_cli = format_digest_cli("2025-12-12", cli_tickers)
     assert "Dec 12 EARNINGS" in digest_cli
     assert "EARNINGS DIGEST" not in digest_cli
 

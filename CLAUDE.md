@@ -158,7 +158,7 @@ Rate limit: 60 req/min per IP.
 - Note: ~239 trade_journal rows have sale_date < acquired_date — this is Fidelity's convention for credit trades (sell-to-open), not a bug. Strategies table is normalized to chronological order (acquired=open, sale=close).
 
 **sentiment_cache.db** (`4.0/data/sentiment_cache.db`) — 3 tables, WAL mode:
-- `sentiment_cache` (3hr TTL) | `api_budget` (daily counts) | `sentiment_history` (permanent)
+- `sentiment_cache` (3hr TTL) | `api_budget` (dormant) | `sentiment_history` (permanent)
 
 ## Key Queries
 

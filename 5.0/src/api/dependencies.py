@@ -13,7 +13,6 @@ from fastapi.security import APIKeyHeader
 from src.core.config import settings
 from src.core.logging import log
 from src.core.job_manager import JobManager
-from src.core.budget import BudgetTracker
 from src.jobs import JobRunner
 from src.domain import (
     HistoricalMovesRepository,
@@ -41,7 +40,6 @@ def _get_state() -> AppState:
         state = AppState(
             job_manager=JobManager(db_path=settings.DB_PATH),
             job_runner=JobRunner(),
-            budget_tracker=BudgetTracker(db_path=settings.DB_PATH),
             tradier=TradierClient(settings.tradier_api_key),
             alphavantage=AlphaVantageClient(settings.alpha_vantage_key),
             perplexity=PerplexityClient(
@@ -69,10 +67,6 @@ def get_job_manager() -> JobManager:
 
 def get_job_runner() -> JobRunner:
     return _get_state().job_runner
-
-
-def get_budget_tracker() -> BudgetTracker:
-    return _get_state().budget_tracker
 
 
 def get_tradier() -> TradierClient:

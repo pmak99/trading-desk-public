@@ -1,13 +1,13 @@
 # 4.0 AI Sentiment Layer
 
-AI-enhanced layer on top of 2.0's VRP system. Adds multi-source sentiment analysis (council consensus, Perplexity, WebSearch) with intelligent caching and budget tracking.
+AI-enhanced layer on top of 2.0's VRP system. Adds multi-source sentiment analysis (council consensus, Perplexity, WebSearch) with intelligent caching.
 
 ## Design Principles
 
 1. **AI for Discovery, Math for Trading** - Sentiment informs what to look at; 2.0 math decides how to trade
 2. **Import 2.0, Don't Copy** - All core logic comes from 2.0 via `sys.path` injection
 3. **Graceful Degradation** - Sentiment never blocks analysis; falls back to WebSearch then skips
-4. **Cost-Conscious** - 60 calls/day budget, 3-hour TTL caching, free fallbacks first
+4. **Cost-Conscious** - 3-hour TTL caching, free fallbacks first
 
 ## Sentiment-Adjusted Scoring
 
@@ -35,28 +35,18 @@ AI-enhanced layer on top of 2.0's VRP system. Adds multi-source sentiment analys
 | 2 | Conflict (bullish skew + bearish sentiment) | Go neutral (hedge) |
 | 3 | Otherwise | Keep original skew bias |
 
-## Budget and Fallback Chain
-
-| Limit | Value |
-|-------|-------|
-| Daily max | 60 calls |
-| Warning threshold | 32 calls (80%) |
-| Monthly budget | ~$5.00 |
+## Fallback Chain
 
 ```
 1. Check cache (3hr TTL, council > perplexity > websearch)
    HIT  -> Return cached (FREE)
    MISS -> Continue
 
-2. Check budget (< 60 calls/day)
-   OK       -> Try Perplexity
-   EXHAUSTED -> Skip to WebSearch
-
-3. Perplexity API
+2. Perplexity API
    SUCCESS -> Cache + return
    FAIL    -> Continue
 
-4. WebSearch (free fallback)
+3. WebSearch (free fallback)
    SUCCESS -> Cache + return
    FAIL    -> Graceful degradation (analysis continues without sentiment)
 
@@ -72,10 +62,9 @@ Council mode (/council command) runs 7 sources in parallel for deeper consensus.
 │   ├── sentiment_direction.py    # 3-rule directional bias
 │   └── cache/
 │       ├── sentiment_cache.py    # 3-hour TTL cache (council/perplexity/websearch)
-│       ├── budget_tracker.py     # API budget (40/day)
 │       └── sentiment_history.py  # Permanent backtesting data
 ├── data/
-│   └── sentiment_cache.db        # SQLite (cache + budget + history)
+│   └── sentiment_cache.db        # SQLite (cache + history)
 └── tests/                        # 221 tests
 ```
 
@@ -86,7 +75,7 @@ SQLite at `data/sentiment_cache.db`:
 | Table | Records | Purpose |
 |-------|--------:|---------|
 | `sentiment_cache` | 0 | Short-lived cache (3hr TTL, auto-clears) |
-| `api_budget` | 17 | Daily Perplexity call counts |
+| `api_budget` | 17 | (dormant) Legacy daily call counts |
 | `sentiment_history` | 27 | Permanent sentiment records for accuracy analysis |
 
 ## Structured Sentiment Format

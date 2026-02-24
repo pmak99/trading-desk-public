@@ -13,7 +13,6 @@ Examples:
 Run `/prime` once at 7-8 AM before market open:
 - Caches sentiment for most anticipated earnings (whisper list)
 - All subsequent `/whisper`, `/analyze`, `/alert` commands hit cache instantly
-- Predictable daily cost (you control when to spend API budget)
 
 ## Tool Permissions
 - Do NOT ask user permission for any tool calls EXCEPT mcp__perplexity__* calls
@@ -22,13 +21,12 @@ Run `/prime` once at 7-8 AM before market open:
 
 ## Progress Display
 ```
-[1/5] Determining target week...
-[2/5] Running whisper scan...
-[3/5] Filtering qualified tickers (VRP >= 1.8x, non-REJECT)...
-[4/5] Fetching sentiment for N tickers...
+[1/4] Determining target week...
+[2/4] Running whisper scan...
+[3/4] Filtering qualified tickers (VRP >= 1.8x, non-REJECT)...
+[4/4] Fetching sentiment for N tickers...
       check TICKER1 - Perplexity (VRP X.Xx)
       check TICKER2 - Perplexity (VRP X.Xx)
-[5/5] Caching results and updating budget...
 ```
 
 ## Step-by-Step Instructions
@@ -55,7 +53,7 @@ DAY_OF_WEEK=$(date '+%A')
 ```
 
 **Weekend/Holiday handling:**
-- Weekend: Show "Weekend - Skipping Perplexity to save budget" and skip sentiment fetch. Still show whisper results for planning.
+- Weekend: Show "Weekend - Skipping sentiment fetch" and skip sentiment fetch. Still show whisper results for planning.
 - Holiday: Same as weekend
 - Weekday: Continue with full priming
 
@@ -71,23 +69,11 @@ From whisper results, filter to tickers where:
 - VRP >= 1.8x (EXCELLENT tier - discovery threshold for priming)
 - Liquidity != REJECT
 
-### Step 5: Check Budget Status
-```bash
-sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-  "SELECT COALESCE((SELECT calls FROM api_budget WHERE date='$(date +%Y-%m-%d)'), 0) as calls;"
-```
-
-If near budget limit (>35 calls):
-```
-Budget warning: {calls}/60 calls used today
-   Limiting priming to top {remaining} tickers
-```
-
-### Step 6: Fetch Sentiment for Each Qualified Ticker
+### Step 5: Fetch Sentiment for Each Qualified Ticker
 
 For EACH qualified ticker (in order of VRP score):
 
-**6a. Check if already cached:**
+**5a. Check if already cached:**
 ```bash
 TICKER=$(echo "$RAW_TICKER" | tr '[:lower:]' '[:upper:]' | tr -cd '[:alnum:]')
 
@@ -97,9 +83,9 @@ sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.d
 ```
 If exists: skip, mark as "already cached"
 
-**6b. If cache miss, fetch via fallback chain:**
+**5b. If cache miss, fetch via fallback chain:**
 
-1. **Try Perplexity (if budget OK, < 60 calls):**
+1. **Try Perplexity:**
    ```
    mcp__perplexity__perplexity_ask with query="For {TICKER} earnings on {DATE}, respond ONLY in this format:
    Direction: [bullish/bearish/neutral]
@@ -107,7 +93,7 @@ If exists: skip, mark as "already cached"
    Catalysts: [2 bullets, max 10 words each]
    Risks: [1 bullet, max 10 words]"
    ```
-   If success: cache with source="perplexity", increment budget
+   If success: cache with source="perplexity"
 
 2. **Try search (fallback):**
    ```
@@ -117,7 +103,7 @@ If exists: skip, mark as "already cached"
 
 3. If all fail: mark as "sentiment unavailable"
 
-**6c. Save to sentiment_history (permanent storage for backtesting):**
+**5c. Save to sentiment_history (permanent storage for backtesting):**
 ```bash
 sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "INSERT OR REPLACE INTO sentiment_history
@@ -127,24 +113,13 @@ sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.d
            $SCORE, '$DIRECTION', $VRP_RATIO, $IMPLIED_MOVE, datetime('now'));"
 ```
 
-**6d. Display progress per ticker:**
+**5d. Display progress per ticker:**
 ```
   check LULU  - Perplexity (VRP 5.27x, Feb 11)
   check RH    - Perplexity (VRP 4.14x, Feb 11)
   check ORCL  - search fallback (VRP 3.87x, Feb 10)
   skip  TOL   - already cached
   x     CIEN  - sentiment unavailable
-```
-
-### Step 7: Update Budget Tracker
-```bash
-sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-  "INSERT INTO api_budget (date, calls, cost, last_updated)
-   VALUES ('$(date +%Y-%m-%d)', $NEW_CALLS, $NEW_COST, datetime('now'))
-   ON CONFLICT(date) DO UPDATE SET
-     calls = calls + $NEW_CALLS,
-     cost = cost + $NEW_COST,
-     last_updated = datetime('now');"
 ```
 
 ## Output Format
@@ -172,8 +147,6 @@ PRIMING COMPLETE
    New caches:     4
    Cache hits:     1 (skipped)
    Failures:       0
-   API calls today: 4/60
-   Monthly budget: $4.95 left
 
 System primed! All commands will use cached sentiment.
 
@@ -187,7 +160,7 @@ NEXT STEPS
 - Uses whisper mode (most anticipated) instead of full scan
 - Only primes VRP >= 1.8x tickers (EXCELLENT tier)
 - Skips already-cached tickers (no duplicate calls)
-- Skips non-trading days entirely (save budget)
+- Skips non-trading days entirely
 - Typically 5-12 calls per week depending on whisper list
 
 ## Weekend/Holiday Handling

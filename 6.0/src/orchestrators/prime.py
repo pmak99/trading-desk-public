@@ -11,7 +11,6 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 
-from common.constants import PERPLEXITY_DAILY_LIMIT
 from .base import BaseOrchestrator
 from ..agents.sentiment_fetch import SentimentFetchAgent
 from ..agents.health import HealthCheckAgent
@@ -24,13 +23,12 @@ class PrimeOrchestrator(BaseOrchestrator):
     Orchestrator for /prime - Pre-cache sentiment data.
 
     Workflow:
-    1. Run health check (verify Perplexity budget available)
+    1. Run health check (verify system is operational)
     2. Fetch earnings calendar for date range
     3. Filter tickers already cached (< 3 hours old)
-    4. Check budget allows fetching remaining tickers
-    5. Spawn N SentimentFetchAgents in parallel (budget-limited)
-    6. Cache all results
-    7. Return summary (tickers cached, API calls made, budget remaining)
+    4. Spawn N SentimentFetchAgents in parallel
+    5. Cache all results
+    6. Return summary (tickers cached, API calls made)
 
     Example:
         orchestrator = PrimeOrchestrator()
@@ -69,7 +67,7 @@ class PrimeOrchestrator(BaseOrchestrator):
             )
         """
         # Step 1: Health check
-        logger.info("[1/6] Running health check...")
+        logger.info("[1/5] Running health check...")
         health_agent = HealthCheckAgent()
         health_result = health_agent.check_health()
 
@@ -81,16 +79,8 @@ class PrimeOrchestrator(BaseOrchestrator):
                 'health': health_result
             }
 
-        # Get budget status (don't block yet - may be all cached)
-        budget_status = health_result.get('budget', {})
-        daily_limit = budget_status.get('daily_limit', PERPLEXITY_DAILY_LIMIT)
-        daily_calls = budget_status.get('daily_calls', 0)
-        daily_remaining = daily_limit - daily_calls
-
-        logger.info(f"Budget status: {daily_remaining} calls remaining (used {daily_calls}/{daily_limit})")
-
         # Step 2: Fetch earnings calendar
-        logger.info("[2/6] Fetching earnings calendar...")
+        logger.info("[2/5] Fetching earnings calendar...")
         earnings = self.fetch_earnings_calendar(days_ahead)
 
         if not earnings:
@@ -105,7 +95,7 @@ class PrimeOrchestrator(BaseOrchestrator):
         logger.info(f"Found {len(earnings)} earnings")
 
         # Step 3: Filter already cached
-        logger.info("[3/6] Checking cache status...")
+        logger.info("[3/5] Checking cache status...")
         sentiment_agent = SentimentFetchAgent()
         to_fetch = []
         already_cached = []
@@ -134,28 +124,8 @@ class PrimeOrchestrator(BaseOrchestrator):
                 'message': f'All {len(already_cached)} tickers already cached'
             }
 
-        # Step 4: Budget check
-        logger.info("[4/6] Verifying budget for API calls...")
-
-        # If budget exhausted and we need to fetch tickers, return error
-        if daily_remaining <= 0 and len(to_fetch) > 0:
-            logger.error("Perplexity API budget exhausted and uncached tickers remain")
-            return {
-                'success': False,
-                'error': f'Perplexity API budget exhausted ({PERPLEXITY_DAILY_LIMIT} calls/day limit). Cannot fetch {len(to_fetch)} uncached tickers.',
-                'tickers_cached': len(already_cached),
-                'uncached_tickers': len(to_fetch),
-                'budget': budget_status
-            }
-
-        # If we need more calls than available, limit to budget
-        if len(to_fetch) > daily_remaining:
-            logger.warning(f"Need {len(to_fetch)} calls but only {daily_remaining} remaining")
-            logger.warning(f"Limiting to first {daily_remaining} tickers")
-            to_fetch = to_fetch[:daily_remaining]
-
-        # Step 5: Parallel sentiment fetching
-        logger.info(f"[5/6] Fetching sentiment for {len(to_fetch)} tickers in parallel...")
+        # Step 4: Parallel sentiment fetching
+        logger.info(f"[4/5] Fetching sentiment for {len(to_fetch)} tickers in parallel...")
         results = await self._parallel_sentiment_fetch(to_fetch)
 
         # Count successes
@@ -172,8 +142,8 @@ class PrimeOrchestrator(BaseOrchestrator):
                 error = result.get('error', 'unknown error')
                 logger.warning(f"  [{i+1}] {ticker}: {error}")
 
-        # Step 6: Summary
-        logger.info("[6/6] Caching complete")
+        # Step 5: Summary
+        logger.info("[5/5] Caching complete")
 
         return {
             'success': True,
@@ -182,7 +152,6 @@ class PrimeOrchestrator(BaseOrchestrator):
             'already_cached_count': len(already_cached),
             'newly_cached_count': len(successful),
             'failed_count': failed,
-            'budget_remaining': daily_remaining - len(to_fetch),
             'summary': self.get_orchestration_summary()
         }
 
@@ -236,7 +205,6 @@ class PrimeOrchestrator(BaseOrchestrator):
 
         tickers_cached = result.get('tickers_cached', 0)
         api_calls = result.get('api_calls_made', 0)
-        budget_remaining = result.get('budget_remaining', 0)
         already_cached = result.get('already_cached_count', 0)
         newly_cached = result.get('newly_cached_count', 0)
         failed = result.get('failed_count', 0)
@@ -251,7 +219,6 @@ class PrimeOrchestrator(BaseOrchestrator):
             f"  - Failed: {failed}",
             "",
             f"API calls made: {api_calls}",
-            f"Budget remaining: {budget_remaining} calls/day",
             "=" * 60
         ]
 

@@ -86,10 +86,9 @@ sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.d
 ```
 
 **5b. If cache miss, use fallback chain:**
-1. Check budget (40/day limit)
-2. Try Perplexity (max 3 calls total)
-3. Fall back to `mcp__perplexity__perplexity_search`
-4. Graceful skip if all fail
+1. Try Perplexity (max 3 calls total)
+2. Fall back to `mcp__perplexity__perplexity_search`
+3. Graceful skip if all fail
 
 Calculate 4.0 Score for each:
 ```

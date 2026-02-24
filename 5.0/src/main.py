@@ -19,7 +19,6 @@ from src.api.dependencies import (  # noqa: F401
     _get_state,
     get_job_manager,
     get_job_runner,
-    get_budget_tracker,
     get_tradier,
     get_alphavantage,
     get_perplexity,

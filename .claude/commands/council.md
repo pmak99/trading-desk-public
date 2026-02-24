@@ -35,14 +35,13 @@ Total: 2 Perplexity calls max per invocation.
 
 ## Progress Display
 ```
-[1/8] Detecting earnings and current price...
-[2/8] Running free council members (5 sources)...
-[3/8] Running Perplexity Research (budget gate)...
-[4/8] Calculating weighted consensus...
-[5/8] Determining direction and modifiers...
-[6/8] Caching council result...
-[7/8] Calculating agreement metrics...
-[8/8] Displaying council report...
+[1/7] Detecting earnings and current price...
+[2/7] Running free council members (5 sources)...
+[3/7] Running Perplexity Research...
+[4/7] Calculating weighted consensus...
+[5/7] Determining direction and modifiers...
+[6/7] Caching council result...
+[7/7] Displaying council report...
 ```
 
 ## Reference Tables
@@ -236,15 +235,8 @@ sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
 
 If no historical_moves exist for ticker: mark member as failed, redistribute weight.
 
-### Step 3: Check Budget + Run Perplexity Research (25% weight) [3/8]
+### Step 3: Run Perplexity Research (25% weight) [3/7]
 
-**Budget gate:**
-```bash
-sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-  "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
-```
-
-**If calls < 60:** Run Perplexity Research:
 ```
 mcp__perplexity__perplexity_research with query="For {TICKER} earnings on {EARNINGS_DATE}, analyze:
 1. Analyst consensus (Buy/Hold/Sell) and recent changes (30 days)
@@ -264,9 +256,9 @@ Analyst Trend: [upgrading/stable/downgrading]"
 
 Parse response for direction, score, and details. Status: "fresh"
 
-**If calls >= 60:** Skip Perplexity Research, mark member as failed, redistribute 25% weight to others.
+If Perplexity fails: mark member as failed, redistribute 25% weight to others.
 
-### Step 4: Calculate Weighted Consensus [4/8]
+### Step 4: Calculate Weighted Consensus [4/7]
 
 ```
 For each active member:
@@ -285,7 +277,7 @@ consensus_score = weighted_sum / sum_of_active_weights
      Try /analyze {TICKER} for single-source analysis.
   ```
 
-### Step 5: Determine Direction and Modifiers [5/8]
+### Step 5: Determine Direction and Modifiers [5/7]
 
 **Map consensus score to sentiment tier:**
 ```
@@ -308,7 +300,7 @@ To get the 2.0 Score, run a quick analysis or estimate from VRP/liquidity contex
 4.0 Score = 2.0 Score * (1 + modifier)
 ```
 
-### Step 6: Cache Council Result [6/8]
+### Step 6: Cache Council Result [6/7]
 
 **Cache in sentiment_cache (3hr TTL):**
 ```bash
@@ -328,15 +320,7 @@ sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.d
            $SCORE, '$DIRECTION');"
 ```
 
-**Update api_budget if Perplexity was called:**
-```bash
-# Add 1 for each Perplexity call made (max 2: research + quick)
-sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-  "INSERT INTO api_budget (date, calls) VALUES ('$(date +%Y-%m-%d)', $PERPLEXITY_CALLS)
-   ON CONFLICT(date) DO UPDATE SET calls = calls + $PERPLEXITY_CALLS;"
-```
-
-### Step 7: Calculate Agreement Metrics [7/8]
+### Step 7: Calculate Agreement Metrics & Display Report [7/7]
 
 Count how many members agree with the final consensus direction:
 ```
@@ -347,8 +331,6 @@ HIGH:   >= 71% (5/7 or better)
 MEDIUM: >= 57% (4/7)
 LOW:    < 57%  (3/7 or fewer)
 ```
-
-### Step 8: Display Council Report [8/8]
 
 ## Output Format
 
@@ -417,12 +399,10 @@ RISK FLAGS
    {TRR HIGH warning if applicable}
    {Low agreement warning if applicable}
    {Contrarian signal if skew != consensus}
-   {Budget warning if Perplexity skipped}
 
 CACHE STATUS
    Council cached as source="council" (3hr TTL)
    Saved to sentiment_history (permanent)
-   Budget: {N}/60 calls today
 
 NEXT STEPS
    Run /analyze {TICKER} for strategy recommendations
@@ -432,7 +412,6 @@ NEXT STEPS
 ## Error Handling
 
 - Individual member failure: exclude from weighted sum, redistribute weight
-- Perplexity budget exceeded: skip both Perplexity members, proceed with 5 free sources
 - Finnhub 403 (premium endpoint): mark member failed, proceed
 - <3 active members: abort with "INSUFFICIENT DATA — council inconclusive"
 - No bias_predictions for ticker: try most recent entry, else exclude skew member
@@ -443,7 +422,6 @@ NEXT STEPS
 - Maximum 2 Perplexity calls per invocation (research + quick)
 - 5 of 7 sources are completely free
 - Perplexity Quick checks cache first (3hr TTL)
-- Budget gate: skip Perplexity if daily calls >= 60
 - Council result is cached and reused by /analyze, /whisper, /alert, /scan
 
 ## Typical Workflow

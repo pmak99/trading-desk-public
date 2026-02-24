@@ -81,7 +81,7 @@ Save the removed duplicates (ticker, removed_date, kept_date) for the dedup note
 
 ### Step 3: Check Sentiment Cache Readiness
 
-Query `sentiment_cache.db` for cached tickers and today's API budget:
+Query `sentiment_cache.db` for cached tickers:
 
 ```sql
 -- Cache hits (fresh within 3 hours)
@@ -90,14 +90,7 @@ WHERE ticker IN ({deduped_ticker_list})
   AND cached_at > datetime('now', '-3 hours');
 ```
 
-```sql
--- Today's API budget
-SELECT COALESCE(SUM(call_count), 0) as calls_today
-FROM api_budget
-WHERE date = date('now');
-```
-
-Report: `Sentiment: X/{total} cached | Budget: Y/60 calls used today`
+Report: `Sentiment: X/{total} cached`
 
 ### Step 4: Finnhub Enrichment
 
@@ -373,7 +366,7 @@ EARNINGS CALENDAR — Week of {MONDAY} to {FRIDAY}
 ================================================================
 
 Week at a Glance:  Mon(5)  Tue(14)***  Wed(11)  Thu(3)  Fri(0)
-Sentiment: 8/33 cached | Budget: 12/60 calls used today
+Sentiment: 8/33 cached
 
 ────────────────────────────────────────────────────────────────
 MONDAY {DATE}

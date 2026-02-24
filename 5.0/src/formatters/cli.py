@@ -7,11 +7,6 @@ Creates ASCII-formatted tables for Mac terminal display.
 from typing import List, Dict, Any
 from datetime import datetime
 
-from src.core.config import Settings
-
-settings = Settings()
-
-
 def format_ticker_line_cli(ticker_data: Dict[str, Any], rank: int) -> str:
     """
     Format single ticker for CLI.
@@ -37,8 +32,6 @@ def format_ticker_line_cli(ticker_data: Dict[str, Any], rank: int) -> str:
 def format_digest_cli(
     date: str,
     tickers: List[Dict[str, Any]],
-    budget_calls: int = 0,
-    budget_remaining: float = settings.PERPLEXITY_MONTHLY_BUDGET,
 ) -> str:
     """
     Format morning digest for CLI with ASCII borders.
@@ -47,7 +40,7 @@ def format_digest_cli(
     has_dates = any(t.get("earnings_date") for t in tickers)
 
     if has_dates:
-        return _format_digest_cli_grouped(tickers, budget_calls, budget_remaining)
+        return _format_digest_cli_grouped(tickers)
 
     # Fallback: single-date format (backward compatible)
     try:
@@ -73,7 +66,6 @@ def format_digest_cli(
 
     lines.extend([
         thin,
-        f" Budget: {budget_calls}/{settings.PERPLEXITY_DAILY_LIMIT} calls | ${budget_remaining:.2f} remaining",
         border,
     ])
 
@@ -82,8 +74,6 @@ def format_digest_cli(
 
 def _format_digest_cli_grouped(
     tickers: List[Dict[str, Any]],
-    budget_calls: int,
-    budget_remaining: float,
 ) -> str:
     """Format CLI digest grouped by earnings_date with ASCII sub-headers."""
     # Group by earnings_date
@@ -127,7 +117,6 @@ def _format_digest_cli_grouped(
 
     lines.extend([
         thin,
-        f" Budget: {budget_calls}/{settings.PERPLEXITY_DAILY_LIMIT} calls | ${budget_remaining:.2f} remaining",
         border,
     ])
 

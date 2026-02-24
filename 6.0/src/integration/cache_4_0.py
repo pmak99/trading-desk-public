@@ -1,6 +1,6 @@
-"""Integration wrapper for 4.0's caching and budget tracking.
+"""Integration wrapper for 4.0's caching.
 
-Provides access to sentiment cache and budget tracker without duplication.
+Provides access to sentiment cache without duplication.
 """
 
 import logging
@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 CACHE_AGE_UNKNOWN = float('inf')
 
 from ..utils.paths import MAIN_REPO, REPO_4_0
-from common.constants import PERPLEXITY_DAILY_LIMIT, PERPLEXITY_MONTHLY_BUDGET, PERPLEXITY_COST_PER_CALL_ESTIMATE
 
 # Add 4.0/src to Python path
 _main_repo = MAIN_REPO
@@ -33,29 +32,23 @@ sys.path.insert(1, _4_0_src_str)  # Position 1 (2.0/ should be at 0)
 
 # Import 4.0 components
 from cache.sentiment_cache import SentimentCache
-from cache.budget_tracker import BudgetTracker
 
 
 class Cache4_0:
     """
-    Wrapper for 4.0's caching and budget tracking.
+    Wrapper for 4.0's caching.
 
     Provides access to:
     - sentiment_cache: 3-hour TTL sentiment caching
-    - budget_tracker: $5/month, 40 calls/day tracking
 
     Example:
         cache = Cache4_0()
         sentiment = cache.get_cached_sentiment("NVDA", "2026-02-05")
-        if cache.can_call_perplexity():
-            # Make Perplexity API call
-            cache.record_call("perplexity", cost=PERPLEXITY_COST_PER_CALL_ESTIMATE)
     """
 
     def __init__(self):
-        """Initialize cache and budget tracker."""
+        """Initialize cache."""
         self.sentiment_cache = SentimentCache()
-        self.budget_tracker = BudgetTracker()
 
     def get_cached_sentiment(
         self,
@@ -106,49 +99,6 @@ class Cache4_0:
         # Store with source='perplexity'
         self.sentiment_cache.set(ticker, earnings_date, 'perplexity', sentiment_str)
 
-    def can_call_perplexity(self) -> bool:
-        """
-        Check if budget allows Perplexity API call.
-
-        Returns:
-            True if budget allows, False otherwise
-        """
-        return self.budget_tracker.can_call()
-
-    def record_call(
-        self,
-        cost: float = PERPLEXITY_COST_PER_CALL_ESTIMATE
-    ):
-        """
-        Record an API call for budget tracking.
-
-        Args:
-            cost: Cost per call (default: $0.006)
-        """
-        self.budget_tracker.record_call(cost)
-
-    def get_budget_status(self) -> Dict[str, Any]:
-        """
-        Get current budget status.
-
-        Returns:
-            Budget status dict with daily/monthly usage
-        """
-        info = self.budget_tracker.get_info()
-        monthly_summary = self.budget_tracker.get_monthly_summary()
-
-        return {
-            'daily_calls': info.calls_today,
-            'daily_limit': PERPLEXITY_DAILY_LIMIT,
-            'monthly_cost': monthly_summary.get('month_cost', 0.0),
-            'monthly_budget': PERPLEXITY_MONTHLY_BUDGET,
-            'daily_remaining': info.calls_remaining,
-            'monthly_remaining': max(
-                0.0,
-                PERPLEXITY_MONTHLY_BUDGET - monthly_summary.get('month_cost', 0.0)
-            )
-        }
-
     def get_cache_statistics(self) -> Dict[str, Any]:
         """
         Get cache statistics for monitoring.
@@ -166,33 +116,6 @@ class Cache4_0:
             Number of entries cleared
         """
         return self.sentiment_cache.clear_expired()
-
-    def check_perplexity_health(self) -> Dict[str, Any]:
-        """
-        Check Perplexity API budget health.
-
-        Returns:
-            Health status dict with remaining calls and status
-        """
-        status = self.get_budget_status()
-
-        # Determine health status
-        daily_remaining = status['daily_remaining']
-        monthly_remaining = status['monthly_remaining']
-
-        if daily_remaining == 0 or monthly_remaining <= 0:
-            health_status = 'error'
-        elif daily_remaining < 5 or monthly_remaining < 0.50:
-            health_status = 'degraded'
-        else:
-            health_status = 'ok'
-
-        return {
-            'status': health_status,
-            'remaining_calls': daily_remaining,
-            'monthly_remaining': monthly_remaining,
-            'error': None if health_status == 'ok' else 'Budget limit approaching'
-        }
 
     def get_cache_stats(self) -> Dict[str, Any]:
         """
@@ -257,39 +180,6 @@ class Cache4_0:
             cursor.execute(
                 "DELETE FROM sentiment_cache WHERE cached_at < ?",
                 (cutoff_time.isoformat(),)
-            )
-
-            deleted_count = cursor.rowcount
-            conn.commit()
-
-        return deleted_count
-
-    def cleanup_budget_tracker(self, max_age_days: int = 30) -> int:
-        """
-        Clean up budget tracker entries older than specified age.
-
-        Args:
-            max_age_days: Maximum age in days (default: 30)
-
-        Returns:
-            Number of entries removed
-        """
-        from datetime import datetime, timedelta
-
-        cutoff_date = datetime.now() - timedelta(days=max_age_days)
-
-        import sqlite3
-        budget_db = _main_repo / "4.0" / "data" / "perplexity_budget.db"
-
-        with sqlite3.connect(str(budget_db)) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-
-            # Delete old entries (use date field for filtering)
-            cutoff_date_str = cutoff_date.strftime('%Y-%m-%d')
-            cursor.execute(
-                "DELETE FROM api_budget WHERE date < ?",
-                (cutoff_date_str,)
             )
 
             deleted_count = cursor.rowcount

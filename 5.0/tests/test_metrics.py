@@ -256,15 +256,6 @@ class TestConvenienceHelpers:
                     "ivcrush.api.latency", 75.0, {"provider": "tradier"}
                 )
 
-    def test_budget_update(self):
-        """budget_update() records calls and dollars remaining."""
-        from src.core import metrics
-
-        with patch.object(metrics, "gauge") as mock_gauge:
-            metrics.budget_update(35, 4.25)
-            assert mock_gauge.call_count == 2
-            mock_gauge.assert_any_call("ivcrush.budget.calls_remaining", 35)
-            mock_gauge.assert_any_call("ivcrush.budget.dollars_remaining", 4.25)
 
 
 class TestPushMetric:

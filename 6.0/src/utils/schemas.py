@@ -7,7 +7,6 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from .paths import MAIN_REPO  # noqa: F401 — ensures common/ is on sys.path
-from common.constants import PERPLEXITY_DAILY_LIMIT, PERPLEXITY_MONTHLY_BUDGET
 
 
 class AgentResponse(BaseModel):
@@ -154,24 +153,6 @@ class DatabaseHealthStatus(BaseModel):
         return v
 
 
-class BudgetStatus(BaseModel):
-    """Budget tracking status."""
-    daily_calls: int = 0
-    daily_limit: int = PERPLEXITY_DAILY_LIMIT
-    monthly_cost: float = 0.0
-    monthly_budget: float = PERPLEXITY_MONTHLY_BUDGET
-
-    @property
-    def daily_remaining(self) -> int:
-        """Remaining daily API calls."""
-        return max(0, self.daily_limit - self.daily_calls)
-
-    @property
-    def monthly_remaining(self) -> float:
-        """Remaining monthly budget."""
-        return max(0.0, self.monthly_budget - self.monthly_cost)
-
-
 class SentimentFetchResponse(BaseModel):
     """Response from SentimentFetchAgent."""
     ticker: str
@@ -220,7 +201,6 @@ class HealthCheckResponse(BaseModel):
     status: str
     apis: Dict[str, APIHealthStatus]
     database: DatabaseHealthStatus
-    budget: BudgetStatus
 
     @field_validator('status')
     @classmethod

@@ -9,11 +9,10 @@ Verify all connections and system dependencies before trading.
 
 ## Progress Display
 ```
-[1/5] Checking market day status...
-[2/5] Testing MCP server connectivity...
-[3/5] Running 2.0 system health...
-[4/5] Checking Perplexity budget...
-[5/5] Checking sentiment cache stats...
+[1/4] Checking market day status...
+[2/4] Testing MCP server connectivity...
+[3/4] Running 2.0 system health...
+[4/4] Checking sentiment cache stats...
 ```
 
 ## Step-by-Step Instructions
@@ -39,8 +38,8 @@ Test each available MCP server with a lightweight call. If any MCP fails, show t
 mcp__finnhub__finnhub_stock_market_data with operation="quote" and symbol="SPY"
 ```
 
-**Perplexity** (do NOT test with an actual call - just report budget status):
-- Check budget DB instead of making a live call
+**Perplexity** (do NOT test with an actual call - just confirm MCP server is configured):
+- Note: Perplexity is available via MCP (no budget limits)
 
 **Memory**:
 ```
@@ -60,23 +59,7 @@ This verifies:
 - Alpha Vantage API health
 - Historical data counts
 
-### Step 4: Check Perplexity Budget
-```bash
-sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-  "SELECT date, calls, cost FROM api_budget ORDER BY date DESC LIMIT 5;"
-```
-
-Also show monthly totals:
-```bash
-sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-  "SELECT strftime('%Y-%m', date) as month, SUM(calls) as total_calls,
-          ROUND(SUM(cost), 2) as total_cost
-   FROM api_budget GROUP BY month ORDER BY month DESC LIMIT 3;"
-```
-
-If table doesn't exist: report "Budget tracking not initialized (first run)".
-
-### Step 5: Check Sentiment Cache Stats
+### Step 4: Check Sentiment Cache Stats
 ```bash
 sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
   "SELECT source, COUNT(*) as count FROM sentiment_cache GROUP BY source;"
@@ -110,17 +93,12 @@ Market Status:
 MCP Servers:
   [check/x] Finnhub        [Connected - SPY $XXX.XX / Error message]
   [check/x] Memory         [Connected (X entities) / Error message]
-  [info]    Perplexity     [Budget checked below - not tested live]
+  [info]    Perplexity     [Available via MCP - not tested live]
 
 2.0 System:
   [check/x] Database       [X historical records, Y upcoming earnings]
   [check/x] Tradier API    [Healthy/Error]
   [check/x] Alpha Vantage  [Healthy/Error]
-
-Budget (Perplexity):
-  Today: X/60 calls ($X.XX spent)
-  Month: X calls ($X.XX of $5.00)
-  [WARNING if > 80% daily usage (48+ calls)]
 
 Database:
   2.0 ivcrush.db:          X.X MB (X,XXX historical moves)

@@ -79,13 +79,6 @@ Summarize into structured format:
 - Risks: [2 bullets]
 
 **4b. If search insufficient, try Perplexity ask:**
-Check budget first:
-```bash
-sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-  "SELECT COALESCE((SELECT calls FROM api_budget WHERE date=date('now')), 0) as calls;"
-```
-
-If under budget (< 40):
 ```
 mcp__perplexity__perplexity_ask with query="For $TICKER earnings on $DATE, respond ONLY in this format:
 Direction: [bullish/bearish/neutral]
@@ -160,5 +153,5 @@ NEXT STEPS
 
 ## Cost Control
 - Tries free search first
-- Only uses Perplexity ask if search insufficient AND budget allows
+- Only uses Perplexity ask if search insufficient
 - Single call per ticker (no duplicates)

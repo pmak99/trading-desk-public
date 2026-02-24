@@ -19,7 +19,6 @@ from src.core.logging import log
 from src.core.database import DatabaseSync
 from src.domain.repositories import cleanup_all_pools
 from src.core.job_manager import JobManager
-from src.core.budget import BudgetTracker
 from src.core import metrics
 from src.jobs import JobRunner
 from src.domain import (
@@ -124,7 +123,6 @@ class AppState:
     """
     job_manager: Optional[JobManager] = None
     job_runner: Optional[JobRunner] = None
-    budget_tracker: Optional[BudgetTracker] = None
     tradier: Optional[TradierClient] = None
     alphavantage: Optional[AlphaVantageClient] = None
     perplexity: Optional[PerplexityClient] = None
@@ -203,7 +201,6 @@ async def lifespan(app: FastAPI):
     state = AppState(
         job_manager=JobManager(db_path=settings.DB_PATH),
         job_runner=JobRunner(),
-        budget_tracker=BudgetTracker(db_path=settings.DB_PATH),
         tradier=TradierClient(settings.tradier_api_key),
         alphavantage=AlphaVantageClient(settings.alpha_vantage_key),
         perplexity=PerplexityClient(

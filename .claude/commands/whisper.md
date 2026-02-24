@@ -103,7 +103,7 @@ Parse the whisper output and filter to tickers with 2.0 Score >= 50.
 
 **IMPORTANT:** Do NOT suppress REJECT liquidity tickers from display. Show ALL qualified tickers (VRP >= 1.8x EXCELLENT tier) in the results table, clearly marking REJECT ones. This gives visibility into what opportunities exist even if liquidity is poor.
 
-Take TOP 5 from filtered results for sentiment enrichment (skip REJECT for sentiment fetch to save budget, but still display them).
+Take TOP 5 from filtered results for sentiment enrichment (skip REJECT for sentiment fetch, but still display them).
 
 ### Step 4: Check TRR for All Qualified Tickers
 Query tail risk for all qualified tickers in one batch:
@@ -143,14 +143,7 @@ sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.d
 ```
 If found: use cached sentiment, note "(cached)"
 
-**5b. If cache miss, check budget:**
-```bash
-sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-  "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
-```
-If calls >= 60: skip to WebSearch fallback (daily limit: 60 calls, monthly cap: $5)
-
-**5c. Try Perplexity (if budget OK):**
+**5b. If cache miss, try Perplexity:**
 ```
 mcp__perplexity__perplexity_ask with query="For {TICKER} earnings on {DATE}, respond ONLY in this format:
 Direction: [bullish/bearish/neutral]
@@ -159,16 +152,15 @@ Catalysts: [3 bullets, max 10 words each]
 Risks: [2 bullets, max 10 words each]"
 ```
 - Cache result with source="perplexity"
-- Record API call in budget tracker
 
-**5d. If Perplexity fails, try WebSearch:**
+**5c. If Perplexity fails, try WebSearch:**
 ```
 mcp__perplexity__perplexity_search with query="{TICKER} earnings sentiment analyst rating {DATE}"
 ```
 - Summarize results into the same structured format
 - Cache with source="websearch"
 
-**5e. If all fail:**
+**5d. If all fail:**
 ```
 Sentiment unavailable for {TICKER}
 ```
@@ -219,7 +211,6 @@ HIGH TAIL RISK (if any):
 CACHE STATUS
    Hits: X (instant, free)
    Misses: Y (fetched fresh)
-   Budget: Z/60 calls today | $X.XX left this month
 
 NEXT STEPS
    Run /analyze {TOP_TICKER} for full strategy recommendations

@@ -94,7 +94,7 @@ Cloud Scheduler: */15 * * * * → POST /dispatch
 | Time | Job | Status | Description |
 |------|-----|--------|-------------|
 | 5:30 AM | `pre-market-prep` | ✅ | Fetch earnings calendar, calculate VRP for today's tickers, rate-limited API calls |
-| 6:30 AM | `sentiment-scan` | ✅ | Pre-cache AI sentiment for high-VRP tickers (≥1.8x EXCELLENT tier), respects budget limits |
+| 6:30 AM | `sentiment-scan` | ✅ | Pre-cache AI sentiment for high-VRP tickers (≥1.8x EXCELLENT tier) |
 | 7:30 AM | `morning-digest` | ✅ | Send Telegram digest with top 10 ranked opportunities |
 | 10:00 AM | `market-open-refresh` | ✅ | Refresh prices, alert on significant pre-market moves (>50% of historical avg) |
 | 2:30 PM | `pre-trade-refresh` | ✅ | Final VRP validation, send actionable alert with top 5 AMC earnings |
@@ -195,7 +195,7 @@ All jobs follow consistent error handling patterns:
 | `/analyze TICKER` | Deep dive on single ticker | `/analyze NVDA` |
 | `/whisper` | Most anticipated earnings this week | `/whisper` |
 | `/history TICKER` | Historical earnings visualization | `/history AMD` |
-| `/health` | System status + API budget | `/health` |
+| `/health` | System status | `/health` |
 | `/dashboard` | Quick link to Grafana | `/dashboard` |
 | `/help` | List available commands | `/help` |
 
@@ -234,8 +234,6 @@ iv/health?format=cli
     + Holiday sales         - Inventory
  3  ORCL     3.9x   65     BEARISH  Bear Call 145/150
     + Cloud growth          - Competition
-───────────────────────────────────────────────────────
- Budget: 12/60 calls | $4.85 remaining
 ═══════════════════════════════════════════════════════
 ```
 
@@ -394,7 +392,6 @@ tradier_key = secrets["TRADIER_API_KEY"]
    ✅ Cloud growth  ⚠️ Competition
    → Bear Call 145/150 @ $1.85
 
-Budget: 12/60 calls | $4.85 left
 ```
 
 **Format Key:**
@@ -424,8 +421,6 @@ Uses Graphite protocol for simple HTTP POST metrics push to Grafana Cloud.
 | `ivcrush.sentiment.score` | gauge | Sentiment score per ticker |
 | `ivcrush.api.calls` | count | External API calls by provider |
 | `ivcrush.api.latency` | timing | External API latency |
-| `ivcrush.budget.calls_remaining` | gauge | Perplexity calls remaining |
-| `ivcrush.budget.dollars_remaining` | gauge | Budget remaining |
 | `ivcrush.tickers.qualified` | gauge | Qualified tickers from scan |
 
 ### Dashboards
@@ -433,7 +428,7 @@ Uses Graphite protocol for simple HTTP POST metrics push to Grafana Cloud.
 Create in Grafana Cloud UI:
 1. **Operations** - Request rate, error rate, P95 latency
 2. **Trading** - VRP distribution, qualified tickers, tier breakdown
-3. **API** - Calls by provider, latency, budget gauge
+3. **API** - Calls by provider, latency
 4. **Whisper** - Daily scan results, top VRP tickers
 
 ## Code Reuse Strategy
@@ -821,7 +816,7 @@ uvicorn main:app --reload --port 8080
 | Metric | Target |
 |--------|--------|
 | Morning digest delivery | Before 6:30 AM ET |
-| API call budget | <60 calls/day |
+| Perplexity API uptime | >99% |
 | Job success rate | >99% |
 | On-demand response time | <5 seconds |
 | Monthly infrastructure cost | $0 |

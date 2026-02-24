@@ -208,7 +208,6 @@ async def test_run_council_no_earnings():
         tradier=MagicMock(),
         repo=repo,
         cache=MagicMock(),
-        budget=MagicMock(),
     )
 
     assert result.status == "no_earnings"
@@ -233,9 +232,6 @@ async def test_run_council_no_finnhub():
     cache.get_sentiment.return_value = {"score": 0.3, "direction": "bullish"}
     cache.save_sentiment.return_value = True
 
-    budget = MagicMock()
-    budget.can_call.return_value = False  # No budget for Perplexity
-
     result = await run_council(
         ticker="NVDA",
         finnhub=None,  # No Finnhub
@@ -243,7 +239,6 @@ async def test_run_council_no_finnhub():
         tradier=tradier,
         repo=repo,
         cache=cache,
-        budget=budget,
     )
 
     # Finnhub members failed, but historical + perplexity_quick + skew should work
@@ -280,9 +275,6 @@ async def test_run_council_success():
     cache.get_sentiment.return_value = {"score": 0.4, "direction": "bullish"}
     cache.save_sentiment.return_value = True
 
-    budget = MagicMock()
-    budget.can_call.return_value = False  # Skip Perplexity research
-
     perplexity = MagicMock()
 
     result = await run_council(
@@ -292,7 +284,6 @@ async def test_run_council_success():
         tradier=tradier,
         repo=repo,
         cache=cache,
-        budget=budget,
     )
 
     assert result.ticker == "NVDA"
@@ -323,9 +314,6 @@ async def test_run_council_insufficient_members():
     cache.get_sentiment.return_value = None
     cache.save_sentiment.return_value = True
 
-    budget = MagicMock()
-    budget.can_call.return_value = False
-
     result = await run_council(
         ticker="ZZZZZ",
         finnhub=None,
@@ -333,7 +321,6 @@ async def test_run_council_insufficient_members():
         tradier=tradier,
         repo=repo,
         cache=cache,
-        budget=budget,
     )
 
     assert result.status == "insufficient_data"
@@ -364,9 +351,6 @@ async def test_run_council_cached_sentiment():
     cache.get_sentiment.return_value = {"score": 0.2, "direction": "neutral"}
     cache.save_sentiment.return_value = True
 
-    budget = MagicMock()
-    budget.can_call.return_value = False
-
     result = await run_council(
         ticker="MSFT",
         finnhub=finnhub,
@@ -374,7 +358,6 @@ async def test_run_council_cached_sentiment():
         tradier=tradier,
         repo=repo,
         cache=cache,
-        budget=budget,
     )
 
     # Perplexity Quick should be "cached"
@@ -386,7 +369,7 @@ async def test_run_council_cached_sentiment():
 
 @pytest.mark.asyncio
 async def test_run_council_deep_research():
-    """Phase 2 Perplexity Research fires when budget allows."""
+    """Phase 2 Perplexity Research fires automatically."""
     repo = MagicMock()
     repo.get_next_earnings.return_value = {"earnings_date": "2026-03-01", "timing": "AMC"}
     repo.get_position_limits.return_value = {"tail_risk_ratio": 1.8, "tail_risk_level": "NORMAL"}
@@ -409,10 +392,6 @@ async def test_run_council_deep_research():
     cache.get_sentiment.return_value = {"score": 0.4, "direction": "bullish"}
     cache.save_sentiment.return_value = True
 
-    budget = MagicMock()
-    budget.can_call.return_value = True  # Allow Phase 2
-    budget.try_acquire_call_async = AsyncMock(return_value=True)
-
     perplexity = MagicMock()
     perplexity.query = AsyncMock(return_value={
         "choices": [{"message": {"content": (
@@ -432,7 +411,6 @@ async def test_run_council_deep_research():
         tradier=tradier,
         repo=repo,
         cache=cache,
-        budget=budget,
     )
 
     # Perplexity Research should be active (not failed)
@@ -443,6 +421,4 @@ async def test_run_council_deep_research():
     assert research.score == 0.6
     assert research.direction == "bullish"
 
-    # Budget should have been acquired
-    budget.try_acquire_call_async.assert_called_once()
     perplexity.query.assert_called_once()

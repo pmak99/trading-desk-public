@@ -6,7 +6,7 @@ Covers:
 - fetch_earnings_with_db_fallback (API success, API failure, both fail)
 - _parse_price_history helper
 - _pre_market_prep (earnings pipeline, VRP evaluation, rate limiting)
-- _sentiment_scan (budget exhaustion, BudgetExhausted exception, priming flow)
+- _sentiment_scan (priming flow)
 - _morning_digest (empty calendar, opportunities, Telegram sending)
 - _outcome_recorder (BMO/AMC timing, duplicate skipping)
 - _weekly_backfill (timing-aware backfill, duplicate detection)
@@ -48,8 +48,6 @@ def mock_settings():
         s.VRP_DISCOVERY = 1.8
         s.require_weekly_options = False
         s.gcs_bucket = "test-bucket"
-        s.PERPLEXITY_DAILY_LIMIT = 60
-        s.PERPLEXITY_MONTHLY_BUDGET = 5.0
         yield s
 
 
@@ -589,123 +587,6 @@ class TestSentimentScan:
         assert result["primed"] == 0
 
     @pytest.mark.asyncio
-    async def test_budget_exhaustion_stops_priming(self, runner, mock_settings):
-        """When budget.can_call returns False, remaining tickers are tracked."""
-        today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
-            ["AAPL", "NVDA", "MSFT"], report_date=today
-        )
-
-        mock_repo = MagicMock()
-        mock_repo.get_tracked_tickers.return_value = {"AAPL", "NVDA", "MSFT"}
-        mock_repo.get_moves.return_value = [
-            {"intraday_move_pct": 3.0},
-            {"intraday_move_pct": 5.0},
-            {"intraday_move_pct": 4.0},
-            {"intraday_move_pct": 2.0},
-        ]
-
-        mock_cache = MagicMock()
-        mock_cache.get_sentiment.return_value = None  # Not cached yet
-
-        mock_budget = MagicMock()
-        mock_budget.can_call.return_value = False  # Budget exhausted from start
-
-        # Mock VRP evaluation to return EXCELLENT tier tickers
-        mock_im_result = {
-            "implied_move_pct": 8.0,
-            "used_real_data": True,
-            "price": 150.0,
-            "has_weekly_options": True,
-            "expiration": "2026-02-14",
-        }
-
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et") as mock_now, \
-             patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
-             patch("src.jobs.handlers.BudgetTracker", return_value=mock_budget), \
-             patch("src.jobs.handlers.calculate_vrp", return_value={"vrp_ratio": 2.5, "tier": "EXCELLENT"}), \
-             patch("src.jobs.handlers.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
-             patch("src.jobs.handlers.get_implied_move_with_fallback", return_value=(8.0, True)), \
-             patch("src.jobs.base.today_et", return_value=today), \
-             patch("src.jobs.base.now_et") as mock_base_now, \
-             patch("src.jobs.base.settings", mock_settings), \
-             patch("src.jobs.base.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
-             patch("src.jobs.base.get_implied_move_with_fallback", return_value=(8.0, True)), \
-             patch("src.jobs.base.calculate_vrp", return_value={"vrp_ratio": 2.5, "tier": "EXCELLENT"}):
-            mock_now.return_value = MagicMock(strftime=MagicMock(return_value=today))
-            mock_base_now.return_value = mock_now.return_value
-
-            result = await runner._sentiment_scan()
-
-        assert result["primed"] == 0
-        assert "budget_skipped" in result
-        assert len(result["budget_skipped"]) > 0
-
-    @pytest.mark.asyncio
-    async def test_budget_exhausted_exception_stops_loop(self, runner, mock_settings):
-        """BudgetExhausted exception mid-loop stops priming gracefully."""
-        from src.core.budget import BudgetExhausted
-
-        today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
-            ["AAPL", "NVDA"], report_date=today
-        )
-
-        mock_repo = MagicMock()
-        mock_repo.get_tracked_tickers.return_value = {"AAPL", "NVDA"}
-        mock_repo.get_moves.return_value = [
-            {"intraday_move_pct": 3.0},
-            {"intraday_move_pct": 5.0},
-            {"intraday_move_pct": 4.0},
-            {"intraday_move_pct": 2.0},
-        ]
-
-        mock_cache = MagicMock()
-        mock_cache.get_sentiment.return_value = None
-
-        mock_budget = MagicMock()
-        mock_budget.can_call.return_value = True
-
-        # First call succeeds, second raises BudgetExhausted
-        runner._perplexity.get_sentiment.side_effect = [
-            {"score": 0.7, "direction": "BULLISH"},
-            BudgetExhausted("perplexity", "Daily limit reached"),
-        ]
-
-        mock_im_result = {
-            "implied_move_pct": 8.0,
-            "used_real_data": True,
-            "price": 150.0,
-            "has_weekly_options": True,
-            "expiration": "2026-02-14",
-        }
-
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et") as mock_now, \
-             patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
-             patch("src.jobs.handlers.BudgetTracker", return_value=mock_budget), \
-             patch("src.jobs.handlers.calculate_vrp", return_value={"vrp_ratio": 2.5, "tier": "EXCELLENT"}), \
-             patch("src.jobs.handlers.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
-             patch("src.jobs.handlers.get_implied_move_with_fallback", return_value=(8.0, True)), \
-             patch("src.jobs.base.today_et", return_value=today), \
-             patch("src.jobs.base.now_et") as mock_base_now, \
-             patch("src.jobs.base.settings", mock_settings), \
-             patch("src.jobs.base.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
-             patch("src.jobs.base.get_implied_move_with_fallback", return_value=(8.0, True)), \
-             patch("src.jobs.base.calculate_vrp", return_value={"vrp_ratio": 2.5, "tier": "EXCELLENT"}):
-            mock_now.return_value = MagicMock(strftime=MagicMock(return_value=today))
-            mock_base_now.return_value = mock_now.return_value
-
-            result = await runner._sentiment_scan()
-
-        # First ticker should have been primed, second triggered BudgetExhausted
-        assert result["primed"] == 1
-        assert "budget_skipped" in result
-
-    @pytest.mark.asyncio
     async def test_already_cached_tickers_skipped(self, runner, mock_settings):
         """Tickers with existing cached sentiment are skipped."""
         today = "2026-02-09"
@@ -724,7 +605,6 @@ class TestSentimentScan:
              patch("src.jobs.handlers.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
-             patch("src.jobs.handlers.BudgetTracker", return_value=MagicMock()), \
              patch("src.jobs.base.today_et", return_value=today), \
              patch("src.jobs.base.now_et") as mock_base_now, \
              patch("src.jobs.base.settings", mock_settings):
@@ -769,7 +649,6 @@ class TestSentimentScan:
              patch("src.jobs.handlers.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
-             patch("src.jobs.handlers.BudgetTracker", return_value=MagicMock()), \
              patch("src.jobs.handlers.calculate_vrp", return_value={"vrp_ratio": 1.1, "tier": "SKIP"}), \
              patch("src.jobs.handlers.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
              patch("src.jobs.handlers.get_implied_move_with_fallback", return_value=(4.0, True)), \
@@ -830,12 +709,6 @@ class TestMorningDigest:
         mock_cache = MagicMock()
         mock_cache.get_sentiment.return_value = None
 
-        mock_budget = MagicMock()
-        mock_budget.get_summary.return_value = {
-            "today_calls": 5,
-            "budget_remaining": 4.5,
-        }
-
         # Low VRP - below discovery threshold
         mock_im_result = {
             "implied_move_pct": 4.0,
@@ -851,7 +724,6 @@ class TestMorningDigest:
              patch("src.jobs.handlers.now_et", return_value=real_now), \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
-             patch("src.jobs.handlers.BudgetTracker", return_value=mock_budget), \
              patch("src.jobs.handlers.calculate_vrp", return_value={"vrp_ratio": 1.1, "tier": "SKIP"}), \
              patch("src.jobs.handlers.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
              patch("src.jobs.handlers.get_implied_move_with_fallback", return_value=(4.0, True)), \
@@ -889,12 +761,6 @@ class TestMorningDigest:
         mock_cache = MagicMock()
         mock_cache.get_sentiment.return_value = None
 
-        mock_budget = MagicMock()
-        mock_budget.get_summary.return_value = {
-            "today_calls": 5,
-            "budget_remaining": 4.5,
-        }
-
         mock_im_result = {
             "implied_move_pct": 8.0,
             "used_real_data": True,
@@ -911,7 +777,6 @@ class TestMorningDigest:
              patch("src.jobs.handlers.now_et", return_value=real_now), \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
-             patch("src.jobs.handlers.BudgetTracker", return_value=mock_budget), \
              patch("src.jobs.handlers.calculate_vrp", return_value={"vrp_ratio": 2.5, "tier": "EXCELLENT"}), \
              patch("src.jobs.handlers.calculate_score", return_value={"total_score": 80}), \
              patch("src.jobs.handlers.apply_sentiment_modifier", return_value=82), \

@@ -3,16 +3,15 @@
 This agent verifies system health before batch operations:
 - API connectivity (Tradier, Alpha Vantage, Perplexity)
 - Database health
-- Budget status
 - Data freshness
 """
 
+import os
 from typing import Dict, Any
 
-from common.constants import PERPLEXITY_DAILY_LIMIT, PERPLEXITY_MONTHLY_BUDGET
 from ..integration.container_2_0 import Container2_0
 from ..integration.cache_4_0 import Cache4_0
-from ..utils.schemas import HealthCheckResponse, APIHealthStatus, DatabaseHealthStatus, BudgetStatus
+from ..utils.schemas import HealthCheckResponse, APIHealthStatus, DatabaseHealthStatus
 from .base import BaseAgent
 
 
@@ -23,8 +22,7 @@ class HealthCheckAgent:
     Verifies:
     1. API connectivity (Tradier, Alpha Vantage, Perplexity)
     2. Database health (connection, size, record counts)
-    3. Budget status (daily/monthly limits)
-    4. Data freshness (cache statistics)
+    3. Data freshness (cache statistics)
 
     Example:
         agent = HealthCheckAgent()
@@ -42,16 +40,6 @@ class HealthCheckAgent:
 
         Returns:
             Health check result dict conforming to HealthCheckResponse schema
-
-        Example:
-            result = agent.check_health()
-            # Returns:
-            # {
-            #     "status": "healthy",
-            #     "apis": {...},
-            #     "database": {...},
-            #     "budget": {...}
-            # }
         """
         try:
             # Check APIs
@@ -59,9 +47,6 @@ class HealthCheckAgent:
 
             # Check database
             database = self._check_database()
-
-            # Check budget
-            budget = self._check_budget()
 
             # Determine overall status
             overall_status = self._determine_overall_status(apis, database)
@@ -71,7 +56,6 @@ class HealthCheckAgent:
                 'status': overall_status,
                 'apis': apis,
                 'database': database,
-                'budget': budget
             }
 
             # Validate with schema
@@ -84,7 +68,6 @@ class HealthCheckAgent:
                 'status': 'unhealthy',
                 'apis': {},
                 'database': {'status': 'error', 'error': str(e)},
-                'budget': {'daily_calls': 0, 'daily_limit': PERPLEXITY_DAILY_LIMIT, 'monthly_cost': 0.0, 'monthly_budget': PERPLEXITY_MONTHLY_BUDGET}
             }
 
     def _check_apis(self) -> Dict[str, Dict[str, Any]]:
@@ -97,7 +80,7 @@ class HealthCheckAgent:
         # Check Alpha Vantage
         apis['alphavantage'] = self._check_alphavantage()
 
-        # Check Perplexity (via budget status)
+        # Check Perplexity (just check API key exists)
         apis['perplexity'] = self._check_perplexity()
 
         return apis
@@ -135,20 +118,17 @@ class HealthCheckAgent:
             }
 
     def _check_perplexity(self) -> Dict[str, Any]:
-        """Check Perplexity API budget status."""
-        try:
-            result = self.cache.check_perplexity_health()
+        """Check Perplexity API key is configured."""
+        api_key = os.environ.get('PERPLEXITY_API_KEY')
+        if api_key:
             return {
-                'status': result['status'],
-                'remaining_calls': result.get('remaining_calls'),
-                'error': result.get('error')
+                'status': 'ok',
+                'error': None
             }
-        except Exception as e:
-            return {
-                'status': 'error',
-                'remaining_calls': None,
-                'error': str(e)
-            }
+        return {
+            'status': 'error',
+            'error': 'PERPLEXITY_API_KEY not configured'
+        }
 
     def _check_database(self) -> Dict[str, Any]:
         """Check database health."""
@@ -168,18 +148,6 @@ class HealthCheckAgent:
                 'historical_moves': None,
                 'earnings_calendar': None,
                 'error': str(e)
-            }
-
-    def _check_budget(self) -> Dict[str, Any]:
-        """Check budget status."""
-        try:
-            return self.cache.get_budget_status()
-        except Exception as e:
-            return {
-                'daily_calls': 0,
-                'daily_limit': PERPLEXITY_DAILY_LIMIT,
-                'monthly_cost': 0.0,
-                'monthly_budget': PERPLEXITY_MONTHLY_BUDGET
             }
 
     def _determine_overall_status(

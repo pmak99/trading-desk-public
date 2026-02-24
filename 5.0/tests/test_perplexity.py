@@ -3,7 +3,6 @@ import tempfile
 import os
 from unittest.mock import AsyncMock, patch
 from src.integrations.perplexity import PerplexityClient, parse_sentiment_response
-from src.core.budget import BudgetTracker
 
 def test_parse_sentiment_response_bullish():
     """Parse bullish sentiment response."""
@@ -32,12 +31,10 @@ Risks: Inventory concerns, Competition"""
 @pytest.mark.asyncio
 async def test_get_sentiment():
     """get_sentiment calls API and parses response."""
-    # Use temp database for budget tracker
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
     try:
-        budget = BudgetTracker(db_path=db_path)
-        client = PerplexityClient(api_key="test-key", budget_tracker=budget)
+        client = PerplexityClient(api_key="test-key", db_path=db_path)
 
         mock_response = {
             "choices": [{

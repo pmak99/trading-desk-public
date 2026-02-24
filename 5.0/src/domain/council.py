@@ -13,7 +13,6 @@ from typing import Dict, Any, List, Optional
 
 from src.core.logging import log
 from src.core import metrics
-from src.core.budget import DEFAULT_COST_ESTIMATE
 
 
 # Council member weights (renormalized from 85% to 100% — WebSearch dropped)
@@ -229,7 +228,6 @@ async def run_council(
     tradier,  # TradierClient
     repo,  # HistoricalMovesRepository
     cache,  # SentimentCacheRepository
-    budget,  # BudgetTracker
 ) -> CouncilResult:
     """
     Run 6-source council consensus for a ticker.
@@ -376,9 +374,7 @@ async def run_council(
                     score=score, direction=cached.get("direction", "neutral"),
                     status="cached",
                 )
-        # Fetch fresh if budget allows
-        if not budget.can_call("perplexity"):
-            return CouncilMember(name="Perplexity Quick", weight=WEIGHTS["perplexity_quick"], failed=True, status="budget exhausted")
+        # Fetch fresh
         try:
             sentiment = await perplexity.get_sentiment(ticker, earnings_date)
             if sentiment and not sentiment.get("error"):
@@ -410,47 +406,44 @@ async def run_council(
         else:
             members.append(result)
 
-    # 4. Phase 2: Budget-gated deep research
+    # 4. Phase 2: Deep research
     research_member = CouncilMember(
         name="Perplexity Research", weight=WEIGHTS["perplexity_research"],
         failed=True, status="skipped",
     )
 
-    if budget.can_call("perplexity"):
-        try:
-            acquired = await budget.try_acquire_call_async("perplexity", cost=DEFAULT_COST_ESTIMATE)
-            if acquired:
-                prompt = (
-                    f"For {ticker} earnings on {earnings_date}, analyze:\n"
-                    f"1. Analyst consensus and recent rating changes\n"
-                    f"2. EPS/revenue estimates vs whisper numbers\n"
-                    f"3. Key business metric to watch\n"
-                    f"4. Bull case and bear case (2 bullets each)\n"
-                    f"5. Key risk\n\n"
-                    f"Respond ONLY in this format:\n"
-                    f"Direction: [bullish/bearish/neutral]\n"
-                    f"Score: [number -1.0 to +1.0]\n"
-                    f"Bull Case: [2 bullets, max 15 words each]\n"
-                    f"Bear Case: [2 bullets, max 15 words each]\n"
-                    f"Key Risk: [1 bullet, max 20 words]\n"
-                    f"Analyst Trend: [upgrading/stable/downgrading]"
+    try:
+        prompt = (
+            f"For {ticker} earnings on {earnings_date}, analyze:\n"
+            f"1. Analyst consensus and recent rating changes\n"
+            f"2. EPS/revenue estimates vs whisper numbers\n"
+            f"3. Key business metric to watch\n"
+            f"4. Bull case and bear case (2 bullets each)\n"
+            f"5. Key risk\n\n"
+            f"Respond ONLY in this format:\n"
+            f"Direction: [bullish/bearish/neutral]\n"
+            f"Score: [number -1.0 to +1.0]\n"
+            f"Bull Case: [2 bullets, max 15 words each]\n"
+            f"Bear Case: [2 bullets, max 15 words each]\n"
+            f"Key Risk: [1 bullet, max 20 words]\n"
+            f"Analyst Trend: [upgrading/stable/downgrading]"
+        )
+        response = await perplexity.query([
+            {"role": "system", "content": "You are a financial analyst providing pre-earnings sentiment analysis."},
+            {"role": "user", "content": prompt},
+        ])
+        if not response.get("error"):
+            text = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if text:
+                parsed = parse_research_response(text)
+                research_member = CouncilMember(
+                    name="Perplexity Research", weight=WEIGHTS["perplexity_research"],
+                    score=parsed["score"], direction=parsed["direction"],
+                    status="fresh", details=parsed,
                 )
-                response = await perplexity.query([
-                    {"role": "system", "content": "You are a financial analyst providing pre-earnings sentiment analysis."},
-                    {"role": "user", "content": prompt},
-                ])
-                if not response.get("error"):
-                    text = response.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    if text:
-                        parsed = parse_research_response(text)
-                        research_member = CouncilMember(
-                            name="Perplexity Research", weight=WEIGHTS["perplexity_research"],
-                            score=parsed["score"], direction=parsed["direction"],
-                            status="fresh", details=parsed,
-                        )
-        except Exception as e:
-            log("warn", "Perplexity Research failed", ticker=ticker, error=type(e).__name__)
-            research_member.status = f"error: {type(e).__name__}"
+    except Exception as e:
+        log("warn", "Perplexity Research failed", ticker=ticker, error=type(e).__name__)
+        research_member.status = f"error: {type(e).__name__}"
 
     members.insert(0, research_member)  # Research is first member
 

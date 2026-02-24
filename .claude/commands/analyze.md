@@ -163,13 +163,7 @@ Skip sentiment ONLY if:
       ORDER BY CASE source WHEN 'council' THEN 0 WHEN 'perplexity' THEN 1 ELSE 2 END LIMIT 1;"
    ```
 
-2. **If cache miss, check budget:**
-   ```bash
-   sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/4.0/data/sentiment_cache.db" \
-     "SELECT COALESCE(calls, 0) as calls FROM api_budget WHERE date='$(date +%Y-%m-%d)';"
-   ```
-
-3. **Try Perplexity (if budget OK):**
+2. **If cache miss, try Perplexity:**
    ```
    mcp__perplexity__perplexity_ask with query="For {TICKER} earnings on {EARNINGS_DATE}, respond ONLY in this format:
    Direction: [bullish/bearish/neutral]
@@ -179,12 +173,12 @@ Skip sentiment ONLY if:
    ```
    Cache result and record API call.
 
-4. **If Perplexity fails, try search:**
+3. **If Perplexity fails, try search:**
    ```
    mcp__perplexity__perplexity_search with query="{TICKER} earnings sentiment analyst rating {EARNINGS_DATE}"
    ```
 
-5. **If all fail:** Show "AI sentiment unavailable. Displaying raw news from Finnhub above."
+4. **If all fail:** Show "AI sentiment unavailable. Displaying raw news from Finnhub above."
 
 ### Step 4: Sentiment-Adjusted Direction (4.0)
 
@@ -266,5 +260,5 @@ RISK NOTES
 - Finnhub news: Always (free, 60/min rate limit)
 - Finnhub earnings calendar: Fallback when database empty (free)
 - Sentiment cache: 3-hour TTL, checked before any API call
-- Perplexity: For any TRADEABLE opportunity AND cache miss AND budget OK
-- Maximum 1 paid API call per /analyze
+- Perplexity: For any TRADEABLE opportunity AND cache miss
+- Maximum 1 Perplexity call per /analyze

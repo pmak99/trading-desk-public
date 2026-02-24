@@ -8,11 +8,6 @@ import html
 from typing import List, Dict, Any
 from datetime import datetime
 
-from src.core.config import Settings
-
-settings = Settings()
-
-
 def format_ticker_line(ticker_data: Dict[str, Any], rank: int) -> str:
     """
     Format single ticker for digest — compact one-line format.
@@ -61,8 +56,6 @@ def format_ticker_line(ticker_data: Dict[str, Any], rank: int) -> str:
 def format_digest(
     date: str,
     tickers: List[Dict[str, Any]],
-    budget_calls: int = 0,
-    budget_remaining: float = settings.PERPLEXITY_MONTHLY_BUDGET,
 ) -> str:
     """
     Format morning digest message.
@@ -70,8 +63,6 @@ def format_digest(
     Args:
         date: Date string (YYYY-MM-DD)
         tickers: List of qualified ticker data
-        budget_calls: API calls used today
-        budget_remaining: Budget remaining
 
     Returns:
         HTML-formatted Telegram message
@@ -80,7 +71,7 @@ def format_digest(
     has_dates = any(t.get("earnings_date") for t in tickers)
 
     if has_dates:
-        return _format_digest_grouped(tickers, budget_calls, budget_remaining)
+        return _format_digest_grouped(tickers)
 
     # Fallback: single-date format (backward compatible)
     try:
@@ -97,16 +88,11 @@ def format_digest(
     for i, ticker_data in enumerate(tickers, 1):
         lines.append(format_ticker_line(ticker_data, i))
 
-    lines.append("")
-    lines.append(f"Budget: {budget_calls}/{settings.PERPLEXITY_DAILY_LIMIT} | ${budget_remaining:.2f}")
-
     return "\n".join(lines)
 
 
 def _format_digest_grouped(
     tickers: List[Dict[str, Any]],
-    budget_calls: int,
-    budget_remaining: float,
 ) -> str:
     """Format digest grouped by earnings_date with sub-headers."""
     # Group by earnings_date
@@ -140,9 +126,6 @@ def _format_digest_grouped(
         for ticker_data in groups[ed]:
             lines.append(format_ticker_line(ticker_data, rank))
             rank += 1
-
-    lines.append("")
-    lines.append(f"Budget: {budget_calls}/{settings.PERPLEXITY_DAILY_LIMIT} | ${budget_remaining:.2f}")
 
     return "\n".join(lines)
 

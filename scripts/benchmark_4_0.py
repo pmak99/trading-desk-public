@@ -61,10 +61,9 @@ def benchmark_cache_operations():
     print("BENCHMARK 1: Cache Infrastructure Performance")
     print("="*60)
 
-    from cache import SentimentCache, BudgetTracker
+    from cache import SentimentCache
 
     cache = SentimentCache()
-    tracker = BudgetTracker()
 
     # Clear for clean test
     cache.clear_all()
@@ -90,18 +89,6 @@ def benchmark_cache_operations():
 
     results.append(time_operation(cache_get_miss, iterations=100))
 
-    # Test budget check
-    def budget_check():
-        tracker.get_info()
-
-    results.append(time_operation(budget_check, iterations=100))
-
-    # Test budget record
-    def budget_record():
-        tracker.record_call(0.01)
-
-    results.append(time_operation(budget_record, iterations=50))
-
     # Print results
     print("\nResults:")
     for r in results:
@@ -109,7 +96,6 @@ def benchmark_cache_operations():
 
     # Cleanup
     cache.clear_all()
-    tracker.reset_today()
 
     return results
 
