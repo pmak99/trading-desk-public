@@ -103,12 +103,14 @@ TRR = Max Historical Move / Average Historical Move
 ## Critical Rules
 
 1. **Prefer SINGLE options** over spreads - 64% vs 52% win rate
-2. **Respect TRR limits** - LOW TRR made +$52k, HIGH TRR lost -$123k
-3. **Never roll losing positions** - 0% success rate
-4. **Cut losses early** - repairs reduce loss but rarely save campaigns
-5. **Check liquidity first** before evaluating VRP
-6. **VRP >= 1.8x** for full position sizing
-7. **Reduce size for REJECT liquidity** - allowed but penalized in scoring
+2. **Minimum 3 DTE at entry** - 0-2 DTE lost -$209k vs 3-5 DTE gained +$139k at same win rates; enforced in `calculate_expiration_date` (Wed earnings → next Friday)
+3. **Exit spreads next trading day** - Spreads held 2+ days: 31% win, -$28k. Singles can hold (78% win, +$66k)
+4. **Respect TRR limits** - LOW TRR made +$52k, HIGH TRR lost -$123k
+5. **Never roll losing positions** - 0% success rate
+6. **Cut losses early** - repairs reduce loss but rarely save campaigns
+7. **Check liquidity first** before evaluating VRP
+8. **VRP >= 1.8x** for full position sizing
+9. **Reduce size for REJECT liquidity** - allowed but penalized in scoring
 
 ## 4.0 Directional Bias (3-Rule System)
 
@@ -241,6 +243,8 @@ cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 82 tests
 1. Check TRR level - prefer LOW, avoid HIGH
 2. Check liquidity tier - REJECT = reduce size (allowed but penalized)
 3. Verify VRP >= 1.4x minimum, >= 1.8x preferred
-4. **Prefer SINGLE options** over spreads
-5. If trade goes wrong: **cut the loss, don't roll**
-6. Repair only as last resort (convert single to spread)
+4. **Verify DTE >= 3** - system enforces this, but double-check edge cases
+5. **Prefer SINGLE options** over spreads
+6. **Spreads: exit next trading day** - do not hold spreads into day 2
+7. If trade goes wrong: **cut the loss, don't roll**
+8. Repair only as last resort (convert single to spread)

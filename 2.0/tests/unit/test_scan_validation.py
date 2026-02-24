@@ -132,6 +132,75 @@ class TestCalculateExpirationDate:
         assert result == date(2025, 1, 10)  # Friday
 
 
+class TestMinimumDTEFloor:
+    """Test minimum DTE floor enforcement (Feb 2026).
+
+    Data shows 0-2 DTE options lose -$209k vs 3-5 DTE gains +$139k at same win rates.
+    Wednesday earnings → same-week Friday = 2 DTE, should bump to next Friday.
+    """
+
+    def test_wednesday_earnings_bumped_to_next_friday(self):
+        """Wednesday earnings with default min_dte=3 should use NEXT Friday (not same week).
+
+        Wed Jan 8 → same-week Fri Jan 10 = 2 DTE (< 3), bumps to Fri Jan 17 = 9 DTE.
+        """
+        wednesday = date(2025, 1, 8)  # Wednesday
+        result = calculate_expiration_date(wednesday, EarningsTiming.AMC)
+        # Same-week Friday would be Jan 10 (2 DTE), but min_dte=3 bumps to Jan 17
+        assert result == date(2025, 1, 17)  # Next Friday
+        assert (result - wednesday).days == 9  # 9 DTE >= 3
+
+    def test_monday_earnings_unchanged(self):
+        """Monday earnings → same-week Friday = 4 DTE >= 3, no change."""
+        monday = date(2025, 1, 6)  # Monday
+        result = calculate_expiration_date(monday, EarningsTiming.AMC)
+        assert result == date(2025, 1, 10)  # Friday, 4 DTE
+        assert (result - monday).days == 4
+
+    def test_tuesday_earnings_unchanged(self):
+        """Tuesday earnings → same-week Friday = 3 DTE >= 3, no change."""
+        tuesday = date(2025, 1, 7)  # Tuesday
+        result = calculate_expiration_date(tuesday, EarningsTiming.AMC)
+        assert result == date(2025, 1, 10)  # Friday, 3 DTE
+        assert (result - tuesday).days == 3
+
+    def test_thursday_earnings_already_next_week(self):
+        """Thursday earnings already uses next-week Friday (8 DTE), no change."""
+        thursday = date(2025, 1, 9)  # Thursday
+        result = calculate_expiration_date(thursday, EarningsTiming.AMC)
+        assert result == date(2025, 1, 17)  # Next Friday, 8 DTE
+        assert (result - thursday).days == 8
+
+    def test_friday_earnings_already_next_week(self):
+        """Friday earnings already uses next-week Friday (7 DTE), no change."""
+        friday = date(2025, 1, 10)  # Friday
+        result = calculate_expiration_date(friday, EarningsTiming.AMC)
+        assert result == date(2025, 1, 17)  # Next Friday, 7 DTE
+        assert (result - friday).days == 7
+
+    def test_min_dte_zero_disables_floor(self):
+        """Setting min_dte=0 should disable the floor (backward compat)."""
+        wednesday = date(2025, 1, 8)  # Wednesday
+        result = calculate_expiration_date(wednesday, EarningsTiming.AMC, min_dte=0)
+        assert result == date(2025, 1, 10)  # Same-week Friday (2 DTE allowed)
+        assert (result - wednesday).days == 2
+
+    def test_min_dte_5_bumps_tuesday(self):
+        """Setting min_dte=5 should also bump Tuesday (3 DTE < 5)."""
+        tuesday = date(2025, 1, 7)  # Tuesday
+        result = calculate_expiration_date(tuesday, EarningsTiming.AMC, min_dte=5)
+        # Same-week Fri = 3 DTE < 5, bumps to next Fri = 10 DTE
+        assert result == date(2025, 1, 17)
+        assert (result - tuesday).days == 10
+
+    def test_custom_offset_ignores_min_dte(self):
+        """Custom offset_days bypasses min_dte (explicit user override)."""
+        wednesday = date(2025, 1, 8)
+        result = calculate_expiration_date(wednesday, EarningsTiming.AMC, offset_days=1)
+        # offset_days=1 → Jan 9 (Thursday), no min_dte check
+        assert result == date(2025, 1, 9)
+
+
 class TestValidateExpirationDate:
     """Test expiration date validation logic."""
 
@@ -450,6 +519,69 @@ class TestNextQuarterDetection:
         # -45 days - skip
         api_neg45 = db_date - timedelta(days=45)
         assert abs((api_neg45 - db_date).days) >= self.THRESHOLD
+
+
+class TestSpreadExitWarning:
+    """Test that spread strategies include next-day exit warning in rationale.
+
+    Data: Spreads held 2+ days have 31% win rate vs 69% for 0-1 day holds.
+    Singles held 2+ days have 78% win rate — no warning needed.
+    """
+
+    @pytest.fixture
+    def scorer(self):
+        from src.domain.scoring.strategy_scorer import StrategyScorer
+        return StrategyScorer()
+
+    def _make_mock_strategy(self, strategy_type):
+        """Create minimal mock strategy for rationale generation."""
+        from unittest.mock import MagicMock
+        from decimal import Decimal
+
+        strategy = MagicMock()
+        strategy.strategy_type = strategy_type
+        strategy.probability_of_profit = 0.65
+        strategy.reward_risk_ratio = 0.30
+        strategy.position_theta = None
+        strategy.position_vega = None
+        strategy.liquidity_tier = "EXCELLENT"
+        return strategy
+
+    def _make_mock_vrp(self, vrp_ratio=2.0):
+        """Create minimal mock VRP."""
+        from unittest.mock import MagicMock
+
+        vrp = MagicMock()
+        vrp.vrp_ratio = vrp_ratio
+        return vrp
+
+    def test_bull_put_spread_has_exit_warning(self, scorer):
+        """Bull put spread rationale should include exit warning."""
+        from src.domain.enums import StrategyType
+        strategy = self._make_mock_strategy(StrategyType.BULL_PUT_SPREAD)
+        vrp = self._make_mock_vrp()
+
+        rationale = scorer._generate_strategy_rationale(strategy, vrp)
+        assert "EXIT next trading day" in rationale
+        assert "31%" in rationale
+
+    def test_bear_call_spread_has_exit_warning(self, scorer):
+        """Bear call spread rationale should include exit warning."""
+        from src.domain.enums import StrategyType
+        strategy = self._make_mock_strategy(StrategyType.BEAR_CALL_SPREAD)
+        vrp = self._make_mock_vrp()
+
+        rationale = scorer._generate_strategy_rationale(strategy, vrp)
+        assert "EXIT next trading day" in rationale
+
+    def test_iron_condor_no_exit_warning(self, scorer):
+        """Iron condor should NOT have spread exit warning (different warning)."""
+        from src.domain.enums import StrategyType
+        strategy = self._make_mock_strategy(StrategyType.IRON_CONDOR)
+        vrp = self._make_mock_vrp()
+
+        rationale = scorer._generate_strategy_rationale(strategy, vrp)
+        assert "EXIT next trading day" not in rationale
 
 
 if __name__ == "__main__":

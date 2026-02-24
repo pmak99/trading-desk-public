@@ -4,12 +4,15 @@ Trading day calculations and expiration date logic.
 Provides date parsing, holiday detection, and options expiration calculation.
 """
 
+import logging
 from datetime import date, datetime, timedelta
 from typing import Dict, Optional, Set
 
 from src.domain.enums import EarningsTiming
 
 from .constants import MAX_TRADING_DAY_ITERATIONS
+
+logger = logging.getLogger(__name__)
 
 # Module-level cache for holidays
 _holiday_cache: Dict[int, set] = {}
@@ -205,7 +208,8 @@ def calculate_implied_move_expiration(earnings_date: date) -> date:
 def calculate_expiration_date(
     earnings_date: date,
     timing: EarningsTiming,
-    offset_days: Optional[int] = None
+    offset_days: Optional[int] = None,
+    min_dte: int = 3
 ) -> date:
     """
     Calculate expiration date for TRADING purposes (liquidity, strategy).
@@ -214,12 +218,18 @@ def calculate_expiration_date(
         earnings_date: Date of earnings announcement
         timing: BMO (before market open), AMC (after market close), or UNKNOWN
         offset_days: Optional custom offset in days from earnings date
+        min_dte: Minimum days to expiration from earnings date (default 3).
+                 Data shows 0-2 DTE loses -$209k vs 3-5 DTE gains +$139k at
+                 similar win rates (~64%). Extreme gamma at low DTE causes
+                 catastrophic losses. If calculated expiration gives < min_dte,
+                 bumps to the following Friday.
 
     Returns:
         Expiration date for options (adjusted to trading day if needed)
 
     Strategy (aligned with user's trading workflow):
-        - Mon/Tue/Wed earnings -> Friday of same week
+        - Mon/Tue/Wed earnings -> Friday of same week (if DTE >= min_dte)
+        - Wed earnings -> next Friday (same-week Friday = 2 DTE < min_dte)
         - Thu/Fri earnings -> Friday 1 week out (avoid 0DTE risk)
         - Custom offset: earnings_date + offset_days (adjusted to trading day)
 
@@ -246,7 +256,21 @@ def calculate_expiration_date(
             return earnings_date + timedelta(days=7)  # Fri + 7 = next Fri
 
     # Mon/Tue/Wed: Use Friday of same week
-    return get_next_friday(earnings_date)
+    expiration = get_next_friday(earnings_date)
+
+    # Enforce minimum DTE floor (Feb 2026)
+    # Wed earnings → same-week Friday = 2 DTE, which is below min_dte=3
+    # In that case, bump to the following Friday to avoid gamma blowups
+    dte = (expiration - earnings_date).days
+    if dte < min_dte:
+        day_name = earnings_date.strftime('%A')
+        logger.info(
+            f"DTE floor: {earnings_date} ({day_name}) → bumped from "
+            f"{expiration} ({dte} DTE) to {expiration + timedelta(days=7)} ({dte + 7} DTE)"
+        )
+        expiration = expiration + timedelta(days=7)  # Next Friday
+
+    return expiration
 
 
 def validate_expiration_date(

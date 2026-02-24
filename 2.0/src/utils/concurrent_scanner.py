@@ -28,6 +28,8 @@ from datetime import date, timedelta
 from typing import List, Dict, Optional, Callable, Any, Tuple
 from threading import Lock
 
+from src.domain.enums import EarningsTiming
+
 logger = logging.getLogger(__name__)
 
 
@@ -307,27 +309,24 @@ class ConcurrentScanner:
         timing: str,
         offset: int
     ) -> date:
-        """Calculate expiration date from earnings date and timing."""
-        # BMO (Before Market Open): Expiration on same day or Friday after
-        # AMC (After Market Close): Expiration on next day or Friday after
+        """Calculate expiration date from earnings date and timing.
 
-        if timing == 'BMO':
-            base_date = earnings_date
-        else:  # AMC or DMH
-            base_date = earnings_date + timedelta(days=1)
+        Delegates to the canonical calculate_expiration_date from date_utils
+        to ensure consistent DTE floor enforcement across all scan modes.
+        """
+        from scripts.scan.date_utils import calculate_expiration_date
 
-        # Find Friday on or after base date
-        days_until_friday = (4 - base_date.weekday()) % 7
-        if days_until_friday == 0 and timing != 'BMO':
-            days_until_friday = 7
+        # Convert string timing to EarningsTiming enum
+        try:
+            timing_enum = EarningsTiming(timing)
+        except ValueError:
+            timing_enum = EarningsTiming.UNKNOWN
 
-        expiration = base_date + timedelta(days=days_until_friday)
-
-        # Apply offset
-        if offset:
-            expiration = expiration + timedelta(days=offset * 7)
-
-        return expiration
+        return calculate_expiration_date(
+            earnings_date,
+            timing_enum,
+            offset_days=offset if offset else None
+        )
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get scanner statistics (thread-safe)."""

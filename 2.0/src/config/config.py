@@ -101,6 +101,12 @@ class ThresholdsConfig:
     min_theta_good: float = 30.0
     min_vega_good: float = -50.0
 
+    # Minimum DTE floor (Feb 2026)
+    # Data shows 0-2 DTE options lose -$209k vs 3-5 DTE options gain +$139k
+    # Same win rates (~64%) but extreme gamma at 0-2 DTE causes catastrophic losses
+    # If calculated expiration gives < min_dte from earnings, bump to next Friday
+    min_dte: int = 3
+
     # Weekly options filter (opt-in)
     # When enabled, filters out tickers without weekly options
     # Weekly options have better liquidity and tighter spreads
@@ -443,6 +449,8 @@ class Config:
             min_historical_quarters=int(os.getenv("MIN_HISTORICAL_QUARTERS", "4")),
             max_historical_quarters=int(os.getenv("MAX_HISTORICAL_QUARTERS", "12")),
             min_market_cap_millions=float(os.getenv("MIN_MARKET_CAP_MILLIONS", "1000.0")),
+            # Minimum DTE floor (Feb 2026)
+            min_dte=int(os.getenv("MIN_DTE", "3")),
             # Weekly options filter (opt-in, default OFF)
             require_weekly_options=os.getenv("REQUIRE_WEEKLY_OPTIONS", "false").lower() == "true",
         )

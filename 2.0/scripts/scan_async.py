@@ -187,22 +187,8 @@ def get_earnings_for_ticker(db_path: Path, ticker: str) -> Optional[Tuple[date, 
 # Expiration Calculation
 # ============================================================================
 
-def calculate_expiration_date(earnings_date: date, timing: EarningsTiming) -> date:
-    """Calculate expiration date based on earnings timing."""
-    weekday = earnings_date.weekday()
-
-    # Thursday or Friday earnings -> next week Friday
-    if weekday in [3, 4]:
-        if weekday == 3:  # Thursday
-            return earnings_date + timedelta(days=8)
-        else:  # Friday
-            return earnings_date + timedelta(days=7)
-
-    # Mon/Tue/Wed -> Friday of same week
-    days_until_friday = (4 - weekday) % 7
-    if days_until_friday == 0:
-        days_until_friday = 7
-    return earnings_date + timedelta(days=days_until_friday)
+# Import canonical implementation from date_utils to avoid duplication
+from scripts.scan.date_utils import calculate_expiration_date  # noqa: E402
 
 
 # ============================================================================

@@ -563,13 +563,15 @@ def scanning_mode(
         maxinterval=2.0   # Maximum 2 seconds between updates
     )
 
+    min_dte = container.config.thresholds.min_dte
+
     for ticker, earnings_date, timing in pbar:
         pbar.set_postfix_str(f"Current: {ticker}")
         sys.stderr.flush()  # Force flush after each update
 
         # Calculate expiration date
         expiration_date = calculate_expiration_date(
-            earnings_date, timing, expiration_offset
+            earnings_date, timing, expiration_offset, min_dte=min_dte
         )
 
         # Apply filters (market cap + liquidity) for scan mode
@@ -829,6 +831,8 @@ def ticker_mode(
         maxinterval=2.0   # Maximum 2 seconds between updates
     )
 
+    min_dte = container.config.thresholds.min_dte
+
     for ticker in pbar:
         pbar.set_postfix_str(f"Current: {ticker}")
         sys.stderr.flush()  # Force flush after each update
@@ -846,7 +850,7 @@ def ticker_mode(
 
         # Calculate expiration date
         expiration_date = calculate_expiration_date(
-            earnings_date, timing, expiration_offset
+            earnings_date, timing, expiration_offset, min_dte=min_dte
         )
 
         # Apply filters (market cap + liquidity) for list mode
@@ -1185,6 +1189,8 @@ def whisper_mode(
         maxinterval=2.0   # Maximum 2 seconds between updates
     )
 
+    min_dte = container.config.thresholds.min_dte
+
     for ticker in pbar:
         pbar.set_postfix_str(f"Current: {ticker}")
         sys.stderr.flush()  # Force flush after each update
@@ -1210,7 +1216,7 @@ def whisper_mode(
 
         # Calculate expiration date
         expiration_date = calculate_expiration_date(
-            earnings_date, timing, expiration_offset
+            earnings_date, timing, expiration_offset, min_dte=min_dte
         )
 
         # Apply filters (market cap + liquidity) for whisper mode

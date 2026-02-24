@@ -682,6 +682,11 @@ class StrategyScorer:
         elif strategy.strategy_type == StrategyType.IRON_BUTTERFLY:
             parts.append("max profit at current price")
 
+        # Spread exit rule (Feb 2026 - data-driven)
+        # Spreads held 2+ days: 31% win rate, -$28k. Singles held 2+ days: 78% win, +$66k.
+        if strategy.strategy_type in {StrategyType.BULL_PUT_SPREAD, StrategyType.BEAR_CALL_SPREAD}:
+            parts.append("EXIT next trading day (spreads: 31% win if held 2+ days)")
+
         return ", ".join(parts) if parts else "Defined risk outside expected move"
 
     def generate_recommendation_rationale(
