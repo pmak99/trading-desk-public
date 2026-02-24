@@ -116,7 +116,7 @@ def test_format_digest():
     assert "Dec 12" in digest or "2025-12-12" in digest
     assert "AVGO" in digest
     assert "LULU" in digest
-    assert "12/40" in digest
+    assert "12/60" in digest
 
 
 def test_format_ticker_line_cli():
@@ -210,7 +210,7 @@ def test_format_digest_grouped_by_date():
     assert ticker_lines[3].startswith("4.")
 
     # Budget line
-    assert "15/40" in digest
+    assert "15/60" in digest
     assert "$4.91" in digest
 
 

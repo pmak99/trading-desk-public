@@ -23,8 +23,8 @@ def test_record_api_call(tracker):
 
 def test_daily_limit_check(tracker):
     """can_call returns False when daily limit exceeded."""
-    # Record 40 calls (daily limit)
-    for _ in range(40):
+    # Record 60 calls (daily limit)
+    for _ in range(60):
         tracker.record_call("perplexity", cost=0.005)
 
     assert tracker.can_call("perplexity") is False
@@ -95,17 +95,17 @@ class TestTryAcquireCall:
 
     def test_try_acquire_call_daily_limit(self, tracker):
         """try_acquire_call should fail when daily limit exceeded."""
-        # Record 40 calls to hit limit
-        for _ in range(40):
+        # Record 60 calls to hit limit
+        for _ in range(60):
             tracker.record_call("perplexity", cost=0.005)
 
         # Next acquire should fail
         result = tracker.try_acquire_call("perplexity", cost=0.006)
         assert result is False
 
-        # Count should still be 40
+        # Count should still be 60
         stats = tracker.get_daily_stats("perplexity")
-        assert stats["calls"] == 40
+        assert stats["calls"] == 60
 
     def test_try_acquire_call_monthly_budget(self, tracker):
         """try_acquire_call should fail when monthly budget exceeded."""
@@ -148,8 +148,8 @@ class TestTryAcquireCallAsync:
     @pytest.mark.asyncio
     async def test_try_acquire_call_async_daily_limit(self, tracker):
         """try_acquire_call_async should fail when daily limit exceeded."""
-        # Record 40 calls to hit limit
-        for _ in range(40):
+        # Record 60 calls to hit limit
+        for _ in range(60):
             tracker.record_call("perplexity", cost=0.005)
 
         # Next acquire should fail
