@@ -58,7 +58,7 @@ def aggregate_fills(rows: list[dict]) -> list[dict]:
 
         # Aggregate: sum quantity, proceeds, gain_loss, cost_basis
         base = dict(fill_rows[0])  # copy first row as template
-        total_qty = sum(int(r['Quantity']) for r in fill_rows if r.get('Quantity', '').strip())
+        total_qty = sum(int(float(r['Quantity'])) for r in fill_rows if r.get('Quantity', '').strip())
         total_proceeds = sum(parse_dollar(r['Proceeds']) for r in fill_rows)
         total_cost = sum(parse_dollar(r['Cost Basis']) for r in fill_rows)
         total_gl = sum(parse_dollar(r['Gain/Loss']) for r in fill_rows)
@@ -113,7 +113,8 @@ def import_csv_to_db(csv_path: str, db_path: str, dry_run: bool = False) -> dict
             days_held = int(row['Days Held']) if row.get('Days Held', '').strip() else None
             strike = float(row['Strike']) if row.get('Strike', '').strip() else None
             expiration = row.get('Expiration', '').strip() or None
-            quantity = int(row['Quantity']) if row.get('Quantity', '').strip() else None
+            qty_str = row.get('Quantity', '').strip()
+            quantity = int(float(qty_str)) if qty_str else None
             cost_basis = parse_dollar(row['Cost Basis'])
             proceeds = parse_dollar(row['Proceeds'])
             gain_loss = parse_dollar(row['Gain/Loss'])

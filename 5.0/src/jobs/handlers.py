@@ -561,6 +561,14 @@ class JobRunner(BaseJobHandler):
         log("info", "Digest analysis complete",
             real_implied_count=real_implied_count, total_candidates=len(upcoming[:MAX_DIGEST_CANDIDATES]))
 
+        # Save qualified tickers for downstream jobs (after-hours check)
+        if opportunities:
+            self._save_daily_candidates(
+                settings.DB_PATH, today,
+                [o["ticker"] for o in opportunities],
+                "morning_digest",
+            )
+
         # Sort by score descending
         opportunities.sort(key=lambda x: x["score"], reverse=True)
 
@@ -776,6 +784,14 @@ class JobRunner(BaseJobHandler):
         # Sort by VRP ratio
         candidates.sort(key=lambda x: x["vrp_ratio"], reverse=True)
 
+        # Save qualified tickers for downstream jobs (after-hours check)
+        if candidates:
+            self._save_daily_candidates(
+                settings.DB_PATH, today,
+                [c["ticker"] for c in candidates],
+                "pre_trade_refresh",
+            )
+
         # Send actionable alert
         telegram_error = None
         if candidates:
@@ -810,27 +826,34 @@ class JobRunner(BaseJobHandler):
         """
         After hours check (16:30 ET).
         Check for after-market-close earnings announcements.
-        Alerts about earnings that just reported and their initial moves.
+        Only tracks tickers that qualified in morning digest or pre-trade alert.
         """
         start_time = self._start_timer()
         today = today_et()
+
+        # Only show tickers that qualified in earlier alerts (digest / pre-trade)
+        qualified = self._get_daily_candidates(settings.DB_PATH, today)
+        if not qualified:
+            log("info", "No qualified candidates today", job="after_hours_check")
+            return {"status": "success", "checked": 0, "note": "No qualified candidates today"}
 
         # Get earnings for today
         earnings = await self._fetch_earnings("after_hours_check")
         if not earnings:
             return {"status": "warning", "checked": 0, "note": "Empty calendar from API"}
 
-        # Filter to today's earnings
-        todays_earnings = self._todays_earnings(earnings)
-
-        # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
-        todays_earnings, repo = self._filter_tracked(todays_earnings)
+        # Filter to today's earnings that were in our qualified list
+        todays_earnings = [
+            e for e in self._todays_earnings(earnings)
+            if e["symbol"] in qualified
+        ]
 
         if not todays_earnings:
-            log("info", "No earnings today", job="after_hours_check")
-            return {"status": "success", "checked": 0, "note": "No earnings today"}
+            log("info", "No qualified earnings today", job="after_hours_check")
+            return {"status": "success", "checked": 0, "note": "No qualified earnings today"}
 
-        # Check after-hours prices for earnings that just reported
+        # Check after-hours prices for qualified earnings
+        repo = HistoricalMovesRepository(settings.DB_PATH)
         checked = 0
         reported = []
         failed_tickers = []

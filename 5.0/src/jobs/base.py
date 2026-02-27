@@ -13,7 +13,8 @@ Extracts common patterns from individual job handlers:
 """
 
 import asyncio
-from typing import Dict, Any, List, Optional, Tuple
+import sqlite3
+from typing import Dict, Any, List, Optional, Set, Tuple
 
 from datetime import timedelta
 
@@ -194,6 +195,75 @@ class BaseJobHandler:
             repo = HistoricalMovesRepository(settings.DB_PATH)
         tracked = repo.get_tracked_tickers()
         return filter_to_tracked_tickers(earnings, tracked), repo
+
+    # ------------------------------------------------------------------ #
+    #  Daily Candidate Tracking
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _save_daily_candidates(
+        db_path: str, date: str, tickers: List[str], source: str
+    ) -> None:
+        """
+        Save qualified tickers so downstream jobs (after-hours) can filter to them.
+
+        Uses CREATE TABLE IF NOT EXISTS so no migration is needed.
+
+        Args:
+            db_path: Path to ivcrush.db
+            date: Date string (YYYY-MM-DD)
+            tickers: List of qualified ticker symbols
+            source: Job name that qualified them (e.g. "morning_digest")
+        """
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS daily_candidates (
+                    date TEXT NOT NULL,
+                    ticker TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    UNIQUE(date, ticker, source)
+                )
+            """)
+            for ticker in tickers:
+                conn.execute(
+                    "INSERT OR IGNORE INTO daily_candidates (date, ticker, source) VALUES (?, ?, ?)",
+                    (date, ticker, source),
+                )
+            conn.commit()
+            log("info", "Saved daily candidates",
+                date=date, source=source, count=len(tickers))
+        except sqlite3.Error as e:
+            log("error", "Failed to save daily candidates", error=str(e))
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _get_daily_candidates(db_path: str, date: str) -> Set[str]:
+        """
+        Get all qualified tickers for a date (from any source job).
+
+        Returns empty set if table doesn't exist or no candidates found.
+
+        Args:
+            db_path: Path to ivcrush.db
+            date: Date string (YYYY-MM-DD)
+
+        Returns:
+            Set of ticker symbols that were qualified by morning digest / pre-trade
+        """
+        conn = sqlite3.connect(db_path)
+        try:
+            cursor = conn.execute(
+                "SELECT DISTINCT ticker FROM daily_candidates WHERE date = ?",
+                (date,),
+            )
+            return {row[0] for row in cursor.fetchall()}
+        except sqlite3.OperationalError:
+            # Table doesn't exist yet (first run)
+            return set()
+        finally:
+            conn.close()
 
     # ------------------------------------------------------------------ #
     #  Historical Data

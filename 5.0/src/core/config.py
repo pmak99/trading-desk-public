@@ -42,10 +42,10 @@ class Settings:
     # Position sizing defaults
     DEFAULT_POSITION_SIZE = 10  # Contracts for liquidity tier calculation
 
-    # Weekly options filter (opt-in, default OFF)
-    # When enabled, filters out tickers without weekly options
-    # Weekly options have better liquidity and tighter spreads
-    REQUIRE_WEEKLY_OPTIONS = False
+    # Weekly options filter (default ON)
+    # Filters out tickers without weekly options
+    # Weekly options have better liquidity and tighter spreads for IV crush
+    REQUIRE_WEEKLY_OPTIONS = True
 
     def __init__(self):
         self._secrets: Optional[dict] = None
@@ -267,8 +267,8 @@ class Settings:
 
     @property
     def require_weekly_options(self) -> bool:
-        """Check if weekly options filter is enabled (opt-in)."""
-        return os.environ.get('REQUIRE_WEEKLY_OPTIONS', 'false').lower() == 'true'
+        """Check if weekly options filter is enabled (default: on)."""
+        return os.environ.get('REQUIRE_WEEKLY_OPTIONS', 'true').lower() == 'true'
 
     @property
     def DB_PATH(self) -> str:

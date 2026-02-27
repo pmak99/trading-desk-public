@@ -46,7 +46,7 @@ def mock_settings():
         s.twelve_data_key = "test_12d_key"
         s.DB_PATH = ":memory:"
         s.VRP_DISCOVERY = 1.8
-        s.require_weekly_options = False
+        s.require_weekly_options = True
         s.gcs_bucket = "test-bucket"
         yield s
 
@@ -434,6 +434,49 @@ class TestBaseJobHandler:
         assert len(result) == 2
         assert all(e["symbol"] in tracked for e in result)
 
+    def test_save_and_get_daily_candidates(self, tmp_path):
+        """Daily candidates round-trip: save then retrieve."""
+        from src.jobs.base import BaseJobHandler
+
+        db_path = str(tmp_path / "test.db")
+        BaseJobHandler._save_daily_candidates(db_path, "2026-02-25", ["AAPL", "CRM"], "morning_digest")
+        BaseJobHandler._save_daily_candidates(db_path, "2026-02-25", ["CRM", "SNOW"], "pre_trade_refresh")
+
+        result = BaseJobHandler._get_daily_candidates(db_path, "2026-02-25")
+        assert result == {"AAPL", "CRM", "SNOW"}
+
+    def test_get_daily_candidates_empty_date(self, tmp_path):
+        """No candidates for a date returns empty set."""
+        from src.jobs.base import BaseJobHandler
+
+        db_path = str(tmp_path / "test.db")
+        BaseJobHandler._save_daily_candidates(db_path, "2026-02-25", ["AAPL"], "morning_digest")
+
+        result = BaseJobHandler._get_daily_candidates(db_path, "2026-02-26")
+        assert result == set()
+
+    def test_get_daily_candidates_no_table(self, tmp_path):
+        """Returns empty set when table doesn't exist yet."""
+        import sqlite3
+        from src.jobs.base import BaseJobHandler
+
+        db_path = str(tmp_path / "empty.db")
+        sqlite3.connect(db_path).close()  # Create empty DB
+
+        result = BaseJobHandler._get_daily_candidates(db_path, "2026-02-25")
+        assert result == set()
+
+    def test_save_daily_candidates_idempotent(self, tmp_path):
+        """Saving same ticker+date+source twice doesn't duplicate."""
+        from src.jobs.base import BaseJobHandler
+
+        db_path = str(tmp_path / "test.db")
+        BaseJobHandler._save_daily_candidates(db_path, "2026-02-25", ["AAPL"], "morning_digest")
+        BaseJobHandler._save_daily_candidates(db_path, "2026-02-25", ["AAPL"], "morning_digest")
+
+        result = BaseJobHandler._get_daily_candidates(db_path, "2026-02-25")
+        assert result == {"AAPL"}
+
 
 # ---------------------------------------------------------------------------
 # _pre_market_prep
@@ -797,6 +840,78 @@ class TestMorningDigest:
         assert result["status"] == "success"
         assert "telegram_error" in result
         assert "Telegram timeout" in result["telegram_error"]
+
+
+# ---------------------------------------------------------------------------
+# _after_hours_check
+# ---------------------------------------------------------------------------
+
+class TestAfterHoursCheck:
+    """Tests for the _after_hours_check handler."""
+
+    @pytest.mark.asyncio
+    async def test_no_qualified_candidates_returns_early(self, runner, mock_settings):
+        """Returns early when no tickers were qualified by digest/pre-trade."""
+        with patch("src.jobs.handlers.today_et", return_value="2026-02-25"), \
+             patch("src.jobs.base.BaseJobHandler._get_daily_candidates", return_value=set()):
+
+            result = await runner._after_hours_check()
+
+        assert result["status"] == "success"
+        assert result["checked"] == 0
+        assert "No qualified candidates" in result["note"]
+        # Should NOT call earnings API
+        runner._alphavantage.get_earnings_calendar.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_filters_to_qualified_tickers_only(self, runner, mock_settings):
+        """Only tickers from daily_candidates are checked, micro-caps excluded."""
+        today = "2026-02-25"
+        runner._alphavantage.get_earnings_calendar.return_value = [
+            {"symbol": "CRM", "report_date": today},
+            {"symbol": "EDXC", "report_date": today},  # micro-cap, not in candidates
+            {"symbol": "ENSV", "report_date": today},  # micro-cap, not in candidates
+        ]
+
+        # CRM qualified in morning digest; EDXC and ENSV did not
+        qualified = {"CRM", "SNOW"}
+
+        mock_repo = MagicMock()
+        mock_repo.get_moves.return_value = [
+            {"intraday_move_pct": 5.0},
+            {"intraday_move_pct": 3.0},
+            {"intraday_move_pct": 4.0},
+            {"intraday_move_pct": 6.0},
+        ]
+
+        runner._tradier.get_quote = AsyncMock(return_value={"last": 205.0})
+        runner._twelvedata.get_stock_history = AsyncMock(return_value={
+            "Close": {"2026-02-25": 200.0}
+        })
+
+        with patch("src.jobs.handlers.today_et", return_value=today), \
+             patch("src.jobs.base.today_et", return_value=today), \
+             patch("src.jobs.base.BaseJobHandler._get_daily_candidates", return_value=qualified), \
+             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.base.settings", mock_settings):
+
+            result = await runner._after_hours_check()
+
+        # Only CRM should be checked (SNOW not in today's earnings, EDXC/ENSV not qualified)
+        assert result["checked"] == 1
+        assert result["reported"] == 1
+
+    @pytest.mark.asyncio
+    async def test_empty_calendar_returns_warning(self, runner, mock_settings):
+        """Empty earnings calendar returns warning."""
+        runner._alphavantage.get_earnings_calendar.return_value = []
+
+        with patch("src.jobs.handlers.today_et", return_value="2026-02-25"), \
+             patch("src.jobs.base.BaseJobHandler._get_daily_candidates", return_value={"CRM"}):
+
+            result = await runner._after_hours_check()
+
+        assert result["status"] == "warning"
 
 
 # ---------------------------------------------------------------------------
