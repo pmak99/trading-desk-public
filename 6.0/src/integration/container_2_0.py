@@ -143,7 +143,7 @@ class Container2_0:
 
             # Re-raise any initialization error after cleanup is complete
             if init_error is not None:
-                raise init_error
+                raise init_error from init_error
 
     def analyze_ticker(
         self,

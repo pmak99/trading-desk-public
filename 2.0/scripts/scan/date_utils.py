@@ -31,9 +31,6 @@ def get_us_market_holidays(year: int) -> set:
     Get US stock market holidays for a given year (with caching).
 
     Returns fixed-date holidays and approximations for floating holidays.
-    Note: Good Friday requires Easter calculation which is complex,
-    so it's omitted here. For production, consider using a library like
-    pandas_market_calendars or exchange_calendars.
 
     Args:
         year: The year to get holidays for
@@ -84,6 +81,26 @@ def get_us_market_holidays(year: int) -> set:
         holidays.add(date(year, 12, 26))
     else:
         holidays.add(christmas)
+
+    # Good Friday (Friday before Easter Sunday)
+    # Uses the Anonymous Gregorian Easter algorithm
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    easter_sunday = date(year, month, day)
+    good_friday = easter_sunday - timedelta(days=2)
+    holidays.add(good_friday)
 
     # Floating holidays (approximations)
     # MLK Day (3rd Monday of January)

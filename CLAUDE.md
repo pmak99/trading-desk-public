@@ -58,7 +58,7 @@ VRP Ratio = Implied Move / Historical Mean Move
 
 Rebalanced Dec 2025 after WDAY/ZS $26,930 loss: POP raised to 40%, liquidity added at 22%.
 
-**4.0 Modifier:** `4.0 Score = 2.0 Score x (1 + sentiment_modifier)` where modifiers are symmetric and dampened: +3% to +5% bullish (~55% accuracy), -3% to -5% bearish (0/4 accuracy, dampened Feb 2026).
+**4.0 Modifier:** `4.0 Score = 2.0 Score x (1 + sentiment_modifier)` where modifiers reflect accuracy: +1% to +2% bullish (~55% accuracy, marginal signal), 0% bearish (0/4 accuracy, zeroed Mar 2026).
 
 **Cutoffs:** 2.0 Score >= 50 (pre-filter) | 4.0 Score >= 55 (post-filter)
 

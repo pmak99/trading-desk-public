@@ -237,12 +237,15 @@ class StrategyScorer:
         ) * self.weights.pop_weight_no_greeks
 
         # Factor 2: Liquidity Quality - CRITICAL when Greeks unavailable
-        # Use liquidity tier for scoring (EXCELLENT=full, WARNING=half, REJECT=zero)
+        # 4-tier scoring: EXCELLENT/GOOD=full, WARNING=half, REJECT=zero
         if strategy.liquidity_tier is None:
             liquidity_score = self.weights.liquidity_weight_no_greeks
         else:
             tier = strategy.liquidity_tier.upper()
             if tier == "EXCELLENT":
+                liquidity_score = self.weights.liquidity_weight_no_greeks
+            elif tier == "GOOD":
+                # Full score - GOOD tier = full size per CLAUDE.md trading rules
                 liquidity_score = self.weights.liquidity_weight_no_greeks
             elif tier == "WARNING":
                 liquidity_score = self.weights.liquidity_weight_no_greeks * 0.5
@@ -318,8 +321,14 @@ class StrategyScorer:
                 vega_score = min(abs(strategy.position_vega) / self.weights.target_vega, 1.0) * (
                     self.weights.greeks_weight / 2
                 )
+            elif strategy.position_vega <= 10:
+                # Near-zero positive vega (0 to +10): partial credit
+                # Functionally near-neutral, won't be significantly hurt by IV crush
+                # Linear gradient: vega=0 gets 50% credit, vega=10 gets 0%
+                near_zero_fraction = 1.0 - (strategy.position_vega / 10.0)
+                vega_score = 0.5 * near_zero_fraction * (self.weights.greeks_weight / 2)
             else:
-                # Penalize positive vega (hurt by IV decrease) - score 0
+                # Positive vega > 10: hurt by IV decrease - score 0
                 vega_score = 0.0
 
         return theta_score + vega_score
@@ -334,10 +343,11 @@ class StrategyScorer:
         - Slippage amplified losses by ~20%
         - Expensive fills when trying to close positions
 
-        Scoring logic (3-tier system):
-        - EXCELLENT tier: 100% of liquidity_weight (25 points max)
-        - WARNING tier: 50% of liquidity_weight (12.5 points max)
-        - REJECT tier: 0% (should be filtered before scoring)
+        Scoring logic (4-tier system):
+        - EXCELLENT tier: 100% of liquidity_weight
+        - GOOD tier: 100% of liquidity_weight (full size per CLAUDE.md)
+        - WARNING tier: 50% of liquidity_weight
+        - REJECT tier: 0% (allowed but penalized)
         - No tier info: 100% (assume EXCELLENT for backward compatibility)
 
         Args:
@@ -354,6 +364,9 @@ class StrategyScorer:
 
         if tier == "EXCELLENT":
             # Full score for excellent liquidity
+            return self.weights.liquidity_weight
+        elif tier == "GOOD":
+            # Full score - GOOD tier = full size per CLAUDE.md trading rules
             return self.weights.liquidity_weight
         elif tier == "WARNING":
             # Half score for warning liquidity (risky but tradeable)

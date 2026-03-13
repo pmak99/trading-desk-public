@@ -7,7 +7,7 @@ import logging
 import sys
 from pathlib import Path
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ class Cache4_0:
         Returns:
             Cache stats dict with hit rate, size, etc.
         """
-        return self.sentiment_cache.get_stats()
+        return self.sentiment_cache.stats()
 
     def clear_expired_cache(self) -> int:
         """
@@ -138,8 +138,8 @@ class Cache4_0:
             cursor.execute("SELECT COUNT(*) FROM sentiment_cache")
             total_entries = cursor.fetchone()[0]
 
-            # Stale entries (>3 hours old)
-            cutoff_time = datetime.now() - timedelta(hours=3)
+            # Stale entries (>3 hours old) - use UTC to match 4.0's storage format
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=3)
             cursor.execute(
                 "SELECT COUNT(*) FROM sentiment_cache WHERE cached_at < ?",
                 (cutoff_time.isoformat(),)
@@ -165,9 +165,9 @@ class Cache4_0:
         Returns:
             Number of entries removed
         """
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
-        cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
 
         import sqlite3
         cache_db = _main_repo / "4.0" / "data" / "sentiment_cache.db"
@@ -223,10 +223,10 @@ class Cache4_0:
                 # Parse ISO format timestamp
                 try:
                     cached_at = datetime.fromisoformat(cached_at_str.replace('Z', '+00:00'))
-                    # Handle timezone-naive comparison
-                    if cached_at.tzinfo is not None:
-                        cached_at = cached_at.replace(tzinfo=None)
-                    age_seconds = (datetime.now() - cached_at).total_seconds()
+                    # Ensure timezone-aware comparison using UTC
+                    if cached_at.tzinfo is None:
+                        cached_at = cached_at.replace(tzinfo=timezone.utc)
+                    age_seconds = (datetime.now(timezone.utc) - cached_at).total_seconds()
                     return age_seconds / 3600.0
                 except (ValueError, TypeError):
                     logger.debug(f"Could not parse cache timestamp for {ticker}: {cached_at_str}")

@@ -30,6 +30,7 @@ from ..agents.preflight import PreFlightAgent
 from ..agents.news_fetch import NewsFetchAgent
 from ..integration.cache_4_0 import Cache4_0
 from ..utils.retry import with_retry
+from ..utils.timeout import gather_with_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -208,52 +209,42 @@ class AnalyzeOrchestrator(BaseOrchestrator):
         pattern_agent = PatternRecognitionAgent()
 
         # Phase 1: All independent agents in parallel with retry
+        # Uses gather_with_timeout to preserve partial results on timeout
         print("  Phase 1: TickerAnalysis + Sentiment + News + Pattern (parallel)...")
-        try:
-            phase1_results = await asyncio.wait_for(
-                asyncio.gather(
-                    with_retry(
-                        lambda: asyncio.to_thread(
-                            ticker_agent.analyze,
-                            ticker,
-                            earnings_date,
-                            generate_strategies=True
-                        ),
-                        max_retries=3,
-                        base_delay=2.0,
-                        label=f"TickerAnalysis({ticker})"
-                    ),
-                    with_retry(
-                        lambda: sentiment_agent.fetch_sentiment(ticker, earnings_date),
-                        max_retries=2,
-                        base_delay=2.0,
-                        label=f"Sentiment({ticker})"
-                    ),
-                    with_retry(
-                        lambda: news_agent.fetch_news(ticker),
-                        max_retries=1,
-                        base_delay=2.0,
-                        label=f"News({ticker})"
-                    ),
-                    with_retry(
-                        lambda: asyncio.to_thread(pattern_agent.analyze, ticker),
-                        max_retries=1,
-                        base_delay=2.0,
-                        label=f"Pattern({ticker})"
-                    ),
-                    return_exceptions=True
+        phase1_tasks = [
+            asyncio.ensure_future(with_retry(
+                lambda: asyncio.to_thread(
+                    ticker_agent.analyze,
+                    ticker,
+                    earnings_date,
+                    generate_strategies=True
                 ),
-                timeout=self.timeout
-            )
-        except asyncio.TimeoutError:
-            return {
-                'ticker_analysis': {'error': 'Timeout during Phase 1 analysis'},
-                'sentiment': {'error': 'Timeout'},
-                'news': {'error': 'Timeout'},
-                'explanation': None,
-                'anomaly': None,
-                'patterns': None
-            }
+                max_retries=3,
+                base_delay=2.0,
+                label=f"TickerAnalysis({ticker})"
+            )),
+            asyncio.ensure_future(with_retry(
+                lambda: sentiment_agent.fetch_sentiment(ticker, earnings_date),
+                max_retries=2,
+                base_delay=2.0,
+                label=f"Sentiment({ticker})"
+            )),
+            asyncio.ensure_future(with_retry(
+                lambda: news_agent.fetch_news(ticker),
+                max_retries=1,
+                base_delay=2.0,
+                label=f"News({ticker})"
+            )),
+            asyncio.ensure_future(with_retry(
+                lambda: asyncio.to_thread(pattern_agent.analyze, ticker),
+                max_retries=1,
+                base_delay=2.0,
+                label=f"Pattern({ticker})"
+            )),
+        ]
+        phase1_results = await gather_with_timeout(
+            phase1_tasks, timeout=self.timeout, return_exceptions=True
+        )
 
         # Unwrap Phase 1 results
         ticker_result = self._unwrap_result(phase1_results[0], 'ticker_analysis')

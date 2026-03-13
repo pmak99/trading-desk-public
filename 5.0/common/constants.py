@@ -57,11 +57,11 @@ SENTIMENT_BULLISH_THRESHOLD = 0.2
 SENTIMENT_BEARISH_THRESHOLD = -0.2
 SENTIMENT_STRONG_BEARISH_THRESHOLD = -0.6
 
-SENTIMENT_MODIFIER_STRONG_BULLISH = 0.05   # +5% (dampened: bullish accuracy ~55%)
-SENTIMENT_MODIFIER_BULLISH = 0.03          # +3% (dampened: bullish accuracy ~55%)
+SENTIMENT_MODIFIER_STRONG_BULLISH = 0.02   # +2% (reduced: bullish accuracy ~55%, marginal signal)
+SENTIMENT_MODIFIER_BULLISH = 0.01          # +1% (reduced: bullish accuracy ~55%, marginal signal)
 SENTIMENT_MODIFIER_NEUTRAL = 0.0           # 0%
-SENTIMENT_MODIFIER_BEARISH = -0.03         # -3% (dampened: bearish accuracy 0/4, Feb 2026)
-SENTIMENT_MODIFIER_STRONG_BEARISH = -0.05  # -5% (dampened: bearish accuracy 0/4, Feb 2026)
+SENTIMENT_MODIFIER_BEARISH = 0.0           # 0% (zeroed: bearish accuracy 0/4, wrong 100% of the time)
+SENTIMENT_MODIFIER_STRONG_BEARISH = 0.0    # 0% (zeroed: bearish accuracy 0/4, wrong 100% of the time)
 
 
 # =============================================================================

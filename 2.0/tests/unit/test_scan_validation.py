@@ -206,25 +206,25 @@ class TestValidateExpirationDate:
 
     def test_valid_expiration(self):
         """Valid expiration should return None (no error)."""
-        earnings = date(2026, 3, 9)  # Monday
-        expiration = date(2026, 3, 10)  # Tuesday
+        earnings = date(2027, 3, 8)  # Monday
+        expiration = date(2027, 3, 9)  # Tuesday
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
         assert result is None
 
     def test_expiration_in_past(self):
         """Expiration in the past should return error."""
-        earnings = date(2026, 3, 10)  # Tuesday
-        expiration = date(2026, 3, 8)  # Sunday (past relative to earnings)
+        earnings = date(2027, 3, 9)  # Tuesday
+        expiration = date(2027, 3, 7)  # Sunday (past relative to earnings)
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
         assert result is not None
-        assert "in the past" in result or "before earnings" in result
+        assert "before earnings" in result
 
     def test_expiration_before_earnings(self):
         """Expiration before earnings should return error."""
-        earnings = date(2026, 3, 13)  # Friday
-        expiration = date(2026, 3, 10)  # Tuesday (before earnings)
+        earnings = date(2027, 3, 12)  # Friday
+        expiration = date(2027, 3, 9)  # Tuesday (before earnings)
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
         assert result is not None
@@ -232,8 +232,8 @@ class TestValidateExpirationDate:
 
     def test_expiration_on_weekend(self):
         """Expiration on weekend should return error (programming error)."""
-        earnings = date(2026, 3, 9)  # Monday
-        saturday = date(2026, 3, 14)  # Saturday
+        earnings = date(2027, 3, 8)  # Monday
+        saturday = date(2027, 3, 13)  # Saturday
 
         result = validate_expiration_date(saturday, earnings, "AAPL")
         assert result is not None
@@ -241,8 +241,8 @@ class TestValidateExpirationDate:
 
     def test_expiration_too_far_future(self):
         """Expiration > 30 days after earnings should return error."""
-        earnings = date(2026, 3, 9)  # Monday
-        expiration = date(2026, 4, 14)  # 36 days later, a Tuesday
+        earnings = date(2027, 3, 8)  # Monday
+        expiration = date(2027, 4, 13)  # 36 days later, a Tuesday
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
         assert result is not None
@@ -250,15 +250,15 @@ class TestValidateExpirationDate:
 
     def test_expiration_exactly_30_days_valid(self):
         """Expiration exactly 30 days after earnings should be valid."""
-        earnings = date(2026, 3, 9)  # Monday
-        expiration = adjust_to_trading_day(earnings + timedelta(days=30))  # Apr 8, Wed
+        earnings = date(2027, 3, 8)  # Monday
+        expiration = adjust_to_trading_day(earnings + timedelta(days=30))  # Apr 7, Wed
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
         assert result is None
 
     def test_expiration_same_as_earnings(self):
         """Expiration same as earnings (0DTE) should be valid."""
-        earnings = date(2026, 3, 9)  # Monday
+        earnings = date(2027, 3, 8)  # Monday
         expiration = earnings  # Same day
 
         result = validate_expiration_date(expiration, earnings, "AAPL")
@@ -271,7 +271,7 @@ class TestIntegrationScenarios:
     def test_friday_earnings_bmo_with_offset_1(self):
         """Friday BMO earnings with offset 1 should adjust Saturday to next trading day."""
         # Use a fixed Friday to avoid date-dependent failures (e.g., Presidents' Day)
-        friday = date(2026, 3, 6)  # A Friday where the following Monday is not a holiday
+        friday = date(2027, 3, 5)  # A Friday where the following Monday is not a holiday
         assert friday.weekday() == 4  # Sanity check: is Friday
 
         # Calculate expiration with offset 1
@@ -290,7 +290,7 @@ class TestIntegrationScenarios:
 
     def test_thursday_amc_auto_calculation(self):
         """Thursday AMC should auto-calculate to Friday 1 week out (avoid 0DTE risk)."""
-        thursday = date(2026, 3, 5)  # A Thursday
+        thursday = date(2027, 3, 4)  # A Thursday
         assert thursday.weekday() == 3
 
         # Calculate expiration (no offset)
@@ -307,7 +307,7 @@ class TestIntegrationScenarios:
 
     def test_monday_unknown_timing(self):
         """Monday with unknown timing should use next Friday."""
-        monday = date(2026, 3, 9)  # A Monday
+        monday = date(2027, 3, 8)  # A Monday
         assert monday.weekday() == 0
 
         # Calculate expiration (no offset, unknown timing)

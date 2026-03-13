@@ -40,14 +40,14 @@ def test_calculate_score_reject_liquidity():
     assert reject_result["total_score"] < 90  # Penalized from perfect score
 
 def test_apply_sentiment_modifier_bullish():
-    """Strong bullish adds +5% (dampened from +12%)."""
+    """Strong bullish adds +2% (reduced Mar 2026: ~55% accuracy = marginal signal)."""
     modified = apply_sentiment_modifier(80, sentiment_score=0.8)
-    assert modified == 84.0  # 80 * 1.05
+    assert modified == 81.6  # 80 * 1.02
 
 def test_apply_sentiment_modifier_bearish():
-    """Strong bearish subtracts -5% (dampened Feb 2026)."""
+    """Strong bearish zeroed (Mar 2026: 0/4 accuracy = no signal)."""
     modified = apply_sentiment_modifier(80, sentiment_score=-0.8)
-    assert modified == 76.0  # 80 * 0.95
+    assert modified == 80.0  # 80 * 1.0 (bearish modifier zeroed)
 
 def test_apply_sentiment_modifier_neutral():
     """Neutral sentiment has no effect."""

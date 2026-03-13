@@ -47,8 +47,8 @@ class TestEndToEndAnalysisFlow:
 
     def test_excellent_opportunity_full_flow(self):
         """High VRP + good liquidity + bullish sentiment = strong recommendation."""
-        # Step 1: VRP calculation (implied move 8.5% vs ~3.69% mean = ~2.3x)
-        vrp = calculate_vrp(implied_move_pct=8.5, historical_moves=HISTORICAL_AAPL)
+        # Step 1: VRP calculation (implied move 12.0% vs ~3.69% mean = ~3.25x)
+        vrp = calculate_vrp(implied_move_pct=12.0, historical_moves=HISTORICAL_AAPL)
         assert "error" not in vrp
         assert vrp["tier"] == "EXCELLENT"
         assert vrp["vrp_ratio"] >= 1.8
@@ -67,7 +67,7 @@ class TestEndToEndAnalysisFlow:
         base_score = score_result["total_score"]
         assert base_score >= 50, f"Base score {base_score} should pass 2.0 pre-filter (>=50)"
 
-        # Step 4: Sentiment modifier (4.0) - strong bullish +5%
+        # Step 4: Sentiment modifier (4.0) - strong bullish +2% (Mar 2026: reduced from +5%)
         final_score = apply_sentiment_modifier(base_score, sentiment_score=0.7)
         assert final_score > base_score, "Bullish sentiment should increase score"
         assert final_score >= 55, f"Final score {final_score} should pass 4.0 post-filter (>=55)"
@@ -76,8 +76,8 @@ class TestEndToEndAnalysisFlow:
         direction = get_direction("neutral", sentiment_score=0.7, sentiment_direction="bullish")
         assert direction == "BULLISH"
 
-    def test_marginal_opportunity_rejected_by_sentiment(self):
-        """Marginal VRP that passes 2.0 filter but fails 4.0 post-filter with bearish sentiment."""
+    def test_marginal_opportunity_bearish_sentiment_neutral(self):
+        """Marginal VRP: bearish sentiment has no effect (zeroed Mar 2026, 0/4 accuracy)."""
         # VRP: 1.3x (MARGINAL) - implied 5.85% vs ~4.5 mean
         vrp = calculate_vrp(implied_move_pct=5.85, historical_moves=HISTORICAL_MINIMAL)
         assert vrp["tier"] == "MARGINAL"
@@ -94,10 +94,9 @@ class TestEndToEndAnalysisFlow:
         )
         base_score = score_result["total_score"]
 
-        # Strong bearish sentiment (-12%) could push below 55 cutoff
+        # Bearish sentiment zeroed (0/4 accuracy) - no effect on score
         final_score = apply_sentiment_modifier(base_score, sentiment_score=-0.8)
-        assert final_score < base_score, "Bearish sentiment should reduce score"
-        # The reduction is 12%, so final = base * 0.88
+        assert final_score == base_score, "Bearish sentiment should have no effect (zeroed)"
 
     def test_skip_vrp_never_reaches_filter(self):
         """SKIP VRP tier produces score too low for any filter."""
@@ -112,12 +111,12 @@ class TestEndToEndAnalysisFlow:
         )
         base_score = score_result["total_score"]
 
-        # Even with maximum bullish sentiment (+5%), SKIP VRP should stay low
+        # Even with maximum bullish sentiment (+2%), SKIP VRP should stay low
         boosted = apply_sentiment_modifier(base_score, sentiment_score=0.9)
         # VRP ratio ~1.0 -> VRP component ~(1.0/7.0)*100*0.55 = 7.86
         # Move component = (5/4.5)*100*0.25 = 27.78
         # Liquidity component = 100*0.20 = 20
-        # Total ~55.6, boosted by 5% = ~58.4
+        # Total ~55.6, boosted by 2% = ~56.7
         # This could pass, but the VRP tier is still SKIP which would flag the trade
         assert vrp["tier"] == "SKIP"
 
@@ -239,19 +238,19 @@ class TestVRPWithRealisticData:
 # ===========================================================================
 
 class TestSentimentModifierRange:
-    """Sentiment modifier correctly adjusts base score (asymmetric: +5%/+3% bullish, -3%/-5% bearish dampened)."""
+    """Sentiment modifier adjusts base score: +2%/+1% bullish, 0% bearish (Mar 2026)."""
 
-    def test_strong_bullish_applies_plus_5_percent(self):
-        """Sentiment >= 0.6 applies +5% modifier (dampened from +12%)."""
+    def test_strong_bullish_applies_plus_2_percent(self):
+        """Sentiment >= 0.6 applies +2% modifier (reduced Mar 2026: ~55% accuracy)."""
         base = 70.0
         modified = apply_sentiment_modifier(base, sentiment_score=0.6)
-        assert modified == pytest.approx(73.5, abs=0.1)  # 70 * 1.05
+        assert modified == pytest.approx(71.4, abs=0.1)  # 70 * 1.02
 
-    def test_bullish_applies_plus_3_percent(self):
-        """Sentiment >= 0.2 (but < 0.6) applies +3% modifier (dampened from +7%)."""
+    def test_bullish_applies_plus_1_percent(self):
+        """Sentiment >= 0.2 (but < 0.6) applies +1% modifier (reduced Mar 2026)."""
         base = 70.0
         modified = apply_sentiment_modifier(base, sentiment_score=0.3)
-        assert modified == pytest.approx(72.1, abs=0.1)  # 70 * 1.03
+        assert modified == pytest.approx(70.7, abs=0.1)  # 70 * 1.01
 
     def test_neutral_applies_zero_modifier(self):
         """Sentiment between -0.2 and 0.2 applies 0% modifier."""
@@ -259,20 +258,20 @@ class TestSentimentModifierRange:
         modified = apply_sentiment_modifier(base, sentiment_score=0.1)
         assert modified == pytest.approx(70.0, abs=0.1)  # 70 * 1.00
 
-    def test_bearish_applies_minus_3_percent(self):
-        """Sentiment <= -0.2 (but > -0.6) applies -3% modifier (dampened Feb 2026: 0/4 accuracy)."""
+    def test_bearish_applies_zero_modifier(self):
+        """Sentiment <= -0.2 (but > -0.6): bearish modifier zeroed (0/4 accuracy)."""
         base = 70.0
         modified = apply_sentiment_modifier(base, sentiment_score=-0.3)
-        assert modified == pytest.approx(67.9, abs=0.1)  # 70 * 0.97
+        assert modified == pytest.approx(70.0, abs=0.1)  # 70 * 1.00 (zeroed)
 
-    def test_strong_bearish_applies_minus_5_percent(self):
-        """Sentiment <= -0.6 applies -5% modifier (dampened Feb 2026: 0/4 accuracy)."""
+    def test_strong_bearish_applies_zero_modifier(self):
+        """Sentiment <= -0.6: strong bearish modifier zeroed (0/4 accuracy)."""
         base = 70.0
         modified = apply_sentiment_modifier(base, sentiment_score=-0.8)
-        assert modified == pytest.approx(66.5, abs=0.1)  # 70 * 0.95
+        assert modified == pytest.approx(70.0, abs=0.1)  # 70 * 1.00 (zeroed)
 
     def test_modifier_preserves_ordering(self):
-        """Bullish sentiment always produces higher score than bearish for same base."""
+        """Bullish sentiment produces higher score; bearish/neutral are equal."""
         base = 75.0
         strong_bullish = apply_sentiment_modifier(base, sentiment_score=0.9)
         bullish = apply_sentiment_modifier(base, sentiment_score=0.4)
@@ -280,7 +279,10 @@ class TestSentimentModifierRange:
         bearish = apply_sentiment_modifier(base, sentiment_score=-0.4)
         strong_bearish = apply_sentiment_modifier(base, sentiment_score=-0.9)
 
-        assert strong_bullish > bullish > neutral > bearish > strong_bearish
+        assert strong_bullish > bullish > neutral
+        # Bearish modifiers are zeroed, so bearish == neutral == strong_bearish
+        assert bearish == neutral
+        assert strong_bearish == neutral
 
     def test_modifier_clamped_to_0_100(self):
         """Modified score is clamped to [0, 100] range."""
@@ -293,21 +295,21 @@ class TestSentimentModifierRange:
         assert modified >= 0.0
 
     def test_boundary_between_neutral_and_bullish(self):
-        """Score of exactly 0.2 triggers bullish modifier (+3%)."""
+        """Score of exactly 0.2 triggers bullish modifier (+1%)."""
         base = 60.0
         at_boundary = apply_sentiment_modifier(base, sentiment_score=0.2)
         just_below = apply_sentiment_modifier(base, sentiment_score=0.19)
 
-        assert at_boundary == pytest.approx(61.8, abs=0.1)  # 60 * 1.03
+        assert at_boundary == pytest.approx(60.6, abs=0.1)  # 60 * 1.01
         assert just_below == pytest.approx(60.0, abs=0.1)   # 60 * 1.00
 
     def test_boundary_between_neutral_and_bearish(self):
-        """Score of exactly -0.2 triggers bearish modifier (-3% dampened)."""
+        """Score of exactly -0.2 triggers bearish modifier (0% zeroed)."""
         base = 60.0
         at_boundary = apply_sentiment_modifier(base, sentiment_score=-0.2)
         just_above = apply_sentiment_modifier(base, sentiment_score=-0.19)
 
-        assert at_boundary == pytest.approx(58.2, abs=0.1)  # 60 * 0.97
+        assert at_boundary == pytest.approx(60.0, abs=0.1)  # 60 * 1.00 (zeroed)
         assert just_above == pytest.approx(60.0, abs=0.1)   # 60 * 1.00
 
 
@@ -375,14 +377,13 @@ class TestScoreFlowPipeline:
         )
         base = result["total_score"]
 
-        # Bullish sentiment boosts by 3%
+        # Bullish sentiment boosts by 1%
         final = apply_sentiment_modifier(base, sentiment_score=0.4)
         assert final > base
-        assert final == pytest.approx(base * 1.03, abs=0.1)
+        assert final == pytest.approx(base * 1.01, abs=0.1)
 
-    def test_pipeline_fails_4_0_filter_with_bearish_sentiment(self):
-        """Borderline base score fails 4.0 filter when reduced by bearish sentiment."""
-        # Score right around 55
+    def test_pipeline_bearish_sentiment_no_effect(self):
+        """Bearish sentiment has no effect on score (zeroed Mar 2026)."""
         result = calculate_score(
             vrp_ratio=1.5,
             implied_move_pct=5.0,
@@ -390,10 +391,9 @@ class TestScoreFlowPipeline:
         )
         base = result["total_score"]
 
-        # Strong bearish reduces by 5% (dampened Feb 2026: 0/4 accuracy)
+        # Bearish modifier zeroed (0/4 accuracy)
         final = apply_sentiment_modifier(base, sentiment_score=-0.8)
-        assert final < base
-        assert final == pytest.approx(base * 0.95, abs=0.1)
+        assert final == base
 
     def test_liquidity_tiers_affect_score_proportionally(self):
         """Score difference between liquidity tiers is proportional to weight."""
@@ -612,8 +612,8 @@ class TestEdgeCases:
         max_bullish = apply_sentiment_modifier(base, sentiment_score=1.0)
         max_bearish = apply_sentiment_modifier(base, sentiment_score=-1.0)
 
-        assert max_bullish == pytest.approx(63.0, abs=0.1)  # 60 * 1.05
-        assert max_bearish == pytest.approx(57.0, abs=0.1)  # 60 * 0.95 (dampened)
+        assert max_bullish == pytest.approx(61.2, abs=0.1)  # 60 * 1.02
+        assert max_bearish == pytest.approx(60.0, abs=0.1)  # 60 * 1.00 (zeroed)
 
     def test_score_with_very_large_implied_move(self):
         """Very large implied move produces low move_difficulty component."""
@@ -643,7 +643,7 @@ class TestEdgeCases:
     def test_sentiment_modifier_with_max_base_score(self):
         """Sentiment modifier on 100 base score is clamped at 100."""
         result = apply_sentiment_modifier(100.0, sentiment_score=0.9)
-        assert result == 100.0  # Clamped: 100 * 1.05 = 105 -> 100
+        assert result == 100.0  # Clamped: 100 * 1.02 = 102 -> 100
 
     def test_unknown_liquidity_tier_gets_default_score(self):
         """Unknown liquidity tier gets default score (20) via dict.get fallback."""
@@ -696,11 +696,11 @@ class TestCrossSubsystemScenarios:
         base = score["total_score"]
         assert base >= 50  # Passes 2.0 filter
 
-        # 4.0: Sentiment (+3% dampened bullish)
+        # 4.0: Sentiment (+1% bullish)
         final = apply_sentiment_modifier(base, sentiment_score=0.5)
         assert final > base  # Sentiment boosted
-        # With dampened modifiers, strong base score still passes 4.0 filter
-        assert final >= 53  # Bullish boost is smaller now (+3%)
+        # With reduced modifiers, strong base score still passes 4.0 filter
+        assert final >= 53  # Bullish boost is small (+1%)
 
         # Direction: neutral skew + bullish sentiment -> bullish
         direction = adjust_direction("NEUTRAL", sentiment_score=0.5)
@@ -710,7 +710,7 @@ class TestCrossSubsystemScenarios:
     def test_conflicting_signals_msft(self):
         """
         MSFT earnings: moderate VRP, bullish skew but bearish sentiment.
-        Direction conflict forces neutral hedge.
+        Direction conflict forces neutral hedge. Bearish modifier zeroed.
         """
         # 2.0: VRP
         vrp = calculate_vrp(implied_move_pct=7.5, historical_moves=HISTORICAL_MSFT)
@@ -724,10 +724,9 @@ class TestCrossSubsystemScenarios:
         )
         base = score["total_score"]
 
-        # 4.0: Strong bearish sentiment reduces score by 5% (dampened Feb 2026)
+        # 4.0: Strong bearish sentiment has no effect (zeroed Mar 2026)
         final = apply_sentiment_modifier(base, sentiment_score=-0.7)
-        assert final < base
-        assert final == pytest.approx(base * 0.95, abs=0.1)
+        assert final == base  # Bearish modifier zeroed
 
         # Direction: bullish skew + bearish sentiment = CONFLICT -> neutral
         direction = adjust_direction("BULLISH", sentiment_score=-0.7, sentiment_direction="bearish")
@@ -778,22 +777,20 @@ class TestCrossSubsystemScenarios:
 
     def test_sentiment_can_push_borderline_over_filter(self):
         """
-        Score at 52 (passes 2.0 filter >= 50, fails 4.0 >= 55).
-        Strong bullish sentiment (+5%) pushes to 54.6 -> still marginal.
+        Score at 52: strong bullish sentiment (+2%) pushes to 53.04.
+        With reduced modifiers, borderline scores need higher base to pass 4.0 filter.
         """
         base_score = 52.0
         final = apply_sentiment_modifier(base_score, sentiment_score=0.8)
-        assert final == pytest.approx(54.6, abs=0.1)  # 52 * 1.05
-        # With dampened modifiers, borderline scores need higher base to pass 4.0 filter
+        assert final == pytest.approx(53.04, abs=0.1)  # 52 * 1.02
 
-    def test_sentiment_can_push_borderline_below_filter(self):
+    def test_sentiment_bearish_no_longer_reduces(self):
         """
-        Score at 60 (passes both filters).
-        Strong bearish sentiment (-5% dampened) reduces to 57.0 -> still passes both filters.
-        With dampened bearish modifiers, sentiment alone rarely pushes below 4.0 filter.
+        Score at 60: bearish sentiment has no effect (zeroed Mar 2026).
+        Score stays at 60, passes both filters.
         """
         base_score = 60.0
         final = apply_sentiment_modifier(base_score, sentiment_score=-0.8)
-        assert final == pytest.approx(57.0, abs=0.1)  # 60 * 0.95
-        assert final >= 55  # Still passes 4.0 filter with dampened modifiers
+        assert final == pytest.approx(60.0, abs=0.1)  # 60 * 1.00 (zeroed)
+        assert final >= 55  # Still passes 4.0 filter
         assert final >= 50  # Still passes 2.0 filter
