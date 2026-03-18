@@ -115,8 +115,9 @@ class JobManager:
 
     def _init_db(self):
         """Initialize job_status table."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         try:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS job_status (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -181,7 +182,7 @@ class JobManager:
         today = today_et()
         timestamp = now_et().isoformat()
 
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         try:
             conn.execute("""
                 INSERT INTO job_status (date, job_name, status, updated_at)
