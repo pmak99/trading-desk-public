@@ -38,7 +38,7 @@ def _get_state() -> AppState:
     if state is None:
         # Lazy initialization for tests that don't use lifespan
         state = AppState(
-            job_manager=JobManager(db_path=settings.DB_PATH),
+            job_manager=JobManager(db_path=settings.JOB_STATUS_DB_PATH),
             job_runner=JobRunner(),
             tradier=TradierClient(settings.tradier_api_key),
             alphavantage=AlphaVantageClient(settings.alpha_vantage_key),

@@ -109,7 +109,7 @@ def get_scheduled_job(
 class JobManager:
     """Manages job dispatch and dependency checking with persistent storage."""
 
-    def __init__(self, db_path: str = "data/ivcrush.db"):
+    def __init__(self, db_path: str = "data/job_status.db"):
         self.db_path = db_path
         self._init_db()
 
