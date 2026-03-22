@@ -631,11 +631,17 @@ def calculate_statistics(trades: List[Trade]) -> Dict:
         if t.is_winner:
             by_ticker[t.symbol]['wins'] += 1
 
-    # By month
+    # By month — use the CLOSE date for bucketing.
+    # For credit trades (sell-to-open), Fidelity inverts the dates:
+    # "Date Acquired" = when the short was covered (close), "Date Sold" = when opened.
+    # So for credit trades where acquired_date > sale_date, use acquired_date.
     by_month = defaultdict(lambda: {'count': 0, 'pnl': 0, 'wins': 0})
     for t in trades:
-        if t.sale_date and len(t.sale_date) >= 7:
-            month = t.sale_date[:7]
+        close_date = t.sale_date
+        if t.acquired_date and t.sale_date and t.acquired_date > t.sale_date:
+            close_date = t.acquired_date  # credit trade: close = acquired_date
+        if close_date and len(close_date) >= 7:
+            month = close_date[:7]
         else:
             month = 'UNKNOWN'
         by_month[month]['count'] += 1
