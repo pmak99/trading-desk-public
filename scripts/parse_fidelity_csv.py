@@ -328,15 +328,17 @@ def parse_occ_symbol(symbol: str) -> Dict:
     return result
 
 
-def parse_fidelity_csv(filepath: str) -> Tuple[List[Trade], List[Tuple]]:
+def parse_fidelity_csv(filepath: str) -> Tuple[List[Trade], List[Tuple], List[dict]]:
     """Parse Fidelity CSV export into Trade objects
 
     Returns:
-        Tuple of (trades, skipped_rows) where skipped_rows contains
-        (row_num, reason, row_preview) for debugging
+        Tuple of (trades, skipped_rows, unable_rows) where:
+        - skipped_rows: (row_num, reason, row_preview) for debugging
+        - unable_rows: positions Fidelity could not export G/L for
     """
     trades = []
     skipped_rows = []
+    unable_rows = []
 
     # Read file efficiently - peek at first 20 lines to find header
     with open(filepath, 'r', encoding='utf-8-sig') as f:
@@ -389,6 +391,20 @@ def parse_fidelity_csv(filepath: str) -> Tuple[List[Trade], List[Tuple]]:
             if any(skip in row_text for skip in skip_terms):
                 matched_term = [s for s in skip_terms if s in row_text][0]
                 skipped_rows.append((row_num, f'Summary row ({matched_term})', None))
+                continue
+
+            # Detect Fidelity "unable to provide" rows — real positions with missing G/L data
+            if len(row) == 3 and 'unable' in row[2].lower():
+                desc = row[1].strip() if len(row) > 1 else ''
+                opt = parse_option_description(desc)
+                unable_rows.append({
+                    'cusip': row[0].strip(),
+                    'description': desc,
+                    'symbol': opt.get('underlying', '?'),
+                    'option_type': opt.get('option_type', ''),
+                    'strike': opt.get('strike', ''),
+                    'expiration': opt.get('expiration', ''),
+                })
                 continue
 
             def get_val(field: str) -> str:
@@ -479,7 +495,7 @@ def parse_fidelity_csv(filepath: str) -> Tuple[List[Trade], List[Tuple]]:
             )
             trades.append(trade)
 
-    return trades, skipped_rows
+    return trades, skipped_rows, unable_rows
 
 
 def load_historical_moves(db_path: str, min_date: str = '2020-01-01') -> Dict[str, List[Dict]]:
@@ -707,7 +723,7 @@ def export_journal_csv(trades: List[Trade], filepath: str):
             })
 
 
-def print_summary(stats: Dict, skipped_count: int = 0):
+def print_summary(stats: Dict, skipped_count: int = 0, unable_rows: list = None):
     """Print formatted summary"""
 
     print("\n" + "=" * 70)
@@ -744,7 +760,14 @@ def print_summary(stats: Dict, skipped_count: int = 0):
 
     print(f"\n   MONTHLY P&L")
     ytd = 0
+    current_year = None
     for month, data in stats['by_month'].items():
+        # Determine year from month string (format: YYYY-MM)
+        month_year = int(month.split('-')[0]) if '-' in month else None
+        # Reset YTD at start of each new calendar year
+        if month_year and month_year != current_year:
+            current_year = month_year
+            ytd = 0
         ytd += data['pnl']
         print(f"   {month}  {data['count']:3} trades  {data['win_rate']:5.1f}% win  ${data['pnl']:>10,.2f}  (YTD: ${ytd:>12,.2f})")
 
@@ -756,6 +779,18 @@ def print_summary(stats: Dict, skipped_count: int = 0):
         print(f"\n   WASH SALES")
         print(f"   Count:           {stats['wash_sales']['count']}")
         print(f"   Disallowed:      ${stats['wash_sales']['total']:,.2f}")
+
+    if unable_rows:
+        print(f"\n   *** DATA GAP — FIDELITY MISSING G/L FOR {len(unable_rows)} POSITIONS ***")
+        print(f"   These positions were closed but Fidelity could not export gain/loss.")
+        print(f"   Totals above are UNDERSTATED. Verify these in Fidelity directly:\n")
+        for r in unable_rows:
+            exp = r['expiration'] or '?'
+            strike = r['strike'] or '?'
+            otype = r['option_type'] or '?'
+            print(f"   {r['symbol']:6}  {otype:4}  strike {strike}  exp {exp}")
+            print(f"          Description: {r['description']}")
+        print()
 
     if skipped_count > 0:
         print(f"\n   PARSING NOTES")
@@ -823,8 +858,10 @@ def main():
 
     # Parse CSV
     print("\n[1/4] Parsing Fidelity CSV...")
-    trades, skipped_rows = parse_fidelity_csv(csv_path)
+    trades, skipped_rows, unable_rows = parse_fidelity_csv(csv_path)
     print(f"      Found {len(trades)} trades")
+    if unable_rows:
+        print(f"      WARNING: {len(unable_rows)} positions missing G/L data (Fidelity export error)")
 
     if skipped_rows and args.verbose:
         print(f"      Skipped {len(skipped_rows)} rows:")
@@ -843,7 +880,7 @@ def main():
     stats = calculate_statistics(trades)
 
     # Print summary
-    print_summary(stats, len(skipped_rows))
+    print_summary(stats, len(skipped_rows), unable_rows)
 
     # Export files
     print("\n[4/4] Exporting files...")
