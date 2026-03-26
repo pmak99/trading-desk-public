@@ -486,22 +486,21 @@ class TestPreMarketPrep:
     """Tests for the _pre_market_prep handler."""
 
     @pytest.mark.asyncio
-    async def test_empty_calendar_returns_warning(self, runner, mock_settings):
-        """Empty earnings calendar returns warning status."""
-        runner._alphavantage.get_earnings_calendar.return_value = []
+    async def test_empty_calendar_returns_success(self, runner, mock_settings):
+        """Empty earnings calendar returns success (not warning) — warning blocks all downstream jobs."""
+        with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock) as mock_fallback, \
+             patch("src.jobs.handlers.HistoricalMovesRepository"):
+            mock_fallback.return_value = []
+            result = await runner._pre_market_prep()
 
-        result = await runner._pre_market_prep()
-
-        assert result["status"] == "warning"
+        assert result["status"] == "success"
         assert result["tickers_found"] == 0
 
     @pytest.mark.asyncio
     async def test_processes_tracked_tickers_only(self, runner, mock_settings):
         """Only tickers present in historical_moves are processed."""
         today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
-            ["AAPL", "CUIRF", "NVDA"], report_date=today
-        )
+        earnings = _make_earnings(["AAPL", "CUIRF", "NVDA"], report_date=today)
 
         mock_repo = MagicMock()
         mock_repo.get_tracked_tickers.return_value = {"AAPL", "NVDA"}
@@ -509,7 +508,9 @@ class TestPreMarketPrep:
 
         runner._tradier.get_quote.return_value = {"last": 180.0}
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
+        with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
+             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.today_et", return_value=today), \
              patch("src.jobs.handlers.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.today_et", return_value=today), \
@@ -528,9 +529,7 @@ class TestPreMarketPrep:
     async def test_no_price_skips_ticker(self, runner, mock_settings):
         """Tickers without price data are skipped."""
         today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
-            ["AAPL"], report_date=today
-        )
+        earnings = _make_earnings(["AAPL"], report_date=today)
 
         mock_repo = MagicMock()
         mock_repo.get_tracked_tickers.return_value = {"AAPL"}
@@ -539,7 +538,9 @@ class TestPreMarketPrep:
         # Return None price
         runner._tradier.get_quote.return_value = {"last": None, "close": None, "prevclose": None}
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
+        with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
+             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.today_et", return_value=today), \
              patch("src.jobs.handlers.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.today_et", return_value=today), \
@@ -556,15 +557,15 @@ class TestPreMarketPrep:
     async def test_no_historical_skips_ticker(self, runner, mock_settings):
         """Tickers without historical average move are skipped."""
         today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
-            ["AAPL"], report_date=today
-        )
+        earnings = _make_earnings(["AAPL"], report_date=today)
 
         mock_repo = MagicMock()
         mock_repo.get_tracked_tickers.return_value = {"AAPL"}
         mock_repo.get_average_move.return_value = None  # No historical data
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
+        with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
+             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.today_et", return_value=today), \
              patch("src.jobs.handlers.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.today_et", return_value=today), \
@@ -582,9 +583,7 @@ class TestPreMarketPrep:
     async def test_ticker_exception_tracked_as_failure(self, runner, mock_settings):
         """When a ticker raises an exception, it's tracked in failed_tickers."""
         today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
-            ["AAPL", "NVDA"], report_date=today
-        )
+        earnings = _make_earnings(["AAPL", "NVDA"], report_date=today)
 
         mock_repo = MagicMock()
         mock_repo.get_tracked_tickers.return_value = {"AAPL", "NVDA"}
@@ -596,7 +595,9 @@ class TestPreMarketPrep:
             Exception("Tradier timeout"),
         ]
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
+        with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
+             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.today_et", return_value=today), \
              patch("src.jobs.handlers.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.today_et", return_value=today), \
@@ -619,13 +620,13 @@ class TestSentimentScan:
     """Tests for the _sentiment_scan handler."""
 
     @pytest.mark.asyncio
-    async def test_empty_calendar_returns_warning(self, runner, mock_settings):
-        """Empty calendar returns warning with zero candidates."""
+    async def test_empty_calendar_returns_success(self, runner, mock_settings):
+        """Empty calendar returns success (not warning) with zero candidates."""
         runner._alphavantage.get_earnings_calendar.return_value = []
 
         result = await runner._sentiment_scan()
 
-        assert result["status"] == "warning"
+        assert result["status"] == "success"
         assert result["candidates"] == 0
         assert result["primed"] == 0
 
@@ -1682,3 +1683,42 @@ class TestEvaluateVrp:
         assert result["historical_avg"] == pytest.approx(3.5)
         # API calls should be incremented by TRADIER_CALLS_PER_TICKER (3)
         assert result["api_calls"] == 3
+
+
+# ---------------------------------------------------------------------------
+# DB fallback + empty-calendar regression tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pre_market_prep_empty_calendar_returns_success(runner):
+    """Empty earnings calendar must return success, not warning — warning blocks all downstream jobs."""
+    runner._alphavantage.get_earnings_calendar = AsyncMock(return_value=[])
+    with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock) as mock_fallback, \
+         patch("src.jobs.handlers.HistoricalMovesRepository"):
+        mock_fallback.return_value = []
+        result = await runner._pre_market_prep()
+    assert result["status"] == "success", f"Expected success, got: {result['status']}"
+    assert result.get("tickers_found") == 0
+
+
+@pytest.mark.asyncio
+async def test_pre_market_prep_av_failure_uses_db_fallback(runner):
+    """Alpha Vantage exception must fall back to DB, not propagate as error."""
+    with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock) as mock_fallback, \
+         patch("src.jobs.handlers.HistoricalMovesRepository"):
+        mock_fallback.return_value = []
+        result = await runner._pre_market_prep()
+    # fetch_earnings_with_db_fallback handles the exception internally; result must be success
+    assert result["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_sentiment_scan_empty_calendar_returns_success(runner):
+    """Sentiment scan: empty calendar must return success, not warning."""
+    runner._alphavantage.get_earnings_calendar = AsyncMock(return_value=[])
+    with patch.object(runner, "_fetch_earnings", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = None  # simulates empty
+        result = await runner._sentiment_scan()
+    assert result["status"] == "success", f"Expected success, got: {result['status']}"
+    assert result.get("candidates") == 0
+    assert result.get("primed") == 0

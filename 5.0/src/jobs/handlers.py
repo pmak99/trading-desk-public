@@ -238,20 +238,25 @@ class JobRunner(BaseJobHandler):
         """
         Pre-market prep (05:30 ET).
         Fetch today's earnings and calculate VRP for each.
+        Uses DB fallback if Alpha Vantage is unavailable.
         """
         start_time = self._start_timer()
         today = today_et()
 
-        # Get earnings for today and next few days
-        earnings = await self._fetch_earnings("pre_market_prep")
+        # Get earnings with DB fallback (Alpha Vantage rate limits can block the whole day otherwise)
+        repo_for_fallback = HistoricalMovesRepository(settings.DB_PATH)
+        earnings = await fetch_earnings_with_db_fallback(
+            self.alphavantage, repo_for_fallback, days=4
+        )
         if not earnings:
-            return {"status": "warning", "tickers_found": 0, "earnings_dates": [], "note": "Empty calendar from API"}
+            log("info", "No earnings found for pre-market prep", job="pre_market_prep")
+            return self._build_result(tickers_found=0, earnings_dates=[])
 
         # Filter to upcoming earnings
         upcoming, target_dates = self._upcoming_earnings(earnings, days=4)
 
         # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
-        upcoming, repo = self._filter_tracked(upcoming)
+        upcoming, repo = self._filter_tracked(upcoming, repo=repo_for_fallback)
 
         # Log truncation if limit exceeded
         if len(upcoming) > MAX_PRE_MARKET_TICKERS:
@@ -317,7 +322,8 @@ class JobRunner(BaseJobHandler):
         # Get earnings for today and next few days
         earnings = await self._fetch_earnings("sentiment_scan")
         if not earnings:
-            return {"status": "warning", "candidates": 0, "primed": 0, "note": "Empty calendar from API"}
+            log("info", "No earnings found for sentiment scan", job="sentiment_scan")
+            return {"status": "success", "candidates": 0, "primed": 0}
 
         upcoming, target_dates = self._upcoming_earnings(earnings, days=4)
 
