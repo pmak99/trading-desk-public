@@ -517,7 +517,7 @@ class TestPreMarketPrep:
              patch("src.jobs.base.now_et") as mock_base_now, \
              patch("src.jobs.base.settings", mock_settings):
             mock_now.return_value = MagicMock(strftime=MagicMock(return_value=today))
-            mock_base_now.return_value = mock_now.return_value
+            mock_base_now.return_value = ET.localize(datetime(2026, 2, 9, 10, 0, 0))
 
             result = await runner._pre_market_prep()
 
@@ -547,7 +547,7 @@ class TestPreMarketPrep:
              patch("src.jobs.base.now_et") as mock_base_now, \
              patch("src.jobs.base.settings", mock_settings):
             mock_now.return_value = MagicMock(strftime=MagicMock(return_value=today))
-            mock_base_now.return_value = mock_now.return_value
+            mock_base_now.return_value = ET.localize(datetime(2026, 2, 9, 10, 0, 0))
 
             result = await runner._pre_market_prep()
 
@@ -572,7 +572,7 @@ class TestPreMarketPrep:
              patch("src.jobs.base.now_et") as mock_base_now, \
              patch("src.jobs.base.settings", mock_settings):
             mock_now.return_value = MagicMock(strftime=MagicMock(return_value=today))
-            mock_base_now.return_value = mock_now.return_value
+            mock_base_now.return_value = ET.localize(datetime(2026, 2, 9, 10, 0, 0))
 
             result = await runner._pre_market_prep()
 
@@ -604,7 +604,7 @@ class TestPreMarketPrep:
              patch("src.jobs.base.now_et") as mock_base_now, \
              patch("src.jobs.base.settings", mock_settings):
             mock_now.return_value = MagicMock(strftime=MagicMock(return_value=today))
-            mock_base_now.return_value = mock_now.return_value
+            mock_base_now.return_value = ET.localize(datetime(2026, 2, 9, 10, 0, 0))
 
             result = await runner._pre_market_prep()
 
@@ -653,7 +653,7 @@ class TestSentimentScan:
              patch("src.jobs.base.now_et") as mock_base_now, \
              patch("src.jobs.base.settings", mock_settings):
             mock_now.return_value = MagicMock(strftime=MagicMock(return_value=today))
-            mock_base_now.return_value = mock_now.return_value
+            mock_base_now.return_value = ET.localize(datetime(2026, 2, 9, 10, 0, 0))
 
             result = await runner._sentiment_scan()
 
@@ -703,7 +703,7 @@ class TestSentimentScan:
              patch("src.jobs.base.get_implied_move_with_fallback", return_value=(4.0, True)), \
              patch("src.jobs.base.calculate_vrp", return_value={"vrp_ratio": 1.1, "tier": "SKIP"}):
             mock_now.return_value = MagicMock(strftime=MagicMock(return_value=today))
-            mock_base_now.return_value = mock_now.return_value
+            mock_base_now.return_value = ET.localize(datetime(2026, 2, 9, 10, 0, 0))
 
             result = await runner._sentiment_scan()
 
@@ -1184,8 +1184,10 @@ class TestWeeklyBackup:
                 os.unlink(tmp_path)
 
     @pytest.mark.asyncio
-    async def test_upload_failure_returns_error(self, runner, mock_settings):
-        """Upload conflict returns error status."""
+    async def test_upload_conflict_still_returns_success(self, runner, mock_settings):
+        """Upload conflict (DatabaseSyncConflictError) is logged as warn but still returns success."""
+        from src.core.database import DatabaseSyncConflictError
+
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             tmp_path = f.name
 
@@ -1205,14 +1207,14 @@ class TestWeeklyBackup:
                 mock_sqlite.connect.return_value = mock_conn
 
                 mock_sync = MagicMock()
-                mock_sync.upload.return_value = False  # Upload failed
+                mock_sync.upload.side_effect = DatabaseSyncConflictError("conflict")
                 mock_sync.local_path = "/tmp/sync_path"
                 mock_sync_cls.return_value = mock_sync
 
                 result = await runner._weekly_backup()
 
-            assert result["status"] == "error"
-            assert "Upload conflict" in result["error"]
+            assert result["status"] == "success"
+            assert result["backed_up"] is True
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
@@ -1722,6 +1724,20 @@ async def test_sentiment_scan_empty_calendar_returns_success(runner):
     assert result["status"] == "success", f"Expected success, got: {result['status']}"
     assert result.get("candidates") == 0
     assert result.get("primed") == 0
+
+
+def test_upcoming_earnings_uses_single_time_snapshot():
+    """_upcoming_earnings must produce contiguous dates from a single snapshot."""
+    from src.jobs.base import BaseJobHandler
+    from datetime import datetime
+    import pytz
+    et = pytz.timezone("America/New_York")
+    # Simulate just-before-midnight: all dates should be relative to the same day
+    midnight = et.localize(datetime(2026, 3, 27, 23, 59, 59))
+    with patch("src.jobs.base.now_et", return_value=midnight):
+        upcoming, dates = BaseJobHandler._upcoming_earnings([], days=3)
+    assert dates == ["2026-03-27", "2026-03-28", "2026-03-29"]
+    assert upcoming == []  # no earnings in empty list
 
 
 def test_sentiment_cache_uses_separate_db_from_ivcrush():

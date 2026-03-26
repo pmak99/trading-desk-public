@@ -158,11 +158,8 @@ class BaseJobHandler:
         Returns:
             (filtered_earnings, target_dates)
         """
-        today = today_et()
-        target_dates = [today]
-        for i in range(1, days):
-            future = (now_et() + timedelta(days=i)).strftime("%Y-%m-%d")
-            target_dates.append(future)
+        now = now_et()
+        target_dates = [(now + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
 
         upcoming = [e for e in earnings if e["report_date"] in target_dates]
         return upcoming, target_dates
