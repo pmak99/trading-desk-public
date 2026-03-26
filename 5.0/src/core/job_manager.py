@@ -231,12 +231,18 @@ class JobManager:
             return job
 
         # Check within ±7 minute window for 15-min dispatcher
+        # Use total_minutes arithmetic so midnight rollover adjusts day_of_week correctly
         minute = now.minute
         for offset in [-7, -6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7]:
-            check_minute = (minute + offset) % 60
-            check_hour = (now.hour + ((minute + offset) // 60)) % 24  # Handle midnight overflow
+            total_minutes = now.hour * 60 + minute + offset
+            check_hour = (total_minutes // 60) % 24
+            check_minute = total_minutes % 60
             check_time = f"{check_hour:02d}:{check_minute:02d}"
-            job = get_scheduled_job(check_time, is_weekend, day_of_week)
+            # Adjust day_of_week if window crosses midnight (Python floor div handles negatives)
+            day_offset = total_minutes // (60 * 24)  # -1 prev day, 0 same day
+            check_day = (day_of_week + day_offset) % 7
+            check_is_weekend = check_day >= 5
+            job = get_scheduled_job(check_time, check_is_weekend, check_day)
             if job:
                 return job
 
