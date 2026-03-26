@@ -302,21 +302,31 @@ class Settings:
 
     @property
     def SENTIMENT_CACHE_DB_PATH(self) -> str:
-        """Sentiment cache DB path - shared with 4.0 subsystem.
+        """Sentiment cache DB path.
 
-        In Cloud Run, set SENTIMENT_CACHE_DB_PATH env var to the mounted path.
-        Locally, resolves to 4.0/data/sentiment_cache.db relative to project root.
+        In Cloud Run: data/sentiment_cache.db (same directory as ivcrush.db).
+        Locally: 4.0/data/sentiment_cache.db (set SENTIMENT_CACHE_DB_PATH env var
+        or rely on auto-detection below).
         """
         env_path = os.environ.get('SENTIMENT_CACHE_DB_PATH')
         if env_path:
             return env_path
 
-        # Resolve relative to project root (4 levels up from this file:
-        # config.py -> core/ -> src/ -> 5.0/ -> project root)
+        # Prefer 4.0/data/ locally (shared with 4.0 subsystem)
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__))
         )))
-        return os.path.join(project_root, '4.0', 'data', 'sentiment_cache.db')
+        local_path = os.path.join(project_root, '4.0', 'data', 'sentiment_cache.db')
+        if os.path.exists(os.path.dirname(local_path)):
+            return local_path
+
+        # Fallback: data/sentiment_cache.db (Cloud Run container)
+        default_path = 'data/sentiment_cache.db'
+        data_dir = os.path.dirname(default_path)
+        if data_dir and not os.path.exists(data_dir):
+            import tempfile
+            return os.path.join(tempfile.gettempdir(), 'sentiment_cache_test.db')
+        return default_path
 
     def validate_required_config(self) -> list[str]:
         """Validate that required configuration is present.
