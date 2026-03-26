@@ -239,7 +239,7 @@ class JobManager:
             check_minute = total_minutes % 60
             check_time = f"{check_hour:02d}:{check_minute:02d}"
             # Adjust day_of_week if window crosses midnight (Python floor div handles negatives)
-            day_offset = total_minutes // (60 * 24)  # -1 prev day, 0 same day
+            day_offset = total_minutes // (60 * 24)  # -1 prev day, 0 same day, +1 next day
             check_day = (day_of_week + day_offset) % 7
             check_is_weekend = check_day >= 5
             job = get_scheduled_job(check_time, check_is_weekend, check_day)
