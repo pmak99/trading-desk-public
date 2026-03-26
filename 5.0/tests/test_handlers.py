@@ -1692,7 +1692,6 @@ class TestEvaluateVrp:
 @pytest.mark.asyncio
 async def test_pre_market_prep_empty_calendar_returns_success(runner):
     """Empty earnings calendar must return success, not warning — warning blocks all downstream jobs."""
-    runner._alphavantage.get_earnings_calendar = AsyncMock(return_value=[])
     with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock) as mock_fallback, \
          patch("src.jobs.handlers.HistoricalMovesRepository"):
         mock_fallback.return_value = []
@@ -1702,14 +1701,15 @@ async def test_pre_market_prep_empty_calendar_returns_success(runner):
 
 
 @pytest.mark.asyncio
-async def test_pre_market_prep_av_failure_uses_db_fallback(runner):
-    """Alpha Vantage exception must fall back to DB, not propagate as error."""
-    with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock) as mock_fallback, \
-         patch("src.jobs.handlers.HistoricalMovesRepository"):
-        mock_fallback.return_value = []
-        result = await runner._pre_market_prep()
-    # fetch_earnings_with_db_fallback handles the exception internally; result must be success
-    assert result["status"] == "success"
+async def test_pre_market_prep_fallback_exception_does_not_propagate(runner):
+    """If fetch_earnings_with_db_fallback raises, _pre_market_prep must not propagate it."""
+    with patch("src.jobs.handlers.fetch_earnings_with_db_fallback",
+               new_callable=AsyncMock) as mock_fallback:
+        mock_fallback.side_effect = Exception("AV rate limit + DB also failed")
+        result = await runner.run("pre-market-prep")
+    # run() catches all exceptions and returns {"status": "error"}; process must not crash
+    assert isinstance(result, dict)
+    assert result.get("status") == "error"
 
 
 @pytest.mark.asyncio
