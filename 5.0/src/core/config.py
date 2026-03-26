@@ -300,6 +300,24 @@ class Settings:
             return os.path.join(tempfile.gettempdir(), 'job_status_test.db')
         return default_path
 
+    @property
+    def SENTIMENT_CACHE_DB_PATH(self) -> str:
+        """Sentiment cache DB path - shared with 4.0 subsystem.
+
+        In Cloud Run, set SENTIMENT_CACHE_DB_PATH env var to the mounted path.
+        Locally, resolves to 4.0/data/sentiment_cache.db relative to project root.
+        """
+        env_path = os.environ.get('SENTIMENT_CACHE_DB_PATH')
+        if env_path:
+            return env_path
+
+        # Resolve relative to project root (4 levels up from this file:
+        # config.py -> core/ -> src/ -> 5.0/ -> project root)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))
+        )))
+        return os.path.join(project_root, '4.0', 'data', 'sentiment_cache.db')
+
     def validate_required_config(self) -> list[str]:
         """Validate that required configuration is present.
 

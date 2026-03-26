@@ -53,7 +53,7 @@ def _get_state() -> AppState:
             yahoo=YahooFinanceClient(),
             twelvedata=TwelveDataClient(settings.twelve_data_key),
             historical_repo=HistoricalMovesRepository(settings.DB_PATH),
-            sentiment_cache=SentimentCacheRepository(settings.DB_PATH),
+            sentiment_cache=SentimentCacheRepository(settings.SENTIMENT_CACHE_DB_PATH),
             vrp_cache=VRPCacheRepository(settings.DB_PATH),
             finnhub=FinnhubClient(settings.finnhub_api_key) if settings.finnhub_api_key else None,
         )

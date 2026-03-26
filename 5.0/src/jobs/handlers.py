@@ -336,7 +336,7 @@ class JobRunner(BaseJobHandler):
                 total=len(upcoming), processing=MAX_PRIME_CANDIDATES)
 
         # Calculate VRP and filter to candidates worth priming
-        cache = SentimentCacheRepository(settings.DB_PATH)
+        cache = SentimentCacheRepository(settings.SENTIMENT_CACHE_DB_PATH)
 
         candidates = []
         failed_tickers = []
@@ -466,7 +466,7 @@ class JobRunner(BaseJobHandler):
                 total=len(upcoming), processing=MAX_DIGEST_CANDIDATES)
 
         # Build opportunities list with VRP and sentiment
-        cache = SentimentCacheRepository(settings.DB_PATH)
+        cache = SentimentCacheRepository(settings.SENTIMENT_CACHE_DB_PATH)
 
         opportunities: List[Dict[str, Any]] = []
         failed_tickers = []
@@ -732,7 +732,7 @@ class JobRunner(BaseJobHandler):
             return {"status": "success", "candidates": 0, "note": "No earnings today"}
 
         # Re-evaluate VRP for today's tickers with current prices
-        cache = SentimentCacheRepository(settings.DB_PATH)
+        cache = SentimentCacheRepository(settings.SENTIMENT_CACHE_DB_PATH)
         candidates = []
         failed_tickers = []
         api_calls = 0
@@ -1444,7 +1444,7 @@ class JobRunner(BaseJobHandler):
         start_time = self._start_timer()
 
         try:
-            cache = SentimentCacheRepository(settings.DB_PATH)
+            cache = SentimentCacheRepository(settings.SENTIMENT_CACHE_DB_PATH)
             cleared = cache.clear_expired()
 
             # Record metrics

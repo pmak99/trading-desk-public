@@ -1722,3 +1722,14 @@ async def test_sentiment_scan_empty_calendar_returns_success(runner):
     assert result["status"] == "success", f"Expected success, got: {result['status']}"
     assert result.get("candidates") == 0
     assert result.get("primed") == 0
+
+
+def test_sentiment_cache_uses_separate_db_from_ivcrush():
+    """Sentiment cache must use SENTIMENT_CACHE_DB_PATH, not DB_PATH (ivcrush.db)."""
+    from src.core.config import Settings
+    s = Settings()
+    assert s.SENTIMENT_CACHE_DB_PATH != s.DB_PATH, (
+        "Sentiment cache must use a separate DB from ivcrush.db — "
+        "they run as separate processes (5.0 Cloud Run vs local 4.0)"
+    )
+    assert "sentiment_cache" in s.SENTIMENT_CACHE_DB_PATH or "4.0" in s.SENTIMENT_CACHE_DB_PATH
