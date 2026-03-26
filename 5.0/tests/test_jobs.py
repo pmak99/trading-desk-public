@@ -239,3 +239,35 @@ async def test_all_jobs_registered():
             mock_job.return_value = {"status": "success"}
             result = await runner.run(job_name)
             assert result["status"] == "success", f"Job {job_name} not registered correctly"
+
+
+@pytest.mark.asyncio
+async def test_alphavantage_429_sleep_is_bounded():
+    """429 response must sleep at most 15s, not 60s — to preserve job timeout budget."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from src.integrations.alphavantage import AlphaVantageClient
+
+    client = AlphaVantageClient(api_key="test")
+    sleep_times = []
+
+    async def mock_sleep(t):
+        sleep_times.append(t)
+
+    with patch("src.integrations.alphavantage.asyncio.sleep", side_effect=mock_sleep):
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.request = MagicMock()
+        mock_response.headers = {}
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_ctx = AsyncMock()
+            mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
+            mock_ctx.__aexit__ = AsyncMock(return_value=False)
+            mock_ctx.get = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_ctx
+            try:
+                await client._request("EARNINGS_CALENDAR")
+            except Exception:
+                pass  # Expected — retries exhausted
+
+    assert len(sleep_times) > 0, "Expected at least one sleep call on 429"
+    assert all(t <= 15 for t in sleep_times), f"Sleep times exceeded 15s budget: {sleep_times}"

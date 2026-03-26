@@ -39,8 +39,8 @@ class AlphaVantageClient:
         self.api_key = api_key
 
     @retry(
-        stop=stop_after_attempt(2),  # Reduced from 5 to avoid burning rate limit
-        wait=wait_exponential(multiplier=15, min=30, max=120),  # Longer waits for rate limits
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=5, min=10, max=30),
         retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.TimeoutException)),
     )
     async def _request(
@@ -61,8 +61,8 @@ class AlphaVantageClient:
 
             # Handle 429 explicitly
             if response.status_code == 429:
-                log("warn", "Alpha Vantage rate limited, waiting...")
-                await asyncio.sleep(60)  # Wait 60s on rate limit
+                log("warn", "Alpha Vantage rate limited, waiting 15s...")
+                await asyncio.sleep(15)
                 raise httpx.HTTPStatusError(
                     "Rate limited",
                     request=response.request,
@@ -74,8 +74,8 @@ class AlphaVantageClient:
 
             # Check for soft rate limit in response body
             if _is_rate_limited(text):
-                log("warn", "Alpha Vantage soft rate limit detected")
-                await asyncio.sleep(30)
+                log("warn", "Alpha Vantage soft rate limit detected, waiting 10s...")
+                await asyncio.sleep(10)
                 raise httpx.HTTPStatusError(
                     "Soft rate limit",
                     request=response.request,
