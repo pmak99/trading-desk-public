@@ -39,6 +39,7 @@ MAX_PRIME_CALLS = 15  # Max Perplexity API calls during prime
 MAX_DIGEST_CANDIDATES = 40  # Max candidates to consider for digest
 MAX_BACKFILL_TICKERS = 60  # Max tickers to backfill in weekly job
 MAX_OUTCOME_TICKERS = 30  # Max tickers to record outcomes for same-day earnings
+MAX_TWELVEDATA_TICKERS = 10  # 10 × 7.5s rate limit = 75s, safely within 5-min job timeout
 RATE_LIMIT_DELAY = 0.5  # Seconds between API calls
 RATE_LIMIT_BATCH_SIZE = 5  # API calls before adding delay
 

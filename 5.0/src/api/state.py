@@ -198,9 +198,10 @@ async def lifespan(app: FastAPI):
                 error=type(e).__name__, message=str(e)[:100])
 
     # Initialize all components
+    twelvedata_client = TwelveDataClient(settings.twelve_data_key)
     state = AppState(
         job_manager=JobManager(db_path=settings.JOB_STATUS_DB_PATH),
-        job_runner=JobRunner(),
+        job_runner=JobRunner(twelvedata_client=twelvedata_client),
         tradier=TradierClient(settings.tradier_api_key),
         alphavantage=AlphaVantageClient(settings.alpha_vantage_key),
         perplexity=PerplexityClient(
@@ -212,7 +213,7 @@ async def lifespan(app: FastAPI):
             chat_id=settings.telegram_chat_id,
         ),
         yahoo=YahooFinanceClient(),
-        twelvedata=TwelveDataClient(settings.twelve_data_key),
+        twelvedata=twelvedata_client,
         historical_repo=HistoricalMovesRepository(settings.DB_PATH),
         sentiment_cache=SentimentCacheRepository(settings.SENTIMENT_CACHE_DB_PATH),
         vrp_cache=VRPCacheRepository(settings.DB_PATH),

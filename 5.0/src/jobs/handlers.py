@@ -58,6 +58,7 @@ from src.jobs.base import (
     MAX_DIGEST_CANDIDATES,
     MAX_BACKFILL_TICKERS,
     MAX_OUTCOME_TICKERS,
+    MAX_TWELVEDATA_TICKERS,
     RATE_LIMIT_DELAY,
     RATE_LIMIT_BATCH_SIZE,
     PRE_MARKET_ALERT_THRESHOLD,
@@ -136,13 +137,13 @@ def _parse_price_history(closes: dict) -> List[tuple]:
 class JobRunner(BaseJobHandler):
     """Runs scheduled jobs with proper error handling."""
 
-    def __init__(self):
+    def __init__(self, twelvedata_client=None):
         self._tradier = None
         self._alphavantage = None
         self._perplexity = None
         self._telegram = None
         self._yahoo = None
-        self._twelvedata = None
+        self._twelvedata = twelvedata_client  # Accept shared client from app state; create lazily if None
 
     @property
     def tradier(self) -> TradierClient:
@@ -640,7 +641,7 @@ class JobRunner(BaseJobHandler):
         failed_tickers = []
         api_calls = 0
 
-        for e in todays_earnings[:MAX_PRE_MARKET_TICKERS]:
+        for e in todays_earnings[:MAX_TWELVEDATA_TICKERS]:
             ticker = e["symbol"]
             try:
                 # Rate limiting
@@ -865,7 +866,7 @@ class JobRunner(BaseJobHandler):
         failed_tickers = []
         api_calls = 0
 
-        for e in todays_earnings[:MAX_PRE_MARKET_TICKERS]:
+        for e in todays_earnings[:MAX_TWELVEDATA_TICKERS]:
             ticker = e["symbol"]
             try:
                 # Rate limiting
@@ -1054,7 +1055,7 @@ class JobRunner(BaseJobHandler):
         failed_tickers = []
         api_calls = 0
 
-        for e in earnings_to_record[:MAX_OUTCOME_TICKERS]:
+        for e in earnings_to_record[:MAX_TWELVEDATA_TICKERS]:
             ticker = e["symbol"]
             earnings_date = e["earnings_date"]
             reference_day = e["reference_close_day"]
@@ -1254,7 +1255,7 @@ class JobRunner(BaseJobHandler):
         log("info", "Found past earnings to backfill", count=len(past_earnings))
 
         api_calls = 0
-        for e in past_earnings[:MAX_BACKFILL_TICKERS]:
+        for e in past_earnings[:MAX_TWELVEDATA_TICKERS]:
             ticker = e["symbol"]
             earnings_date = e["report_date"]
             timing = e.get("timing", "").upper()

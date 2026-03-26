@@ -478,6 +478,15 @@ class TestBaseJobHandler:
         assert result == {"AAPL"}
 
 
+def test_job_runner_accepts_twelvedata_client():
+    """JobRunner must accept a pre-built TwelveDataClient to enable proper lifecycle management."""
+    from src.jobs.handlers import JobRunner
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    runner = JobRunner(twelvedata_client=mock_client)
+    assert runner._twelvedata is mock_client
+
+
 # ---------------------------------------------------------------------------
 # _pre_market_prep
 # ---------------------------------------------------------------------------
