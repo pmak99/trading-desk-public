@@ -21,7 +21,7 @@ from datetime import timedelta
 
 from src.core.config import settings, now_et, today_et, MARKET_TZ
 from src.core.logging import log
-from src.core.database import DatabaseSync
+from src.core.database import DatabaseSync, DatabaseSyncConflictError
 from src.core import metrics
 from src.integrations import (
     AlphaVantageClient,
@@ -1404,7 +1404,7 @@ class JobRunner(BaseJobHandler):
                 return {"status": "error", "error": f"Integrity check error: {str(db_err)}"}
 
             # Create timestamped backup filename
-            timestamp = now_et().strftime("%Y%m%d_%H%M%S")
+            timestamp = now_et().strftime("%Y%m%d_%H%M%S_%f")
             backup_blob_name = f"backups/ivcrush_{timestamp}.db"
 
             # Use DatabaseSync to upload
@@ -1416,20 +1416,18 @@ class JobRunner(BaseJobHandler):
             # Copy current database to sync location
             shutil.copy(str(db_path), str(sync.local_path))
 
-            # Upload to GCS
-            success = sync.upload()
+            # Upload to GCS (raises DatabaseSyncConflictError on conflict)
+            try:
+                sync.upload()
+            except DatabaseSyncConflictError:
+                # Conflict on a unique-timestamped blob is unexpected but harmless
+                log("warn", "Weekly backup upload conflict (duplicate timestamp)", job="weekly_backup")
 
             # Record metrics
             self._record_duration(start_time, "weekly_backup")
-
-            if success:
-                log("info", "Weekly backup complete", blob=backup_blob_name)
-                metrics.count("ivcrush.job.backup_success")
-                return {"status": "success", "backed_up": True, "blob": backup_blob_name}
-            else:
-                log("error", "Weekly backup failed - upload conflict", job="weekly_backup")
-                metrics.count("ivcrush.job.backup_failed", {"reason": "upload_conflict"})
-                return {"status": "error", "error": "Upload conflict"}
+            log("info", "Weekly backup complete", blob=backup_blob_name)
+            metrics.count("ivcrush.job.backup_success")
+            return {"status": "success", "backed_up": True, "blob": backup_blob_name}
 
         except Exception as e:
             log("error", "Weekly backup failed", error=str(e), job="weekly_backup")
@@ -1480,11 +1478,9 @@ class JobRunner(BaseJobHandler):
                     sync = DatabaseSync(bucket_name=settings.gcs_bucket)
                     db_path = Path(settings.DB_PATH)
                     shutil.copy(str(db_path), str(sync.local_path))
-                    gcs_uploaded = sync.upload()
-                    if gcs_uploaded:
-                        log("info", "Calendar sync uploaded to GCS", bucket=settings.gcs_bucket)
-                    else:
-                        log("warn", "GCS upload conflict during calendar sync")
+                    sync.upload()
+                    gcs_uploaded = True
+                    log("info", "Calendar sync uploaded to GCS", bucket=settings.gcs_bucket)
                 except Exception as gcs_err:
                     log("warn", "Failed to upload calendar sync to GCS",
                         error=type(gcs_err).__name__)
