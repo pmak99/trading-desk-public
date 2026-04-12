@@ -18,7 +18,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "requests>=2.32.5",
+    "requests>=2.33.1",
     "python-dotenv>=1.2.1",
     "numpy>=2.4.0",
     "praw>=7.8.0",
