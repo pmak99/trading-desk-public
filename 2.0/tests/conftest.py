@@ -38,7 +38,7 @@ def test_db_path(tmp_path):
 @pytest.fixture
 def today():
     """Fixed date for deterministic tests (Monday, non-holiday)."""
-    return date(2026, 3, 16)
+    return date(2026, 6, 16)
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ def sample_option_chain(sample_strike, sample_option_quote):
 
     return OptionChain(
         ticker="AAPL",
-        expiration=date(2026, 3, 23),
+        expiration=date(2026, 6, 23),
         stock_price=Money(100.0),
         calls=calls,
         puts=puts,

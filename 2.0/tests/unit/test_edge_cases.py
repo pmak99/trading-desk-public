@@ -25,7 +25,7 @@ class TestZeroAndNegativeValues:
         mock_options_provider.set_stock_price("DEAD", Money(0))
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("DEAD", date(2026, 3, 23))
+        result = calc.calculate("DEAD", date(2026, 6, 23))
 
         assert result.is_err
         # Returns NODATA since no option chain is set for DEAD
@@ -68,17 +68,17 @@ class TestEmptyAndMissingData:
         # Create empty chain
         empty_chain = OptionChain(
             ticker="EMPTY",
-            expiration=date(2026, 3, 23),
+            expiration=date(2026, 6, 23),
             stock_price=stock_price,
             calls={},
             puts={},
         )
         mock_options_provider.set_option_chain(
-            "EMPTY", date(2026, 3, 23), empty_chain
+            "EMPTY", date(2026, 6, 23), empty_chain
         )
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("EMPTY", date(2026, 3, 23))
+        result = calc.calculate("EMPTY", date(2026, 6, 23))
 
         assert result.is_err
         assert result.unwrap_err().code == ErrorCode.NODATA
@@ -102,17 +102,17 @@ class TestEmptyAndMissingData:
 
         chain = OptionChain(
             ticker="NOATM",
-            expiration=date(2026, 3, 23),
+            expiration=date(2026, 6, 23),
             stock_price=stock_price,
             calls=calls,
             puts=puts,
         )
         mock_options_provider.set_option_chain(
-            "NOATM", date(2026, 3, 23), chain
+            "NOATM", date(2026, 6, 23), chain
         )
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("NOATM", date(2026, 3, 23))
+        result = calc.calculate("NOATM", date(2026, 6, 23))
 
         # No ATM strikes should return error (cannot calculate straddle)
         assert result.is_err, "Expected error for chain with no ATM strikes"
@@ -200,15 +200,15 @@ class TestBoundaryConditions:
 
         chain = OptionChain(
             ticker="ZEROD",
-            expiration=date(2026, 3, 16),  # Expires today
+            expiration=date(2026, 6, 16),  # Expires today
             stock_price=stock_price,
             calls=calls,
             puts=puts,
         )
-        mock_options_provider.set_option_chain("ZEROD", date(2026, 3, 16), chain)
+        mock_options_provider.set_option_chain("ZEROD", date(2026, 6, 16), chain)
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("ZEROD", date(2026, 3, 16))
+        result = calc.calculate("ZEROD", date(2026, 6, 16))
 
         # 0 DTE options are valid and should calculate successfully
         # Note: Some implementations may reject 0 DTE, so we accept either
@@ -286,17 +286,17 @@ class TestBoundaryConditions:
 
         chain = OptionChain(
             ticker="SINGLE",
-            expiration=date(2026, 3, 23),
+            expiration=date(2026, 6, 23),
             stock_price=stock_price,
             calls=calls,
             puts=puts,
         )
         mock_options_provider.set_option_chain(
-            "SINGLE", date(2026, 3, 23), chain
+            "SINGLE", date(2026, 6, 23), chain
         )
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("SINGLE", date(2026, 3, 23))
+        result = calc.calculate("SINGLE", date(2026, 6, 23))
 
         assert result.is_ok
 
