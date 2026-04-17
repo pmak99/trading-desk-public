@@ -258,6 +258,15 @@ def quick_upload(local_path: str, bucket_name: str, blob_name: str = "ivcrush.db
         True if upload succeeded, False on any error
     """
     try:
+        # Checkpoint WAL before upload so all recent writes are in the main file.
+        # Without this, SQLite WAL-mode writes land in ivcrush.db-wal, not the
+        # main file, and GCS would receive a stale copy.
+        conn = sqlite3.connect(local_path)
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            conn.close()
+
         client = storage.Client()
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(blob_name)

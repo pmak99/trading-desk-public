@@ -158,12 +158,22 @@ def test_database_context_conflict_includes_message(mock_gcs):
         db_path.unlink(missing_ok=True)
 
 
+def _make_sqlite_db(path):
+    """Create a minimal real SQLite DB (needed for WAL checkpoint)."""
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(str(path))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+
+
 def test_quick_upload_calls_gcs(tmp_path):
-    """quick_upload() uploads local file to GCS blob."""
+    """quick_upload() checkpoints WAL and uploads to GCS."""
     from src.core.database import quick_upload
 
     db_file = tmp_path / "ivcrush.db"
-    db_file.write_bytes(b"fake db")
+    _make_sqlite_db(db_file)
 
     mock_blob = MagicMock()
     mock_bucket = MagicMock()
@@ -185,7 +195,7 @@ def test_quick_upload_returns_false_on_error(tmp_path):
     from src.core.database import quick_upload
 
     db_file = tmp_path / "ivcrush.db"
-    db_file.write_bytes(b"fake db")
+    _make_sqlite_db(db_file)
 
     mock_client = MagicMock()
     mock_client.bucket.side_effect = Exception("GCS unavailable")
