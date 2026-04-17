@@ -119,6 +119,14 @@ async def test_run_after_hours_check(runner):
     mock_job.assert_called_once()
 
 
+def test_sync_status_to_gcs_is_callable():
+    """_sync_status_to_gcs must be importable and async."""
+    import asyncio
+    from src.api.routers.jobs import _sync_status_to_gcs
+    import inspect
+    assert inspect.iscoroutinefunction(_sync_status_to_gcs)
+
+
 def test_tracked_ticker_whitelist_filter():
     """Only tickers in historical_moves whitelist are kept from earnings."""
     from src.jobs.handlers import filter_to_tracked_tickers
