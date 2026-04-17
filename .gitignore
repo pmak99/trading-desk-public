@@ -102,3 +102,4 @@ dmypy.json
 
 # Exclude sensitive 2025 trade statements and analysis
 docs/2025 Trades/
+.worktrees/
