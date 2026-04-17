@@ -160,8 +160,7 @@ def test_database_context_conflict_includes_message(mock_gcs):
 
 def _make_sqlite_db(path):
     """Create a minimal real SQLite DB (needed for WAL checkpoint)."""
-    import sqlite3 as _sqlite3
-    conn = _sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
     conn.commit()

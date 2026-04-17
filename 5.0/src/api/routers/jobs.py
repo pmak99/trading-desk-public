@@ -24,6 +24,15 @@ from src.api.dependencies import (
 
 router = APIRouter(tags=["jobs"])
 
+# Holds references to fire-and-forget GCS sync tasks to prevent GC cancellation.
+_background_tasks: set = set()
+
+
+def _fire_and_forget(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 
 def _safe_record_status(manager: JobManager, job: str, status: str) -> bool:
     """
@@ -46,7 +55,7 @@ async def _sync_status_to_gcs(db_path: str, bucket: str) -> None:
     """Upload ivcrush.db to GCS after a job status write. Fire-and-forget."""
     if not bucket:
         return
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, quick_upload, db_path, bucket)
 
 
@@ -97,7 +106,7 @@ async def dispatch(
             log("error", "Job execution failed", job=job, error=str(e))
             status_recorded = _safe_record_status(manager, job, "failed")
             if settings.gcs_bucket:
-                asyncio.create_task(_sync_status_to_gcs(manager.db_path, settings.gcs_bucket))
+                _fire_and_forget(_sync_status_to_gcs(manager.db_path, settings.gcs_bucket))
             duration_ms = (time.time() - start_time) * 1000
             metrics.request_error("dispatch", duration_ms, "job_failed")
             response = {"status": "error", "job": job, "error": str(e)}
@@ -109,7 +118,7 @@ async def dispatch(
         status = "success" if result.get("status") == "success" else "failed"
         status_recorded = _safe_record_status(manager, job, status)
         if settings.gcs_bucket:
-            asyncio.create_task(_sync_status_to_gcs(manager.db_path, settings.gcs_bucket))
+            _fire_and_forget(_sync_status_to_gcs(manager.db_path, settings.gcs_bucket))
 
         duration_ms = (time.time() - start_time) * 1000
         if status == "success":

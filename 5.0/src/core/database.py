@@ -263,7 +263,7 @@ def quick_upload(local_path: str, bucket_name: str, blob_name: str = "ivcrush.db
         # main file, and GCS would receive a stale copy.
         conn = sqlite3.connect(local_path)
         try:
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
         finally:
             conn.close()
 

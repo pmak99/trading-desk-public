@@ -109,7 +109,7 @@ def get_scheduled_job(
 class JobManager:
     """Manages job dispatch and dependency checking with persistent storage."""
 
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str | None = None):
         self.db_path = db_path or settings.DB_PATH
         self._init_db()
 
