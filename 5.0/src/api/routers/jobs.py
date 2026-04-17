@@ -6,12 +6,15 @@ Handles Cloud Scheduler job routing and execution.
 
 import sqlite3
 import time
+import asyncio
 
 from fastapi import APIRouter, Depends
 
 from src.core.logging import log
 from src.core import metrics
 from src.core.job_manager import JobManager
+from src.core.config import settings
+from src.core.database import quick_upload
 from src.api.state import _mask_sensitive
 from src.api.dependencies import (
     verify_api_key,
@@ -37,6 +40,14 @@ def _safe_record_status(manager: JobManager, job: str, status: str) -> bool:
             job=job, status=status, error=str(db_err))
         metrics.count("ivcrush.job_status.failed", {"job": job, "error": "sqlite3"})
         return False
+
+
+async def _sync_status_to_gcs(db_path: str, bucket: str) -> None:
+    """Upload ivcrush.db to GCS after a job status write. Fire-and-forget."""
+    if not bucket:
+        return
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, quick_upload, db_path, bucket)
 
 
 @router.post("/dispatch")
@@ -85,6 +96,8 @@ async def dispatch(
         except Exception as e:
             log("error", "Job execution failed", job=job, error=str(e))
             status_recorded = _safe_record_status(manager, job, "failed")
+            if settings.gcs_bucket:
+                asyncio.create_task(_sync_status_to_gcs(manager.db_path, settings.gcs_bucket))
             duration_ms = (time.time() - start_time) * 1000
             metrics.request_error("dispatch", duration_ms, "job_failed")
             response = {"status": "error", "job": job, "error": str(e)}
@@ -95,6 +108,8 @@ async def dispatch(
         # Record status based on result
         status = "success" if result.get("status") == "success" else "failed"
         status_recorded = _safe_record_status(manager, job, status)
+        if settings.gcs_bucket:
+            asyncio.create_task(_sync_status_to_gcs(manager.db_path, settings.gcs_bucket))
 
         duration_ms = (time.time() - start_time) * 1000
         if status == "success":

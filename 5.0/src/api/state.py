@@ -200,7 +200,7 @@ async def lifespan(app: FastAPI):
     # Initialize all components
     twelvedata_client = TwelveDataClient(settings.twelve_data_key)
     state = AppState(
-        job_manager=JobManager(db_path=settings.JOB_STATUS_DB_PATH),
+        job_manager=JobManager(db_path=settings.DB_PATH),
         job_runner=JobRunner(twelvedata_client=twelvedata_client),
         tradier=TradierClient(settings.tradier_api_key),
         alphavantage=AlphaVantageClient(settings.alpha_vantage_key),

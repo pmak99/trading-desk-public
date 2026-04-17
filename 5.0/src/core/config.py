@@ -288,17 +288,15 @@ class Settings:
 
     @property
     def JOB_STATUS_DB_PATH(self) -> str:
-        """Separate DB for job status tracking, isolated from ivcrush.db to prevent lock contention."""
+        """Job status is stored in ivcrush.db (GCS-backed).
+
+        Kept for backwards-compat with tests that pass a custom path.
+        Override with JOB_STATUS_DB_PATH env var only in tests.
+        """
         env_path = os.environ.get('JOB_STATUS_DB_PATH')
         if env_path:
             return env_path
-
-        default_path = 'data/job_status.db'
-        data_dir = os.path.dirname(default_path)
-        if data_dir and not os.path.exists(data_dir):
-            import tempfile
-            return os.path.join(tempfile.gettempdir(), 'job_status_test.db')
-        return default_path
+        return self.DB_PATH
 
     @property
     def SENTIMENT_CACHE_DB_PATH(self) -> str:

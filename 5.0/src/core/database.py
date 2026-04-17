@@ -239,3 +239,32 @@ class DatabaseContext:
                     self.sync.local_path.unlink()
                 except OSError:
                     pass  # Best effort cleanup
+
+
+def quick_upload(local_path: str, bucket_name: str, blob_name: str = "ivcrush.db") -> bool:
+    """
+    Upload a local file to GCS without generation-based locking.
+
+    Used for low-stakes writes (e.g. job status) where idempotency matters
+    more than strict ordering. Never raises — logs and returns False on error
+    so callers can fire-and-forget.
+
+    Args:
+        local_path: Path to local file to upload
+        bucket_name: GCS bucket name
+        blob_name: GCS blob name (default: "ivcrush.db")
+
+    Returns:
+        True if upload succeeded, False on any error
+    """
+    try:
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+        blob.upload_from_filename(local_path, timeout=60)
+        log("info", "Job status synced to GCS", blob=blob_name)
+        return True
+    except Exception as e:
+        log("warn", "Failed to sync job status to GCS (non-fatal)",
+            error=type(e).__name__, blob=blob_name)
+        return False
