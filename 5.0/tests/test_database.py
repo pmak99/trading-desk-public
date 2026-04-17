@@ -156,3 +156,41 @@ def test_database_context_conflict_includes_message(mock_gcs):
         assert "another instance" in str(exc_info.value)
     finally:
         db_path.unlink(missing_ok=True)
+
+
+def test_quick_upload_calls_gcs(tmp_path):
+    """quick_upload() uploads local file to GCS blob."""
+    from src.core.database import quick_upload
+
+    db_file = tmp_path / "ivcrush.db"
+    db_file.write_bytes(b"fake db")
+
+    mock_blob = MagicMock()
+    mock_bucket = MagicMock()
+    mock_bucket.blob.return_value = mock_blob
+    mock_client = MagicMock()
+    mock_client.bucket.return_value = mock_bucket
+
+    with patch("src.core.database.storage.Client", return_value=mock_client):
+        result = quick_upload(str(db_file), "trading-desk-data", "ivcrush.db")
+
+    assert result is True
+    mock_blob.upload_from_filename.assert_called_once_with(
+        str(db_file), timeout=60
+    )
+
+
+def test_quick_upload_returns_false_on_error(tmp_path):
+    """quick_upload() returns False (does not raise) on GCS errors."""
+    from src.core.database import quick_upload
+
+    db_file = tmp_path / "ivcrush.db"
+    db_file.write_bytes(b"fake db")
+
+    mock_client = MagicMock()
+    mock_client.bucket.side_effect = Exception("GCS unavailable")
+
+    with patch("src.core.database.storage.Client", return_value=mock_client):
+        result = quick_upload(str(db_file), "trading-desk-data", "ivcrush.db")
+
+    assert result is False
