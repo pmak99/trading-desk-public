@@ -8,7 +8,7 @@ and this module routes to the correct job based on current time.
 import sqlite3
 from typing import Optional, List, Dict
 
-from .config import now_et, today_et
+from .config import now_et, today_et, settings
 from .logging import log
 
 # Weekday schedule (Mon-Fri) - all times ET
@@ -109,8 +109,8 @@ def get_scheduled_job(
 class JobManager:
     """Manages job dispatch and dependency checking with persistent storage."""
 
-    def __init__(self, db_path: str = "data/job_status.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or settings.DB_PATH
         self._init_db()
 
     def _init_db(self):

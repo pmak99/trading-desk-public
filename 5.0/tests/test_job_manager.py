@@ -109,3 +109,14 @@ def test_midnight_rollover_does_not_wrap_day_incorrectly():
         manager = JobManager(db_path=":memory:")
         job = manager.get_current_job()
     assert job is None, f"Saturday 00:02 has no scheduled job (nearest is 04:00), got: {job}"
+
+
+def test_job_manager_uses_ivcrush_db_path(tmp_path):
+    """JobManager default db_path should be ivcrush.db, not job_status.db."""
+    import os
+    os.environ['DB_PATH'] = str(tmp_path / "ivcrush.db")
+    try:
+        manager = JobManager()
+        assert "ivcrush" in manager.db_path or manager.db_path == str(tmp_path / "ivcrush.db")
+    finally:
+        del os.environ['DB_PATH']
