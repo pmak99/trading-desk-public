@@ -179,25 +179,42 @@ class JobManager:
         Raises:
             sqlite3.Error: On database errors (don't swallow - caller should handle)
         """
+        import time as _time
+
         today = today_et()
         timestamp = now_et().isoformat()
 
-        conn = sqlite3.connect(self.db_path, timeout=30)
-        try:
-            conn.execute("""
-                INSERT INTO job_status (date, job_name, status, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(date, job_name) DO UPDATE SET
-                    status = excluded.status,
-                    updated_at = excluded.updated_at
-            """, (today, job_name, status, timestamp))
-            conn.commit()
-            log("info", "Job status recorded", job=job_name, status=status)
-        except sqlite3.Error as e:
-            log("error", "Failed to record job status", error=str(e), job=job_name)
-            raise  # Don't swallow database errors - caller should know
-        finally:
-            conn.close()
+        # SQLITE_LOCKED (same-process contention) bypasses timeout=30 and fires
+        # immediately, so we retry explicitly with backoff.
+        last_err: Exception = RuntimeError("unreachable")
+        for attempt in range(5):
+            conn = sqlite3.connect(self.db_path, timeout=30)
+            try:
+                conn.execute("""
+                    INSERT INTO job_status (date, job_name, status, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(date, job_name) DO UPDATE SET
+                        status = excluded.status,
+                        updated_at = excluded.updated_at
+                """, (today, job_name, status, timestamp))
+                conn.commit()
+                log("info", "Job status recorded", job=job_name, status=status)
+                return
+            except sqlite3.OperationalError as e:
+                last_err = e
+                if "locked" in str(e).lower() and attempt < 4:
+                    _time.sleep(0.1 * (attempt + 1))
+                    continue
+                log("error", "Failed to record job status", error=str(e), job=job_name)
+                raise
+            except sqlite3.Error as e:
+                log("error", "Failed to record job status", error=str(e), job=job_name)
+                raise
+            finally:
+                conn.close()
+
+        log("error", "Failed to record job status after retries", error=str(last_err), job=job_name)
+        raise last_err
 
     def get_day_summary(self, date: Optional[str] = None) -> Dict[str, str]:
         """Get all job statuses for a given day."""

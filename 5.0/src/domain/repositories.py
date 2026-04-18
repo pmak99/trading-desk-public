@@ -110,6 +110,14 @@ class ConnectionPool:
             yield conn
         finally:
             if conn:
+                # Rollback any uncommitted state before returning to pool.
+                # Without this, a connection used for a write that didn't
+                # commit (e.g. exception path) holds a RESERVED lock, causing
+                # SQLITE_LOCKED for the next writer — which bypasses timeout=30.
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
                 try:
                     self._pool.put_nowait(conn)
                 except Exception:
