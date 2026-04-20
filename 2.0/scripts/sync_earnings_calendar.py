@@ -449,6 +449,60 @@ def cleanup_duplicate_earnings(db_path: str, dry_run: bool = False) -> List[Dict
         conn.close()
 
 
+def _sync_via_yahoo_fallback(
+    db_path: str,
+    dry_run: bool,
+    stats: "SyncStats",
+) -> "SyncStats":
+    """
+    Yahoo Finance per-ticker fallback used when Alpha Vantage bulk fetch fails.
+
+    Iterates DB tickers with upcoming earnings (next 90 days) and queries
+    Yahoo Finance individually. Slower but functional when AV is rate-limited.
+    """
+    yahoo = YahooFinanceEarnings()
+    db_dates = get_database_dates(db_path)
+
+    today = date.today()
+    cutoff = today + timedelta(days=90)
+    stale_tickers = [
+        ticker for ticker, dates in db_dates.items()
+        if any(today <= d <= cutoff for d in dates)
+    ]
+
+    logger.info(f"Yahoo Finance fallback: checking {len(stale_tickers)} tickers with upcoming earnings")
+
+    for ticker in stale_tickers:
+        try:
+            yf_result = yahoo.get_next_earnings_date(ticker)
+            if yf_result.is_err:
+                logger.debug(f"{ticker}: Yahoo Finance also failed: {yf_result.error}")
+                continue
+
+            yf_date, yf_timing = yf_result.value
+            existing = db_dates.get(ticker, set())
+
+            if yf_date not in existing:
+                logger.info(f"{ticker}: Yahoo Finance found new date {yf_date} ({yf_timing.value})")
+                if not dry_run:
+                    with sqlite3.connect(db_path, timeout=30) as conn:
+                        conn.execute(
+                            """INSERT OR REPLACE INTO earnings_calendar
+                               (ticker, earnings_date, timing, updated_at)
+                               VALUES (?, ?, ?, datetime('now'))""",
+                            (ticker, yf_date.isoformat(), yf_timing.value)
+                        )
+                        conn.commit()
+                stats.new_dates += 1
+            else:
+                stats.unchanged_dates += 1
+        except Exception as e:
+            logger.debug(f"{ticker}: Yahoo Finance fallback error: {e}")
+
+    logger.info(f"Yahoo Finance fallback complete: {stats.new_dates} new, {stats.unchanged_dates} unchanged")
+    return stats
+
+
 def sync_earnings_calendar(
     validator: EarningsDateValidator,
     earnings_repo: EarningsRepository,
@@ -484,7 +538,8 @@ def sync_earnings_calendar(
 
     if calendar_result.is_err:
         logger.error(f"Failed to fetch calendar: {calendar_result.error}")
-        return stats
+        logger.warning("Alpha Vantage unavailable — falling back to Yahoo Finance per-ticker lookup")
+        return _sync_via_yahoo_fallback(db_path=db_path, dry_run=dry_run, stats=stats)
 
     calendar = calendar_result.value
     logger.info(f"✓ Fetched {len(calendar)} earnings events from Alpha Vantage")
