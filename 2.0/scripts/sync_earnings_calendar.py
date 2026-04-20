@@ -467,7 +467,7 @@ def _sync_via_yahoo_fallback(
     cutoff = today + timedelta(days=90)
     stale_tickers = [
         ticker for ticker, dates in db_dates.items()
-        if any(today <= d <= cutoff for d in dates)
+        if today <= dates[0] <= cutoff
     ]
 
     logger.info(f"Yahoo Finance fallback: checking {len(stale_tickers)} tickers with upcoming earnings")
@@ -480,9 +480,9 @@ def _sync_via_yahoo_fallback(
                 continue
 
             yf_date, yf_timing = yf_result.value
-            existing = db_dates.get(ticker, set())
+            existing_date = db_dates.get(ticker, (None,))[0]
 
-            if yf_date not in existing:
+            if yf_date != existing_date:
                 logger.info(f"{ticker}: Yahoo Finance found new date {yf_date} ({yf_timing.value})")
                 if not dry_run:
                     with sqlite3.connect(db_path, timeout=30) as conn:

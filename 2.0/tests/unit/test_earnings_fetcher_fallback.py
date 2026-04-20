@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path("/Users/prashant/PycharmProjects/Trading Desk/2.0"))
 
 import pytest
 from unittest.mock import MagicMock, patch
-from datetime import date
+from datetime import date, datetime as dt
 from src.domain.errors import Result, AppError, ErrorCode
 
 
@@ -28,8 +28,8 @@ def test_sync_falls_back_to_yahoo_when_av_fails():
     mock_repo = MagicMock()
 
     fake_db_dates = {
-        "NVDA": {date(2026, 5, 1)},
-        "AAPL": {date(2026, 5, 15)},
+        "NVDA": (date(2026, 5, 1), EarningsTiming.AMC, dt.now(), None),
+        "AAPL": (date(2026, 5, 15), EarningsTiming.AMC, dt.now(), None),
     }
 
     with patch("scripts.sync_earnings_calendar.YahooFinanceEarnings", return_value=mock_yahoo), \
