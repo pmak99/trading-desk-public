@@ -431,35 +431,37 @@ class JobRunner(BaseJobHandler):
         start_time = self._start_timer()
         today = today_et()
 
-        # Get earnings for today and next few days
-        earnings = await self.alphavantage.get_earnings_calendar()
-        log("debug", "Fetched earnings from Alpha Vantage",
-            job="morning_digest", count=len(earnings) if earnings else 0)
+        # Primary: DB earnings_calendar (populated by calendar-sync, same source as /api/whisper).
+        # Avoids Alpha Vantage gaps that drop tickers like INTC from the digest.
+        # Fallback: Alpha Vantage + tracked-ticker filter if DB window is empty.
+        repo = HistoricalMovesRepository(settings.DB_PATH)
+        upcoming = repo.get_upcoming_earnings(today, days=4)
+        log("debug", "Fetched earnings from DB",
+            job="morning_digest", count=len(upcoming))
 
-        # Validate API response
-        if not earnings:
-            log("warn", "Empty earnings calendar from Alpha Vantage", job="morning_digest")
-            metrics.count("ivcrush.job.api_empty", {"job": "morning_digest", "api": "alphavantage"})
-            # Still send a notification about the empty calendar
+        if not upcoming:
+            log("warn", "DB earnings empty, falling back to Alpha Vantage", job="morning_digest")
+            av_earnings = await self.alphavantage.get_earnings_calendar()
+            if av_earnings:
+                upcoming_raw, _ = self._upcoming_earnings(av_earnings, days=4)
+                upcoming, repo = self._filter_tracked(upcoming_raw, repo=repo)
+                log("debug", "Fetched earnings from Alpha Vantage fallback",
+                    job="morning_digest", count=len(upcoming))
+
+        if not upcoming:
+            log("warn", "No earnings found in DB or Alpha Vantage", job="morning_digest")
+            metrics.count("ivcrush.job.api_empty", {"job": "morning_digest", "api": "all"})
             try:
                 await self.telegram.send_message(
                     f"\U0001f4cb <b>Trading Desk Digest: {today}</b>\n\n\u26a0\ufe0f Earnings calendar unavailable."
                 )
             except Exception as tg_err:
                 log("error", "Failed to send Telegram notification", error=str(tg_err))
-            return {"status": "warning", "opportunities": 0, "sent": False, "note": "Empty calendar from API"}
+            return {"status": "warning", "opportunities": 0, "sent": False, "note": "No earnings found"}
 
-        upcoming, target_dates = self._upcoming_earnings(earnings, days=4)
-        log("debug", "Filtered by date",
-            job="morning_digest", target_dates=target_dates,
-            before=len(earnings), after=len(upcoming))
-
-        # Filter to tracked tickers only (excludes OTC/foreign stocks without VRP data)
-        before_filter = len(upcoming)
-        upcoming, repo = self._filter_tracked(upcoming)
-        log("debug", "Filtered by tracked tickers",
-            job="morning_digest", tracked_count=len(repo.get_tracked_tickers()),
-            before=before_filter, after=len(upcoming))
+        target_dates = sorted({e["report_date"] for e in upcoming})
+        log("debug", "Digest target dates",
+            job="morning_digest", target_dates=target_dates, count=len(upcoming))
 
         # Log truncation if limit exceeded
         if len(upcoming) > MAX_DIGEST_CANDIDATES:

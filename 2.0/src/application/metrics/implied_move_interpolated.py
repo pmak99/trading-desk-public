@@ -186,6 +186,10 @@ class ImpliedMoveCalculatorInterpolated:
         """
         Interpolate straddle cost between two strikes.
 
+        When both brackets are liquid, performs full linear interpolation.
+        When only one bracket is liquid (e.g. upper strike has no bids at open),
+        falls back to that bracket's straddle rather than failing entirely.
+
         Args:
             chain: Option chain
             lower_strike: Strike below stock price
@@ -196,36 +200,34 @@ class ImpliedMoveCalculatorInterpolated:
             Interpolated straddle cost
 
         Raises:
-            ValueError: If options are missing or illiquid
+            ValueError: If options are missing or illiquid at both brackets
         """
-        # Get options at lower strike
         lower_call = chain.calls.get(lower_strike)
         lower_put = chain.puts.get(lower_strike)
-
-        if not lower_call or not lower_put:
-            raise ValueError(f"Missing options at lower strike {lower_strike}")
-
-        if not lower_call.is_liquid or not lower_put.is_liquid:
-            raise ValueError(f"Illiquid options at lower strike {lower_strike}")
-
-        # Get options at upper strike
         upper_call = chain.calls.get(upper_strike)
         upper_put = chain.puts.get(upper_strike)
 
-        if not upper_call or not upper_put:
-            raise ValueError(f"Missing options at upper strike {upper_strike}")
+        lower_ok = bool(lower_call and lower_put and lower_call.is_liquid and lower_put.is_liquid)
+        upper_ok = bool(upper_call and upper_put and upper_call.is_liquid and upper_put.is_liquid)
 
-        if not upper_call.is_liquid or not upper_put.is_liquid:
-            raise ValueError(f"Illiquid options at upper strike {upper_strike}")
+        if not lower_ok and not upper_ok:
+            if not lower_call or not lower_put:
+                raise ValueError(f"Missing options at lower strike {lower_strike}")
+            if not upper_call or not upper_put:
+                raise ValueError(f"Missing options at upper strike {upper_strike}")
+            raise ValueError(f"Illiquid options at both bracket strikes {lower_strike} and {upper_strike}")
 
-        # Calculate straddles at each strike
-        lower_straddle = float(lower_call.mid.amount + lower_put.mid.amount)
-        upper_straddle = float(upper_call.mid.amount + upper_put.mid.amount)
+        if lower_ok and upper_ok:
+            lower_straddle = float(lower_call.mid.amount + lower_put.mid.amount)
+            upper_straddle = float(upper_call.mid.amount + upper_put.mid.amount)
+            return lower_straddle * (1 - weight) + upper_straddle * weight
 
-        # Linear interpolation
-        interpolated = lower_straddle * (1 - weight) + upper_straddle * weight
+        if lower_ok:
+            logger.warning(f"Upper strike {upper_strike} illiquid, using lower bracket only")
+            return float(lower_call.mid.amount + lower_put.mid.amount)
 
-        return interpolated
+        logger.warning(f"Lower strike {lower_strike} illiquid, using upper bracket only")
+        return float(upper_call.mid.amount + upper_put.mid.amount)
 
     def _interpolate_iv(
         self,

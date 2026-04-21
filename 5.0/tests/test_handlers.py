@@ -729,11 +729,15 @@ class TestMorningDigest:
 
     @pytest.mark.asyncio
     async def test_empty_calendar_sends_warning_telegram(self, runner, mock_settings):
-        """Empty earnings calendar sends Telegram warning and returns warning status."""
+        """Empty earnings calendar (DB + AV both empty) sends Telegram warning."""
         runner._alphavantage.get_earnings_calendar.return_value = []
         runner._telegram.send_message.return_value = True
 
-        with patch("src.jobs.handlers.today_et", return_value="2026-02-09"):
+        mock_repo = MagicMock()
+        mock_repo.get_upcoming_earnings.return_value = []
+
+        with patch("src.jobs.handlers.today_et", return_value="2026-02-09"), \
+             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo):
             result = await runner._morning_digest()
 
         assert result["status"] == "warning"
@@ -746,11 +750,9 @@ class TestMorningDigest:
     async def test_no_opportunities_skips_telegram(self, runner, mock_settings):
         """When no tickers pass VRP filter, no digest is sent."""
         today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
-            ["AAPL"], report_date=today
-        )
 
         mock_repo = MagicMock()
+        mock_repo.get_upcoming_earnings.return_value = _make_earnings(["AAPL"], report_date=today)
         mock_repo.get_tracked_tickers.return_value = {"AAPL"}
         mock_repo.get_moves.return_value = [
             {"intraday_move_pct": 3.0},
@@ -775,6 +777,7 @@ class TestMorningDigest:
 
         with patch("src.jobs.handlers.today_et", return_value=today), \
              patch("src.jobs.handlers.now_et", return_value=real_now), \
+             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
              patch("src.jobs.handlers.calculate_vrp", return_value={"vrp_ratio": 1.1, "tier": "SKIP"}), \
@@ -798,11 +801,9 @@ class TestMorningDigest:
     async def test_telegram_error_tracked_in_result(self, runner, mock_settings):
         """Telegram send failure is captured in result, not raised."""
         today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
-            ["AAPL"], report_date=today
-        )
 
         mock_repo = MagicMock()
+        mock_repo.get_upcoming_earnings.return_value = _make_earnings(["AAPL"], report_date=today)
         mock_repo.get_tracked_tickers.return_value = {"AAPL"}
         mock_repo.get_moves.return_value = [
             {"intraday_move_pct": 3.0},
@@ -828,6 +829,7 @@ class TestMorningDigest:
 
         with patch("src.jobs.handlers.today_et", return_value=today), \
              patch("src.jobs.handlers.now_et", return_value=real_now), \
+             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
              patch("src.jobs.handlers.calculate_vrp", return_value={"vrp_ratio": 2.5, "tier": "EXCELLENT"}), \
