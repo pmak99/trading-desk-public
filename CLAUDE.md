@@ -152,10 +152,11 @@ Rate limit: 60 req/min per IP.
 ## Databases
 
 **ivcrush.db** (`2.0/data/ivcrush.db` | `gs://trading-desk-data/ivcrush.db`) — 15 tables, schema v6:
-- `historical_moves` (6,921) | `earnings_calendar` (6,762) | `strategies` (235)
+- `historical_moves` (6,921) | `earnings_calendar` (6,762) | `strategies` (235 rows, 203 verified 2025 trades — remainder are multi-year or cancelled entries)
 - `trade_journal` (634) | `position_limits` (428) | `bias_predictions` (28) | `iv_log` (16)
 - Empty: `analysis_log`, `cache`, `rate_limits`, `backtest_runs`, `backtest_trades`, `job_status`, `ticker_metadata`
 - Note: ~239 trade_journal rows have sale_date < acquired_date — this is Fidelity's convention for credit trades (sell-to-open), not a bug. Strategies table is normalized to chronological order (acquired=open, sale=close).
+- `job_status` table: currently empty but under active development (branch `job-status-gcs`).
 
 **sentiment_cache.db** (`4.0/data/sentiment_cache.db`) — 3 tables, WAL mode:
 - `sentiment_cache` (3hr TTL) | `api_budget` (dormant) | `sentiment_history` (permanent)
@@ -210,6 +211,8 @@ GROUP BY campaign_id ORDER BY total;
 
 ## Environment Variables
 
+`.env` files live at `2.0/.env` and `5.0/.env`. Source before running scripts: `source 2.0/.env`.
+
 ```bash
 TRADIER_API_KEY=xxx          # Options data (primary)
 ALPHA_VANTAGE_KEY=xxx        # Earnings calendar
@@ -218,6 +221,8 @@ PERPLEXITY_API_KEY=xxx       # AI sentiment
 FINNHUB_API_KEY=xxx          # Analyst data + news (5.0 council)
 DB_PATH=data/ivcrush.db
 ```
+
+GCS access: `gcloud auth application-default login` (needed for `sync-cloud` and GCS backups).
 
 ## Testing
 
@@ -230,13 +235,11 @@ cd 6.0 && ../2.0/venv/bin/python -m pytest tests/  # 82 tests
 
 ## Working Style Preferences
 
-1. **Confirm scope before executing** — For data operations (backfill, sync, cleanup), confirm the exact scope (which tickers, which date range, which database) before executing. For batch operations, always scope to the user's actual data (historically traded tickers from `strategies`/`trade_journal`, existing watchlists) rather than arbitrary/random selections.
-2. **Respect rewrite requests** — When asked for a full rewrite or ground-up rebuild, do NOT attempt incremental fixes first. Go straight to the clean-slate approach.
-3. **Audit all related configs** — When fixing any issue, find ALL files that reference the same service, URL, endpoint, or config value and fix them together. A fix in one file often needs to be mirrored in others.
-4. **Source env before API calls** — Always check for required environment variables (`TRADIER_API_KEY`, `TWELVE_DATA_KEY`, `PERPLEXITY_API_KEY`, etc.) before executing scripts that need them. Source `.env` if needed.
-5. **Verify data, don't infer** — When checking external sources (job postings, ticker lookups, API responses), verify actual data fields rather than inferring from URLs or titles. Validate ticker symbols against exchange lookup (e.g., "PFIZER" -> "PFE").
-6. **Complete output, no truncation** — Slash commands (`/prime`, `/whisper`, `/analyze`, `/backfill`, `/scan`, etc.) must run to full completion with complete output displayed. Never truncate results.
-7. **Always push after committing** — When creating git commits, always `git push` immediately after. Do not leave commits local-only.
+1. **Confirm scope before executing** — For data operations (backfill, sync, cleanup), confirm which tickers, date range, and database before executing. Always scope batch ops to historically traded tickers from `strategies`/`trade_journal` or existing watchlists.
+2. **Respect rewrite requests** — When asked for a full rewrite or ground-up rebuild, go straight to the clean-slate approach. Do NOT attempt incremental fixes first.
+3. **Audit all related configs** — When fixing any issue, find ALL files referencing the same service, URL, endpoint, or config value and fix them together.
+4. **Validate ticker symbols** against exchange lookup (e.g., "PFIZER" → "PFE"). Verify actual API response fields, don't infer from URL or title.
+5. **Complete output, no truncation** — Slash commands (`/prime`, `/whisper`, `/analyze`, `/backfill`, `/scan`, etc.) must run to full completion with complete output displayed.
 
 ## When Analyzing Trades
 
