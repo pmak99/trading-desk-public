@@ -57,11 +57,15 @@ SENTIMENT_BULLISH_THRESHOLD = 0.2
 SENTIMENT_BEARISH_THRESHOLD = -0.2
 SENTIMENT_STRONG_BEARISH_THRESHOLD = -0.6
 
-SENTIMENT_MODIFIER_STRONG_BULLISH = 0.02   # +2% (reduced: bullish accuracy ~55%, marginal signal)
-SENTIMENT_MODIFIER_BULLISH = 0.01          # +1% (reduced: bullish accuracy ~55%, marginal signal)
+SENTIMENT_MODIFIER_STRONG_BULLISH = 0.01   # +1% flat (accuracy data: strong_bullish 23% vs weak_bullish 75%, no differential justified)
+SENTIMENT_MODIFIER_BULLISH = 0.01          # +1% flat (~55% accuracy, marginal signal)
 SENTIMENT_MODIFIER_NEUTRAL = 0.0           # 0%
 SENTIMENT_MODIFIER_BEARISH = 0.0           # 0% (zeroed: bearish accuracy 0/4, wrong 100% of the time)
 SENTIMENT_MODIFIER_STRONG_BEARISH = 0.0    # 0% (zeroed: bearish accuracy 0/4, wrong 100% of the time)
+
+# Sentiment directions with zero predictive signal — treated as neutral in routing logic.
+# Remove a direction from this set to re-enable it (restores conflict_hedge and tiebreak behavior).
+ZEROED_SENTIMENT_DIRECTIONS: frozenset = frozenset({'bearish', 'strong_bearish'})
 
 
 # =============================================================================

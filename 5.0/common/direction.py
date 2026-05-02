@@ -6,7 +6,9 @@ Adjusts 2.0's skew-based directional bias using AI sentiment signals.
 
 Rules:
 1. Neutral skew + sentiment -> sentiment breaks tie
-2. Conflict (bullish skew + bearish sentiment) -> go neutral (hedge)
+2. Conflict (bullish skew + active bearish sentiment) -> go neutral (hedge)
+   Note: directions in ZEROED_SENTIMENT_DIRECTIONS are treated as neutral,
+   so they never trigger conflict_hedge or tiebreak (no predictive signal).
 3. Otherwise -> keep skew bias
 
 Position Sizing (contrarian signal based on 2025 backtest data):
@@ -27,6 +29,7 @@ from .constants import (
     SIZE_MODIFIER_BULLISH,
     SIZE_MODIFIER_BEARISH,
     HIGH_BULLISH_WARNING_THRESHOLD,
+    ZEROED_SENTIMENT_DIRECTIONS,
 )
 
 
@@ -199,12 +202,16 @@ def adjust_direction(
         else:
             sent_dir = "neutral"
 
+    # Directions in ZEROED_SENTIMENT_DIRECTIONS have no predictive signal.
+    # Treat them as neutral so they don't trigger conflict_hedge or tiebreak.
+    eff_sent_dir = "neutral" if sent_dir in ZEROED_SENTIMENT_DIRECTIONS else sent_dir
+
     # RULE 1: Neutral skew -> sentiment breaks tie
     if original == "neutral":
-        if sent_dir == "bullish":
+        if eff_sent_dir == "bullish":
             rule = "tiebreak_bullish"
             adjusted = AdjustedBias.BULLISH
-        elif sent_dir == "bearish":
+        elif eff_sent_dir == "bearish":
             rule = "tiebreak_bearish"
             adjusted = AdjustedBias.BEARISH
         else:
@@ -216,23 +223,24 @@ def adjust_direction(
             sentiment_score=sentiment_score,
             adjusted_bias=adjusted,
             rule_applied=rule,
-            confidence=_calculate_confidence(sentiment_score, rule, sent_dir, original),
+            confidence=_calculate_confidence(sentiment_score, rule, eff_sent_dir, original),
             size_modifier=get_size_modifier(sentiment_score),
         )
 
     # RULE 2: Conflict -> go neutral (hedge)
+    # Only fires when the opposing sentiment direction has active predictive signal.
     is_bullish_skew = original in ("bullish", "strong_bullish")
     is_bearish_skew = original in ("bearish", "strong_bearish")
 
-    if (is_bullish_skew and sent_dir == "bearish") or \
-       (is_bearish_skew and sent_dir == "bullish"):
+    if (is_bullish_skew and eff_sent_dir == "bearish") or \
+       (is_bearish_skew and eff_sent_dir == "bullish"):
         rule = "conflict_hedge"
         return DirectionAdjustment(
             original_bias=skew_bias,
             sentiment_score=sentiment_score,
             adjusted_bias=AdjustedBias.NEUTRAL,
             rule_applied=rule,
-            confidence=_calculate_confidence(sentiment_score, rule, sent_dir, original),
+            confidence=_calculate_confidence(sentiment_score, rule, eff_sent_dir, original),
             size_modifier=get_size_modifier(sentiment_score),
         )
 
@@ -251,7 +259,7 @@ def adjust_direction(
         sentiment_score=sentiment_score,
         adjusted_bias=bias_map.get(original, AdjustedBias.NEUTRAL),
         rule_applied=rule,
-        confidence=_calculate_confidence(sentiment_score, rule, sent_dir, original),
+        confidence=_calculate_confidence(sentiment_score, rule, eff_sent_dir, original),
         size_modifier=get_size_modifier(sentiment_score),
     )
 

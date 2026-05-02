@@ -2,8 +2,9 @@
 Unit tests for 4.0 sentiment-adjusted directional bias.
 
 Tests the 3-rule system:
-1. Neutral skew + sentiment → sentiment breaks tie
-2. Conflict (bullish skew + bearish sentiment) → go neutral (hedge)
+1. Neutral skew + sentiment → sentiment breaks tie (bearish zeroed May 2026)
+2. Conflict (skew vs active opposing sentiment) → go neutral (hedge)
+   Bearish signal zeroed — no longer triggers conflict_hedge.
 3. Otherwise → keep skew bias
 """
 
@@ -79,17 +80,17 @@ class TestRule1TiebreakNeutralSkew:
         assert adj.confidence >= 1.0  # Max confidence at 0.6+
 
     def test_neutral_skew_bearish_sentiment(self):
-        """Neutral skew + bearish sentiment → BEARISH."""
+        """Neutral skew + bearish sentiment → NEUTRAL (bearish zeroed May 2026: 0/4 accuracy)."""
         adj = adjust_direction("NEUTRAL", -0.4)
-        assert adj.adjusted_bias == AdjustedBias.BEARISH
-        assert adj.rule_applied == "tiebreak_bearish"
-        assert adj.changed is True
+        assert adj.adjusted_bias == AdjustedBias.NEUTRAL
+        assert adj.rule_applied == "both_neutral"
+        assert adj.changed is False
 
     def test_neutral_skew_strong_bearish_sentiment(self):
-        """Neutral skew + strong bearish sentiment → BEARISH."""
+        """Neutral skew + strong bearish sentiment → NEUTRAL (bearish zeroed May 2026)."""
         adj = adjust_direction("NEUTRAL", -0.7)
-        assert adj.adjusted_bias == AdjustedBias.BEARISH
-        assert adj.rule_applied == "tiebreak_bearish"
+        assert adj.adjusted_bias == AdjustedBias.NEUTRAL
+        assert adj.rule_applied == "both_neutral"
 
     def test_neutral_skew_neutral_sentiment(self):
         """Neutral skew + neutral sentiment → NEUTRAL."""
@@ -105,47 +106,51 @@ class TestRule1TiebreakNeutralSkew:
         assert adj.rule_applied == "tiebreak_bullish"
 
     def test_neutral_skew_edge_bearish(self):
-        """Neutral skew + sentiment at edge (-0.2) → BEARISH (boundary is inclusive, symmetric with bullish >= 0.2)."""
+        """Neutral skew + sentiment at edge (-0.2) → NEUTRAL (bearish zeroed May 2026)."""
         adj = adjust_direction("NEUTRAL", -0.2)
-        assert adj.adjusted_bias == AdjustedBias.BEARISH
-        assert adj.rule_applied == "tiebreak_bearish"
+        assert adj.adjusted_bias == AdjustedBias.NEUTRAL
+        assert adj.rule_applied == "both_neutral"
 
 
 class TestRule2ConflictHedge:
-    """Rule 2: Conflict (opposite directions) → go neutral."""
+    """Rule 2: Conflict (skew vs active opposing sentiment) → go neutral.
+
+    Bearish signal zeroed May 2026 (0/4 accuracy). Only bullish sentiment
+    still has active signal and can trigger conflict_hedge.
+    """
 
     def test_bullish_skew_bearish_sentiment(self):
-        """Bullish skew + bearish sentiment → NEUTRAL (conflict)."""
+        """Bullish skew + bearish sentiment → BULLISH (bearish zeroed, skew dominates)."""
         adj = adjust_direction("BULLISH", -0.3)
-        assert adj.adjusted_bias == AdjustedBias.NEUTRAL
-        assert adj.rule_applied == "conflict_hedge"
-        assert adj.changed is True
+        assert adj.adjusted_bias == AdjustedBias.BULLISH
+        assert adj.rule_applied == "skew_dominates"
+        assert adj.changed is False
 
     def test_strong_bullish_skew_bearish_sentiment(self):
-        """Strong bullish skew + bearish sentiment → NEUTRAL (conflict)."""
+        """Strong bullish skew + bearish sentiment → STRONG_BULLISH (bearish zeroed, skew dominates)."""
         adj = adjust_direction("STRONG_BULLISH", -0.4)
-        assert adj.adjusted_bias == AdjustedBias.NEUTRAL
-        assert adj.rule_applied == "conflict_hedge"
+        assert adj.adjusted_bias == AdjustedBias.STRONG_BULLISH
+        assert adj.rule_applied == "skew_dominates"
 
     def test_bearish_skew_bullish_sentiment(self):
-        """Bearish skew + bullish sentiment → NEUTRAL (conflict)."""
+        """Bearish skew + bullish sentiment → NEUTRAL (conflict; bullish still active)."""
         adj = adjust_direction("BEARISH", 0.5)
         assert adj.adjusted_bias == AdjustedBias.NEUTRAL
         assert adj.rule_applied == "conflict_hedge"
         assert adj.changed is True
 
     def test_strong_bearish_skew_bullish_sentiment(self):
-        """Strong bearish skew + bullish sentiment → NEUTRAL (conflict)."""
+        """Strong bearish skew + bullish sentiment → NEUTRAL (conflict; bullish still active)."""
         adj = adjust_direction("STRONG_BEARISH", 0.6)
         assert adj.adjusted_bias == AdjustedBias.NEUTRAL
         assert adj.rule_applied == "conflict_hedge"
 
     def test_weak_bullish_skew_bearish_sentiment(self):
-        """Weak bullish skew + bearish sentiment → NEUTRAL (conflict)."""
+        """Weak bullish skew + bearish sentiment → BULLISH (bearish zeroed, skew dominates)."""
         # WEAK_BULLISH normalizes to bullish
         adj = adjust_direction("WEAK_BULLISH", -0.3)
-        assert adj.adjusted_bias == AdjustedBias.NEUTRAL
-        assert adj.rule_applied == "conflict_hedge"
+        assert adj.adjusted_bias == AdjustedBias.BULLISH
+        assert adj.rule_applied == "skew_dominates"
 
 
 class TestRule3SkewDominates:
@@ -218,8 +223,8 @@ class TestChangedProperty:
         assert adj.changed is False
 
     def test_changed_on_conflict(self):
-        """changed=True on conflict (BULLISH → NEUTRAL)."""
-        adj = adjust_direction("BULLISH", -0.3)
+        """changed=True on active conflict (BEARISH + bullish sentiment → NEUTRAL)."""
+        adj = adjust_direction("BEARISH", 0.5)
         assert adj.changed is True
 
     def test_not_changed_directional_bias_format(self):
@@ -237,8 +242,8 @@ class TestQuickAdjust:
         assert result == "BULLISH"
 
     def test_quick_adjust_conflict(self):
-        """quick_adjust handles conflict correctly."""
-        result = quick_adjust("BULLISH", -0.3)
+        """quick_adjust: bearish_skew + bullish sentiment still triggers conflict_hedge."""
+        result = quick_adjust("BEARISH", 0.5)
         assert result == "NEUTRAL"
 
 
@@ -282,10 +287,10 @@ class TestRealWorldScenarios:
         assert adj.rule_applied == "skew_dominates"
 
     def test_lulu_scenario(self):
-        """LULU: BULLISH skew + Bearish (-0.21) → NEUTRAL (conflict)."""
+        """LULU: BULLISH skew + Bearish (-0.21) → BULLISH (bearish zeroed, skew dominates)."""
         adj = adjust_direction("BULLISH", -0.21)
-        assert adj.adjusted_bias == AdjustedBias.NEUTRAL
-        assert adj.rule_applied == "conflict_hedge"
+        assert adj.adjusted_bias == AdjustedBias.BULLISH
+        assert adj.rule_applied == "skew_dominates"
 
     def test_cost_scenario(self):
         """COST: BULLISH skew + Bullish (+0.3) → BULLISH (aligned)."""
