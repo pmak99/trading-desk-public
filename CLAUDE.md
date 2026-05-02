@@ -58,7 +58,7 @@ VRP Ratio = Implied Move / Historical Mean Move
 
 Rebalanced Dec 2025 after WDAY/ZS $26,930 loss: POP raised to 40%, liquidity added at 22%.
 
-**4.0 Modifier:** `4.0 Score = 2.0 Score x (1 + sentiment_modifier)` where modifiers reflect accuracy: +1% to +2% bullish (~55% accuracy, marginal signal), 0% bearish (0/4 accuracy, zeroed Mar 2026).
+**4.0 Modifier:** `4.0 Score = 2.0 Score x (1 + sentiment_modifier)` where modifiers reflect accuracy: +1% bullish flat rate, all strength levels (strong_bullish 23% accuracy, no differential justified — May 2026), 0% bearish (0/4 accuracy, zeroed Mar 2026).
 
 **Cutoffs:** 2.0 Score >= 50 (pre-filter) | 4.0 Score >= 55 (post-filter)
 
@@ -117,7 +117,7 @@ TRR = Max Historical Move / Average Historical Move
 | Rule | Condition | Action |
 |------|-----------|--------|
 | 1 | Neutral skew + sentiment signal | Sentiment breaks tie |
-| 2 | Conflict (bullish skew + bearish sentiment) | Go neutral |
+| 2 | Conflict (skew vs active opposing sentiment) | Go neutral (bearish zeroed May 2026 — no longer triggers) |
 | 3 | Otherwise | Keep original skew bias |
 
 ## CLI Commands

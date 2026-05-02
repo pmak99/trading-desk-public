@@ -67,7 +67,7 @@ class TestEndToEndAnalysisFlow:
         base_score = score_result["total_score"]
         assert base_score >= 50, f"Base score {base_score} should pass 2.0 pre-filter (>=50)"
 
-        # Step 4: Sentiment modifier (4.0) - strong bullish +2% (Mar 2026: reduced from +5%)
+        # Step 4: Sentiment modifier (4.0) - strong bullish +1% flat (May 2026: flattened)
         final_score = apply_sentiment_modifier(base_score, sentiment_score=0.7)
         assert final_score > base_score, "Bullish sentiment should increase score"
         assert final_score >= 55, f"Final score {final_score} should pass 4.0 post-filter (>=55)"
@@ -111,7 +111,7 @@ class TestEndToEndAnalysisFlow:
         )
         base_score = score_result["total_score"]
 
-        # Even with maximum bullish sentiment (+2%), SKIP VRP should stay low
+        # Even with maximum bullish sentiment (+1%), SKIP VRP should stay low
         boosted = apply_sentiment_modifier(base_score, sentiment_score=0.9)
         # VRP ratio ~1.0 -> VRP component ~(1.0/7.0)*100*0.55 = 7.86
         # Move component = (5/4.5)*100*0.25 = 27.78
@@ -240,11 +240,11 @@ class TestVRPWithRealisticData:
 class TestSentimentModifierRange:
     """Sentiment modifier adjusts base score: +2%/+1% bullish, 0% bearish (Mar 2026)."""
 
-    def test_strong_bullish_applies_plus_2_percent(self):
-        """Sentiment >= 0.6 applies +2% modifier (reduced Mar 2026: ~55% accuracy)."""
+    def test_strong_bullish_applies_plus_1_percent(self):
+        """Sentiment >= 0.6 applies +1% flat (May 2026: no differential — strong_bullish 23% vs weak_bullish 75%)."""
         base = 70.0
         modified = apply_sentiment_modifier(base, sentiment_score=0.6)
-        assert modified == pytest.approx(71.4, abs=0.1)  # 70 * 1.02
+        assert modified == pytest.approx(70.7, abs=0.1)  # 70 * 1.01
 
     def test_bullish_applies_plus_1_percent(self):
         """Sentiment >= 0.2 (but < 0.6) applies +1% modifier (reduced Mar 2026)."""
@@ -279,7 +279,9 @@ class TestSentimentModifierRange:
         bearish = apply_sentiment_modifier(base, sentiment_score=-0.4)
         strong_bearish = apply_sentiment_modifier(base, sentiment_score=-0.9)
 
-        assert strong_bullish > bullish > neutral
+        # Both strong_bullish and bullish get +1% flat (no differential justified)
+        assert strong_bullish == bullish
+        assert bullish > neutral
         # Bearish modifiers are zeroed, so bearish == neutral == strong_bearish
         assert bearish == neutral
         assert strong_bearish == neutral
@@ -429,10 +431,10 @@ class TestDirectionBiasIntegration:
         assert result.size_modifier == 0.9  # Contrarian: reduce size for strong bullish
 
     def test_rule1_neutral_with_moderate_bearish_sentiment(self):
-        """Neutral skew + moderate bearish sentiment -> BEARISH."""
+        """Neutral skew + bearish sentiment -> NEUTRAL (bearish zeroed May 2026: 0/4 accuracy)."""
         result = adjust_direction("NEUTRAL", sentiment_score=-0.4)
-        assert result.adjusted_bias == AdjustedBias.BEARISH
-        assert result.rule_applied == "tiebreak_bearish"
+        assert result.adjusted_bias == AdjustedBias.NEUTRAL
+        assert result.rule_applied == "both_neutral"
 
     def test_rule1_neutral_stays_neutral_with_weak_sentiment(self):
         """Neutral skew + weak sentiment (within -0.2 to 0.2) -> stays NEUTRAL."""
@@ -443,17 +445,17 @@ class TestDirectionBiasIntegration:
     # Rule 2: Conflict (bullish skew + bearish sentiment) -> go neutral
 
     def test_rule2_bullish_skew_bearish_sentiment_conflict(self):
-        """Bullish skew + bearish sentiment = conflict -> NEUTRAL hedge."""
+        """Bullish skew + bearish sentiment -> BULLISH (bearish zeroed, skew dominates)."""
         result = adjust_direction("BULLISH", sentiment_score=-0.5, sentiment_direction="bearish")
-        assert result.adjusted_bias == AdjustedBias.NEUTRAL
-        assert result.rule_applied == "conflict_hedge"
-        assert result.changed is True
+        assert result.adjusted_bias == AdjustedBias.BULLISH
+        assert result.rule_applied == "skew_dominates"
+        assert result.changed is False
 
     def test_rule2_strong_bullish_skew_bearish_sentiment_conflict(self):
-        """Strong bullish skew + bearish sentiment = conflict -> NEUTRAL."""
+        """Strong bullish skew + bearish sentiment -> STRONG_BULLISH (bearish zeroed, skew dominates)."""
         result = adjust_direction("STRONG_BULLISH", sentiment_score=-0.4, sentiment_direction="bearish")
-        assert result.adjusted_bias == AdjustedBias.NEUTRAL
-        assert result.rule_applied == "conflict_hedge"
+        assert result.adjusted_bias == AdjustedBias.STRONG_BULLISH
+        assert result.rule_applied == "skew_dominates"
 
     def test_rule2_bearish_skew_bullish_sentiment_conflict(self):
         """Bearish skew + bullish sentiment = conflict -> NEUTRAL."""
@@ -496,8 +498,11 @@ class TestDirectionBiasIntegration:
         # Rule 1: neutral + bullish -> BULLISH
         assert get_direction("NEUTRAL", 0.5, "bullish") == "BULLISH"
 
-        # Rule 2: conflict -> NEUTRAL
-        assert get_direction("BULLISH", -0.5, "bearish") == "NEUTRAL"
+        # Rule 2: conflict (active signal only) -> bearish_skew + bullish sentiment -> NEUTRAL
+        assert get_direction("BEARISH", 0.5, "bullish") == "NEUTRAL"
+
+        # Rule 2: bearish is zeroed -> bullish_skew + bearish sentiment -> skew dominates
+        assert get_direction("BULLISH", -0.5, "bearish") == "BULLISH"
 
         # Rule 3: aligned -> keep
         assert get_direction("BEARISH", -0.5, "bearish") == "BEARISH"
@@ -612,7 +617,7 @@ class TestEdgeCases:
         max_bullish = apply_sentiment_modifier(base, sentiment_score=1.0)
         max_bearish = apply_sentiment_modifier(base, sentiment_score=-1.0)
 
-        assert max_bullish == pytest.approx(61.2, abs=0.1)  # 60 * 1.02
+        assert max_bullish == pytest.approx(60.6, abs=0.1)  # 60 * 1.01
         assert max_bearish == pytest.approx(60.0, abs=0.1)  # 60 * 1.00 (zeroed)
 
     def test_score_with_very_large_implied_move(self):
@@ -643,7 +648,7 @@ class TestEdgeCases:
     def test_sentiment_modifier_with_max_base_score(self):
         """Sentiment modifier on 100 base score is clamped at 100."""
         result = apply_sentiment_modifier(100.0, sentiment_score=0.9)
-        assert result == 100.0  # Clamped: 100 * 1.02 = 102 -> 100
+        assert result == 100.0  # Clamped: 100 * 1.01 = 101 -> 100
 
     def test_unknown_liquidity_tier_gets_default_score(self):
         """Unknown liquidity tier gets default score (20) via dict.get fallback."""
@@ -728,12 +733,12 @@ class TestCrossSubsystemScenarios:
         final = apply_sentiment_modifier(base, sentiment_score=-0.7)
         assert final == base  # Bearish modifier zeroed
 
-        # Direction: bullish skew + bearish sentiment = CONFLICT -> neutral
+        # Direction: bullish skew + bearish sentiment -> skew dominates (bearish zeroed)
         direction = adjust_direction("BULLISH", sentiment_score=-0.7, sentiment_direction="bearish")
-        assert direction.adjusted_bias == AdjustedBias.NEUTRAL
-        assert direction.rule_applied == "conflict_hedge"
-        assert direction.changed is True
-        assert direction.size_modifier == 1.1  # Contrarian: increase for strong bearish
+        assert direction.adjusted_bias == AdjustedBias.BULLISH
+        assert direction.rule_applied == "skew_dominates"
+        assert direction.changed is False
+        assert direction.size_modifier == 1.1  # Contrarian: size increase still applies for strong bearish score
 
     def test_no_edge_trade_skip(self):
         """
@@ -777,12 +782,12 @@ class TestCrossSubsystemScenarios:
 
     def test_sentiment_can_push_borderline_over_filter(self):
         """
-        Score at 52: strong bullish sentiment (+2%) pushes to 53.04.
-        With reduced modifiers, borderline scores need higher base to pass 4.0 filter.
+        Score at 52: strong bullish sentiment (+1% flat) pushes to 52.52.
+        Borderline scores need stronger base to clear 4.0 filter now.
         """
         base_score = 52.0
         final = apply_sentiment_modifier(base_score, sentiment_score=0.8)
-        assert final == pytest.approx(53.04, abs=0.1)  # 52 * 1.02
+        assert final == pytest.approx(52.52, abs=0.1)  # 52 * 1.01
 
     def test_sentiment_bearish_no_longer_reduces(self):
         """
