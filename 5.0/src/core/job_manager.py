@@ -153,6 +153,10 @@ class JobManager:
         finally:
             conn.close()
 
+    def has_run_today(self, job_name: str) -> bool:
+        """Return True if job already completed successfully today."""
+        return self._get_status(today_et(), job_name) == "success"
+
     def check_dependencies(self, job_name: str) -> tuple[bool, str]:
         """
         Check if all dependencies succeeded today.

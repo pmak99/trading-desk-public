@@ -88,6 +88,13 @@ async def dispatch(
             metrics.request_success("dispatch", duration_ms)
             return {"status": "no_job", "message": "No job scheduled"}
 
+        # Idempotency guard: Cloud Scheduler can fire the same trigger twice
+        if not force and manager.has_run_today(job):
+            log("info", "Job already ran successfully today, skipping", job=job)
+            duration_ms = (time.time() - start_time) * 1000
+            metrics.request_success("dispatch", duration_ms)
+            return {"status": "already_run", "job": job}
+
         # Check dependencies
         can_run, reason = manager.check_dependencies(job)
         if not can_run:

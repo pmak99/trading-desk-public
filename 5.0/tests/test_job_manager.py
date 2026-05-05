@@ -111,6 +111,26 @@ def test_midnight_rollover_does_not_wrap_day_incorrectly():
     assert job is None, f"Saturday 00:02 has no scheduled job (nearest is 04:00), got: {job}"
 
 
+def test_has_run_today_false_when_not_run(db_path):
+    """has_run_today returns False when job has no recorded status."""
+    manager = JobManager(db_path=db_path)
+    assert manager.has_run_today("morning-digest") is False
+
+
+def test_has_run_today_true_after_success(db_path):
+    """has_run_today returns True after job recorded as success."""
+    manager = JobManager(db_path=db_path)
+    manager.record_status("morning-digest", "success")
+    assert manager.has_run_today("morning-digest") is True
+
+
+def test_has_run_today_false_after_failure(db_path):
+    """has_run_today returns False when job status is failed (not success)."""
+    manager = JobManager(db_path=db_path)
+    manager.record_status("morning-digest", "failed")
+    assert manager.has_run_today("morning-digest") is False
+
+
 def test_job_manager_uses_ivcrush_db_path(tmp_path):
     """JobManager default db_path should be ivcrush.db, not job_status.db."""
     import os
