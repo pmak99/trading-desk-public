@@ -282,13 +282,15 @@ backup_database() {
 }
 
 sync_earnings_calendar() {
-    # Sync earnings calendar with latest data from Alpha Vantage + Yahoo Finance
-    #
-    # This discovers new earnings announcements and validates dates using
-    # cross-reference validation (Yahoo Finance priority).
+    # Sync earnings calendar with latest data from Alpha Vantage + Yahoo Finance.
+    # Default: focused mode — only traded tickers (strategies + trade_journal).
+    # Use --all to sync the full calendar (slow, thousands of tickers).
     #
     # Args:
-    #   $1: Optional flags (--dry-run, --check-staleness)
+    #   --dry-run          Preview only, no DB writes
+    #   --check-staleness  Report stale dates and exit
+    #   --all              Sync all tickers (not just traded ones)
+    #   --threshold N      Staleness threshold in days
 
     local dry_run_flag=""
     local extra_args=""
@@ -300,7 +302,10 @@ sync_earnings_calendar() {
                 dry_run_flag="--dry-run"
                 ;;
             --check-staleness|-s)
-                extra_args="--check-staleness"
+                extra_args="$extra_args --check-staleness"
+                ;;
+            --all)
+                extra_args="$extra_args --all"
                 ;;
             --threshold*)
                 extra_args="$extra_args $arg"

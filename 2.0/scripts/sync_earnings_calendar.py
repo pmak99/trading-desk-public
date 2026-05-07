@@ -127,11 +127,32 @@ class SyncStats:
                 )
 
 
+def get_focused_tickers(db_path: str) -> Set[str]:
+    """
+    Return tickers we've actually traded (from strategies + trade_journal).
+    Used as the default sync target to avoid crawling thousands of irrelevant tickers.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT DISTINCT symbol FROM strategies "
+        "UNION SELECT DISTINCT symbol FROM trade_journal"
+    )
+    tickers = {row[0] for row in cursor.fetchall()}
+    conn.close()
+    return tickers
+
+
 def get_database_dates(
-    db_path: str, horizon_days: int = 90
+    db_path: str,
+    horizon_days: int = 90,
+    ticker_filter: Set[str] | None = None,
 ) -> Dict[str, Tuple[date, EarningsTiming, datetime, datetime | None]]:
     """
     Get current earnings dates from database.
+
+    Args:
+        ticker_filter: If provided, restrict to this set of tickers.
 
     Returns:
         Dict[ticker] = (earnings_date, timing, updated_at, last_validated_at)
@@ -142,15 +163,28 @@ def get_database_dates(
     cutoff_date = (date.today() - timedelta(days=7)).isoformat()
     future_date = (date.today() + timedelta(days=horizon_days)).isoformat()
 
-    cursor.execute(
-        """
-        SELECT ticker, earnings_date, timing, updated_at, last_validated_at
-        FROM earnings_calendar
-        WHERE earnings_date >= ? AND earnings_date <= ?
-        ORDER BY earnings_date
-        """,
-        (cutoff_date, future_date),
-    )
+    if ticker_filter:
+        placeholders = ",".join("?" * len(ticker_filter))
+        cursor.execute(
+            f"""
+            SELECT ticker, earnings_date, timing, updated_at, last_validated_at
+            FROM earnings_calendar
+            WHERE earnings_date >= ? AND earnings_date <= ?
+            AND ticker IN ({placeholders})
+            ORDER BY earnings_date
+            """,
+            (cutoff_date, future_date, *ticker_filter),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT ticker, earnings_date, timing, updated_at, last_validated_at
+            FROM earnings_calendar
+            WHERE earnings_date >= ? AND earnings_date <= ?
+            ORDER BY earnings_date
+            """,
+            (cutoff_date, future_date),
+        )
 
     result = {}
     for row in cursor.fetchall():
@@ -453,15 +487,17 @@ def _sync_via_yahoo_fallback(
     db_path: str,
     dry_run: bool,
     stats: "SyncStats",
+    ticker_filter: Set[str] | None = None,
 ) -> "SyncStats":
     """
     Yahoo Finance per-ticker fallback used when Alpha Vantage bulk fetch fails.
 
     Iterates DB tickers with upcoming earnings (next 90 days) and queries
     Yahoo Finance individually. Slower but functional when AV is rate-limited.
+    Respects ticker_filter (focused mode) to avoid crawling thousands of tickers.
     """
     yahoo = YahooFinanceEarnings()
-    db_dates = get_database_dates(db_path)
+    db_dates = get_database_dates(db_path, ticker_filter=ticker_filter)
 
     today = date.today()
     cutoff = today + timedelta(days=90)
@@ -510,6 +546,7 @@ def sync_earnings_calendar(
     db_path: str,
     horizon: str = "3month",
     dry_run: bool = False,
+    focused: bool = True,
 ) -> SyncStats:
     """
     Synchronize earnings calendar with latest data.
@@ -521,6 +558,8 @@ def sync_earnings_calendar(
         db_path: Database path
         horizon: Time horizon (3month, 6month, 12month)
         dry_run: If True, don't update database
+        focused: If True (default), only sync tickers we've actually traded.
+                 Pass False (--all flag) to sync all tickers in the calendar.
 
     Returns:
         SyncStats with results
@@ -529,7 +568,14 @@ def sync_earnings_calendar(
 
     # Get current database state
     logger.info("Loading current database state...")
-    db_dates = get_database_dates(db_path)
+    ticker_filter: Set[str] | None = None
+    if focused:
+        ticker_filter = get_focused_tickers(db_path)
+        logger.info(
+            f"Focused mode: targeting {len(ticker_filter)} traded tickers "
+            f"(use --all to sync full calendar)"
+        )
+    db_dates = get_database_dates(db_path, ticker_filter=ticker_filter)
     logger.info(f"Found {len(db_dates)} existing earnings dates in database")
 
     # Fetch full calendar from Alpha Vantage
@@ -539,7 +585,7 @@ def sync_earnings_calendar(
     if calendar_result.is_err:
         logger.error(f"Failed to fetch calendar: {calendar_result.error}")
         logger.warning("Alpha Vantage unavailable — falling back to Yahoo Finance per-ticker lookup")
-        return _sync_via_yahoo_fallback(db_path=db_path, dry_run=dry_run, stats=stats)
+        return _sync_via_yahoo_fallback(db_path=db_path, dry_run=dry_run, stats=stats, ticker_filter=ticker_filter)
 
     calendar = calendar_result.value
     logger.info(f"✓ Fetched {len(calendar)} earnings events from Alpha Vantage")
@@ -826,6 +872,11 @@ def main():
         help=f"Staleness threshold in days (default: {STALENESS_THRESHOLD_DAYS})",
     )
     parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Sync all tickers in the calendar (default: only traded tickers)",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -912,6 +963,7 @@ def main():
         db_path=db_path,
         horizon=args.horizon,
         dry_run=args.dry_run,
+        focused=not args.all,
     )
 
     # Print summary
