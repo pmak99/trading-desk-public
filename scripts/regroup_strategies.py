@@ -138,6 +138,7 @@ def create_strategy_and_link(
     conn: sqlite3.Connection,
     legs: List[LegRecord],
     strategy_type: str,
+    account_type: str = 'TAXABLE',
 ) -> int:
     """Create a strategy record and link all legs to it."""
     cursor = conn.cursor()
@@ -177,8 +178,8 @@ def create_strategy_and_link(
     cursor.execute("""
         INSERT INTO strategies
         (symbol, strategy_type, acquired_date, sale_date, days_held, expiration,
-         quantity, gain_loss, is_winner, earnings_date, actual_move)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         quantity, gain_loss, is_winner, earnings_date, actual_move, account_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         first_leg.symbol,
         strategy_type,
@@ -191,6 +192,7 @@ def create_strategy_and_link(
         is_winner,
         first_leg.earnings_date,
         first_leg.actual_move,
+        account_type,
     ))
 
     strategy_id = cursor.lastrowid
@@ -205,7 +207,7 @@ def create_strategy_and_link(
     return strategy_id
 
 
-def run_regrouping(db_path: str, dry_run: bool = False) -> Dict[str, Any]:
+def run_regrouping(db_path: str, dry_run: bool = False, account_type: str = 'TAXABLE') -> Dict[str, Any]:
     """
     Run the regrouping process.
 
@@ -281,7 +283,7 @@ def run_regrouping(db_path: str, dry_run: bool = False) -> Dict[str, Any]:
                     stats['legs_linked'] += leg_count
                     stats['by_type'][final_type] += 1
                 else:
-                    strategy_id = create_strategy_and_link(conn, matched_legs, final_type)
+                    strategy_id = create_strategy_and_link(conn, matched_legs, final_type, account_type)
                     stats['strategies_created'] += 1
                     stats['legs_linked'] += leg_count
                     stats['by_type'][final_type] += 1
@@ -332,13 +334,16 @@ def main():
     parser = argparse.ArgumentParser(description='Regroup orphan legs into strategies')
     parser.add_argument('--db', default=str(default_db), help='Database path')
     parser.add_argument('--dry-run', action='store_true', help='Preview without making changes')
+    parser.add_argument('--account-type', default='TAXABLE', choices=['TAXABLE', 'IRA'],
+                        help='Account type tag for created strategies (default: TAXABLE)')
 
     args = parser.parse_args()
 
     print(f"Database: {args.db}")
+    print(f"Account type: {args.account_type}")
     print(f"Mode: {'DRY RUN' if args.dry_run else 'LIVE'}")
 
-    stats = run_regrouping(args.db, dry_run=args.dry_run)
+    stats = run_regrouping(args.db, dry_run=args.dry_run, account_type=args.account_type)
     print_report(stats, args.dry_run)
 
 

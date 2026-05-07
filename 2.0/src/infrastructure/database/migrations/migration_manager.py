@@ -194,6 +194,17 @@ class MigrationManager:
             sql_down=None
         ))
 
+        # Migration 007: Add account_type to trade_journal and strategies
+        # Distinguishes IRA vs TAXABLE trades. Existing rows default to TAXABLE.
+        self.migrations.append(Migration(
+            version=7,
+            name="add_account_type_column",
+            sql_up="""
+                -- Handled in _apply_migration_007
+            """,
+            sql_down=None
+        ))
+
         # Sort migrations by version (safety check)
         self.migrations.sort(key=lambda m: m.version)
 
@@ -319,6 +330,8 @@ class MigrationManager:
                     self._apply_migration_005(cursor)
                 elif migration.version == 6:
                     self._apply_migration_006(cursor)
+                elif migration.version == 7:
+                    self._apply_migration_007(cursor)
                 else:
                     # Execute statements individually (safer than executescript)
                     for statement in migration.sql_up.split(';'):
@@ -549,6 +562,24 @@ class MigrationManager:
         # Update query planner statistics
         cursor.execute("ANALYZE")
         logger.info("Updated query planner statistics (ANALYZE)")
+
+    def _apply_migration_007(self, cursor: sqlite3.Cursor):
+        """
+        Apply migration 007: Add account_type column to trade_journal and strategies.
+
+        Existing rows default to TAXABLE. IRA trades imported after this migration
+        are tagged at insert time via --account-type IRA.
+        """
+        for table in ('trade_journal', 'strategies'):
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = [row[1] for row in cursor.fetchall()]
+            if 'account_type' not in columns:
+                cursor.execute(
+                    f"ALTER TABLE {table} ADD COLUMN account_type TEXT NOT NULL DEFAULT 'TAXABLE'"
+                )
+                logger.info(f"Added account_type column to {table}")
+            else:
+                logger.debug(f"{table} already has account_type column")
 
     def rollback(self, target_version: int) -> int:
         """

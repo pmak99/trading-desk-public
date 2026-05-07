@@ -78,7 +78,7 @@ def aggregate_fills(rows: list[dict]) -> list[dict]:
     return aggregated
 
 
-def import_csv_to_db(csv_path: str, db_path: str, dry_run: bool = False) -> dict:
+def import_csv_to_db(csv_path: str, db_path: str, dry_run: bool = False, account_type: str = 'TAXABLE') -> dict:
     """Import enhanced CSV into trade_journal table."""
     inserted = 0
     skipped = 0
@@ -134,12 +134,12 @@ def import_csv_to_db(csv_path: str, db_path: str, dry_run: bool = False) -> dict
                     INSERT OR IGNORE INTO trade_journal
                     (symbol, acquired_date, sale_date, days_held, option_type, strike,
                      expiration, quantity, cost_basis, proceeds, gain_loss, is_winner,
-                     term, wash_sale_amount, earnings_date, actual_move)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     term, wash_sale_amount, earnings_date, actual_move, account_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     symbol, acquired_date, sale_date, days_held, option_type, strike,
                     expiration, quantity, cost_basis, proceeds, gain_loss, is_winner,
-                    term, wash_sale, earnings_date, actual_move,
+                    term, wash_sale, earnings_date, actual_move, account_type,
                 ))
                 if cursor.rowcount > 0:
                     inserted += 1
@@ -175,15 +175,18 @@ def main():
     parser.add_argument('--csv', default=str(default_csv), help='Path to enhanced CSV')
     parser.add_argument('--db', default=str(default_db), help='Database path')
     parser.add_argument('--dry-run', action='store_true', help='Preview without inserting')
+    parser.add_argument('--account-type', default='TAXABLE', choices=['TAXABLE', 'IRA'],
+                        help='Account type tag for imported rows (default: TAXABLE)')
 
     args = parser.parse_args()
 
     print(f"CSV: {args.csv}")
     print(f"Database: {args.db}")
+    print(f"Account type: {args.account_type}")
     print(f"Mode: {'DRY RUN' if args.dry_run else 'LIVE'}")
     print()
 
-    result = import_csv_to_db(args.csv, args.db, dry_run=args.dry_run)
+    result = import_csv_to_db(args.csv, args.db, dry_run=args.dry_run, account_type=args.account_type)
 
     prefix = "[DRY RUN] " if args.dry_run else ""
     print(f"\n{prefix}Results:")
