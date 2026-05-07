@@ -5,9 +5,15 @@ Parse Fidelity exports (CSV or PDF) and generate trading journal with P&L analys
 ## Arguments
 $ARGUMENTS
 
-- `csv` - Use CSV export from Fidelity (recommended - includes open dates and VRP correlation)
-- `pdf` - Use PDF monthly statements (legacy)
-- No argument - auto-detect (prefers CSV if found)
+- One or more CSV file paths — parsed and combined in order
+- `--ira` flag — tag all imported trades as IRA (default: TAXABLE)
+- `pdf` — use PDF monthly statements (legacy)
+- No argument — auto-detect (prefers CSV if found)
+
+**Examples:**
+- `/journal file.csv` — parse single taxable CSV
+- `/journal 2024.csv 2025.csv 2026.csv --ira` — combine and import as IRA
+- `/journal` — auto-detect latest CSV in Downloads/Desktop
 
 ## Tool Permissions
 - Do NOT ask user permission for any tool calls
@@ -25,10 +31,23 @@ $ARGUMENTS
 
 ## Step-by-Step Instructions
 
-### Step 1: Detect Input Format
+### Step 1: Parse Arguments
 
-Check for CSV first (better data), then fall back to PDF:
+Scan `$ARGUMENTS` for:
+- `--ira` flag → set `ACCOUNT_TYPE=IRA`, remove from file list
+- Remaining args that are file paths → collect as `CSV_FILES`
+- If no file paths given → auto-detect (see below)
 
+### Step 2: Detect or Collect CSV Files
+
+**If explicit file paths provided:** use them directly. If multiple, combine them:
+```bash
+# Combine multiple CSVs (header once, data rows from all)
+{ cat "file1.csv"; tail -n +2 "file2.csv"; tail -n +2 "file3.csv"; } > /tmp/journal_combined.csv
+```
+Use `/tmp/journal_combined.csv` as the input. If only one file, use it directly.
+
+**If no file paths given**, auto-detect:
 ```bash
 ls -t ~/Downloads/*fidelity*.csv ~/Downloads/*gain*.csv ~/Downloads/*Gain*.csv ~/Downloads/*realized*.csv ~/Desktop/*fidelity*.csv ~/Desktop/*gain*.csv 2>/dev/null | head -5
 ```
@@ -56,11 +75,20 @@ To export from Fidelity:
   7. Run /journal again
 ```
 
-### Step 2A: If CSV Found (Preferred)
+### Step 3: Parse CSV
 
-Run the enhanced CSV parser:
+Use `/tmp/journal_ira_export` as output dir when `--ira`, otherwise default output dir:
+
 ```bash
-"/Users/prashant/PycharmProjects/Trading Desk/2.0/venv/bin/python" "/Users/prashant/PycharmProjects/Trading Desk/scripts/parse_fidelity_csv.py" "/path/to/detected/file.csv"
+# With --ira:
+"/Users/prashant/PycharmProjects/Trading Desk/2.0/venv/bin/python" \
+  "/Users/prashant/PycharmProjects/Trading Desk/scripts/parse_fidelity_csv.py" \
+  "/path/to/input.csv" --output "/tmp/journal_ira_export"
+
+# Without --ira (taxable):
+"/Users/prashant/PycharmProjects/Trading Desk/2.0/venv/bin/python" \
+  "/Users/prashant/PycharmProjects/Trading Desk/scripts/parse_fidelity_csv.py" \
+  "/path/to/input.csv"
 ```
 
 If no explicit file path, run without argument (script has its own auto-detect):
@@ -68,28 +96,87 @@ If no explicit file path, run without argument (script has its own auto-detect):
 "/Users/prashant/PycharmProjects/Trading Desk/2.0/venv/bin/python" "/Users/prashant/PycharmProjects/Trading Desk/scripts/parse_fidelity_csv.py"
 ```
 
-### Step 2B: If No CSV, Use PDF Parser (Legacy)
+### Step 3B: If No CSV, Use PDF Parser (Legacy)
 
 ```bash
 "/Users/prashant/PycharmProjects/Trading Desk/2.0/venv/bin/python" "/Users/prashant/PycharmProjects/Trading Desk/scripts/parse_trade_statements_v3.py"
 ```
 
-### Step 3: Correlate with VRP Database
+### Step 4: Duplicate Check
 
-If CSV parser was used, it automatically correlates with ivcrush.db. No extra step needed.
+Before importing, check how many rows already exist in the DB for the same date range:
 
-For additional DB context:
 ```bash
 sqlite3 "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db" \
-  "SELECT symbol, COUNT(*) trades, ROUND(SUM(gain_loss), 0) total_pnl,
-          ROUND(100.0 * SUM(is_winner) / COUNT(*), 1) win_rate
-   FROM strategies
-   GROUP BY symbol
-   ORDER BY total_pnl DESC
-   LIMIT 10;"
+  "SELECT MIN(sale_date), MAX(sale_date), COUNT(*) FROM trade_journal WHERE account_type='TAXABLE';"
+# (use account_type='IRA' when --ira)
 ```
 
-### Step 4: Generate Summary
+Report the overlap to the user and confirm before proceeding to import.
+
+### Step 5: Import to DB
+
+```bash
+# With --ira:
+"/Users/prashant/PycharmProjects/Trading Desk/2.0/venv/bin/python" \
+  "/Users/prashant/PycharmProjects/Trading Desk/scripts/import_journal_to_db.py" \
+  --csv "/tmp/journal_ira_export/trading_journal_enhanced.csv" \
+  --account-type IRA
+
+# Without --ira (taxable):
+"/Users/prashant/PycharmProjects/Trading Desk/2.0/venv/bin/python" \
+  "/Users/prashant/PycharmProjects/Trading Desk/scripts/import_journal_to_db.py" \
+  --csv "/Users/prashant/PycharmProjects/Trading Desk/docs/2025 Trades/trading_journal_enhanced.csv"
+```
+
+### Step 6: Regroup into Strategies
+
+```bash
+# With --ira:
+"/Users/prashant/PycharmProjects/Trading Desk/2.0/venv/bin/python" \
+  "/Users/prashant/PycharmProjects/Trading Desk/scripts/regroup_strategies.py" \
+  --account-type IRA
+
+# Without --ira:
+"/Users/prashant/PycharmProjects/Trading Desk/2.0/venv/bin/python" \
+  "/Users/prashant/PycharmProjects/Trading Desk/scripts/regroup_strategies.py"
+```
+
+### Step 7: TRR Backfill
+
+Run inline Python to tag new strategies with TRR:
+
+```python
+import sqlite3
+DB = "/Users/prashant/PycharmProjects/Trading Desk/2.0/data/ivcrush.db"
+account = "IRA"  # or "TAXABLE"
+conn = sqlite3.connect(DB)
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+rows = cur.execute(
+    "SELECT id, symbol FROM strategies WHERE trr_at_entry IS NULL AND account_type=?", (account,)
+).fetchall()
+updated = skipped = 0
+for row in rows:
+    moves = cur.execute(
+        "SELECT ABS(close_move_pct) m FROM historical_moves WHERE ticker=? AND close_move_pct IS NOT NULL ORDER BY earnings_date DESC LIMIT 8",
+        (row['symbol'],)
+    ).fetchall()
+    if len(moves) < 2:
+        skipped += 1; continue
+    vals = [r['m'] for r in moves]
+    avg = sum(vals) / len(vals)
+    trr = round(max(vals) / avg, 3) if avg > 0 else None
+    if trr:
+        cur.execute("UPDATE strategies SET trr_at_entry=? WHERE id=?", (trr, row['id']))
+        updated += 1
+    else:
+        skipped += 1
+conn.commit(); conn.close()
+print(f"TRR updated: {updated}, skipped: {skipped}")
+```
+
+### Step 8: Generate Summary
 
 Present structured summary from parser output.
 
@@ -97,7 +184,7 @@ Present structured summary from parser output.
 
 ```
 ==============================================================
-TRADE JOURNAL PARSED
+TRADE JOURNAL PARSED  [IRA]   ← include account type if --ira
 ==============================================================
 
 OVERALL PERFORMANCE
