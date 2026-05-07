@@ -269,11 +269,14 @@ def sync_trade_journal(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Conne
     """Sync trade_journal table (union strategy)."""
     stats = {"local_added": 0, "cloud_added": 0}
 
-    # Get unique keys from both (symbol, acquired_date, sale_date, option_type, strike, cost_basis)
+    # Get unique keys from both — include account_type so IRA and TAXABLE rows
+    # with identical option details are treated as distinct records.
+    # COALESCE(account_type, 'TAXABLE') handles cloud DBs pre-migration-007.
     local_keys = set(
         local_conn.execute("""
             SELECT symbol, acquired_date, sale_date,
-                   COALESCE(option_type, ''), COALESCE(strike, 0), cost_basis
+                   COALESCE(option_type, ''), COALESCE(strike, 0), cost_basis,
+                   COALESCE(account_type, 'TAXABLE')
             FROM trade_journal
         """).fetchall()
     )
@@ -281,7 +284,8 @@ def sync_trade_journal(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Conne
     cloud_keys = set(
         cloud_conn.execute("""
             SELECT symbol, acquired_date, sale_date,
-                   COALESCE(option_type, ''), COALESCE(strike, 0), cost_basis
+                   COALESCE(option_type, ''), COALESCE(strike, 0), cost_basis,
+                   COALESCE(account_type, 'TAXABLE')
             FROM trade_journal
         """).fetchall()
     )
@@ -290,27 +294,30 @@ def sync_trade_journal(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Conne
     cloud_only = cloud_keys - local_keys
     if cloud_only:
         for key in cloud_only:
-            symbol, acq_date, sale_date, opt_type, strike, cost_basis = key
+            symbol, acq_date, sale_date, opt_type, strike, cost_basis, account_type = key
             opt_type = opt_type if opt_type else None
             strike = strike if strike else None
 
             rec = cloud_conn.execute("""
                 SELECT symbol, acquired_date, sale_date, days_held, option_type, strike,
                        expiration, quantity, cost_basis, proceeds, gain_loss, is_winner,
-                       term, wash_sale_amount, earnings_date, actual_move, created_at
+                       term, wash_sale_amount, earnings_date, actual_move, created_at,
+                       COALESCE(account_type, 'TAXABLE')
                 FROM trade_journal
                 WHERE symbol = ? AND (acquired_date = ? OR (acquired_date IS NULL AND ? IS NULL))
                   AND sale_date = ? AND (option_type = ? OR (option_type IS NULL AND ? IS NULL))
                   AND (strike = ? OR (strike IS NULL AND ? IS NULL)) AND cost_basis = ?
-            """, (symbol, acq_date, acq_date, sale_date, opt_type, opt_type, strike, strike, cost_basis)).fetchone()
+                  AND COALESCE(account_type, 'TAXABLE') = ?
+            """, (symbol, acq_date, acq_date, sale_date, opt_type, opt_type, strike, strike, cost_basis, account_type)).fetchone()
 
             if rec:
                 local_conn.execute("""
                     INSERT OR IGNORE INTO trade_journal
                     (symbol, acquired_date, sale_date, days_held, option_type, strike,
                      expiration, quantity, cost_basis, proceeds, gain_loss, is_winner,
-                     term, wash_sale_amount, earnings_date, actual_move, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     term, wash_sale_amount, earnings_date, actual_move, created_at,
+                     account_type)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, rec)
                 stats["local_added"] += 1
 
@@ -318,27 +325,30 @@ def sync_trade_journal(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Conne
     local_only = local_keys - cloud_keys
     if local_only:
         for key in local_only:
-            symbol, acq_date, sale_date, opt_type, strike, cost_basis = key
+            symbol, acq_date, sale_date, opt_type, strike, cost_basis, account_type = key
             opt_type = opt_type if opt_type else None
             strike = strike if strike else None
 
             rec = local_conn.execute("""
                 SELECT symbol, acquired_date, sale_date, days_held, option_type, strike,
                        expiration, quantity, cost_basis, proceeds, gain_loss, is_winner,
-                       term, wash_sale_amount, earnings_date, actual_move, created_at
+                       term, wash_sale_amount, earnings_date, actual_move, created_at,
+                       COALESCE(account_type, 'TAXABLE')
                 FROM trade_journal
                 WHERE symbol = ? AND (acquired_date = ? OR (acquired_date IS NULL AND ? IS NULL))
                   AND sale_date = ? AND (option_type = ? OR (option_type IS NULL AND ? IS NULL))
                   AND (strike = ? OR (strike IS NULL AND ? IS NULL)) AND cost_basis = ?
-            """, (symbol, acq_date, acq_date, sale_date, opt_type, opt_type, strike, strike, cost_basis)).fetchone()
+                  AND COALESCE(account_type, 'TAXABLE') = ?
+            """, (symbol, acq_date, acq_date, sale_date, opt_type, opt_type, strike, strike, cost_basis, account_type)).fetchone()
 
             if rec:
                 cloud_conn.execute("""
                     INSERT OR IGNORE INTO trade_journal
                     (symbol, acquired_date, sale_date, days_held, option_type, strike,
                      expiration, quantity, cost_basis, proceeds, gain_loss, is_winner,
-                     term, wash_sale_amount, earnings_date, actual_move, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     term, wash_sale_amount, earnings_date, actual_move, created_at,
+                     account_type)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, rec)
                 stats["cloud_added"] += 1
 

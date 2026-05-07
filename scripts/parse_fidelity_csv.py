@@ -92,9 +92,14 @@ class Trade:
 
 @dataclass
 class Strategy:
-    """Represents a grouped multi-leg strategy (spread, single, iron condor)."""
+    """Represents a grouped multi-leg strategy for in-memory reporting only.
+
+    strategy_type values: SINGLE, SPREAD, STOCK.
+    STOCK is not DB-compatible (violates strategies CHECK constraint) — never
+    pass Strategy objects directly to create_strategy_and_link or any DB write.
+    """
     symbol: str
-    strategy_type: str  # SINGLE, SPREAD, IRON_CONDOR, STOCK
+    strategy_type: str  # SINGLE, SPREAD, STOCK
     option_type: Optional[str]
     expiration: Optional[str]
     gain_loss: float
@@ -574,8 +579,17 @@ def find_nearest_earnings(trade: Trade, moves_by_ticker: Dict) -> Optional[Dict]
         return None
 
     try:
-        sale_date = datetime.strptime(trade.sale_date, '%Y-%m-%d')
-        acquired_date = datetime.strptime(trade.acquired_date, '%Y-%m-%d') if trade.acquired_date else None
+        # Use normalised dates: Fidelity inverts acquired/sale for credit trades
+        # (sale_date = when opened, acquired_date = when closed).
+        # Trade.close_date handles this inversion; open_date is the other field.
+        close_date_str = trade.close_date  # actual close, regardless of trade direction
+        open_date_str = (
+            trade.sale_date
+            if close_date_str == trade.acquired_date
+            else trade.acquired_date
+        )
+        close_dt = datetime.strptime(close_date_str, '%Y-%m-%d')
+        open_dt = datetime.strptime(open_date_str, '%Y-%m-%d') if open_date_str else None
     except (ValueError, TypeError):
         return None
 
@@ -588,24 +602,19 @@ def find_nearest_earnings(trade: Trade, moves_by_ticker: Dict) -> Optional[Dict]
         except ValueError:
             continue
 
-        if acquired_date:
-            # CORRECT IV CRUSH LOGIC:
-            # - Position opened BEFORE earnings (1-7 days before)
-            # - Position closed AFTER earnings (0-7 days after)
-            days_before = (earnings - acquired_date).days
-            days_after = (sale_date - earnings).days
+        if open_dt:
+            # IV crush: opened before earnings, closed after
+            days_before = (earnings - open_dt).days
+            days_after = (close_dt - earnings).days
 
-            # Valid IV crush trade: opened 0-7 days before, closed 0-7 days after
             if 0 <= days_before <= 7 and 0 <= days_after <= 7:
-                # Prefer closest match to sale date
                 diff = abs(days_after)
                 if diff < min_diff:
                     min_diff = diff
                     best_match = move
         else:
-            # No acquired date - fall back to looser matching
-            # Sale should be 0-3 days after earnings
-            days_after = (sale_date - earnings).days
+            # No open date — loose match: closed 0-3 days after earnings
+            days_after = (close_dt - earnings).days
             if 0 <= days_after <= 3:
                 if days_after < min_diff:
                     min_diff = days_after
@@ -640,8 +649,12 @@ def group_trades_into_strategies(trades: List[Trade]) -> List[Strategy]:
     """
     Group individual trade legs into strategies by (symbol, expiration, option_type).
 
-    Two distinct strikes → SPREAD. Four → IRON_CONDOR. One → SINGLE.
-    Matches the DB regrouping logic in regroup_strategies.py.
+    One distinct strike → SINGLE. Two → paired SPREADs. Three or more → single
+    SPREAD grouping all legs (avoids silently dropping middle-strike legs).
+
+    Note: iron condors cannot be detected here — grouping by option_type means
+    PUT and CALL legs always land in separate groups. They appear as two SPREADs.
+    For in-memory reporting only; do not persist Strategy objects to the DB.
     """
     options = [t for t in trades if t.is_option]
     stocks = [t for t in trades if not t.is_option]
@@ -672,23 +685,13 @@ def group_trades_into_strategies(trades: List[Trade]) -> List[Strategy]:
                     earnings_date=strike_legs[0].earnings_date,
                     actual_move=strike_legs[0].actual_move,
                 ))
-        elif n_strikes == 4:
-            pnl = sum(l.gain_loss for l in legs)
-            strategies.append(Strategy(
-                symbol=symbol, strategy_type='IRON_CONDOR',
-                option_type=option_type or None,
-                expiration=expiration or None, gain_loss=pnl,
-                legs=legs,
-                earnings_date=legs[0].earnings_date,
-                actual_move=legs[0].actual_move,
-            ))
-        else:
+        elif n_strikes == 2:
             # SPREAD: pair legs by matching strike quantities
             by_strike = defaultdict(list)
             for l in legs:
                 by_strike[l.strike].append(l)
             low_legs = by_strike[strikes[0]]
-            high_legs = by_strike[strikes[-1]]
+            high_legs = by_strike[strikes[1]]
             if len(low_legs) == len(high_legs):
                 for low, high in zip(low_legs, high_legs):
                     pair = [low, high]
@@ -712,6 +715,18 @@ def group_trades_into_strategies(trades: List[Trade]) -> List[Strategy]:
                     earnings_date=legs[0].earnings_date,
                     actual_move=legs[0].actual_move,
                 ))
+        else:
+            # 3+ distinct strikes (partial condor, broken spread, etc.) —
+            # group all legs together to avoid silently dropping middle strikes
+            pnl = sum(l.gain_loss for l in legs)
+            strategies.append(Strategy(
+                symbol=symbol, strategy_type='SPREAD',
+                option_type=option_type or None,
+                expiration=expiration or None, gain_loss=pnl,
+                legs=legs,
+                earnings_date=legs[0].earnings_date,
+                actual_move=legs[0].actual_move,
+            ))
 
     for t in stocks:
         strategies.append(Strategy(

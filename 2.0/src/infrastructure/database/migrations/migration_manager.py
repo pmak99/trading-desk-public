@@ -205,6 +205,18 @@ class MigrationManager:
             sql_down=None
         ))
 
+        # Migration 008: Update trade_journal UNIQUE key to include account_type.
+        # Without this, identical option positions in IRA and TAXABLE accounts
+        # collide on INSERT OR IGNORE and one row is silently dropped.
+        self.migrations.append(Migration(
+            version=8,
+            name="add_account_type_to_unique_key",
+            sql_up="""
+                -- Handled in _apply_migration_008
+            """,
+            sql_down=None
+        ))
+
         # Sort migrations by version (safety check)
         self.migrations.sort(key=lambda m: m.version)
 
@@ -332,6 +344,8 @@ class MigrationManager:
                     self._apply_migration_006(cursor)
                 elif migration.version == 7:
                     self._apply_migration_007(cursor)
+                elif migration.version == 8:
+                    self._apply_migration_008(cursor)
                 else:
                     # Execute statements individually (safer than executescript)
                     for statement in migration.sql_up.split(';'):
@@ -570,16 +584,88 @@ class MigrationManager:
         Existing rows default to TAXABLE. IRA trades imported after this migration
         are tagged at insert time via --account-type IRA.
         """
-        for table in ('trade_journal', 'strategies'):
-            cursor.execute(f"PRAGMA table_info({table})")
+        _ALLOWED_TABLES = frozenset({'trade_journal', 'strategies'})
+        for table in _ALLOWED_TABLES:
+            cursor.execute(f"PRAGMA table_info([{table}])")
             columns = [row[1] for row in cursor.fetchall()]
             if 'account_type' not in columns:
                 cursor.execute(
-                    f"ALTER TABLE {table} ADD COLUMN account_type TEXT NOT NULL DEFAULT 'TAXABLE'"
+                    f"ALTER TABLE [{table}] ADD COLUMN account_type TEXT NOT NULL DEFAULT 'TAXABLE'"
                 )
                 logger.info(f"Added account_type column to {table}")
             else:
                 logger.debug(f"{table} already has account_type column")
+
+    def _apply_migration_008(self, cursor: sqlite3.Cursor):
+        """
+        Apply migration 008: Recreate trade_journal with account_type in UNIQUE key.
+
+        SQLite cannot ALTER a UNIQUE constraint, so this recreates the table.
+        Without account_type in the key, identical option positions in IRA and
+        TAXABLE accounts collide on INSERT OR IGNORE and one row is silently lost.
+        """
+        # Idempotency: check if account_type is already part of the UNIQUE constraint
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='trade_journal'")
+        row = cursor.fetchone()
+        if row:
+            ddl = row[0] or ''
+            unique_clause = ddl.split('UNIQUE')[-1] if 'UNIQUE' in ddl else ''
+            if 'account_type' in unique_clause:
+                logger.debug("trade_journal UNIQUE constraint already includes account_type")
+                return
+
+        cursor.execute("""
+            CREATE TABLE trade_journal_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                acquired_date DATE,
+                sale_date DATE NOT NULL,
+                days_held INTEGER,
+                option_type TEXT,
+                strike REAL,
+                expiration DATE,
+                quantity INTEGER,
+                cost_basis REAL NOT NULL,
+                proceeds REAL NOT NULL,
+                gain_loss REAL NOT NULL,
+                is_winner BOOLEAN NOT NULL,
+                term TEXT,
+                wash_sale_amount REAL DEFAULT 0,
+                earnings_date DATE,
+                actual_move REAL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                strategy_id INTEGER REFERENCES strategies(id),
+                account_type TEXT NOT NULL DEFAULT 'TAXABLE',
+                UNIQUE(symbol, acquired_date, sale_date, option_type, strike,
+                       cost_basis, account_type)
+            )
+        """)
+
+        cursor.execute("""
+            INSERT INTO trade_journal_new
+            SELECT id, symbol, acquired_date, sale_date, days_held, option_type,
+                   strike, expiration, quantity, cost_basis, proceeds, gain_loss,
+                   is_winner, term, wash_sale_amount, earnings_date, actual_move,
+                   created_at, strategy_id, COALESCE(account_type, 'TAXABLE')
+            FROM trade_journal
+        """)
+
+        cursor.execute("DROP TABLE trade_journal")
+        cursor.execute("ALTER TABLE trade_journal_new RENAME TO trade_journal")
+
+        for idx_name, idx_col in [
+            ("idx_journal_symbol",          "trade_journal(symbol)"),
+            ("idx_journal_sale_date",       "trade_journal(sale_date)"),
+            ("idx_journal_earnings",        "trade_journal(earnings_date)"),
+            ("idx_trade_journal_strategy",  "trade_journal(strategy_id)"),
+            ("idx_trade_journal_symbol",    "trade_journal(symbol)"),
+            ("idx_trade_journal_sale_date", "trade_journal(sale_date)"),
+            ("idx_trade_journal_earnings",  "trade_journal(earnings_date)"),
+        ]:
+            cursor.execute(f"CREATE INDEX IF NOT EXISTS [{idx_name}] ON {idx_col}")
+
+        cursor.execute("ANALYZE")
+        logger.info("Recreated trade_journal with account_type in UNIQUE constraint")
 
     def rollback(self, target_version: int) -> int:
         """
