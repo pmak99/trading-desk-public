@@ -82,6 +82,35 @@ class Trade:
         except (ValueError, TypeError):
             return None
 
+    @property
+    def close_date(self) -> Optional[str]:
+        # Credit trades: Fidelity inverts dates — acquired > sale means acquired is the close
+        if self.acquired_date and self.sale_date and self.acquired_date > self.sale_date:
+            return self.acquired_date
+        return self.sale_date
+
+
+@dataclass
+class Strategy:
+    """Represents a grouped multi-leg strategy (spread, single, iron condor)."""
+    symbol: str
+    strategy_type: str  # SINGLE, SPREAD, IRON_CONDOR, STOCK
+    option_type: Optional[str]
+    expiration: Optional[str]
+    gain_loss: float
+    legs: List['Trade']
+    earnings_date: Optional[str] = None
+    actual_move: Optional[float] = None
+
+    @property
+    def is_winner(self) -> bool:
+        return self.gain_loss > 0
+
+    @property
+    def close_date(self) -> Optional[str]:
+        dates = [l.close_date for l in self.legs if l.close_date]
+        return max(dates) if dates else None
+
 
 def find_column(headers: List[str], field_name: str) -> Optional[int]:
     """Find column index for a field using flexible matching.
@@ -607,6 +636,176 @@ def correlate_with_vrp(trades: List[Trade], db_path: str) -> Tuple[List[Trade], 
     return trades, matched_count
 
 
+def group_trades_into_strategies(trades: List[Trade]) -> List[Strategy]:
+    """
+    Group individual trade legs into strategies by (symbol, expiration, option_type).
+
+    Two distinct strikes → SPREAD. Four → IRON_CONDOR. One → SINGLE.
+    Matches the DB regrouping logic in regroup_strategies.py.
+    """
+    options = [t for t in trades if t.is_option]
+    stocks = [t for t in trades if not t.is_option]
+
+    groups: Dict[tuple, List[Trade]] = defaultdict(list)
+    for t in options:
+        key = (t.symbol, t.expiration or '', t.option_type or '')
+        groups[key].append(t)
+
+    strategies: List[Strategy] = []
+
+    for (symbol, expiration, option_type), legs in groups.items():
+        strikes = sorted(set(l.strike for l in legs if l.strike))
+        n_strikes = len(strikes)
+
+        if n_strikes <= 1:
+            # Multiple fills of the same single — one strategy per strike group
+            by_strike: Dict = defaultdict(list)
+            for l in legs:
+                by_strike[l.strike].append(l)
+            for strike_legs in by_strike.values():
+                pnl = sum(l.gain_loss for l in strike_legs)
+                strategies.append(Strategy(
+                    symbol=symbol, strategy_type='SINGLE',
+                    option_type=option_type or None,
+                    expiration=expiration or None, gain_loss=pnl,
+                    legs=strike_legs,
+                    earnings_date=strike_legs[0].earnings_date,
+                    actual_move=strike_legs[0].actual_move,
+                ))
+        elif n_strikes == 4:
+            pnl = sum(l.gain_loss for l in legs)
+            strategies.append(Strategy(
+                symbol=symbol, strategy_type='IRON_CONDOR',
+                option_type=option_type or None,
+                expiration=expiration or None, gain_loss=pnl,
+                legs=legs,
+                earnings_date=legs[0].earnings_date,
+                actual_move=legs[0].actual_move,
+            ))
+        else:
+            # SPREAD: pair legs by matching strike quantities
+            by_strike = defaultdict(list)
+            for l in legs:
+                by_strike[l.strike].append(l)
+            low_legs = by_strike[strikes[0]]
+            high_legs = by_strike[strikes[-1]]
+            if len(low_legs) == len(high_legs):
+                for low, high in zip(low_legs, high_legs):
+                    pair = [low, high]
+                    pnl = sum(l.gain_loss for l in pair)
+                    strategies.append(Strategy(
+                        symbol=symbol, strategy_type='SPREAD',
+                        option_type=option_type or None,
+                        expiration=expiration or None, gain_loss=pnl,
+                        legs=pair,
+                        earnings_date=low.earnings_date or high.earnings_date,
+                        actual_move=low.actual_move or high.actual_move,
+                    ))
+            else:
+                # Unequal leg counts — group all together
+                pnl = sum(l.gain_loss for l in legs)
+                strategies.append(Strategy(
+                    symbol=symbol, strategy_type='SPREAD',
+                    option_type=option_type or None,
+                    expiration=expiration or None, gain_loss=pnl,
+                    legs=legs,
+                    earnings_date=legs[0].earnings_date,
+                    actual_move=legs[0].actual_move,
+                ))
+
+    for t in stocks:
+        strategies.append(Strategy(
+            symbol=t.symbol, strategy_type='STOCK',
+            option_type=None, expiration=None,
+            gain_loss=t.gain_loss, legs=[t],
+            earnings_date=t.earnings_date, actual_move=t.actual_move,
+        ))
+
+    return strategies
+
+
+def calculate_strategy_statistics(strategies: List[Strategy]) -> Dict:
+    """Calculate statistics at the strategy level (spreads counted as one trade)."""
+    total = len(strategies)
+    if total == 0:
+        return {}
+
+    winners = [s for s in strategies if s.is_winner]
+    losers = [s for s in strategies if not s.is_winner]
+    options = [s for s in strategies if s.strategy_type != 'STOCK']
+    stocks = [s for s in strategies if s.strategy_type == 'STOCK']
+
+    total_pnl = sum(s.gain_loss for s in strategies)
+    winner_pnl = sum(s.gain_loss for s in winners)
+    loser_pnl = sum(s.gain_loss for s in losers)
+
+    by_ticker: Dict = defaultdict(lambda: {'count': 0, 'pnl': 0.0, 'wins': 0})
+    for s in strategies:
+        by_ticker[s.symbol]['count'] += 1
+        by_ticker[s.symbol]['pnl'] += s.gain_loss
+        if s.is_winner:
+            by_ticker[s.symbol]['wins'] += 1
+
+    by_month: Dict = defaultdict(lambda: {'count': 0, 'pnl': 0.0, 'wins': 0})
+    for s in strategies:
+        cd = s.close_date or ''
+        month = cd[:7] if len(cd) >= 7 else 'UNKNOWN'
+        by_month[month]['count'] += 1
+        by_month[month]['pnl'] += s.gain_loss
+        if s.is_winner:
+            by_month[month]['wins'] += 1
+
+    by_option_type: Dict = defaultdict(lambda: {'count': 0, 'pnl': 0.0, 'wins': 0})
+    for s in options:
+        otype = s.option_type or 'UNKNOWN'
+        by_option_type[otype]['count'] += 1
+        by_option_type[otype]['pnl'] += s.gain_loss
+        if s.is_winner:
+            by_option_type[otype]['wins'] += 1
+
+    by_strategy_type: Dict = defaultdict(lambda: {'count': 0, 'pnl': 0.0, 'wins': 0})
+    for s in strategies:
+        by_strategy_type[s.strategy_type]['count'] += 1
+        by_strategy_type[s.strategy_type]['pnl'] += s.gain_loss
+        if s.is_winner:
+            by_strategy_type[s.strategy_type]['wins'] += 1
+
+    earnings_strategies = [s for s in strategies if s.earnings_date]
+
+    return {
+        'total_trades': total,
+        'winners': len(winners),
+        'losers': len(losers),
+        'win_rate': round(100 * len(winners) / total, 1) if total > 0 else 0,
+        'total_pnl': round(total_pnl, 2),
+        'winner_pnl': round(winner_pnl, 2),
+        'loser_pnl': round(loser_pnl, 2),
+        'avg_win': round(winner_pnl / len(winners), 2) if winners else 0,
+        'avg_loss': round(loser_pnl / len(losers), 2) if losers else 0,
+        'profit_factor': round(abs(winner_pnl / loser_pnl), 2) if loser_pnl else 0,
+        'options_count': len(options),
+        'stocks_count': len(stocks),
+        'by_ticker': {k: {
+            'count': v['count'],
+            'pnl': round(v['pnl'], 2),
+            'win_rate': round(100 * v['wins'] / v['count'], 1) if v['count'] > 0 else 0,
+        } for k, v in sorted(by_ticker.items(), key=lambda x: x[1]['pnl'], reverse=True)},
+        'by_month': {k: {
+            'count': v['count'],
+            'pnl': round(v['pnl'], 2),
+            'win_rate': round(100 * v['wins'] / v['count'], 1) if v['count'] > 0 else 0,
+        } for k, v in sorted(by_month.items())},
+        'by_option_type': {k: dict(v) for k, v in by_option_type.items()},
+        'by_strategy_type': {k: {
+            'count': v['count'],
+            'pnl': round(v['pnl'], 2),
+            'win_rate': round(100 * v['wins'] / v['count'], 1) if v['count'] > 0 else 0,
+        } for k, v in sorted(by_strategy_type.items())},
+        'earnings_correlated': len(earnings_strategies),
+        'wash_sales': {'count': 0, 'total': 0.0},
+    }
+
+
 def calculate_statistics(trades: List[Trade]) -> Dict:
     """Calculate comprehensive trading statistics"""
 
@@ -754,6 +953,11 @@ def print_summary(stats: Dict, skipped_count: int = 0, unable_rows: list = None)
     print(f"   Options:         {stats['options_count']}")
     print(f"   Stocks:          {stats['stocks_count']}")
 
+    if stats.get('by_strategy_type'):
+        print(f"\n   BY STRATEGY TYPE")
+        for stype, data in stats['by_strategy_type'].items():
+            print(f"   {stype:12} {data['count']:4} trades  {data['win_rate']:5.1f}% win  ${data['pnl']:>12,.2f}")
+
     if stats['by_option_type']:
         print(f"\n   BY OPTION TYPE")
         for otype, data in stats['by_option_type'].items():
@@ -883,7 +1087,14 @@ def main():
 
     # Calculate stats
     print("\n[3/4] Calculating statistics...")
-    stats = calculate_statistics(trades)
+    strategies = group_trades_into_strategies(trades)
+    singles = sum(1 for s in strategies if s.strategy_type == 'SINGLE')
+    spreads = sum(1 for s in strategies if s.strategy_type == 'SPREAD')
+    condors = sum(1 for s in strategies if s.strategy_type == 'IRON_CONDOR')
+    print(f"      Grouped {len(trades)} legs → {len(strategies)} strategies"
+          f"  ({singles} single, {spreads} spread"
+          + (f", {condors} condor" if condors else "") + ")")
+    stats = calculate_strategy_statistics(strategies)
 
     # Print summary
     print_summary(stats, len(skipped_rows), unable_rows)
