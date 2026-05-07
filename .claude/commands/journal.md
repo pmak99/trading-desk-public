@@ -38,6 +38,8 @@ Scan `$ARGUMENTS` for:
 - Remaining args that are file paths → collect as `CSV_FILES`
 - If no file paths given → auto-detect (see below)
 
+After collecting `CSV_FILES`, also check: if any filename contains "ira" (case-insensitive), automatically set `ACCOUNT_TYPE=IRA` even if `--ira` was not explicitly passed.
+
 ### Step 2: Detect or Collect CSV Files
 
 **If explicit file paths provided:** use them directly. If multiple, combine them:
