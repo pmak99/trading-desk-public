@@ -24,7 +24,7 @@ import tempfile
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 LOCAL_DB = PROJECT_ROOT / "2.0" / "data" / "ivcrush.db"
-GCS_BUCKET = "trading-desk-data"
+GCS_BUCKET = os.environ.get("GCS_BUCKET", "your-gcs-bucket")
 GCS_BLOB = "ivcrush.db"
 # Google Drive backup path - auto-detect or use environment variable
 def _find_gdrive_backup_dir() -> Path:

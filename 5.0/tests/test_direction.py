@@ -53,7 +53,7 @@ class TestAdjustDirection:
         assert result.rule_applied == "tiebreak_bullish"
 
     def test_rule1_neutral_skew_bearish_sentiment(self):
-        """Neutral skew + bearish sentiment -> neutral (bearish zeroed May 2026: 0/4 accuracy)."""
+        """Neutral skew + bearish sentiment -> neutral (zeroed direction, treated as neutral)."""
         result = adjust_direction("neutral", -0.5, "bearish")
         assert result.adjusted_bias == AdjustedBias.NEUTRAL
         assert result.rule_applied == "both_neutral"
@@ -70,7 +70,7 @@ class TestAdjustDirection:
         result = adjust_direction("neutral", 0.3)
         assert result.adjusted_bias == AdjustedBias.BULLISH
 
-        # Score <= -0.2 -> bearish direction, but bearish is zeroed -> neutral
+        # Score <= -0.2 -> bearish direction, treated as neutral if zeroed
         result = adjust_direction("neutral", -0.3)
         assert result.adjusted_bias == AdjustedBias.NEUTRAL
 
@@ -81,7 +81,7 @@ class TestAdjustDirection:
     # RULE 2: Conflict -> go neutral (hedge)
 
     def test_rule2_bullish_skew_bearish_sentiment(self):
-        """Bullish skew + bearish sentiment -> bullish (bearish zeroed, skew dominates)."""
+        """Bullish skew + bearish sentiment -> bullish (skew dominates)."""
         result = adjust_direction("bullish", -0.5, "bearish")
         assert result.adjusted_bias == AdjustedBias.BULLISH
         assert result.rule_applied == "skew_dominates"
@@ -93,19 +93,19 @@ class TestAdjustDirection:
         assert result.rule_applied == "conflict_hedge"
 
     def test_zeroed_bearish_via_score_does_not_override_skew(self):
-        """Bearish score on bullish skew -> skew dominates (bearish signal zeroed)."""
+        """Bearish score on bullish skew -> skew dominates."""
         result = adjust_direction("bullish", -0.7)
         assert result.adjusted_bias == AdjustedBias.BULLISH
         assert result.rule_applied == "skew_dominates"
 
     def test_zeroed_bearish_weak_via_score_does_not_override_skew(self):
-        """Weak bearish score on bullish skew -> skew dominates (bearish signal zeroed)."""
+        """Weak bearish score on bullish skew -> skew dominates."""
         result = adjust_direction("bullish", -0.3)
         assert result.adjusted_bias == AdjustedBias.BULLISH
         assert result.rule_applied == "skew_dominates"
 
     def test_rule2_strong_bullish_bearish_sentiment(self):
-        """Strong bullish skew + bearish sentiment -> strong_bullish (bearish zeroed, skew dominates)."""
+        """Strong bullish skew + bearish sentiment -> strong_bullish (skew dominates)."""
         result = adjust_direction("strong_bullish", -0.7, "bearish")
         assert result.adjusted_bias == AdjustedBias.STRONG_BULLISH
         assert result.rule_applied == "skew_dominates"
@@ -178,7 +178,7 @@ class TestGetDirection:
 
     def test_uses_3_rule_adjustment(self):
         """With both, uses 3-rule adjustment."""
-        # Bearish is zeroed -> bullish skew + bearish sentiment keeps bullish (rule 3)
+        # Rule 3: bullish skew + bearish sentiment -> bullish (skew dominates)
         assert get_direction("bullish", -0.5, "bearish") == "BULLISH"
 
         # Active conflict still fires -> bearish skew + bullish sentiment -> neutral (rule 2)

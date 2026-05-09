@@ -181,7 +181,7 @@ def test_quick_upload_calls_gcs(tmp_path):
     mock_client.bucket.return_value = mock_bucket
 
     with patch("src.core.database.storage.Client", return_value=mock_client):
-        result = quick_upload(str(db_file), "trading-desk-data", "ivcrush.db")
+        result = quick_upload(str(db_file), "your-gcs-bucket", "ivcrush.db")
 
     assert result is True
     mock_blob.upload_from_filename.assert_called_once_with(
@@ -200,6 +200,6 @@ def test_quick_upload_returns_false_on_error(tmp_path):
     mock_client.bucket.side_effect = Exception("GCS unavailable")
 
     with patch("src.core.database.storage.Client", return_value=mock_client):
-        result = quick_upload(str(db_file), "trading-desk-data", "ivcrush.db")
+        result = quick_upload(str(db_file), "your-gcs-bucket", "ivcrush.db")
 
     assert result is False

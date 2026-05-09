@@ -38,7 +38,7 @@ cd 6.0/
 ./agent.sh analyze NVDA         # Deep dive
 
 # Cloud API (5.0)
-curl -H "X-API-Key: $KEY" https://trading-desk-vquzm76kja-ue.a.run.app/api/whisper
+curl -H "X-API-Key: $KEY" https://your-service.a.run.app/api/whisper
 ```
 
 ## Claude Code Commands
@@ -99,7 +99,7 @@ Primary database shared by all subsystems.
 
 Plus: `analysis_log`, `cache`, `rate_limits`, `schema_migrations`, `backtest_runs`, `backtest_trades`, `iv_log`, `job_status`, `ticker_metadata`
 
-**Locations:** `2.0/data/ivcrush.db` (local) | `gs://trading-desk-data/ivcrush.db` (cloud)
+**Locations:** `2.0/data/ivcrush.db` (local) | `gs://your-gcs-bucket/ivcrush.db` (cloud)
 
 ### sentiment_cache.db (4.0)
 

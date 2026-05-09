@@ -100,7 +100,7 @@ class Settings:
         try:
             from google.cloud import secretmanager
             client = secretmanager.SecretManagerServiceClient()
-            project = os.environ.get('GOOGLE_CLOUD_PROJECT', 'trading-desk-prod')
+            project = os.environ.get('GOOGLE_CLOUD_PROJECT', 'your-gcp-project')
             name = f"projects/{project}/secrets/trading-desk-secrets/versions/latest"
             response = client.access_secret_version(request={"name": name})
             self._secrets = json.loads(response.payload.data.decode("UTF-8"))
@@ -226,7 +226,7 @@ class Settings:
 
     @property
     def gcs_bucket(self) -> str:
-        return os.environ.get('GCS_BUCKET', 'trading-desk-data')
+        return os.environ.get('GCS_BUCKET', 'your-gcs-bucket')
 
     @property
     def grafana_graphite_url(self) -> str:

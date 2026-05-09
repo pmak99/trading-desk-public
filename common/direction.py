@@ -6,14 +6,10 @@ Adjusts 2.0's skew-based directional bias using AI sentiment signals.
 
 Rules:
 1. Neutral skew + sentiment -> sentiment breaks tie
-2. Conflict (bullish skew + active bearish sentiment) -> go neutral (hedge)
-   Note: directions in ZEROED_SENTIMENT_DIRECTIONS are treated as neutral,
-   so they never trigger conflict_hedge or tiebreak (no predictive signal).
+2. Conflict (skew vs opposing active sentiment) -> go neutral (hedge)
 3. Otherwise -> keep skew bias
 
-Position Sizing (contrarian signal based on 2025 backtest data):
-- Strong bullish sentiment correlates with LARGER moves (reduce size)
-- Strong bearish sentiment correlates with SMALLER moves (increase size)
+Position Sizing (contrarian sizing modifier based on sentiment strength).
 """
 
 from dataclasses import dataclass
@@ -59,17 +55,9 @@ def get_size_modifier(sentiment_score: float) -> float:
     """
     Calculate contrarian position sizing modifier based on sentiment.
 
-    Based on 2025 backtest analysis:
-    - Strong bullish sentiment correlates with LARGER moves (avg 5.47%)
-      -> Reduce position size to limit risk
-    - Strong bearish sentiment correlates with SMALLER moves (avg 3.69%)
-      -> Bad news priced in, increase position size
-
-    CAUTION: Based on n=23 samples (as of Feb 2026). The bullish average is
-    driven by 3 outliers (INTC -17%, ORCL -14.5%, MSFT -11.85%). Without
-    outliers, strong bullish avg is only 3.09%. Treat as HYPOTHESIS until
-    n=50+ samples collected. The HIGH_BULLISH_WARNING (>=0.7) for tail risk
-    IS validated (23% of strong bullish had >10% crashes).
+    Contrarian sizing: strong sentiment in one direction may correlate with
+    larger or smaller subsequent moves. Tune SIZE_MODIFIER_BULLISH and
+    SIZE_MODIFIER_BEARISH in constants.py based on your own backtest data.
 
     Args:
         sentiment_score: Sentiment score from -1.0 to +1.0
@@ -202,8 +190,7 @@ def adjust_direction(
         else:
             sent_dir = "neutral"
 
-    # Directions in ZEROED_SENTIMENT_DIRECTIONS have no predictive signal.
-    # Treat them as neutral so they don't trigger conflict_hedge or tiebreak.
+    # Directions in ZEROED_SENTIMENT_DIRECTIONS are treated as neutral.
     eff_sent_dir = "neutral" if sent_dir in ZEROED_SENTIMENT_DIRECTIONS else sent_dir
 
     # RULE 1: Neutral skew -> sentiment breaks tie
@@ -228,7 +215,6 @@ def adjust_direction(
         )
 
     # RULE 2: Conflict -> go neutral (hedge)
-    # Only fires when the opposing sentiment direction has active predictive signal.
     is_bullish_skew = original in ("bullish", "strong_bullish")
     is_bearish_skew = original in ("bearish", "strong_bearish")
 
