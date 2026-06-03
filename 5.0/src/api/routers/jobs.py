@@ -73,6 +73,13 @@ async def dispatch(
     """
     start_time = time.time()
     try:
+        # Kill switch — set SCHEDULED_JOBS_ENABLED=false to silence all digests/alerts
+        if not settings.scheduled_jobs_enabled:
+            log("info", "Scheduled jobs disabled (SCHEDULED_JOBS_ENABLED=false)")
+            duration_ms = (time.time() - start_time) * 1000
+            metrics.request_success("dispatch", duration_ms)
+            return {"status": "disabled", "message": "Scheduled jobs are disabled"}
+
         manager = get_job_manager()
 
         # Force-run specific job if requested (for testing)
@@ -94,6 +101,13 @@ async def dispatch(
             duration_ms = (time.time() - start_time) * 1000
             metrics.request_success("dispatch", duration_ms)
             return {"status": "already_run", "job": job}
+
+        # Atomic claim: prevent duplicate runs from concurrent requests.
+        if not force and not manager.try_claim_job(job):
+            log("info", "Job already claimed by concurrent request, skipping", job=job)
+            duration_ms = (time.time() - start_time) * 1000
+            metrics.request_success("dispatch", duration_ms)
+            return {"status": "already_running", "job": job}
 
         # Check dependencies
         can_run, reason = manager.check_dependencies(job)

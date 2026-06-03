@@ -9,9 +9,12 @@ VRP thresholds imported from common/constants.py.
 import os
 import sys
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Ensure common/ is importable
 _root = str(Path(__file__).resolve().parent.parent.parent.parent)
@@ -93,7 +96,7 @@ class Settings:
                     log("error", "Invalid SECRETS JSON, falling back to Secret Manager",
                         error=str(e))
                 except ImportError:
-                    print(f"WARNING: Invalid SECRETS JSON: {e}")
+                    logger.warning(f"Invalid SECRETS JSON: {e}")
                 # Fall through to Secret Manager
 
         # Priority 3: Fallback to Secret Manager (production)
@@ -106,7 +109,7 @@ class Settings:
             self._secrets = json.loads(response.payload.data.decode("UTF-8"))
         except Exception as e:
             # Log the exception type for debugging (don't log full message which may contain secrets)
-            print(f"WARNING: Secret Manager unavailable ({type(e).__name__}), using empty secrets")
+            logger.warning(f"Secret Manager unavailable ({type(e).__name__}), using empty secrets")
             self._secrets = {}
 
     @property
@@ -264,6 +267,12 @@ class Settings:
             return env_val
         self._load_secrets()
         return self._secrets.get('GRAFANA_DASHBOARD_URL', '') if self._secrets else ''
+
+    @property
+    def scheduled_jobs_enabled(self) -> bool:
+        """Whether Cloud Scheduler jobs run. Set SCHEDULED_JOBS_ENABLED=false to silence
+        all daily digests and alerts without pausing the Cloud Run service itself."""
+        return os.environ.get('SCHEDULED_JOBS_ENABLED', 'true').lower() == 'true'
 
     @property
     def require_weekly_options(self) -> bool:

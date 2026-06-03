@@ -7,6 +7,8 @@ Sentiment modifier values and routing configuration are tuned via backtesting
 and intentionally left as neutral defaults here. Configure for your own system.
 """
 
+import os
+
 # =============================================================================
 # VRP Thresholds - BALANCED mode (default across all subsystems)
 # =============================================================================
@@ -87,3 +89,43 @@ STRONG_BEARISH_THRESHOLD = -0.6
 SIZE_MODIFIER_BULLISH = 1.0   # Set below 1.0 to reduce size on strong bullish signals
 SIZE_MODIFIER_BEARISH = 1.0   # Set above 1.0 to increase size on strong bearish signals
 HIGH_BULLISH_WARNING_THRESHOLD = 0.7
+
+
+# =============================================================================
+# ORATS Feature Flag
+# =============================================================================
+
+# Set ORATS_ENABLED=false in .env to pause the ORATS subscription.
+# All ORATS API calls are skipped; branched logic is preserved for re-enabling.
+ORATS_ENABLED: bool = os.getenv("ORATS_ENABLED", "true").lower() == "true"
+
+
+# =============================================================================
+# ORATS Signal Fusion
+# =============================================================================
+
+# rSlp30 distribution (measured on position_limits tickers)
+# Z-score normalization required: raw thresholds at 0 would classify ~60% as STRONG_BULLISH
+RSLP30_MEAN = 1.036
+RSLP30_STD  = 1.294
+
+# Sorted breakpoints: (upper_bound, numeric_level) → first threshold exceeded wins
+# Produces balanced distribution: 6.6% | 15.6% | 17.7% | 21.3% | 18.0% | 14.9% | 5.9%
+RSLP30_THRESHOLDS = [
+    (RSLP30_MEAN - 1.50 * RSLP30_STD, -3),  # < -0.905 → STRONG_BEARISH
+    (RSLP30_MEAN - 0.75 * RSLP30_STD, -2),  # < +0.065 → BEARISH
+    (RSLP30_MEAN - 0.25 * RSLP30_STD, -1),  # < +0.712 → WEAK_BEARISH
+    (RSLP30_MEAN + 0.25 * RSLP30_STD,  0),  # < +1.359 → NEUTRAL
+    (RSLP30_MEAN + 0.75 * RSLP30_STD, +1),  # < +2.006 → WEAK_BULLISH
+    (RSLP30_MEAN + 1.50 * RSLP30_STD, +2),  # < +2.976 → BULLISH
+    (float('inf'),                     +3),  # else      → STRONG_BULLISH
+]
+
+# At median Tradier R²=0.226, ORATS drives 69% of fused signal (0.5 / (0.226 + 0.5))
+ORATS_SKEW_CONFIDENCE = 0.5
+
+# iee/fcst ratio at which Rule B fires (reduce position 50%)
+IEE_DIVERGENCE_RATIO  = 1.5
+
+# Validated: 58.7% win +$218k below 2.0x vs 48.3% win -$231k above
+FCST_ERN_IV_THRESHOLD = 2.0

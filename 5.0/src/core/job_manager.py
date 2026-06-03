@@ -157,6 +157,27 @@ class JobManager:
         """Return True if job already completed successfully today."""
         return self._get_status(today_et(), job_name) == "success"
 
+    def try_claim_job(self, job_name: str) -> bool:
+        """
+        Atomically claim a job slot to prevent concurrent duplicate runs.
+
+        Uses INSERT OR IGNORE so only one concurrent request can claim the slot.
+        Returns True if this caller claimed the slot, False if already claimed.
+        """
+        today = today_et()
+        timestamp = now_et().isoformat()
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                "INSERT OR IGNORE INTO job_status (date, job_name, status, updated_at) VALUES (?, ?, 'running', ?)",
+                (today, job_name, timestamp),
+            )
+            conn.commit()
+            return conn.total_changes > 0
+        finally:
+            conn.close()
+
     def check_dependencies(self, job_name: str) -> tuple[bool, str]:
         """
         Check if all dependencies succeeded today.

@@ -73,4 +73,4 @@ def log(level: str, message: str, **context: Any):
         **safe_context
     }
 
-    print(json.dumps(entry))
+    print(json.dumps(entry))  # intentional user output — this IS the structured log emitter

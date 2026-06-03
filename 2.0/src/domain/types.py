@@ -5,6 +5,8 @@ All types are immutable (frozen dataclasses) to ensure thread safety
 and prevent accidental mutations.
 """
 
+import sys as _sys
+from pathlib import Path as _Path
 from dataclasses import dataclass
 from decimal import Decimal, getcontext
 from datetime import date, datetime, timezone
@@ -18,6 +20,15 @@ from src.domain.enums import (
     SettlementType,
     StrategyType,
     DirectionalBias
+)
+
+_root = str(_Path(__file__).resolve().parent.parent.parent.parent)
+if _root not in _sys.path:
+    _sys.path.insert(0, _root)
+
+from common.constants import (  # noqa: E402
+    FCST_ERN_IV_THRESHOLD,
+    IEE_DIVERGENCE_RATIO,
 )
 
 # Set Decimal precision for financial calculations
@@ -598,3 +609,56 @@ def to_market_time(dt: datetime) -> datetime:
 def utc_now() -> datetime:
     """Get current time in UTC."""
     return datetime.now(tz=timezone.utc)
+
+
+# ============================================================================
+# ORATS Signal Fusion Support Types
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class PositionLimitsSnapshot:
+    """Raw DB row from position_limits for one ticker. Single read feeds skew + sizing."""
+    fcst_ern_iv_effect: Optional[float] = None
+    iee_earn_effect: Optional[float]    = None
+    r_slp_30: Optional[float]          = None
+
+
+@dataclass(frozen=True)
+class SizingContext:
+    """Unified contract cap logic."""
+    trr_level: Optional[str]            = None  # 'LOW' | 'NORMAL' | 'HIGH'
+    fcst_ern_iv_effect: Optional[float] = None
+    iee_earn_effect: Optional[float]    = None
+
+    @property
+    def trr_cap(self) -> int:
+        return 50 if self.trr_level == 'HIGH' else 100
+
+    @property
+    def iv_effect_reduction(self) -> bool:
+        if self.fcst_ern_iv_effect is not None and self.fcst_ern_iv_effect >= FCST_ERN_IV_THRESHOLD:
+            return True
+        if self.fcst_ern_iv_effect is not None and self.fcst_ern_iv_effect > 0 and self.iee_earn_effect is not None:
+            if self.iee_earn_effect / self.fcst_ern_iv_effect >= IEE_DIVERGENCE_RATIO:
+                return True
+        return False
+
+    @property
+    def firing_signal(self) -> Optional[str]:
+        trr_fired = self.trr_level == 'HIGH'
+        iv_signal = self._iv_signal_label()
+        if trr_fired and iv_signal:
+            return f'TRR_HIGH + {iv_signal}'
+        if trr_fired:
+            return 'TRR_HIGH'
+        return iv_signal
+
+    def _iv_signal_label(self) -> Optional[str]:
+        if self.fcst_ern_iv_effect is not None and self.fcst_ern_iv_effect >= FCST_ERN_IV_THRESHOLD:
+            return f'FCST_ERN_IV={self.fcst_ern_iv_effect:.1f}x'
+        if self.fcst_ern_iv_effect is not None and self.fcst_ern_iv_effect > 0 and self.iee_earn_effect is not None:
+            ratio = self.iee_earn_effect / self.fcst_ern_iv_effect
+            if ratio >= IEE_DIVERGENCE_RATIO:
+                return f'IEE_DIVERGENCE={ratio:.2f}x'
+        return None
