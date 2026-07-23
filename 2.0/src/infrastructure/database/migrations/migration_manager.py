@@ -217,6 +217,151 @@ class MigrationManager:
             sql_down=None
         ))
 
+        # Migration 009: Add pre_earnings_straddle_pct to historical_moves.
+        # Stores the ATM straddle price (as % of stock price) at the time of
+        # analysis before earnings. Backfilled from ORATS ernStraPct1-12;
+        # populated going forward via analysis_log writes.
+        self.migrations.append(Migration(
+            version=9,
+            name="add_pre_earnings_straddle_pct",
+            sql_up="""
+                -- Handled in _apply_migration_009
+            """,
+            sql_down=None
+        ))
+
+        # Migration 010: Add ORATS-derived analytics columns.
+        # historical_moves.ern_iv_effect: IV multiplier earnings added (ernEffct1-12).
+        # position_limits: iv_rank_1y, iv_pct_1y (IV rank/percentile), iv30d, hv20d,
+        #   abs_avg_ern_mv (ORATS average absolute earnings move), orats_implied_ern_mv.
+        # Backfilled via backfill_orats_ivrank.py + backfill_orats_cores_extra.py.
+        self.migrations.append(Migration(
+            version=10,
+            name="add_orats_analytics_columns",
+            sql_up="""
+                -- Handled in _apply_migration_010
+            """,
+            sql_down=None
+        ))
+
+        # Migration 011: Add fcst_ern_iv_effect to position_limits.
+        # ORATS fcstErnEffct = model-based forecast of ern_iv_effect for the NEXT earnings quarter.
+        # Populated by scripts/refresh_orats_snapshots.py (run weekly or before scans).
+        self.migrations.append(Migration(
+            version=11,
+            name="add_fcst_ern_iv_effect",
+            sql_up="""
+                -- Handled in _apply_migration_011
+            """,
+            sql_down=None
+        ))
+
+        # Migration 012: Add ieeEarnEffect and rSlp30 columns to position_limits.
+        # iee_earn_effect: ORATS live market implied earnings IV multiplier (capped at 4.0).
+        # r_slp_30: ORATS 30-day put/call skew slope (used for skew signal fusion).
+        # Both populated by fetch_orats_ticker.py (per /analyze) and
+        # refresh_orats_snapshots.py (weekly batch via /datav2/summaries).
+        self.migrations.append(Migration(
+            version=12,
+            name="add_iee_r_slp_columns",
+            sql_up="""
+                -- Handled in _apply_migration_012
+            """,
+            sql_down=None
+        ))
+
+        # Migration 013: Add compound risk tracking to bias_predictions.
+        # compound_risk_active: 1 when ≥2 of [TRR HIGH, sizing alarm, BEARISH/STRONG_BEARISH fused skew] fired.
+        # r_slp_30: ORATS value at prediction time (Tradier-only directional_bias stored separately).
+        # fused_bias: the fused directional signal (ORATS-weighted) used in actual analysis.
+        # trr_level: tail risk classification at prediction time.
+        # Enables measuring fused skew accuracy specifically in compound risk zones.
+        self.migrations.append(Migration(
+            version=13,
+            name="add_compound_risk_tracking_to_bias_predictions",
+            sql_up="""
+                -- Handled in _apply_migration_013
+            """,
+            sql_down=None
+        ))
+
+        # Migration 014: Add sizing_alarm to bias_predictions.
+        # Stores whether the ORATS sizing alarm fired (Rule A: fcst≥2.0 OR Rule B: iee/fcst≥1.5).
+        # Enables distinguishing compound risk sub-types:
+        #   FULL (bearish skew among signals): 44% historical crush rate → SKIP
+        #   PARTIAL (TRR+SIZING, no bearish skew): 67% historical crush rate → trade at reduced size
+        # Without this column, the only way to infer sizing_alarm is
+        # compound_risk_active=1 AND fused_bias NOT IN ('bearish','strong_bearish').
+        self.migrations.append(Migration(
+            version=14,
+            name="add_sizing_alarm_to_bias_predictions",
+            sql_up="""
+                -- Handled in _apply_migration_014
+            """,
+            sql_down=None
+        ))
+
+        # Migration 015 (migrate_sentiment_tables_from_4.0) was applied
+        # out-of-band in May 2026 and recorded directly in schema_migrations.
+
+        # Migration 016: Add gap-inclusive VRP columns to analysis_log.
+        # vrp_close_ratio = implied move / mean |close_move_pct| over the same
+        # historical window the production (intraday-baseline) VRP uses.
+        # intraday_move_pct excludes the overnight gap, so intraday VRP can be
+        # inflated for gap-dominant tickers (ORCL Jun 2026). Logged on every
+        # /analyze and /scan as a live A/B before any convention migration.
+        self.migrations.append(Migration(
+            version=16,
+            name="add_vrp_close_ratio_to_analysis_log",
+            sql_up="""
+                -- Handled in _apply_migration_016
+            """,
+            sql_down=None
+        ))
+
+        # Migration 017: Add IV term-structure slope to analysis_log.
+        # term_slope_ratio = front-expiry ATM IV / ~30d-out ATM IV at analysis
+        # time (>1 = backwardation, the event-vol multiple). Measures how much
+        # of the front IV is event-specific and will crush. Logged on every
+        # /analyze for forward validation before it becomes a gate.
+        self.migrations.append(Migration(
+            version=17,
+            name="add_term_slope_ratio_to_analysis_log",
+            sql_up="""
+                -- Handled in _apply_migration_017
+            """,
+            sql_down=None
+        ))
+
+        # Migration 018: TACO index-options skill tables.
+        # taco_log = every /taco run (forward validation, like analysis_log).
+        # taco_positions = open/closed TACO positions with FROZEN entry
+        # reference levels (spec 2026-07-14: refs never update while open).
+        self.migrations.append(Migration(
+            version=18,
+            name="add_taco_tables",
+            sql_up="""
+                -- Handled in _apply_migration_018
+            """,
+            sql_down="""
+                DROP TABLE IF EXISTS taco_log;
+                DROP TABLE IF EXISTS taco_positions;
+            """
+        ))
+
+        # Migration 019: cross-asset confirmation columns on taco_log
+        # (spec 2026-07-22). count/available = confirmation count over the
+        # assets that had data; detail = per-asset JSON (move, threshold,
+        # confirmed, source) for forward validation.
+        self.migrations.append(Migration(
+            version=19,
+            name="add_cross_asset_to_taco_log",
+            sql_up="""
+                -- Handled in _apply_migration_019
+            """,
+            sql_down=None
+        ))
+
         # Sort migrations by version (safety check)
         self.migrations.sort(key=lambda m: m.version)
 
@@ -346,6 +491,26 @@ class MigrationManager:
                     self._apply_migration_007(cursor)
                 elif migration.version == 8:
                     self._apply_migration_008(cursor)
+                elif migration.version == 9:
+                    self._apply_migration_009(cursor)
+                elif migration.version == 10:
+                    self._apply_migration_010(cursor)
+                elif migration.version == 11:
+                    self._apply_migration_011(cursor)
+                elif migration.version == 12:
+                    self._apply_migration_012(cursor)
+                elif migration.version == 13:
+                    self._apply_migration_013(cursor)
+                elif migration.version == 14:
+                    self._apply_migration_014(cursor)
+                elif migration.version == 16:
+                    self._apply_migration_016(cursor)
+                elif migration.version == 17:
+                    self._apply_migration_017(cursor)
+                elif migration.version == 18:
+                    self._apply_migration_018(cursor)
+                elif migration.version == 19:
+                    self._apply_migration_019(cursor)
                 else:
                     # Execute statements individually (safer than executescript)
                     for statement in migration.sql_up.split(';'):
@@ -588,6 +753,9 @@ class MigrationManager:
         for table in _ALLOWED_TABLES:
             cursor.execute(f"PRAGMA table_info([{table}])")
             columns = [row[1] for row in cursor.fetchall()]
+            if not columns:
+                logger.debug(f"{table} does not exist, skipping account_type migration")
+                continue
             if 'account_type' not in columns:
                 cursor.execute(
                     f"ALTER TABLE [{table}] ADD COLUMN account_type TEXT NOT NULL DEFAULT 'TAXABLE'"
@@ -604,9 +772,13 @@ class MigrationManager:
         Without account_type in the key, identical option positions in IRA and
         TAXABLE accounts collide on INSERT OR IGNORE and one row is silently lost.
         """
-        # Idempotency: check if account_type is already part of the UNIQUE constraint
+        # Idempotency / guard: check if trade_journal exists and whether account_type
+        # is already part of the UNIQUE constraint.
         cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='trade_journal'")
         row = cursor.fetchone()
+        if not row:
+            logger.debug("trade_journal does not exist, skipping migration 008")
+            return
         if row:
             ddl = row[0] or ''
             unique_clause = ddl.split('UNIQUE')[-1] if 'UNIQUE' in ddl else ''
@@ -666,6 +838,218 @@ class MigrationManager:
 
         cursor.execute("ANALYZE")
         logger.info("Recreated trade_journal with account_type in UNIQUE constraint")
+
+    def _apply_migration_009(self, cursor: sqlite3.Cursor):
+        """
+        Apply migration 009: Add pre_earnings_straddle_pct to historical_moves.
+
+        Nullable REAL column — NULL for rows created before this migration.
+        Backfilled from ORATS ernStraPct1-12 via scripts/backfill_orats_straddle.py;
+        populated going forward from analysis_log implied_move_pct writes.
+        """
+        cursor.execute("PRAGMA table_info([historical_moves])")
+        columns = [row[1] for row in cursor.fetchall()]
+        if not columns:
+            logger.debug("historical_moves does not exist yet, skipping migration 009")
+            return
+        if 'pre_earnings_straddle_pct' not in columns:
+            cursor.execute(
+                "ALTER TABLE [historical_moves] ADD COLUMN pre_earnings_straddle_pct REAL"
+            )
+            logger.info("Added pre_earnings_straddle_pct column to historical_moves")
+        else:
+            logger.debug("historical_moves already has pre_earnings_straddle_pct column")
+
+    def _apply_migration_010(self, cursor: sqlite3.Cursor):
+        """
+        Apply migration 010: Add ORATS analytics columns.
+
+        historical_moves: ern_iv_effect (IV multiplier from earnings effect, ernEffct1-12).
+        position_limits: iv_rank_1y, iv_pct_1y, iv30d, hv20d, abs_avg_ern_mv,
+                         orats_implied_ern_mv (current snapshot + aggregate fields).
+        All nullable — backfilled via backfill_orats_ivrank.py and
+        backfill_orats_cores_extra.py.
+        """
+        cursor.execute("PRAGMA table_info([historical_moves])")
+        hm_cols = [row[1] for row in cursor.fetchall()]
+        if not hm_cols:
+            logger.debug("historical_moves does not exist yet, skipping ern_iv_effect column")
+        elif 'ern_iv_effect' not in hm_cols:
+            cursor.execute(
+                "ALTER TABLE [historical_moves] ADD COLUMN ern_iv_effect REAL"
+            )
+            logger.info("Added ern_iv_effect column to historical_moves")
+
+        cursor.execute("PRAGMA table_info([position_limits])")
+        pl_cols = [row[1] for row in cursor.fetchall()]
+        if not pl_cols:
+            logger.debug("position_limits does not exist yet, skipping migration 010 (position_limits)")
+            return
+        new_pl_cols = {
+            'iv_rank_1y': 'REAL',
+            'iv_pct_1y': 'REAL',
+            'iv30d': 'REAL',
+            'hv20d': 'REAL',
+            'abs_avg_ern_mv': 'REAL',
+            'orats_implied_ern_mv': 'REAL',
+        }
+        for col, col_type in new_pl_cols.items():
+            if col not in pl_cols:
+                cursor.execute(
+                    f"ALTER TABLE [position_limits] ADD COLUMN {col} {col_type}"
+                )
+                logger.info(f"Added {col} column to position_limits")
+
+    def _apply_migration_011(self, cursor: sqlite3.Cursor):
+        """
+        Apply migration 011: Add fcst_ern_iv_effect to position_limits.
+
+        ORATS fcstErnEffct = model-based forecast of ern_iv_effect for the NEXT quarter.
+        No offline substitute — requires live ORATS /datav2/cores call.
+        Populated by scripts/refresh_orats_snapshots.py.
+        """
+        cursor.execute("PRAGMA table_info([position_limits])")
+        pl_cols = [row[1] for row in cursor.fetchall()]
+        if not pl_cols:
+            logger.debug("position_limits does not exist yet, skipping migration 011")
+            return
+        if 'fcst_ern_iv_effect' not in pl_cols:
+            cursor.execute(
+                "ALTER TABLE [position_limits] ADD COLUMN fcst_ern_iv_effect REAL"
+            )
+            logger.info("Added fcst_ern_iv_effect column to position_limits")
+
+    def _apply_migration_012(self, cursor: sqlite3.Cursor):
+        """Apply migration 012: Add iee_earn_effect and r_slp_30 to position_limits."""
+        cursor.execute("PRAGMA table_info([position_limits])")
+        pl_cols = [row[1] for row in cursor.fetchall()]
+        if not pl_cols:
+            return
+        for col, sql in [
+            ('iee_earn_effect', 'ALTER TABLE [position_limits] ADD COLUMN iee_earn_effect REAL'),
+            ('r_slp_30',        'ALTER TABLE [position_limits] ADD COLUMN r_slp_30 REAL'),
+        ]:
+            if col not in pl_cols:
+                cursor.execute(sql)
+                logger.info(f"Added {col} column to position_limits")
+
+    def _apply_migration_013(self, cursor: sqlite3.Cursor):
+        """Apply migration 013: Add compound risk tracking to bias_predictions."""
+        cursor.execute("PRAGMA table_info([bias_predictions])")
+        bp_cols = [row[1] for row in cursor.fetchall()]
+        if not bp_cols:
+            return
+        for col, sql in [
+            ('compound_risk_active', 'ALTER TABLE [bias_predictions] ADD COLUMN compound_risk_active INTEGER'),
+            ('r_slp_30',            'ALTER TABLE [bias_predictions] ADD COLUMN r_slp_30 REAL'),
+            ('fused_bias',          'ALTER TABLE [bias_predictions] ADD COLUMN fused_bias TEXT'),
+            ('trr_level',           'ALTER TABLE [bias_predictions] ADD COLUMN trr_level TEXT'),
+        ]:
+            if col not in bp_cols:
+                cursor.execute(sql)
+                logger.info(f"Added {col} column to bias_predictions")
+
+    def _apply_migration_014(self, cursor: sqlite3.Cursor):
+        """Apply migration 014: Add sizing_alarm to bias_predictions.
+
+        Stores whether the ORATS sizing alarm fired (Rule A: fcst>=2.0 OR Rule B: iee/fcst>=1.5).
+        Enables clean separation of compound risk sub-types without re-deriving from position_limits:
+          FULL  (bearish skew among signals): 44% historical crush → SKIP
+          PARTIAL (TRR+SIZING, no bearish skew): 67% historical crush → trade at reduced size
+        """
+        cursor.execute("PRAGMA table_info([bias_predictions])")
+        bp_cols = [row[1] for row in cursor.fetchall()]
+        if not bp_cols:
+            return
+        if 'sizing_alarm' not in bp_cols:
+            cursor.execute('ALTER TABLE [bias_predictions] ADD COLUMN sizing_alarm INTEGER')
+            logger.info("Added sizing_alarm column to bias_predictions")
+
+    def _apply_migration_016(self, cursor: sqlite3.Cursor):
+        """Apply migration 016: Add gap-inclusive VRP columns to analysis_log."""
+        cursor.execute("PRAGMA table_info([analysis_log])")
+        al_cols = [row[1] for row in cursor.fetchall()]
+        if not al_cols:
+            return
+        for col, sql in [
+            ('historical_close_mean_pct', 'ALTER TABLE [analysis_log] ADD COLUMN historical_close_mean_pct REAL'),
+            ('vrp_close_ratio',           'ALTER TABLE [analysis_log] ADD COLUMN vrp_close_ratio REAL'),
+        ]:
+            if col not in al_cols:
+                cursor.execute(sql)
+                logger.info(f"Added {col} column to analysis_log")
+
+    def _apply_migration_017(self, cursor: sqlite3.Cursor):
+        """Apply migration 017: Add IV term-structure slope to analysis_log."""
+        cursor.execute("PRAGMA table_info([analysis_log])")
+        al_cols = [row[1] for row in cursor.fetchall()]
+        if not al_cols:
+            return
+        if 'term_slope_ratio' not in al_cols:
+            cursor.execute('ALTER TABLE [analysis_log] ADD COLUMN term_slope_ratio REAL')
+            logger.info("Added term_slope_ratio column to analysis_log")
+
+    def _apply_migration_018(self, cursor: sqlite3.Cursor):
+        """Apply migration 018: TACO skill tables (taco_log, taco_positions)."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS taco_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                direction TEXT,
+                spot REAL,
+                drawdown_pct REAL,
+                runup_z REAL,
+                vix REAL,
+                vix_spike REAL,
+                vix_term_ratio REAL,
+                event_date TEXT,
+                event_type TEXT,
+                event_rationale TEXT,
+                score REAL,
+                tier TEXT,
+                recommendation TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS taco_positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                direction TEXT NOT NULL,        -- 'CALL' | 'PUT'
+                symbol TEXT NOT NULL,           -- 'SPX' | 'SPY'
+                contracts REAL NOT NULL,
+                strike REAL NOT NULL,
+                expiration TEXT NOT NULL,
+                premium_paid REAL NOT NULL,     -- total dollars
+                entry_date TEXT NOT NULL,
+                event_date TEXT NOT NULL,
+                pre_event_high REAL,            -- frozen at entry
+                panic_low REAL,                 -- calls, frozen
+                euphoria_high REAL,             -- puts, frozen
+                rip_base REAL,                  -- puts: 20d mean close at event_date
+                pre_event_vix REAL,             -- frozen
+                status TEXT NOT NULL DEFAULT 'OPEN',  -- 'OPEN' | 'CLOSED'
+                exit_date TEXT,
+                proceeds REAL,
+                outcome_pnl REAL,
+                rule_compliant INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            )
+        """)
+        logger.info("Created taco_log and taco_positions tables")
+
+    def _apply_migration_019(self, cursor: sqlite3.Cursor):
+        """Apply migration 019: cross-asset confirmation columns on taco_log."""
+        cursor.execute("PRAGMA table_info([taco_log])")
+        cols = [row[1] for row in cursor.fetchall()]
+        if not cols:
+            return
+        for col, typ in (("cross_asset_count", "INTEGER"),
+                         ("cross_asset_available", "INTEGER"),
+                         ("cross_asset_detail", "TEXT")):
+            if col not in cols:
+                cursor.execute(
+                    f"ALTER TABLE [taco_log] ADD COLUMN {col} {typ}")
+                logger.info(f"Added {col} column to taco_log")
 
     def rollback(self, target_version: int) -> int:
         """

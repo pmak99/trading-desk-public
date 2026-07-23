@@ -67,7 +67,6 @@ class Settings:
         # Priority 1: Check for individual env vars (local development)
         individual_keys = {
             'TRADIER_API_KEY': os.environ.get('TRADIER_API_KEY'),
-            'ALPHA_VANTAGE_KEY': os.environ.get('ALPHA_VANTAGE_KEY'),
             'PERPLEXITY_API_KEY': os.environ.get('PERPLEXITY_API_KEY'),
             'TELEGRAM_BOT_TOKEN': os.environ.get('TELEGRAM_BOT_TOKEN'),
             'TELEGRAM_CHAT_ID': os.environ.get('TELEGRAM_CHAT_ID'),
@@ -103,7 +102,7 @@ class Settings:
         try:
             from google.cloud import secretmanager
             client = secretmanager.SecretManagerServiceClient()
-            project = os.environ.get('GOOGLE_CLOUD_PROJECT', 'your-gcp-project')
+            project = os.environ.get('GOOGLE_CLOUD_PROJECT', 'trading-desk-prod')
             name = f"projects/{project}/secrets/trading-desk-secrets/versions/latest"
             response = client.access_secret_version(request={"name": name})
             self._secrets = json.loads(response.payload.data.decode("UTF-8"))
@@ -121,17 +120,6 @@ class Settings:
         if not key or not key.strip():
             import logging
             logging.getLogger(__name__).warning("TRADIER_API_KEY not configured or empty")
-            return ''
-        return key.strip()
-
-    @property
-    def alpha_vantage_key(self) -> str:
-        """Alpha Vantage API key. Empty string is treated as unconfigured."""
-        self._load_secrets()
-        key = self._secrets.get('ALPHA_VANTAGE_KEY', '')
-        if not key or not key.strip():
-            import logging
-            logging.getLogger(__name__).warning("ALPHA_VANTAGE_KEY not configured or empty")
             return ''
         return key.strip()
 
@@ -222,6 +210,12 @@ class Settings:
             return self.ACCOUNT_SIZE_DEFAULT
 
     @property
+    def scheduled_jobs_enabled(self) -> bool:
+        """Whether Cloud Scheduler jobs run. Set SCHEDULED_JOBS_ENABLED=false to silence
+        all daily digests and alerts without pausing the Cloud Run service itself."""
+        return os.environ.get('SCHEDULED_JOBS_ENABLED', 'true').lower() == 'true'
+
+    @property
     def is_production(self) -> bool:
         """Check if running in production environment."""
         env = os.environ.get('ENV', os.environ.get('ENVIRONMENT', 'development'))
@@ -267,12 +261,6 @@ class Settings:
             return env_val
         self._load_secrets()
         return self._secrets.get('GRAFANA_DASHBOARD_URL', '') if self._secrets else ''
-
-    @property
-    def scheduled_jobs_enabled(self) -> bool:
-        """Whether Cloud Scheduler jobs run. Set SCHEDULED_JOBS_ENABLED=false to silence
-        all daily digests and alerts without pausing the Cloud Run service itself."""
-        return os.environ.get('SCHEDULED_JOBS_ENABLED', 'true').lower() == 'true'
 
     @property
     def require_weekly_options(self) -> bool:
@@ -349,8 +337,8 @@ class Settings:
         # Required API keys
         if not self.tradier_api_key:
             errors.append("TRADIER_API_KEY is required but not configured")
-        if not self.alpha_vantage_key:
-            errors.append("ALPHA_VANTAGE_KEY is required but not configured")
+        if not self.finnhub_api_key:
+            errors.append("FINNHUB_API_KEY is required but not configured")
 
         # Required for authentication
         if not self.api_key:

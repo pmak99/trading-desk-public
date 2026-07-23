@@ -28,6 +28,7 @@ class TickerScore:
     # Component scores (0-100 scale)
     vrp_score: float
     consistency_score: float
+    iv_crush_rate_score: float
     skew_score: float
     liquidity_score: float
 
@@ -268,12 +269,52 @@ class TickerScorer:
         # Scale to 0-100 (components sum to 0-25, scale by 4)
         return sum(scores) * 4.0
 
+    def calculate_iv_crush_rate_score(
+        self,
+        iv_crush_rate: Optional[float],
+    ) -> float:
+        """
+        Calculate IV crush rate score (0-100).
+
+        IV crush rate = fraction of historical earnings where |gap_move_pct|
+        stayed within the historical mean (i.e., IV crush worked).
+        Higher rate = ticker reliably IV-crushes = better candidate.
+
+        Args:
+            iv_crush_rate: Fraction in [0, 1]; None if insufficient history
+
+        Returns:
+            Score from 0-100
+        """
+        if iv_crush_rate is None:
+            return 50.0  # Neutral — no data to penalize or reward
+
+        # Excellent: >= 70% crush rate
+        if iv_crush_rate >= 0.70:
+            return 100.0
+
+        # Good: >= 55%
+        if iv_crush_rate >= 0.55:
+            range_size = 0.70 - 0.55
+            above = iv_crush_rate - 0.55
+            return 75.0 + (25.0 * above / range_size)
+
+        # Marginal: >= 40%
+        if iv_crush_rate >= 0.40:
+            range_size = 0.55 - 0.40
+            above = iv_crush_rate - 0.40
+            return 50.0 + (25.0 * above / range_size)
+
+        # Below 40%: IV crush rarely works — graduated penalty
+        return max(0.0, 50.0 * (iv_crush_rate / 0.40))
+
     def score_ticker(
         self,
         ticker: str,
         earnings_date: date,
         vrp_ratio: Optional[float] = None,
         consistency: Optional[float] = None,
+        iv_crush_rate: Optional[float] = None,
         skew: Optional[float] = None,
         avg_historical_move: Optional[float] = None,
         open_interest: Optional[int] = None,
@@ -288,6 +329,7 @@ class TickerScorer:
             earnings_date: Date of earnings event
             vrp_ratio: VRP ratio (implied / historical)
             consistency: Consistency score (0-1)
+            iv_crush_rate: Fraction of historical quarters where |gap| <= mean (0-1)
             skew: Skew measure
             avg_historical_move: Average historical move (for reference)
             open_interest: Options open interest
@@ -300,6 +342,7 @@ class TickerScorer:
         # Calculate component scores
         vrp_score = self.calculate_vrp_score(vrp_ratio)
         consistency_score = self.calculate_consistency_score(consistency)
+        iv_crush_rate_score = self.calculate_iv_crush_rate_score(iv_crush_rate)
         skew_score = self.calculate_skew_score(skew)
         liquidity_score = self.calculate_liquidity_score(
             open_interest, bid_ask_spread_pct, volume
@@ -309,6 +352,7 @@ class TickerScorer:
         composite_score = (
             vrp_score * self.weights.vrp_weight
             + consistency_score * self.weights.consistency_weight
+            + iv_crush_rate_score * self.weights.iv_crush_rate_weight
             + skew_score * self.weights.skew_weight
             + liquidity_score * self.weights.liquidity_weight
         )
@@ -318,6 +362,7 @@ class TickerScorer:
             earnings_date=earnings_date,
             vrp_score=vrp_score,
             consistency_score=consistency_score,
+            iv_crush_rate_score=iv_crush_rate_score,
             skew_score=skew_score,
             liquidity_score=liquidity_score,
             composite_score=composite_score,

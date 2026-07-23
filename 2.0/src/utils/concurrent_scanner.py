@@ -131,6 +131,7 @@ class ConcurrentScanner:
         expiration_date: date,
         analyze_func: Callable,
         filter_func: Optional[Callable] = None,
+        earnings_timing: EarningsTiming = EarningsTiming.UNKNOWN,
     ) -> ScanResult:
         """
         Scan a single ticker (thread-safe).
@@ -141,6 +142,7 @@ class ConcurrentScanner:
             expiration_date: Options expiration date
             analyze_func: Function to analyze ticker (receives container, ticker, dates)
             filter_func: Optional filter function (returns (should_filter, reason))
+            earnings_timing: BMO/AMC timing for accurate analysis_log recording
 
         Returns:
             ScanResult with analysis data or error
@@ -167,7 +169,8 @@ class ConcurrentScanner:
                 self.container,
                 ticker,
                 earnings_date,
-                expiration_date
+                expiration_date,
+                earnings_timing=earnings_timing,
             )
 
             if result:
@@ -247,6 +250,10 @@ class ConcurrentScanner:
                 expiration_date = self._calculate_expiration(
                     earnings_date, timing, expiration_offset
                 )
+                try:
+                    timing_enum = EarningsTiming(timing)
+                except ValueError:
+                    timing_enum = EarningsTiming.UNKNOWN
 
                 future = executor.submit(
                     self.scan_ticker,
@@ -254,7 +261,8 @@ class ConcurrentScanner:
                     earnings_date,
                     expiration_date,
                     analyze_func,
-                    filter_func
+                    filter_func,
+                    timing_enum,
                 )
                 future_to_ticker[future] = ticker
 

@@ -56,21 +56,22 @@ class TestBugFix2EarningsTimingEnum:
 
 
 class TestBugFix3AlphaVantageAttribute:
-    """Test Bug Fix #3: Alpha Vantage attribute name."""
+    """Test Bug Fix #3: Finnhub attribute name (was Alpha Vantage)."""
 
-    def test_container_has_alphavantage_attribute(self, container):
-        """Verify Container has 'alphavantage' attribute (not 'alpha_vantage_api')."""
-        # Should have 'alphavantage'
-        assert hasattr(container, 'alphavantage')
+    def test_container_has_finnhub_attribute(self, container):
+        """Verify Container has 'finnhub' attribute (not legacy 'alphavantage')."""
+        # Should have 'finnhub'
+        assert hasattr(container, 'finnhub')
 
-        # Should NOT have 'alpha_vantage_api'
+        # Should NOT have old attribute names
         assert not hasattr(container, 'alpha_vantage_api')
+        assert not hasattr(container, 'alphavantage')
 
-    def test_alphavantage_is_callable(self, container):
-        """Verify alphavantage property is accessible."""
+    def test_finnhub_is_callable(self, container):
+        """Verify finnhub property is accessible."""
         # Should be able to access (lazy-loaded)
-        alpha_vantage = container.alphavantage
-        assert alpha_vantage is not None
+        finnhub = container.finnhub
+        assert finnhub is not None
 
 
 class TestBugFix4SkewAnalysisDirectionalBias:
@@ -90,12 +91,12 @@ class TestBugFix4SkewAnalysisDirectionalBias:
 
     def test_strategy_generator_exists(self):
         """Verify StrategyGenerator can be imported."""
-        from src.application.services.strategy_generator import StrategyGenerator
+        from src.application.services.strategy import StrategyGenerator
         assert StrategyGenerator is not None
 
     def test_strategy_generator_determine_bias_method_exists(self):
         """Verify StrategyGenerator has _determine_bias method."""
-        from src.application.services.strategy_generator import StrategyGenerator
+        from src.application.services.strategy import StrategyGenerator
         from src.config.config import StrategyConfig
         from src.application.metrics.liquidity_scorer import LiquidityScorer
         # StrategyGenerator now requires config and liquidity_scorer
@@ -167,7 +168,7 @@ class TestBugFixesIntegration:
     def test_container_creates_all_components(self, container, config):
         """Verify Container can create all Phase 4 components without errors."""
         # Should be able to access all components
-        assert container.alphavantage is not None
+        assert container.finnhub is not None
 
         # ConsistencyAnalyzer can be created if enabled
         if config.algorithms.use_enhanced_consistency:

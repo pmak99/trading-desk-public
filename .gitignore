@@ -57,12 +57,12 @@ htmlcov/
 /logs/
 *.log
 *.csv
+!tests/**/fixtures/*.csv
 
 # Legacy directories (removed in cleanup)
 /src/
 /profiling/
 /benchmarks/
-/tests/
 
 # Cache files (persistent API cache)
 src/data/cache/

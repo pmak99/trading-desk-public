@@ -6,8 +6,8 @@ These constants are shared across scan submodules to ensure consistency.
 
 import re
 
-# Alpha Vantage free tier rate limits
-ALPHA_VANTAGE_CALLS_PER_MINUTE = 5
+# Finnhub free tier rate limits
+FINNHUB_CALLS_PER_MINUTE = 60
 RATE_LIMIT_PAUSE_SECONDS = 60
 
 # Cache configuration
@@ -89,6 +89,41 @@ LIQUIDITY_PRIORITY_ORDER = {
     'REJECT': 3,
     'UNKNOWN': 4
 }
+
+# Harvest scoring constants (30-45 DTE non-earnings premium scan)
+# Scoring: IV Rank (40) + IV/HV ratio (25) + Skew (15) + Liquidity proxy (20) = 100 max
+HARVEST_IV_RANK_MIN = 60.0          # Hard gate — top 40% of 52-week IV range required
+HARVEST_IV_RANK_MAX_POINTS = 40.0   # Linear: rank=60→0pts, rank=100→40pts
+HARVEST_IV_HV_MAX_POINTS = 25.0     # Linear: ratio=1.0→0pts, ratio=2.0+→25pts (capped)
+HARVEST_IV_HV_CAP = 2.0             # No extra credit above 2.0x IV/HV ratio
+HARVEST_SKEW_MAX_POINTS = 15.0
+HARVEST_LIQUIDITY_MAX_POINTS = 20.0
+HARVEST_EARNINGS_EXCLUSION_DAYS = 30  # Exclude tickers with earnings within this window
+HARVEST_TOP_N = 20                    # Default maximum candidates to display
+
+# Harvest universe (45 DTE non-earnings sleeve) — fixed per sleeve rules.
+# Index names get a real 52-week IVR from their CBOE vol index (yfinance
+# symbols below); single names have NO live IVR source until iv_history
+# matures (~Jun 2027) and must be IVR-verified at the broker before entry.
+HARVEST_UNIVERSE_INDEX = ("SPY", "QQQ", "IWM")
+HARVEST_UNIVERSE_STOCK = ("AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN")
+HARVEST_VOL_INDEX_FOR = {"SPY": "^VIX", "QQQ": "^VXN"}  # ^RVX (IWM) discontinued on Yahoo — IWM degrades to the ungated broker-check path
+
+# Skew label → score mapping (r_slp_30 → RSLP30 bucket → points)
+# Mirrors RSLP30_THRESHOLDS from common/constants.py (strong bull = best, bearish = penalised)
+HARVEST_SKEW_SCORES: dict = {
+    'STRONG_BULLISH': 15.0,
+    'BULLISH':        14.0,
+    'WEAK_BULLISH':   12.0,
+    'NEUTRAL':        10.0,
+    'WEAK_BEARISH':    6.0,
+    'BEARISH':         3.0,
+}
+HARVEST_SKEW_NULL_SCORE = 8.0        # Middle-ground default when r_slp_30 is NULL
+
+# Megacap correlation cluster — highly correlated in stress scenarios.
+# Running 2+ of these simultaneously creates concentrated directional risk.
+MEGACAP_CLUSTER: frozenset = frozenset({'AAPL', 'MSFT', 'NVDA', 'GOOG', 'GOOGL', 'META', 'AMZN'})
 
 # Pre-compiled regex patterns for company name cleaning (performance optimization)
 _COMPANY_SUFFIX_PATTERNS = [

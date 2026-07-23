@@ -188,10 +188,17 @@ class YahooFinanceClient:
             result = {"symbol": symbol}
 
             # Get calendar (next earnings date)
+            # yfinance >= 1.3.0 returns a plain dict; older versions returned a DataFrame
             try:
                 calendar = ticker.calendar
-                if calendar is not None and hasattr(calendar, "to_dict"):
-                    result["calendar"] = calendar.to_dict()
+                if calendar is not None:
+                    if hasattr(calendar, "to_dict"):
+                        result["calendar"] = calendar.to_dict()
+                    elif isinstance(calendar, dict):
+                        result["calendar"] = {
+                            k: ([str(v) for v in val] if isinstance(val, list) else str(val))
+                            for k, val in calendar.items()
+                        }
             except Exception:
                 pass
 

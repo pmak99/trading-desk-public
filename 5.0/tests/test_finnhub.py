@@ -105,3 +105,79 @@ async def test_missing_api_key():
     client = FinnhubClient(api_key="")
     # Client is created, but requests will fail at API level
     assert client.api_key == ""
+
+
+# ── Earnings calendar ────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_get_earnings_calendar_returns_symbol_and_report_date(client):
+    """Calendar response maps Finnhub fields to expected keys."""
+    client._request = AsyncMock(return_value={
+        "earningsCalendar": [
+            {"date": "2026-06-01", "symbol": "AAPL", "hour": "amc", "epsEstimate": 1.5},
+            {"date": "2026-06-02", "symbol": "MSFT", "hour": "bmo", "epsEstimate": 2.1},
+        ]
+    })
+
+    result = await client.get_earnings_calendar()
+
+    assert len(result) == 2
+    assert result[0]["symbol"] == "AAPL"
+    assert result[0]["report_date"] == "2026-06-01"
+    assert result[1]["symbol"] == "MSFT"
+    assert result[1]["report_date"] == "2026-06-02"
+
+
+@pytest.mark.asyncio
+async def test_get_earnings_calendar_empty_returns_empty_list(client):
+    """Empty earningsCalendar key returns empty list."""
+    client._request = AsyncMock(return_value={"earningsCalendar": []})
+
+    result = await client.get_earnings_calendar()
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_earnings_calendar_api_error_returns_empty_list(client):
+    """API error returns empty list, not an exception."""
+    client._request = AsyncMock(return_value={"error": "API error: 403"})
+
+    result = await client.get_earnings_calendar()
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_earnings_calendar_missing_key_returns_empty_list(client):
+    """Response without earningsCalendar key returns empty list."""
+    client._request = AsyncMock(return_value={})
+
+    result = await client.get_earnings_calendar()
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_earnings_calendar_symbol_filter(client):
+    """symbol param is passed through to the API request."""
+    client._request = AsyncMock(return_value={"earningsCalendar": []})
+
+    await client.get_earnings_calendar(symbol="NVDA")
+
+    call_args = client._request.call_args
+    assert call_args[0][1]["symbol"] == "NVDA"
+
+
+@pytest.mark.asyncio
+async def test_get_earnings_for_date_returns_matching_day(client):
+    """get_earnings_for_date passes identical from/to dates."""
+    client._request = AsyncMock(return_value={"earningsCalendar": [
+        {"date": "2026-06-05", "symbol": "AAPL", "hour": "amc", "epsEstimate": None},
+    ]})
+
+    result = await client.get_earnings_for_date("2026-06-05")
+
+    assert len(result) == 1
+    assert result[0]["symbol"] == "AAPL"
+    assert result[0]["report_date"] == "2026-06-05"

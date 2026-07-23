@@ -369,3 +369,191 @@ def check_liquidity_hybrid(
     except Exception as e:
         logger.warning(f"{ticker}: Hybrid liquidity check failed: {e}")
         return (False, "REJECT", {'method': 'ERROR', 'error': str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Harvest chain validation — checks real bid/OI/spread credit at ~45 DTE
+# ---------------------------------------------------------------------------
+
+def _harvest_target_expiry(reference_date: date, min_dte: int = 30, target_dte: int = 45) -> date:
+    """
+    Compute the nearest standard monthly expiry (3rd Friday of month) that is
+    >= min_dte from reference_date and closest to target_dte.
+    """
+    from datetime import timedelta
+    candidates = []
+    for months_ahead in range(1, 5):
+        year = reference_date.year
+        month = reference_date.month + months_ahead
+        while month > 12:
+            month -= 12
+            year += 1
+        first_day = date(year, month, 1)
+        # 4 = Friday (weekday index)
+        first_friday_offset = (4 - first_day.weekday()) % 7
+        third_friday = first_day + timedelta(days=first_friday_offset + 14)
+        dte = (third_friday - reference_date).days
+        if dte >= min_dte:
+            candidates.append((abs(dte - target_dte), third_friday))
+    if candidates:
+        candidates.sort()
+        return candidates[0][1]
+    # Fallback
+    return reference_date + timedelta(days=target_dte)
+
+
+def _find_nearest_strike(options_dict: dict, target_strike: float, tolerance: float = 7.5) -> object | None:
+    """Find the Strike key in an options dict closest to target_strike float."""
+    best = None
+    best_diff = float('inf')
+    for strike in options_dict:
+        diff = abs(float(strike.price) - target_strike)
+        if diff < best_diff:
+            best_diff = diff
+            best = strike
+    return best if (best is not None and best_diff <= tolerance) else None
+
+
+def _dynamic_spread_width(stock_price: float) -> float:
+    """
+    Compute appropriate spread width based on stock price.
+    A $5 spread on a $400 stock is only 1.25% — too tight for meaningful credit.
+    Scale up for higher-priced stocks to ensure the wing option exists and
+    the spread credit is worth the ticket.
+    """
+    if stock_price <= 60:
+        return 2.50
+    if stock_price <= 200:
+        return 5.0
+    if stock_price <= 400:
+        return 10.0
+    return 25.0
+
+
+def validate_harvest_chain(
+    ticker: str,
+    expiry: date,
+    container: Container,
+    target_delta: float = 0.30,
+    min_bid: float = 0.50,
+    min_oi: int = 50,
+) -> dict:
+    """
+    Validate actual options chain liquidity and premium for a harvest candidate.
+
+    Fetches the Tradier chain at expiry, finds the OTM put and call closest to
+    target_delta. Spread width is computed dynamically based on stock price
+    (2.50 for stocks ≤$60, $5 for ≤$200, $10 for ≤$400, $25 for higher).
+
+    Args:
+        ticker: Stock ticker symbol.
+        expiry: Options expiration date (~45 DTE).
+        container: DI container (Tradier client).
+        target_delta: Abs delta to target on short leg (default 0.30).
+        min_bid: Minimum acceptable bid on the short leg (default $0.50).
+        min_oi: Minimum acceptable OI on the short leg (default 50).
+
+    Returns:
+        dict with keys:
+            put_bid, put_oi, put_credit, call_bid, call_oi, call_credit,
+            best_credit (float), best_side ('PUT'/'CALL'/'SKIP'),
+            liq_tier ('GOOD'/'WARN'/'THIN'), stock_price (float),
+            spread_width (float), short_strike (float | None), error (str | None)
+    """
+    result = {
+        'put_bid': 0.0, 'put_oi': 0, 'put_credit': 0.0,
+        'call_bid': 0.0, 'call_oi': 0, 'call_credit': 0.0,
+        'best_credit': 0.0, 'best_side': 'SKIP',
+        'liq_tier': 'THIN', 'stock_price': 0.0,
+        'spread_width': 5.0, 'short_strike': None, 'error': None,
+    }
+    try:
+        tradier = container.tradier
+        chain_result = tradier.get_option_chain(ticker, expiry)
+        if chain_result.is_err:
+            result['error'] = str(chain_result.error)
+            return result
+
+        chain = chain_result.value
+        stock_price = float(chain.stock_price.amount)
+        result['stock_price'] = stock_price
+        spread_width = _dynamic_spread_width(stock_price)
+        result['spread_width'] = spread_width
+
+        # --- PUT side: find OTM put closest to -target_delta ---
+        best_put_strike = None
+        best_put_quote = None
+        best_diff = float('inf')
+        for strike, quote in chain.puts.items():
+            if quote.delta is None:
+                continue
+            diff = abs(abs(quote.delta) - target_delta)
+            if diff < best_diff:
+                best_diff = diff
+                best_put_strike = strike
+                best_put_quote = quote
+
+        if best_put_quote is not None:
+            result['put_bid'] = float(best_put_quote.bid.amount)
+            result['put_oi'] = best_put_quote.open_interest
+            wing_target = float(best_put_strike.price) - spread_width
+            wing_key = _find_nearest_strike(chain.puts, wing_target, tolerance=spread_width)
+            if wing_key is not None:
+                wing_quote = chain.puts[wing_key]
+                credit = float(best_put_quote.bid.amount) - float(wing_quote.ask.amount)
+                result['put_credit'] = max(0.0, round(credit, 2))
+
+        # --- CALL side: find OTM call closest to +target_delta ---
+        best_call_strike = None
+        best_call_quote = None
+        best_diff = float('inf')
+        for strike, quote in chain.calls.items():
+            if quote.delta is None:
+                continue
+            diff = abs(quote.delta - target_delta)
+            if diff < best_diff:
+                best_diff = diff
+                best_call_strike = strike
+                best_call_quote = quote
+
+        if best_call_quote is not None:
+            result['call_bid'] = float(best_call_quote.bid.amount)
+            result['call_oi'] = best_call_quote.open_interest
+            wing_target = float(best_call_strike.price) + spread_width
+            wing_key = _find_nearest_strike(chain.calls, wing_target, tolerance=spread_width)
+            if wing_key is not None:
+                wing_quote = chain.calls[wing_key]
+                credit = float(best_call_quote.bid.amount) - float(wing_quote.ask.amount)
+                result['call_credit'] = max(0.0, round(credit, 2))
+
+        # --- Choose best side and tier ---
+        put_ok  = result['put_bid']  >= min_bid and result['put_oi']  >= min_oi
+        call_ok = result['call_bid'] >= min_bid and result['call_oi'] >= min_oi
+
+        if result['put_credit'] >= result['call_credit'] and put_ok:
+            result['best_side']    = 'PUT'
+            result['best_credit']  = result['put_credit']
+            result['short_strike'] = float(best_put_strike.price) if best_put_strike else None
+        elif call_ok:
+            result['best_side']    = 'CALL'
+            result['best_credit']  = result['call_credit']
+            result['short_strike'] = float(best_call_strike.price) if best_call_strike else None
+        else:
+            result['best_side']   = 'SKIP'
+            result['best_credit'] = max(result['put_credit'], result['call_credit'])
+
+        # Liquidity tier
+        best_bid = max(result['put_bid'], result['call_bid'])
+        best_oi  = max(result['put_oi'],  result['call_oi'])
+        if best_bid >= 1.00 and best_oi >= 200:
+            result['liq_tier'] = 'GOOD'
+        elif best_bid >= min_bid and best_oi >= min_oi:
+            result['liq_tier'] = 'WARN'
+        else:
+            result['liq_tier'] = 'THIN'
+
+    except Exception as e:
+        logger.warning(f"{ticker}: harvest chain validation failed: {e}")
+        result['error'] = str(e)
+
+    return result

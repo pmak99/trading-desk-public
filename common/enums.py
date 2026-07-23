@@ -72,6 +72,7 @@ class StrategyType(Enum):
     BEAR_CALL_SPREAD = "bear_call_spread"    # Credit spread above price (bearish/neutral)
     IRON_CONDOR = "iron_condor"              # Dual credit spreads (neutral)
     IRON_BUTTERFLY = "iron_butterfly"        # Tight dual spreads at ATM (neutral)
+    CALENDAR_SPREAD = "calendar_spread"      # Sell front-expiry ATM, buy back-expiry same strike (debit, defined risk) — Jun 2026 pilot
 
 
 class DirectionalBias(Enum):

@@ -32,8 +32,77 @@ from src.utils.logging import setup_logging
 from src.config.config import Config
 from src.container import Container
 from src.domain.enums import DirectionalBias
+from scripts.scan.date_utils import calculate_implied_move_expiration
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_compound_risk_context(
+    db_path: str,
+    ticker: str,
+    skew_analysis,
+    orats_enabled: Optional[bool] = None,
+) -> tuple:
+    """
+    Resolve (r_slp_30, fused_bias_value, sizing_alarm) for a prediction.
+
+    When ORATS is enabled, reads the position_limits snapshot: sizing_alarm
+    from fcst/iee (Rules A/B) and fused bias from r_slp_30 at ORATS
+    confidence. When disabled (post-Jun-2026 sunset), the frozen snapshot is
+    NOT read — sizing_alarm stays False, r_slp_30 stays None, and the fused
+    bias comes from the Tradier slope_atm proxy at reduced confidence,
+    matching analyzer._fuse_skew_signals so stored predictions agree with
+    /analyze output.
+    """
+    from src.application.metrics.skew_enhanced import fuse_skew_bias
+    import sys as _sys
+    from pathlib import Path as _Path
+    _root = str(_Path(__file__).resolve().parent.parent.parent)
+    if _root not in _sys.path:
+        _sys.path.insert(0, _root)
+    from common.constants import ORATS_ENABLED  # noqa: E402
+
+    if orats_enabled is None:
+        orats_enabled = ORATS_ENABLED
+
+    r_slp_30 = None
+    sizing_alarm = False
+
+    if orats_enabled:
+        from src.domain.types import snapshot_is_stale
+        try:
+            conn_pl = sqlite3.connect(db_path)
+            row = conn_pl.execute(
+                "SELECT r_slp_30, fcst_ern_iv_effect, iee_earn_effect, last_updated "
+                "FROM position_limits WHERE ticker=?",
+                (ticker,)
+            ).fetchone()
+            conn_pl.close()
+            if row and snapshot_is_stale(row[3]):
+                logger.warning(
+                    f"{ticker}: position_limits snapshot stale "
+                    f"(last_updated={row[3]}) — ignoring; run refresh_orats_snapshots.py"
+                )
+                row = None
+            if row:
+                r_slp_30, fcst_ern_iv_effect, iee_earn_effect = row[0], row[1], row[2]
+                # Sizing alarm: fcst >= 2.0 (Rule A) OR iee/fcst >= 1.5 (Rule B)
+                if fcst_ern_iv_effect is not None and fcst_ern_iv_effect >= 2.0:
+                    sizing_alarm = True
+                if (fcst_ern_iv_effect is not None and fcst_ern_iv_effect > 0
+                        and iee_earn_effect is not None
+                        and iee_earn_effect / fcst_ern_iv_effect >= 1.5):
+                    sizing_alarm = True
+        except Exception as e:
+            logger.debug(f"{ticker}: position_limits fetch failed (non-critical): {e}")
+
+    fused = fuse_skew_bias(
+        tradier_bias=skew_analysis.directional_bias,
+        tradier_conf=skew_analysis.bias_confidence,
+        slope_atm=skew_analysis.slope_atm,
+        r_slp_30=r_slp_30,
+    )
+    return r_slp_30, fused.value if fused is not None else None, sizing_alarm
 
 
 def store_bias_prediction(
@@ -43,7 +112,11 @@ def store_bias_prediction(
     expiration: date,
     stock_price: float,
     skew_analysis,
-    vrp_result=None
+    vrp_result=None,
+    r_slp_30: Optional[float] = None,
+    fused_bias_value: Optional[str] = None,
+    trr_level: Optional[str] = None,
+    sizing_alarm: bool = False,
 ):
     """
     Store a directional bias prediction in the database.
@@ -56,6 +129,10 @@ def store_bias_prediction(
         stock_price: Current stock price
         skew_analysis: SkewAnalysis object from skew_enhanced.py
         vrp_result: Optional VRPResult object
+        r_slp_30: ORATS 30-day put/call skew slope at prediction time
+        fused_bias_value: Fused directional bias string (e.g. "strong_bearish")
+        trr_level: Tail risk level at prediction time ("LOW"|"NORMAL"|"HIGH")
+        sizing_alarm: True if fcst_ern_iv_effect>=2.0 or iee/fcst>=1.5
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -64,6 +141,14 @@ def store_bias_prediction(
         # Extract data from skew analysis
         bias = skew_analysis.directional_bias
 
+        # Compound risk: ≥2 of [TRR HIGH, sizing alarm (fcst≥2.0 or iee/fcst≥1.5), BEARISH/STRONG_BEARISH fused skew]
+        compound_signals = sum([
+            trr_level == 'HIGH',
+            sizing_alarm,
+            fused_bias_value in ('bearish', 'strong_bearish'),
+        ])
+        compound_risk_active = 1 if compound_signals >= 2 else 0
+
         cursor.execute("""
             INSERT OR REPLACE INTO bias_predictions (
                 ticker, earnings_date, expiration,
@@ -71,8 +156,9 @@ def store_bias_prediction(
                 skew_atm, skew_curvature, skew_strength, slope_atm,
                 directional_bias, bias_strength, bias_confidence,
                 r_squared, num_points,
-                vrp_ratio, implied_move_pct, historical_mean_pct
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                vrp_ratio, implied_move_pct, historical_mean_pct,
+                compound_risk_active, r_slp_30, fused_bias, trr_level, sizing_alarm
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             ticker,
             earnings_date,
@@ -91,6 +177,11 @@ def store_bias_prediction(
             vrp_result.vrp_ratio if vrp_result else None,
             vrp_result.implied_move.value if vrp_result else None,
             vrp_result.historical_mean.value if vrp_result else None,
+            compound_risk_active,
+            r_slp_30,
+            fused_bias_value,
+            trr_level,
+            1 if sizing_alarm else 0,
         ))
 
         conn.commit()
@@ -120,8 +211,13 @@ def analyze_and_store(
         True if successful, False otherwise
     """
     try:
-        # Get appropriate expiration
-        expiration = earnings_date + timedelta(days=2)  # Typically 2 days after
+        # Expiration: first post-earnings trading day, snapped to a listed
+        # expiration via Tradier — mirrors analyzer Step 0. (The old
+        # earnings_date + 2 days heuristic landed on Saturday for Thursday
+        # reporters and unlisted Thursdays for Tuesday reporters.)
+        desired_expiration = calculate_implied_move_expiration(earnings_date)
+        exp_result = container.tradier.find_nearest_expiration(ticker, desired_expiration)
+        expiration = exp_result.value if exp_result.is_ok else desired_expiration
 
         # Analyze skew
         skew_analyzer = container.skew_analyzer
@@ -144,6 +240,32 @@ def analyze_and_store(
         except Exception as e:
             logger.debug(f"{ticker}: VRP calculation failed (non-critical): {e}")
 
+        # Resolve compound risk context (ORATS-gated — frozen snapshot is
+        # never read when ORATS_ENABLED is false; fused bias falls back to
+        # the Tradier slope_atm proxy, matching /analyze output)
+        trr_level = None
+        try:
+            r_slp_30, fused_bias_value, sizing_alarm = resolve_compound_risk_context(
+                db_path, ticker, skew_analysis
+            )
+        except Exception as e:
+            logger.debug(f"{ticker}: Compound risk context fetch failed (non-critical): {e}")
+            r_slp_30, fused_bias_value, sizing_alarm = None, None, False
+
+        # Compute TRR level from VRP historical context if available
+        if vrp_result is not None:
+            try:
+                hist_result = container.prices_repository.get_historical_moves(ticker, limit=12)
+                if hist_result.is_ok:
+                    gap_moves = [abs(m.gap_move_pct.value) for m in hist_result.value if m.gap_move_pct]
+                    if len(gap_moves) >= 2:
+                        avg_g = sum(gap_moves) / len(gap_moves)
+                        max_g = max(gap_moves)
+                        trr = max_g / avg_g if avg_g > 0 else 0
+                        trr_level = 'HIGH' if trr > 2.5 else ('NORMAL' if trr >= 1.5 else 'LOW')
+            except Exception as e:
+                logger.debug(f"{ticker}: TRR computation failed (non-critical): {e}")
+
         # Store prediction
         store_bias_prediction(
             db_path,
@@ -152,7 +274,11 @@ def analyze_and_store(
             expiration,
             stock_price,
             skew_analysis,
-            vrp_result
+            vrp_result,
+            r_slp_30=r_slp_30,
+            fused_bias_value=fused_bias_value,
+            trr_level=trr_level,
+            sizing_alarm=sizing_alarm,
         )
 
         logger.info(

@@ -17,7 +17,109 @@ from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 from src.domain.protocols import OptionsDataProvider
 from src.domain.enums import DirectionalBias
 
+import sys as _sys
+from pathlib import Path as _Path
+
+_root = str(_Path(__file__).resolve().parent.parent.parent.parent.parent)
+if _root not in _sys.path:
+    _sys.path.insert(0, _root)
+
+from common.constants import RSLP30_THRESHOLDS  # noqa: E402
+
 logger = logging.getLogger(__name__)
+
+
+_BIAS_NUMERIC = {
+    DirectionalBias.STRONG_BEARISH: -3,
+    DirectionalBias.BEARISH:        -2,
+    DirectionalBias.WEAK_BEARISH:   -1,
+    DirectionalBias.NEUTRAL:         0,
+    DirectionalBias.WEAK_BULLISH:   +1,
+    DirectionalBias.BULLISH:        +2,
+    DirectionalBias.STRONG_BULLISH: +3,
+}
+_NUMERIC_BIAS = {v: k for k, v in _BIAS_NUMERIC.items()}
+
+
+def bias_to_numeric(bias: DirectionalBias) -> int:
+    return _BIAS_NUMERIC[bias]
+
+
+def numeric_to_bias(n: int) -> DirectionalBias:
+    clamped = max(-3, min(3, n))
+    return _NUMERIC_BIAS[clamped]
+
+
+def r_slp_30_to_numeric(r_slp_30: float) -> int:
+    for upper_bound, level in RSLP30_THRESHOLDS:
+        if r_slp_30 < upper_bound:
+            return level
+    return RSLP30_THRESHOLDS[-1][1]
+
+
+def fuse_skew_bias(
+    tradier_bias: DirectionalBias,
+    tradier_conf: float,
+    slope_atm,
+    r_slp_30,
+):
+    """
+    Confidence-weighted fusion of Tradier polynomial bias with a slope signal.
+
+    Single source of truth for the fusion formula — used by both
+    analyzer._fuse_skew_signals (live /analyze display) and
+    store_bias_prediction (persisted predictions) so the two cannot drift.
+
+    Slope signal priority: ORATS r_slp_30 at ORATS_SKEW_CONFIDENCE when
+    available; otherwise the Tradier slope_atm proxy at
+    TRADIER_PROXY_SKEW_CONFIDENCE (post-ORATS continuity path).
+
+    Returns None when neither slope signal is available (fusion impossible).
+    """
+    from common.constants import (  # noqa: PLC0415
+        ORATS_SKEW_CONFIDENCE, TRADIER_PROXY_SKEW_CONFIDENCE,
+    )
+    if r_slp_30 is not None:
+        slope_numeric = r_slp_30_to_numeric(r_slp_30)
+        slope_conf = ORATS_SKEW_CONFIDENCE
+    elif slope_atm is not None:
+        proxy = compute_tradier_r_slp30_proxy(slope_atm)
+        slope_numeric = r_slp_30_to_numeric(proxy)
+        slope_conf = TRADIER_PROXY_SKEW_CONFIDENCE
+    else:
+        return None
+
+    tradier_numeric = bias_to_numeric(tradier_bias)
+    fused = (tradier_numeric * tradier_conf + slope_numeric * slope_conf) \
+            / (tradier_conf + slope_conf)
+    return numeric_to_bias(round(fused))
+
+
+def compute_tradier_r_slp30_proxy(slope_atm: float) -> float:
+    """
+    Approximate ORATS r_slp_30 from the Tradier polynomial skew slope_atm.
+
+    Sign convention matches the polynomial classifier (and 5.0 skew.py):
+    negative slope_atm = put skew = bearish → LOW r_slp_30; positive =
+    call skew = bullish → HIGH r_slp_30. Confirmed empirically Jul 2026:
+    corr(slope_atm, r_slp_30) = +0.45 across 42 ORATS-era tickers in
+    bias_predictions (+0.29 excluding the financials cluster).
+
+    Scale from the same OLS fit: Δr_slp_30 ≈ 0.0027 per slope_atm unit,
+    so ±150 slope ≈ ±0.3σ (WEAK_* bucket), NOT ±2σ — a Tradier slope
+    alone never reaches a STRONG_* bucket. Clamped at MEAN ± 2σ.
+
+    (Pre-Jul-2026 version had the sign inverted and a 6x-hot ±150 → ±2σ
+    scale — every proxy-path fusion pulled the wrong direction.)
+
+    Accuracy caveat: noisy single-expiry snapshot vs ORATS' 30-day
+    smoothing. Use at TRADIER_PROXY_SKEW_CONFIDENCE (0.3) in fusion, not 0.5.
+    """
+    from common.constants import RSLP30_MEAN, RSLP30_STD  # noqa: PLC0415
+    _RSLP30_PER_SLOPE_UNIT = 0.0027  # OLS slope, Jul 2026 calibration
+    raw = RSLP30_MEAN + slope_atm * _RSLP30_PER_SLOPE_UNIT
+    lo, hi = RSLP30_MEAN - 2.0 * RSLP30_STD, RSLP30_MEAN + 2.0 * RSLP30_STD
+    return max(lo, min(hi, raw))
 
 
 @dataclass
@@ -70,7 +172,7 @@ class SkewAnalyzerEnhanced:
     """
 
     # Configuration
-    MIN_POINTS = 5  # Minimum points for reliable fit
+    MIN_POINTS = 3  # Minimum points for reliable fit (5 was over-rejecting sparse chains)
     MAX_DISTANCE_PCT = 0.15  # Sample strikes within ±15% of stock price
     MIN_DISTANCE_PCT = 0.02  # Skip strikes within ±2% (ATM)
 
@@ -283,20 +385,19 @@ class SkewAnalyzerEnhanced:
             else:  # THRESHOLD_NEUTRAL < abs_slope <= THRESHOLD_WEAK
                 directional_bias = DirectionalBias.WEAK_BULLISH
 
-        # Calculate bias confidence (R² adjusted by slope strength)
-        # Normalize slope strength based on typical slope range
-        slope_strength = min(1.0, abs_slope / self.MAX_TYPICAL_SLOPE)
-        bias_confidence = r_squared * slope_strength
+        # bias_confidence = R² only (slope strength belongs in level, not confidence)
+        # Previous formula (R² × slope_strength) returned ~0.0002 for all tickers
+        # because slopes are tiny in absolute IV units — permanently forcing NEUTRAL.
+        bias_confidence = r_squared
 
-        # If confidence is too low, force NEUTRAL
-        # Keep original bias_confidence to distinguish weak signal from true neutral
-        if bias_confidence < self.MIN_CONFIDENCE and directional_bias != DirectionalBias.NEUTRAL:
+        # Reject noisy fits: R²<0.30 → NEUTRAL regardless of slope
+        # Calibrated for earnings-time analysis (chains more pronounced at earnings)
+        if r_squared < 0.30 and directional_bias != DirectionalBias.NEUTRAL:
             logger.debug(
-                f"{ticker}: Low bias confidence {bias_confidence:.2f}, "
+                f"{ticker}: Low R² {r_squared:.3f} < 0.30, "
                 f"forcing NEUTRAL (was {directional_bias.value})"
             )
             directional_bias = DirectionalBias.NEUTRAL
-            # Keep bias_confidence as-is to preserve signal strength information
 
         return SkewAnalysis(
             ticker=ticker,

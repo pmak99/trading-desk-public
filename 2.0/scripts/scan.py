@@ -4,7 +4,7 @@ IV Crush Scanner - Entry Point.
 
 Thin wrapper that delegates to the scan package modules:
 - scan/cli.py: Argument parsing
-- scan/workflows.py: Scanning, ticker, and whisper mode orchestration
+- scan/workflows/: Scanning, ticker, and whisper mode orchestration
 - scan/constants.py: All scoring thresholds and configuration
 - scan/quality_scorer.py: Composite quality scoring
 - scan/date_utils.py: Trading day and expiration calculations
@@ -55,6 +55,7 @@ from scan.workflows import (
     ticker_mode_parallel,
     whisper_mode,
     whisper_mode_parallel,
+    harvest_mode,
     analyze_ticker,
     analyze_ticker_concurrent,
 )
@@ -70,7 +71,13 @@ from scan.date_utils import (
 )
 from scan.quality_scorer import (
     calculate_scan_quality_score,
+    calculate_harvest_score,
     _precalculate_quality_scores,
+    _rslp30_to_skew_label,
+)
+from scan.filters import (
+    should_filter_ticker,
+    filter_ticker_concurrent,
 )
 from scan.formatters import (
     parse_liquidity_tier,
@@ -87,10 +94,8 @@ from scan.market_data import (
     get_liquidity_tier_for_display,
     check_liquidity_hybrid,
     get_shared_cache,
-)
-from scan.filters import (
-    should_filter_ticker,
-    filter_ticker_concurrent,
+    validate_harvest_chain,
+    _harvest_target_expiry,
 )
 from scan.earnings_fetcher import (
     fetch_earnings_for_date,
@@ -99,7 +104,7 @@ from scan.earnings_fetcher import (
     ensure_tickers_in_db,
 )
 from scan.constants import (
-    ALPHA_VANTAGE_CALLS_PER_MINUTE,
+    FINNHUB_CALLS_PER_MINUTE,
     RATE_LIMIT_PAUSE_SECONDS,
     CACHE_L1_TTL_SECONDS,
     CACHE_L2_TTL_SECONDS,
@@ -156,7 +161,9 @@ def main():
         # Parallel is the default; use --sequential to disable
         use_parallel = not args.sequential
 
-        if args.scan_date:
+        if args.harvest:
+            return harvest_mode(container=container, db_path=str(config.database.path))
+        elif args.scan_date:
             scan_date = parse_date(args.scan_date)
             return scanning_mode(
                 container, scan_date, args.expiration_offset,

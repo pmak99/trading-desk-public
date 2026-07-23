@@ -1,7 +1,7 @@
 """
 Earnings date cross-reference validator.
 
-Compares earnings dates from multiple sources (Alpha Vantage, Yahoo Finance,
+Compares earnings dates from multiple sources (Finnhub, Yahoo Finance,
 Earnings Whisper) to ensure accuracy and flag conflicts.
 """
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class EarningsSource(Enum):
     """Earnings data source."""
-    ALPHA_VANTAGE = "Alpha Vantage"
+    FINNHUB = "Finnhub"
     YAHOO_FINANCE = "Yahoo Finance"
     EARNINGS_WHISPER = "Earnings Whisper"
     DATABASE = "Database"
@@ -52,20 +52,20 @@ class EarningsDateValidator:
     Priority (highest to lowest):
     1. Yahoo Finance - Most reliable, real-time
     2. Earnings Whisper - Good for near-term dates
-    3. Alpha Vantage - Can be stale or incorrect
+    3. Finnhub - Can be stale or incorrect
     """
 
     # Source reliability weights
     SOURCE_CONFIDENCE = {
         EarningsSource.YAHOO_FINANCE: 1.0,      # Highest confidence
         EarningsSource.EARNINGS_WHISPER: 0.85,  # High confidence for near-term
-        EarningsSource.ALPHA_VANTAGE: 0.70,     # Lower confidence (known to be stale)
+        EarningsSource.FINNHUB: 0.70,     # Lower confidence (known to be stale)
         EarningsSource.DATABASE: 0.60,          # Lowest (could be outdated)
     }
 
     def __init__(
         self,
-        alpha_vantage=None,
+        finnhub=None,
         yahoo_finance=None,
         max_date_diff_days: int = 7
     ):
@@ -73,11 +73,11 @@ class EarningsDateValidator:
         Initialize validator with data sources.
 
         Args:
-            alpha_vantage: Alpha Vantage API client
+            finnhub: Finnhub API client
             yahoo_finance: Yahoo Finance earnings fetcher
             max_date_diff_days: Maximum allowed difference between sources (days)
         """
-        self.alpha_vantage = alpha_vantage
+        self.finnhub = finnhub
         self.yahoo_finance = yahoo_finance
         self.max_date_diff_days = max_date_diff_days
 
@@ -110,20 +110,20 @@ class EarningsDateValidator:
                 ))
                 logger.debug(f"{ticker}: Yahoo Finance = {earnings_date} ({timing.value})")
 
-        # Fetch from Alpha Vantage
-        if self.alpha_vantage:
-            av_result = self.alpha_vantage.get_earnings_calendar(
+        # Fetch from Finnhub
+        if self.finnhub:
+            av_result = self.finnhub.get_earnings_calendar(
                 symbol=ticker, horizon="3month"
             )
             if av_result.is_ok and len(av_result.value) > 0:
                 _, earnings_date, timing = av_result.value[0]
                 sources.append(EarningsDateInfo(
-                    source=EarningsSource.ALPHA_VANTAGE,
+                    source=EarningsSource.FINNHUB,
                     earnings_date=earnings_date,
                     timing=timing,
-                    confidence=self.SOURCE_CONFIDENCE[EarningsSource.ALPHA_VANTAGE]
+                    confidence=self.SOURCE_CONFIDENCE[EarningsSource.FINNHUB]
                 ))
-                logger.debug(f"{ticker}: Alpha Vantage = {earnings_date} ({timing.value})")
+                logger.debug(f"{ticker}: Finnhub = {earnings_date} ({timing.value})")
 
         # Check if we have any data
         if not sources:
@@ -211,22 +211,18 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
 
     # Test with real data sources
-    from src.infrastructure.api.alpha_vantage import AlphaVantageAPI
+    from src.infrastructure.api.finnhub import FinnhubAPI
     from src.infrastructure.data_sources.yahoo_finance_earnings import YahooFinanceEarnings
-    from src.config.config import AppConfig
     import os
 
-    config = AppConfig.from_env()
-
-    # Initialize sources
-    alpha_vantage = AlphaVantageAPI(
-        api_key=os.getenv("ALPHA_VANTAGE_KEY", ""),
+    finnhub = FinnhubAPI(
+        api_key=os.getenv("FINNHUB_API_KEY", ""),
         rate_limiter=None
     )
     yahoo_finance = YahooFinanceEarnings()
 
     validator = EarningsDateValidator(
-        alpha_vantage=alpha_vantage,
+        finnhub=finnhub,
         yahoo_finance=yahoo_finance
     )
 

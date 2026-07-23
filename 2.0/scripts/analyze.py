@@ -22,6 +22,42 @@ from src.config.config import Config
 logger = logging.getLogger(__name__)
 
 
+def vrp_tier(ratio: float) -> str:
+    """Return the VRP tier label for a given ratio."""
+    if ratio >= 1.8:
+        return "EXCELLENT"
+    if ratio >= 1.4:
+        return "GOOD"
+    if ratio >= 1.2:
+        return "MARGINAL"
+    return "SKIP"
+
+
+def _log_vrp_close_divergence(logger_fn, intraday_ratio: float, close_ratio: float, close_mean_pct: float) -> None:
+    """Log gap-inclusive VRP line and a divergence warning when tiers differ."""
+    close_tier = vrp_tier(close_ratio)
+    intraday_tier = vrp_tier(intraday_ratio)
+    logger_fn(f"  VRP Ratio (gap-incl.):  {close_ratio:.2f}x  [{close_tier}]")
+    logger_fn(f"  Historical Mean (gap-incl.): {close_mean_pct:.1f}%")
+    if close_tier != intraday_tier:
+        tier_order = ["SKIP", "MARGINAL", "GOOD", "EXCELLENT"]
+        intraday_rank = tier_order.index(intraday_tier)
+        close_rank = tier_order.index(close_tier)
+        if close_rank < intraday_rank:
+            logger_fn(
+                f"  ⚠️  VRP DIVERGENCE: Intraday VRP ({intraday_ratio:.2f}x {intraday_tier}) is "
+                f"inflated — gap-inclusive is {close_ratio:.2f}x {close_tier}. "
+                f"Gap-dominant ticker: overnight gap excluded from intraday baseline. "
+                f"Treat gap-inclusive as the primary check."
+            )
+        else:
+            logger_fn(
+                f"  NOTE: Gap-inclusive VRP ({close_ratio:.2f}x {close_tier}) > intraday "
+                f"({intraday_ratio:.2f}x {intraday_tier}) — reversal ticker "
+                f"(gap one way, trades back intraday)."
+            )
+
+
 def parse_date(date_str: str) -> date:
     """Parse date string in ISO format."""
     try:
@@ -121,6 +157,20 @@ Notes:
         logger.info("ANALYSIS RESULTS")
         logger.info("=" * 80)
 
+        # VIX regime context (cached from adaptive thresholds step)
+        try:
+            vix_result = container.market_conditions_analyzer.get_current_conditions()
+            if vix_result.is_ok:
+                mc = vix_result.value
+                logger.info(f"\nVIX: {mc.vix_level.value:.1f} ({mc.regime})  |  position sizing: {mc.position_size_multiplier:.0%}")
+                if mc.regime in ('elevated_high', 'high', 'extreme'):
+                    logger.warning(
+                        f"⚠  VIX {mc.vix_level.value:.1f} ({mc.regime}) — "
+                        f"thresholds raised, position sizing reduced to {mc.position_size_multiplier:.0%}"
+                    )
+        except Exception:
+            pass
+
         # Implied Move
         logger.info(f"\n📊 Implied Move:")
         logger.info(f"  Stock Price: {analysis.implied_move.stock_price}")
@@ -132,8 +182,16 @@ Notes:
 
         # VRP Analysis
         logger.info(f"\n📊 VRP Analysis:")
-        logger.info(f"  VRP Ratio: {analysis.vrp.vrp_ratio:.2f}x")
+        vrp_label = "(intraday)" if analysis.vrp_close_ratio is not None else ""
+        logger.info(f"  VRP Ratio {vrp_label}: {analysis.vrp.vrp_ratio:.2f}x  [{vrp_tier(analysis.vrp.vrp_ratio)}]")
         logger.info(f"  Historical Mean: {analysis.vrp.historical_mean_move_pct}")
+        if analysis.vrp_close_ratio is not None and analysis.historical_close_mean_pct is not None:
+            _log_vrp_close_divergence(
+                logger.info,
+                analysis.vrp.vrp_ratio,
+                analysis.vrp_close_ratio,
+                analysis.historical_close_mean_pct,
+            )
         logger.info(f"  Edge Score: {analysis.vrp.edge_score:.2f}")
         logger.info(f"  Recommendation: {analysis.vrp.recommendation.value.upper()}")
 
@@ -224,8 +282,16 @@ Notes:
         logger.info(f"   Stock Price: {analysis.implied_move.stock_price}")
         logger.info(f"\n📈 VRP Metrics:")
         logger.info(f"   Implied Move: {analysis.vrp.implied_move_pct}")
-        logger.info(f"   Historical Avg: {analysis.vrp.historical_mean_move_pct}")
-        logger.info(f"   VRP Ratio: {analysis.vrp.vrp_ratio:.2f}x")
+        logger.info(f"   Historical Avg (intraday): {analysis.vrp.historical_mean_move_pct}")
+        vrp_summary_label = "(intraday)" if analysis.vrp_close_ratio is not None else ""
+        logger.info(f"   VRP Ratio {vrp_summary_label}: {analysis.vrp.vrp_ratio:.2f}x  [{vrp_tier(analysis.vrp.vrp_ratio)}]")
+        if analysis.vrp_close_ratio is not None and analysis.historical_close_mean_pct is not None:
+            _log_vrp_close_divergence(
+                lambda msg: logger.info(f"   {msg.lstrip()}"),
+                analysis.vrp.vrp_ratio,
+                analysis.vrp_close_ratio,
+                analysis.historical_close_mean_pct,
+            )
         logger.info(f"   Edge Score: {analysis.vrp.edge_score:.2f}")
         logger.info(f"   Recommendation: {analysis.vrp.recommendation.value.upper()}")
         # Display directional bias from skew analysis if available
@@ -236,6 +302,37 @@ Notes:
         elif analysis.strategies:
             bias_formatted = analysis.strategies.directional_bias.value.replace('_', ' ').upper()
             logger.info(f"   Directional Bias: {bias_formatted}")
+
+        # IV term structure (Jun 2026): how much of the front IV is event-specific
+        if analysis.term_structure and analysis.term_structure.slope_ratio is not None:
+            from src.application.metrics.term_structure import classify_slope_ratio
+            ts = analysis.term_structure
+            label = classify_slope_ratio(ts.slope_ratio).replace('_', ' ')
+            icon = "✅" if ts.slope_ratio >= 1.10 else "⚠️ "
+            logger.info(f"\n📐 Term Structure: {icon} {label}")
+            logger.info(
+                f"   Front ATM IV {float(ts.ivs[0].value):.1f} ({ts.expirations[0]}) vs "
+                f"back {float(ts.ivs[1].value):.1f} ({ts.expirations[1]}) — "
+                f"event-vol multiple {ts.slope_ratio:.2f}x"
+            )
+            if ts.slope_ratio < 1.10:
+                logger.info(
+                    "   ⚠️  Front IV is NOT event-concentrated — a high VRP here is "
+                    "persistent risk the post-earnings crush will not remove."
+                )
+
+        # Calendar spread pilot (Jun 2026): defined-risk alternative when
+        # compound tail risk would otherwise force a skip
+        if analysis.calendar_candidate:
+            cal = analysis.calendar_candidate
+            logger.info("\n" + "=" * 80)
+            logger.info("🗓️  CALENDAR SPREAD PILOT (tail-risk alternative)")
+            logger.info("=" * 80)
+            logger.info(f"   Structure: {cal.strike_description}")
+            logger.info(f"   Net Debit: ${abs(float(cal.net_credit.amount)):.2f}/spread × {cal.contracts} contracts")
+            logger.info(f"   Max Loss (defined): {cal.max_loss}")
+            logger.info(f"   Est. Profit (50% managed exit): {cal.max_profit}")
+            logger.info(f"   {cal.rationale}")
 
         if analysis.vrp.is_tradeable:
             logger.info("\n" + "=" * 80)

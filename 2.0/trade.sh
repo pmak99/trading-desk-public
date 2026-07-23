@@ -64,12 +64,17 @@ calculate_expiration() {
     local earnings_date=$1
     local expiration=""
 
-    # Use detected date command type (optimization - no failed subprocess)
-    if [ "$DATE_CMD" = "gnu" ]; then
-        expiration=$(date -d "$earnings_date + 1 day" +%Y-%m-%d 2>/dev/null)
-    else
-        expiration=$(date -v+1d -j -f "%Y-%m-%d" "$earnings_date" +%Y-%m-%d 2>/dev/null)
-    fi
+    # Route through the Python DTE-floor logic (same path as scan/whisper):
+    # Mon/Tue -> same-week Friday, Wed -> next Friday, Thu/Fri -> next week's
+    # Friday. Enforces min 3 DTE (backtesting showed materially worse loss severity below it). The old
+    # shell version did earnings+1 day, which put Thu/Fri reporters on a
+    # 0-1 DTE chain.
+    expiration=$(python -c "
+import sys, datetime
+from scripts.scan.date_utils import calculate_expiration_date
+from src.domain.enums import EarningsTiming
+print(calculate_expiration_date(datetime.date.fromisoformat(sys.argv[1]), EarningsTiming.UNKNOWN))
+" "$earnings_date" 2>/dev/null)
 
     # Error handling if date calculation fails
     if [ -z "$expiration" ]; then
@@ -282,7 +287,8 @@ backup_database() {
 }
 
 sync_earnings_calendar() {
-    # Sync earnings calendar with latest data from Alpha Vantage + Yahoo Finance.
+    # Sync earnings calendar with latest data from Finnhub (chunked bulk fetch)
+    # cross-validated against Yahoo Finance.
     # Default: focused mode — only traded tickers (strategies + trade_journal).
     # Use --all to sync the full calendar (slow, thousands of tickers).
     #
@@ -356,7 +362,7 @@ ${BOLD}EXAMPLES${NC}
     $0 whisper
 
 ${BOLD}REQUIREMENTS${NC}
-    TRADIER_API_KEY, ALPHA_VANTAGE_KEY in .env
+    TRADIER_API_KEY, FINNHUB_API_KEY in .env
 EOF
 }
 
@@ -554,7 +560,7 @@ whisper_mode() {
         grep -v "^$"; then
         echo -e "${RED}Whisper mode failed${NC}"
         echo -e "${YELLOW}Could not fetch most anticipated earnings${NC}"
-        echo -e "${YELLOW}Tip: Check Reddit API access or use a different week${NC}"
+        echo -e "${YELLOW}Tip: Try a different week or provide a fallback image${NC}"
         return 1
     fi
 
@@ -605,6 +611,17 @@ case "${1:-}" in
         health_check
         scan_earnings "$2"
         show_summary
+        ;;
+
+    harvest)
+        health_check
+        python -u scripts/scan.py --harvest 2>&1 | grep -v "^$"
+        show_summary
+        ;;
+
+    taco)
+        # TACO index macro-event engine (see .claude/commands/taco.md)
+        python -u scripts/taco_cli.py "${@:2}"
         ;;
 
     whisper)

@@ -211,7 +211,7 @@ async def telegram_webhook(request: Request):
 
         elif text.startswith("/whisper"):
             # Import whisper endpoint from analysis router to call it directly
-            from src.api.routers.analysis import whisper
+            from src.api.routers.whisper import whisper
             # Get whisper data (always fresh)
             result = await whisper(format="json", fresh=True)
             if result.get("status") == "success" and result.get("tickers"):
@@ -252,7 +252,7 @@ async def telegram_webhook(request: Request):
                     return {"ok": True}
                 try:
                     # Import analyze endpoint from analysis router to call it directly
-                    from src.api.routers.analysis import analyze
+                    from src.api.routers.analyze import analyze
                     result = await analyze(ticker=ticker, format="json", fresh=True)
                     if result.get("status") == "success":
                         vrp = result.get("vrp", {})

@@ -3,7 +3,7 @@
 Automated earnings calendar synchronization and validation.
 
 This script proactively discovers and validates upcoming earnings dates by:
-1. Fetching full earnings calendar from Alpha Vantage (3-month horizon)
+1. Fetching full earnings calendar from Finnhub (3-month horizon)
 2. Cross-validating new/changed dates with Yahoo Finance
 3. Detecting conflicts and using consensus (Yahoo Finance priority)
 4. Updating database with validated dates
@@ -43,12 +43,12 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.utils.logging import setup_logging
-from src.infrastructure.api.alpha_vantage import AlphaVantageAPI
+from src.infrastructure.api.finnhub import FinnhubAPI
 from src.infrastructure.data_sources.yahoo_finance_earnings import YahooFinanceEarnings
 from src.application.services.earnings_date_validator import EarningsDateValidator
 from src.infrastructure.database.repositories.earnings_repository import EarningsRepository
 from src.domain.types import EarningsTiming
-from src.utils.rate_limiter import create_alpha_vantage_limiter
+from src.utils.rate_limiter import create_finnhub_limiter
 import os
 
 logger = logging.getLogger(__name__)
@@ -490,10 +490,10 @@ def _sync_via_yahoo_fallback(
     ticker_filter: Set[str] | None = None,
 ) -> "SyncStats":
     """
-    Yahoo Finance per-ticker fallback used when Alpha Vantage bulk fetch fails.
+    Yahoo Finance per-ticker fallback used when Finnhub bulk fetch fails.
 
     Iterates DB tickers with upcoming earnings (next 90 days) and queries
-    Yahoo Finance individually. Slower but functional when AV is rate-limited.
+    Yahoo Finance individually. Slower but functional when Finnhub is unavailable.
     Respects ticker_filter (focused mode) to avoid crawling thousands of tickers.
     """
     yahoo = YahooFinanceEarnings()
@@ -542,7 +542,7 @@ def _sync_via_yahoo_fallback(
 def sync_earnings_calendar(
     validator: EarningsDateValidator,
     earnings_repo: EarningsRepository,
-    alpha_vantage: AlphaVantageAPI,
+    finnhub: FinnhubAPI,
     db_path: str,
     horizon: str = "3month",
     dry_run: bool = False,
@@ -554,7 +554,7 @@ def sync_earnings_calendar(
     Args:
         validator: Earnings date validator
         earnings_repo: Earnings repository
-        alpha_vantage: Alpha Vantage API client
+        finnhub: Finnhub API client
         db_path: Database path
         horizon: Time horizon (3month, 6month, 12month)
         dry_run: If True, don't update database
@@ -578,40 +578,48 @@ def sync_earnings_calendar(
     db_dates = get_database_dates(db_path, ticker_filter=ticker_filter)
     logger.info(f"Found {len(db_dates)} existing earnings dates in database")
 
-    # Fetch full calendar from Alpha Vantage
-    logger.info(f"Fetching earnings calendar from Alpha Vantage (horizon={horizon})...")
-    calendar_result = alpha_vantage.get_earnings_calendar(horizon=horizon)
+    # Fetch full calendar from Finnhub
+    logger.info(f"Fetching earnings calendar from Finnhub (horizon={horizon})...")
+    calendar_result = finnhub.get_earnings_calendar(horizon=horizon)
 
     if calendar_result.is_err:
         logger.error(f"Failed to fetch calendar: {calendar_result.error}")
-        logger.warning("Alpha Vantage unavailable — falling back to Yahoo Finance per-ticker lookup")
+        logger.warning("Finnhub unavailable — falling back to Yahoo Finance per-ticker lookup")
         return _sync_via_yahoo_fallback(db_path=db_path, dry_run=dry_run, stats=stats, ticker_filter=ticker_filter)
 
     calendar = calendar_result.value
-    logger.info(f"✓ Fetched {len(calendar)} earnings events from Alpha Vantage")
+    logger.info(f"✓ Fetched {len(calendar)} earnings events from Finnhub")
 
     # Group by ticker (in case multiple entries per ticker)
     ticker_map: Dict[str, List[Tuple[date, EarningsTiming]]] = defaultdict(list)
     for ticker, earnings_date, timing in calendar:
         ticker_map[ticker].append((earnings_date, timing))
 
-    # OPTIMIZATION: Only process tickers already in database
-    # This prevents adding thousands of unwanted tickers
     db_tickers = set(db_dates.keys())
-    av_tickers = set(ticker_map.keys())
-    tickers_to_process = db_tickers & av_tickers  # Intersection
+    finnhub_tickers = set(ticker_map.keys())
+    if focused and ticker_filter is not None:
+        # Traded tickers found in the Finnhub calendar — including names whose
+        # previous-quarter row already aged out of the DB lookup window. Those
+        # hit the "New ticker" branch below and get re-added; intersecting with
+        # db_tickers instead made that branch unreachable and silently dropped
+        # any traded ticker with no in-window row (NFLX Jul 2026).
+        tickers_to_process = ticker_filter & finnhub_tickers
+    else:
+        # --all mode: only process tickers already in the database to avoid
+        # adding thousands of unwanted tickers from the full calendar
+        tickers_to_process = db_tickers & finnhub_tickers
 
     logger.info(f"\nFiltering tickers:")
     logger.info(f"  • Database: {len(db_tickers)} tickers")
-    logger.info(f"  • Alpha Vantage calendar: {len(av_tickers)} tickers")
+    logger.info(f"  • Finnhub calendar: {len(finnhub_tickers)} tickers")
     logger.info(f"  • Intersection (to process): {len(tickers_to_process)} tickers")
 
-    # Warn about database tickers not in Alpha Vantage
-    missing_from_av = db_tickers - av_tickers
-    if missing_from_av:
-        logger.warning(f"  ⚠️  {len(missing_from_av)} DB tickers not found in Alpha Vantage calendar")
-        if len(missing_from_av) <= 10:
-            logger.warning(f"     Missing: {', '.join(sorted(missing_from_av))}")
+    # Warn about database tickers not in Finnhub
+    missing_from_finnhub = db_tickers - finnhub_tickers
+    if missing_from_finnhub:
+        logger.warning(f"  ⚠️  {len(missing_from_finnhub)} DB tickers not found in Finnhub calendar")
+        if len(missing_from_finnhub) <= 10:
+            logger.warning(f"     Missing: {', '.join(sorted(missing_from_finnhub))}")
 
     # Process filtered tickers with progress bar
     for ticker in tqdm(
@@ -624,7 +632,7 @@ def sync_earnings_calendar(
 
         # Get earliest earnings date for this ticker
         dates = sorted(ticker_map[ticker], key=lambda x: x[0])
-        av_date, av_timing = dates[0]
+        finnhub_date, finnhub_timing = dates[0]
 
         # Check if ticker exists in database
         if ticker in db_dates:
@@ -632,12 +640,12 @@ def sync_earnings_calendar(
             days_stale = (datetime.now() - db_updated_at).days
 
             # Check if date changed
-            if av_date != db_date or av_timing != db_timing:
+            if finnhub_date != db_date or finnhub_timing != db_timing:
                 logger.info(
                     f"\n{'='*70}\n"
                     f"CHANGE DETECTED: {ticker}\n"
                     f"  Database: {db_date} ({db_timing.value}) [updated {days_stale}d ago]\n"
-                    f"  Alpha Vantage: {av_date} ({av_timing.value})\n"
+                    f"  Finnhub: {finnhub_date} ({finnhub_timing.value})\n"
                     f"{'='*70}"
                 )
 
@@ -645,16 +653,16 @@ def sync_earnings_calendar(
                 if should_skip_validation(last_validated_at):
                     hours_ago = (datetime.now() - last_validated_at).total_seconds() / 3600
                     logger.info(
-                        f"  ⏭️  Skipping validation (validated {hours_ago:.1f}h ago) - using AV date"
+                        f"  ⏭️  Skipping validation (validated {hours_ago:.1f}h ago) - using Finnhub date"
                     )
                     stats.validation_skipped += 1
 
-                    # Use Alpha Vantage date directly (no cross-validation)
+                    # Use Finnhub date directly (no cross-validation)
                     if not dry_run:
                         save_result = earnings_repo.save_earnings_event(
                             ticker=ticker,
-                            earnings_date=av_date,
-                            timing=av_timing,
+                            earnings_date=finnhub_date,
+                            timing=finnhub_timing,
                             update_validation_timestamp=False,  # Keep existing validation timestamp
                         )
                         if save_result.is_ok:
@@ -663,8 +671,8 @@ def sync_earnings_calendar(
                                 {
                                     "ticker": ticker,
                                     "old_date": db_date,
-                                    "new_date": av_date,
-                                    "timing": av_timing,
+                                    "new_date": finnhub_date,
+                                    "timing": finnhub_timing,
                                     "reason": "Date changed (validation skipped)",
                                 }
                             )
@@ -790,7 +798,7 @@ def sync_earnings_calendar(
             logger.info(
                 f"\n{'='*70}\n"
                 f"NEW EARNINGS: {ticker}\n"
-                f"  Alpha Vantage: {av_date} ({av_timing.value})\n"
+                f"  Finnhub: {finnhub_date} ({finnhub_timing.value})\n"
                 f"{'='*70}"
             )
 
@@ -941,15 +949,15 @@ def main():
     logger.info("=" * 80)
 
     # Initialize data sources
-    alpha_vantage = AlphaVantageAPI(
-        api_key=os.getenv("ALPHA_VANTAGE_KEY", ""),
-        rate_limiter=create_alpha_vantage_limiter(),
+    finnhub = FinnhubAPI(
+        api_key=os.getenv("FINNHUB_API_KEY", ""),
+        rate_limiter=create_finnhub_limiter(),
     )
     yahoo_finance = YahooFinanceEarnings()
 
     # Initialize validator
     validator = EarningsDateValidator(
-        alpha_vantage=alpha_vantage, yahoo_finance=yahoo_finance
+        finnhub=finnhub, yahoo_finance=yahoo_finance
     )
 
     # Initialize repository
@@ -959,7 +967,7 @@ def main():
     stats = sync_earnings_calendar(
         validator=validator,
         earnings_repo=earnings_repo,
-        alpha_vantage=alpha_vantage,
+        finnhub=finnhub,
         db_path=db_path,
         horizon=args.horizon,
         dry_run=args.dry_run,

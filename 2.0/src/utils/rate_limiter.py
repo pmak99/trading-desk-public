@@ -220,20 +220,13 @@ class CompositeRateLimiter:
             limiter.reset()
 
 
-def create_alpha_vantage_limiter() -> CompositeRateLimiter:
+def create_finnhub_limiter() -> TokenBucketRateLimiter:
     """
-    Create rate limiter for Alpha Vantage API.
+    Create rate limiter for Finnhub API.
 
-    Alpha Vantage free tier limits:
-    - 5 calls per minute
-    - 500 calls per day
+    Finnhub free tier: 60 calls/minute.
     """
-    return CompositeRateLimiter(
-        [
-            TokenBucketRateLimiter(rate=5, per_seconds=60),  # 5/min
-            TokenBucketRateLimiter(rate=500, per_seconds=86400),  # 500/day
-        ]
-    )
+    return TokenBucketRateLimiter(rate=60, per_seconds=60, burst=60)
 
 
 def create_tradier_limiter() -> TokenBucketRateLimiter:

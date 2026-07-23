@@ -7,21 +7,22 @@ This is the core signal for the IV Crush strategy.
 Metric Selection:
 ==================
 The VRP calculation compares implied move (from ATM straddle) to historical moves.
-Three historical move metrics are available:
+Three historical move metrics are available (all stored SIGNED in the database;
+this module takes absolute values before averaging — direction is irrelevant to
+move magnitude):
 
-1. close_move_pct: Earnings close vs previous close (RECOMMENDED)
+1. close_move_pct: Earnings close vs previous close
    - Matches ATM straddle expectation (close-to-close movement)
-   - Most consistent with how straddle is priced
 
-2. intraday_move_pct: High-low range on earnings day
-   - Captures intraday volatility
-   - May be higher than close-to-close move
+2. intraday_move_pct: Earnings-day open -> close (PRODUCTION DEFAULT)
+   - Net intraday move on the reaction day, excludes the overnight gap
+   - For gap-dominant tickers, cross-validate with ORATS abs_avg_ern_mv
+     (close-to-close) — see /analyze --fresh-history
 
 3. gap_move_pct: Earnings open vs previous close
    - Gap move only, ignores intraday action
-   - Useful for overnight-only strategies
 
-Default: close_move_pct for apples-to-apples comparison with implied move.
+Default comes from config.algorithms.vrp_move_metric ("intraday").
 """
 
 import logging
@@ -44,13 +45,15 @@ class VRPCalculator:
     """
     Calculate VRP ratio and generate trading recommendation.
 
-    VRP Ratio = Implied Move / Historical Mean Move
+    VRP Ratio = Implied Move / Historical Mean |Move|
 
-    Thresholds (data-driven from 289-ticker grid scan):
-        - Excellent: >= 7.0x (top 33rd percentile, exceptional edge)
-        - Good: >= 4.0x (top 67th percentile, strong edge)
-        - Marginal: >= 1.5x (baseline edge)
-        - Skip: < 1.5x (insufficient edge)
+    Thresholds come from config (BALANCED profile, production default):
+        - Excellent: >= 1.8x
+        - Good: >= 1.4x
+        - Marginal: >= 1.2x
+        - Skip: < 1.2x (insufficient edge)
+    (Constructor defaults of 7.0/4.0/1.5 are the deprecated LEGACY profile;
+    the container always passes config values.)
 
     Edge Score: Risk-adjusted metric using consistency
         edge_score = vrp_ratio / (1 + consistency)
@@ -118,18 +121,20 @@ class VRPCalculator:
                 )
             )
 
-        # Extract historical move percentages based on configured metric
+        # Extract historical move magnitudes based on configured metric.
+        # DB values are signed; VRP compares against move MAGNITUDE, so take
+        # abs() — a raw mean lets up/down moves cancel and inflates VRP.
         if self.move_metric == "close":
             historical_pcts = [
-                float(move.close_move_pct.value) for move in historical_moves
+                abs(float(move.close_move_pct.value)) for move in historical_moves
             ]
         elif self.move_metric == "intraday":
             historical_pcts = [
-                float(move.intraday_move_pct.value) for move in historical_moves
+                abs(float(move.intraday_move_pct.value)) for move in historical_moves
             ]
         elif self.move_metric == "gap":
             historical_pcts = [
-                float(move.gap_move_pct.value) for move in historical_moves
+                abs(float(move.gap_move_pct.value)) for move in historical_moves
             ]
         else:
             return Err(
@@ -229,17 +234,18 @@ class VRPCalculator:
             return vrp_result
 
         # Calculate detailed consistency metrics using the same metric as VRP
+        # (abs() for the same reason as calculate(): magnitudes, not direction)
         if self.move_metric == "close":
             historical_pcts = [
-                float(move.close_move_pct.value) for move in historical_moves
+                abs(float(move.close_move_pct.value)) for move in historical_moves
             ]
         elif self.move_metric == "intraday":
             historical_pcts = [
-                float(move.intraday_move_pct.value) for move in historical_moves
+                abs(float(move.intraday_move_pct.value)) for move in historical_moves
             ]
         else:  # gap
             historical_pcts = [
-                float(move.gap_move_pct.value) for move in historical_moves
+                abs(float(move.gap_move_pct.value)) for move in historical_moves
             ]
 
         mean = np.mean(historical_pcts)
@@ -279,3 +285,36 @@ class VRPCalculator:
         }
 
         return Ok((vrp_result.value, consistency))
+
+
+def compute_close_baseline_vrp(
+    implied_move_pct: float,
+    historical_moves: List[HistoricalMove],
+    min_quarters: int = 4,
+) -> tuple:
+    """
+    Compute the gap-inclusive (close-to-close) VRP alongside the production
+    intraday VRP for live A/B comparison.
+
+    Universe backtest (Jun 2026, 7,948 events, 2025-06 train/test split):
+    ranking by close-baseline VRP raised top-20% crush rate from 81.2% to
+    84.9% out-of-sample vs the intraday baseline, because intraday_move_pct
+    excludes the overnight gap (the ORCL failure mode). Logged to
+    analysis_log.vrp_close_ratio on every analysis until enough live
+    earnings outcomes accumulate to decide a convention migration.
+
+    Returns:
+        (historical_close_mean_pct, vrp_close_ratio) — either may be None
+        when close data is insufficient.
+    """
+    close_pcts = [
+        abs(float(m.close_move_pct.value))
+        for m in historical_moves
+        if m.close_move_pct is not None
+    ]
+    if len(close_pcts) < min_quarters:
+        return None, None
+    mean_close = float(np.mean(close_pcts))
+    if mean_close < 1e-6 or np.isnan(mean_close) or np.isinf(mean_close):
+        return None, None
+    return mean_close, implied_move_pct / mean_close

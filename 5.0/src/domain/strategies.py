@@ -2,6 +2,7 @@
 Strategy generator for IV Crush trades.
 
 Generates credit spread strategies based on direction and liquidity.
+Iron Condors are permanently banned — NEUTRAL direction uses bull put + bear call spreads.
 """
 
 from dataclasses import dataclass
@@ -115,26 +116,43 @@ def generate_strategies(
             breakeven=short_strike + credit,
         ))
 
-    else:  # NEUTRAL
-        # Iron Condor: bull put + bear call
+    else:  # NEUTRAL — prefer put side first (bull put), then call side
+        # Bull Put Spread (primary)
         put_short = _round_strike(price - short_distance, "down")
         put_long = _round_strike(put_short - spread_width, "down")
+
+        put_credit = spread_width * 0.35
+        put_risk = (put_short - put_long) - put_credit
+
+        strategies.append(Strategy(
+            name="Bull Put Spread",
+            description=f"Sell {put_short:g}P / Buy {put_long:g}P",
+            short_strike=put_short,
+            long_strike=put_long,
+            expiration=expiration,
+            max_profit=put_credit * 100,
+            max_risk=put_risk * 100,
+            pop=68,
+            breakeven=put_short - put_credit,
+        ))
+
+        # Bear Call Spread (secondary)
         call_short = _round_strike(price + short_distance, "up")
         call_long = _round_strike(call_short + spread_width, "up")
 
-        credit = spread_width * 0.5  # Both sides
-        max_risk = spread_width - credit
+        call_credit = spread_width * 0.35
+        call_risk = (call_long - call_short) - call_credit
 
         strategies.append(Strategy(
-            name="Iron Condor",
-            description=f"{put_long:g}P/{put_short:g}P - {call_short:g}C/{call_long:g}C",
-            short_strike=put_short,  # Lower short strike for reference
-            long_strike=call_short,  # Upper short strike
+            name="Bear Call Spread",
+            description=f"Sell {call_short:g}C / Buy {call_long:g}C",
+            short_strike=call_short,
+            long_strike=call_long,
             expiration=expiration,
-            max_profit=credit * 100,
-            max_risk=max_risk * 100,
-            pop=60,
-            breakeven=put_short - credit,  # Lower breakeven
+            max_profit=call_credit * 100,
+            max_risk=call_risk * 100,
+            pop=68,
+            breakeven=call_short + call_credit,
         ))
 
     # Sort by POP descending

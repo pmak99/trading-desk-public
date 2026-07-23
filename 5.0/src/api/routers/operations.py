@@ -20,7 +20,7 @@ from src.domain.implied_move import (
 from src.api.state import _mask_sensitive
 from src.api.dependencies import (
     verify_api_key,
-    get_alphavantage,
+    get_finnhub,
     get_tradier,
     get_perplexity,
     get_historical_repo,
@@ -46,8 +46,8 @@ async def prime(date: str = None, _: bool = Depends(verify_api_key)):
 
     try:
         # Get earnings calendar
-        alphavantage = get_alphavantage()
-        earnings = await alphavantage.get_earnings_calendar()
+        finnhub = get_finnhub()
+        earnings = await finnhub.get_earnings_calendar()
 
         # Filter to target dates
         today = today_et()

@@ -103,6 +103,7 @@ async def dispatch(
             return {"status": "already_run", "job": job}
 
         # Atomic claim: prevent duplicate runs from concurrent requests.
+        # INSERT OR IGNORE returns changes=0 if another request already claimed this slot.
         if not force and not manager.try_claim_job(job):
             log("info", "Job already claimed by concurrent request, skipping", job=job)
             duration_ms = (time.time() - start_time) * 1000

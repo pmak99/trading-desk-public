@@ -1,5 +1,5 @@
 """
-Earnings source aggregation - AlphaVantage, Yahoo Finance, and DB lookups.
+Earnings source aggregation - Finnhub, Yahoo Finance, and DB lookups.
 
 Provides earnings calendar fetching, validation, and database sync.
 """
@@ -20,6 +20,16 @@ from src.infrastructure.data_sources.yahoo_finance_earnings import YahooFinanceE
 
 logger = logging.getLogger(__name__)
 
+# Module-level singleton so LRU cache persists across all calls in one whisper run
+_yf_earnings: Optional["YahooFinanceEarnings"] = None
+
+
+def _get_yf_earnings() -> "YahooFinanceEarnings":
+    global _yf_earnings
+    if _yf_earnings is None:
+        _yf_earnings = YahooFinanceEarnings()
+    return _yf_earnings
+
 
 def fetch_earnings_for_date(
     container: Container,
@@ -33,8 +43,8 @@ def fetch_earnings_for_date(
     """
     logger.info(f"Fetching earnings calendar for {scan_date}...")
 
-    alpha_vantage = container.alphavantage
-    result = alpha_vantage.get_earnings_calendar(horizon="3month")
+    finnhub = container.finnhub
+    result = finnhub.get_earnings_calendar(horizon="3month")
 
     if result.is_err:
         logger.error(f"Failed to fetch earnings calendar: {result.error}")
@@ -56,7 +66,8 @@ def fetch_earnings_for_date(
 
 def fetch_earnings_for_ticker(
     container: Container,
-    ticker: str
+    ticker: str,
+    av_cache: Optional[dict] = None,
 ) -> Optional[Tuple[date, EarningsTiming]]:
     """
     Fetch earnings date for a specific ticker.
@@ -106,11 +117,19 @@ def fetch_earnings_for_ticker(
 
                 if days_until_earnings <= 7 and hours_since_check > 24:
                     logger.info(f"{ticker}: Validating stale cache ({hours_since_check:.0f}h old, earnings in {days_until_earnings}d)")
-                    alpha_vantage = container.alphavantage
-                    av_result = alpha_vantage.get_earnings_calendar(symbol=ticker, horizon="3month")
+                    # Use pre-fetched bulk calendar when available — avoids a rate-limited per-ticker call
+                    av_date, av_timing = None, None
+                    if av_cache is not None and ticker in av_cache:
+                        av_date, av_timing = av_cache[ticker]
+                        av_validated = True
+                    else:
+                        # Yahoo Finance: higher confidence than AV, no hard rate limit
+                        yf_result = _get_yf_earnings().get_next_earnings_date(ticker)
+                        av_validated = yf_result.is_ok
+                        if av_validated:
+                            av_date, av_timing = yf_result.value
 
-                    if av_result.is_ok and av_result.value:
-                        _, av_date, av_timing = av_result.value[0]
+                    if av_validated:
                         if av_date != earnings_date:
                             date_diff_days = (av_date - earnings_date).days
 
@@ -169,7 +188,6 @@ def fetch_earnings_for_ticker(
                             logger.info(f"{ticker}: Earnings on {earnings_date} ({timing.value}) [from DB - validated]")
                             return (earnings_date, timing)
                     else:
-                        # API validation failed, log warning and use cached date
                         logger.warning(f"{ticker}: API validation failed, using potentially stale cache date {earnings_date}")
 
                 logger.info(f"{ticker}: Earnings on {earnings_date} ({timing.value}) [from DB]")
@@ -178,8 +196,8 @@ def fetch_earnings_for_ticker(
         logger.debug(f"DB lookup failed for {ticker}: {e}")
 
     # PRIORITY 2: Fallback to Alpha Vantage API
-    alpha_vantage = container.alphavantage
-    result = alpha_vantage.get_earnings_calendar(symbol=ticker, horizon="3month")
+    finnhub = container.finnhub
+    result = finnhub.get_earnings_calendar(symbol=ticker, horizon="3month")
 
     if result.is_err:
         logger.warning(f"Failed to fetch earnings for {ticker}: {result.error}")
@@ -217,12 +235,36 @@ def validate_tradeable_earnings_dates(tradeable_results: List[dict], container: 
     if not tickers_to_validate:
         return
 
+    # Skip tickers validated in the last 5 min — fetch_earnings_for_ticker already checked them
+    import sqlite3
+    _cutoff = (datetime.now() - timedelta(minutes=5)).isoformat()
+    try:
+        with sqlite3.connect(container.config.database.path, timeout=10) as _conn:
+            _ph = ','.join('?' * len(tickers_to_validate))
+            _rows = _conn.execute(
+                f"SELECT DISTINCT ticker FROM earnings_calendar "
+                f"WHERE ticker IN ({_ph}) AND earnings_date >= date('now') "
+                f"AND last_validated_at > ?",
+                tickers_to_validate + [_cutoff]
+            ).fetchall()
+            _recently_validated = {row[0] for row in _rows}
+    except Exception:
+        _recently_validated = set()
+
+    if _recently_validated:
+        tickers_to_validate = [t for t in tickers_to_validate if t not in _recently_validated]
+        logger.info(f"Skipping {len(_recently_validated)} recently validated: {', '.join(sorted(_recently_validated))}")
+
+    if not tickers_to_validate:
+        logger.info("All tradeable tickers recently validated — skipping redundant pass")
+        return
+
     logger.info(f"\n\U0001f50d Validating earnings dates for {len(tickers_to_validate)} tradeable tickers...")
 
-    # Initialize validator
+    # Initialize validator — Yahoo Finance only (Finnhub bulk already ran; no per-ticker call needed)
     yahoo_finance = YahooFinanceEarnings()
     validator = EarningsDateValidator(
-        alpha_vantage=container.alphavantage,
+        finnhub=None,
         yahoo_finance=yahoo_finance
     )
 
@@ -297,8 +339,7 @@ def ensure_tickers_in_db(tickers: list[str], container: Container) -> None:
                 ("..." if len(missing_tickers) > 10 else ""))
 
     # Sync to fetch correct earnings dates
-    logger.info("\U0001f504 Syncing earnings dates from Alpha Vantage + Yahoo Finance...")
-    logger.info(f"   Note: This may take ~{len(missing_tickers) * 12 // 60} minutes due to rate limiting (5 calls/min)")
+    logger.info("\U0001f504 Syncing earnings dates from Finnhub + Yahoo Finance...")
 
     # Call the existing sync script
     script_path = Path(__file__).parent.parent / "sync_earnings_calendar.py"

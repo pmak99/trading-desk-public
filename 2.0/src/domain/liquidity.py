@@ -4,8 +4,8 @@ Liquidity analysis module for options trading.
 Implements a 3-tier liquidity classification system to prevent trading
 illiquid options that can lead to poor fills and excessive slippage.
 
-Post-Loss Analysis (Nov 2025): This module was created after -$25K loss
-where WDAY and ZS were flagged for insufficient liquidity but traded anyway.
+Post-Loss Analysis: This module was created after a real loss where names
+were flagged for insufficient liquidity but traded anyway.
 """
 
 from dataclasses import dataclass

@@ -1,12 +1,13 @@
 """
-Finnhub API client for analyst recommendations and company news.
+Finnhub API client for analyst recommendations, company news, and earnings calendar.
 
-Provides two free-tier endpoints for the council sentiment consensus.
+Replaces Alpha Vantage for earnings calendar data (free tier: 60 req/min, 30k/month).
 """
 
 import asyncio
 import time
-from typing import Dict, Any, List
+from datetime import date, timedelta
+from typing import Dict, Any, List, Optional
 
 import httpx
 
@@ -15,6 +16,14 @@ from src.core import metrics
 
 
 BASE_URL = "https://finnhub.io/api/v1"
+
+_HORIZON_DAYS = {"3month": 90, "6month": 180, "12month": 365}
+
+# Finnhub silently truncates bulk /calendar/earnings responses at 1,500
+# entries, keeping the LATEST dates — wide windows lose the nearest days.
+# Mirrors 2.0/src/infrastructure/api/finnhub.py (fix both together).
+FINNHUB_BULK_CAP = 1500
+BULK_CHUNK_DAYS = 7
 
 
 class FinnhubClient:
@@ -125,3 +134,119 @@ class FinnhubClient:
             }
             for article in data[:limit]
         ]
+
+    async def get_earnings_calendar(
+        self,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        symbol: Optional[str] = None,
+        horizon: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get upcoming earnings calendar.
+
+        Args:
+            from_date: Start date YYYY-MM-DD (default: today)
+            to_date: End date YYYY-MM-DD (default: today + 30 days)
+            symbol: Filter by ticker (optional)
+            horizon: Convenience alias — "3month" / "6month" / "12month"
+
+        Returns:
+            List of dicts with keys: symbol, report_date, estimate, hour
+        """
+        today = date.today()
+        if horizon:
+            days = _HORIZON_DAYS.get(horizon, 90)
+            start = from_date or today.isoformat()
+            end = to_date or (today + timedelta(days=days)).isoformat()
+        else:
+            start = from_date or today.isoformat()
+            end = to_date or (today + timedelta(days=30)).isoformat()
+
+        if symbol:
+            calendar = await self._fetch_calendar_window(start, end, symbol)
+        else:
+            # Bulk fetches must be chunked: Finnhub caps the response at
+            # FINNHUB_BULK_CAP entries keeping the LATEST dates, so a wide
+            # window silently drops the nearest days (found Jul 2026 — a
+            # 30-day digest window can miss same-day earnings in season).
+            calendar = await self._fetch_calendar_chunked(
+                date.fromisoformat(start), date.fromisoformat(end)
+            )
+
+        seen = set()
+        results = []
+        for item in calendar:
+            if not (item.get("symbol") and item.get("date")):
+                continue
+            key = (item["symbol"], item["date"])
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(
+                {
+                    "symbol": item.get("symbol", ""),
+                    "report_date": item.get("date", ""),
+                    "name": "",
+                    "estimate": str(item["epsEstimate"]) if item.get("epsEstimate") is not None else "",
+                    "currency": "USD",
+                    "fiscal_date_ending": "",
+                    "hour": item.get("hour", ""),
+                }
+            )
+        return results
+
+    async def _fetch_calendar_window(
+        self, start: str, end: str, symbol: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Single /calendar/earnings request. Returns raw entries (may be empty)."""
+        params: Dict[str, str] = {"from": start, "to": end}
+        if symbol:
+            params["symbol"] = symbol
+
+        data = await self._request("/calendar/earnings", params)
+
+        if isinstance(data, dict) and data.get("error"):
+            log("warn", "Finnhub earnings calendar error", error=data["error"])
+            return []
+
+        return data.get("earningsCalendar", []) if isinstance(data, dict) else []
+
+    async def _fetch_calendar_chunked(
+        self, from_date: date, to_date: date
+    ) -> List[Dict[str, Any]]:
+        """
+        Bulk fetch in BULK_CHUNK_DAYS windows, splitting any window that comes
+        back at FINNHUB_BULK_CAP entries (truncated) until it fits or is a
+        single day.
+        """
+        entries: List[Dict[str, Any]] = []
+        start = from_date
+        while start <= to_date:
+            chunk_end = min(start + timedelta(days=BULK_CHUNK_DAYS - 1), to_date)
+            chunk = await self._fetch_calendar_window(
+                start.isoformat(), chunk_end.isoformat()
+            )
+
+            if len(chunk) >= FINNHUB_BULK_CAP and chunk_end > start:
+                mid = start + timedelta(days=(chunk_end - start).days // 2)
+                entries.extend(await self._fetch_calendar_chunked(start, mid))
+                entries.extend(
+                    await self._fetch_calendar_chunked(mid + timedelta(days=1), chunk_end)
+                )
+            else:
+                if len(chunk) >= FINNHUB_BULK_CAP:
+                    log(
+                        "warn",
+                        "Finnhub calendar single-day response at cap — may be truncated",
+                        date=start.isoformat(),
+                        entries=len(chunk),
+                    )
+                entries.extend(chunk)
+
+            start = chunk_end + timedelta(days=1)
+        return entries
+
+    async def get_earnings_for_date(self, target_date: str) -> List[Dict[str, Any]]:
+        """Get earnings for a specific date (from and to are the same day)."""
+        return await self.get_earnings_calendar(from_date=target_date, to_date=target_date)

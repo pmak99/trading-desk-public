@@ -53,10 +53,10 @@ class TestAdjustDirection:
         assert result.rule_applied == "tiebreak_bullish"
 
     def test_rule1_neutral_skew_bearish_sentiment(self):
-        """Neutral skew + bearish sentiment -> neutral (zeroed direction, treated as neutral)."""
+        """Neutral skew + bearish sentiment -> bearish (tiebreak; no direction zeroed by default)."""
         result = adjust_direction("neutral", -0.5, "bearish")
-        assert result.adjusted_bias == AdjustedBias.NEUTRAL
-        assert result.rule_applied == "both_neutral"
+        assert result.adjusted_bias == AdjustedBias.BEARISH
+        assert result.rule_applied == "tiebreak_bearish"
 
     def test_rule1_neutral_skew_neutral_sentiment(self):
         """Neutral skew + neutral sentiment -> neutral."""
@@ -70,9 +70,9 @@ class TestAdjustDirection:
         result = adjust_direction("neutral", 0.3)
         assert result.adjusted_bias == AdjustedBias.BULLISH
 
-        # Score <= -0.2 -> bearish direction, treated as neutral if zeroed
+        # Score <= -0.2 -> bearish direction
         result = adjust_direction("neutral", -0.3)
-        assert result.adjusted_bias == AdjustedBias.NEUTRAL
+        assert result.adjusted_bias == AdjustedBias.BEARISH
 
         # -0.2 < score < 0.2 -> neutral
         result = adjust_direction("neutral", 0.1)
@@ -81,10 +81,10 @@ class TestAdjustDirection:
     # RULE 2: Conflict -> go neutral (hedge)
 
     def test_rule2_bullish_skew_bearish_sentiment(self):
-        """Bullish skew + bearish sentiment -> bullish (skew dominates)."""
+        """Bullish skew + bearish sentiment -> neutral (conflict; bearish is active by default)."""
         result = adjust_direction("bullish", -0.5, "bearish")
-        assert result.adjusted_bias == AdjustedBias.BULLISH
-        assert result.rule_applied == "skew_dominates"
+        assert result.adjusted_bias == AdjustedBias.NEUTRAL
+        assert result.rule_applied == "conflict_hedge"
 
     def test_rule2_bearish_skew_bullish_sentiment(self):
         """Bearish skew + bullish sentiment -> neutral (conflict; bullish is still active)."""
@@ -92,23 +92,23 @@ class TestAdjustDirection:
         assert result.adjusted_bias == AdjustedBias.NEUTRAL
         assert result.rule_applied == "conflict_hedge"
 
-    def test_zeroed_bearish_via_score_does_not_override_skew(self):
-        """Bearish score on bullish skew -> skew dominates."""
+    def test_bearish_via_score_triggers_conflict_on_bullish_skew(self):
+        """Bearish score on bullish skew -> conflict hedge (bearish is active by default)."""
         result = adjust_direction("bullish", -0.7)
-        assert result.adjusted_bias == AdjustedBias.BULLISH
-        assert result.rule_applied == "skew_dominates"
+        assert result.adjusted_bias == AdjustedBias.NEUTRAL
+        assert result.rule_applied == "conflict_hedge"
 
-    def test_zeroed_bearish_weak_via_score_does_not_override_skew(self):
-        """Weak bearish score on bullish skew -> skew dominates."""
+    def test_weak_bearish_via_score_triggers_conflict_on_bullish_skew(self):
+        """Weak bearish score on bullish skew -> conflict hedge."""
         result = adjust_direction("bullish", -0.3)
-        assert result.adjusted_bias == AdjustedBias.BULLISH
-        assert result.rule_applied == "skew_dominates"
+        assert result.adjusted_bias == AdjustedBias.NEUTRAL
+        assert result.rule_applied == "conflict_hedge"
 
     def test_rule2_strong_bullish_bearish_sentiment(self):
-        """Strong bullish skew + bearish sentiment -> strong_bullish (skew dominates)."""
+        """Strong bullish skew + bearish sentiment -> neutral (conflict hedge)."""
         result = adjust_direction("strong_bullish", -0.7, "bearish")
-        assert result.adjusted_bias == AdjustedBias.STRONG_BULLISH
-        assert result.rule_applied == "skew_dominates"
+        assert result.adjusted_bias == AdjustedBias.NEUTRAL
+        assert result.rule_applied == "conflict_hedge"
 
     # RULE 3: Otherwise keep skew bias
 
@@ -178,10 +178,10 @@ class TestGetDirection:
 
     def test_uses_3_rule_adjustment(self):
         """With both, uses 3-rule adjustment."""
-        # Rule 3: bullish skew + bearish sentiment -> bullish (skew dominates)
-        assert get_direction("bullish", -0.5, "bearish") == "BULLISH"
+        # Rule 2: bullish skew + bearish sentiment -> neutral (conflict hedge)
+        assert get_direction("bullish", -0.5, "bearish") == "NEUTRAL"
 
-        # Active conflict still fires -> bearish skew + bullish sentiment -> neutral (rule 2)
+        # Rule 2: bearish skew + bullish sentiment -> neutral (conflict hedge)
         assert get_direction("bearish", 0.5, "bullish") == "NEUTRAL"
 
         # Rule 3: aligned -> keep skew
@@ -211,14 +211,14 @@ class TestSizeModifier:
     """Tests for contrarian position sizing."""
 
     def test_strong_bullish_reduces_size(self):
-        """Strong bullish sentiment -> reduce size (larger moves expected)."""
+        """Strong bullish sentiment -> no size adjustment by default (tune SIZE_MODIFIER_BULLISH)."""
         result = adjust_direction("neutral", 0.7, "bullish")
-        assert result.size_modifier == 0.9
+        assert result.size_modifier == 1.0
 
     def test_strong_bearish_increases_size(self):
-        """Strong bearish sentiment -> increase size (priced in)."""
+        """Strong bearish sentiment -> no size adjustment by default (tune SIZE_MODIFIER_BEARISH)."""
         result = adjust_direction("neutral", -0.7, "bearish")
-        assert result.size_modifier == 1.1
+        assert result.size_modifier == 1.0
 
     def test_moderate_sentiment_neutral_sizing(self):
         """Moderate sentiment -> no size adjustment."""

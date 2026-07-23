@@ -47,7 +47,7 @@ Expiration Date Calculation:
     - Custom offset: earnings_date + offset_days
 
 Notes:
-    - Requires TRADIER_API_KEY and ALPHA_VANTAGE_API_KEY in .env
+    - Requires TRADIER_API_KEY and FINNHUB_API_KEY in .env
     - Whisper mode auto-backfills historical data (like ticker mode)
     - Historical data is backfilled automatically for VRP calculation
     - Run: python scripts/backfill.py <TICKER> to manually backfill data
@@ -72,6 +72,11 @@ Notes:
         const='',
         type=str,
         help="Analyze most anticipated earnings for week (optional: YYYY-MM-DD for Monday, defaults to current week)"
+    )
+    mode_group.add_argument(
+        "--harvest",
+        action="store_true",
+        help="30-45 DTE non-earnings premium harvest candidates (from position_limits ORATS snapshot)"
     )
 
     # Options

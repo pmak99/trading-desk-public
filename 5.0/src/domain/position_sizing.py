@@ -77,3 +77,40 @@ def calculate_position_size(
 
     # Ensure minimum if we have edge
     return max(min_contracts, contracts)
+
+
+def apply_compound_risk_cap(position_limits, tail_risk_level, skew_bias):
+    """
+    Apply the compound tail risk contract cap (parity with 2.0 SizingContext).
+
+    Compound risk = TRR HIGH + BEARISH/STRONG_BEARISH skew firing together
+    (the ORATS sizing alarm cannot fire post-Jun-2026 sunset, so this is the
+    only reachable live combination). Calibrated May 2026: 44% crush rate in
+    FULL compound zones vs ~67% baseline — cap at 25 contracts.
+
+    Args:
+        position_limits: Dict with max_contracts (from DB row or fallback),
+                         or None when no limits are known.
+        tail_risk_level: 'LOW' | 'NORMAL' | 'HIGH' | 'UNKNOWN' — the
+                         live-computed level, not the frozen DB snapshot.
+        skew_bias: DirectionalBias value string (e.g. 'bearish') or None.
+
+    Returns:
+        position_limits dict with compound_risk_active set, max_contracts
+        capped at 25 when compound risk fires (never raises an existing
+        tighter limit). None passes through unchanged.
+    """
+    COMPOUND_RISK_MAX_CONTRACTS = 25
+
+    if position_limits is None:
+        return None
+
+    compound = (
+        tail_risk_level == "HIGH"
+        and skew_bias in ("bearish", "strong_bearish")
+    )
+    position_limits["compound_risk_active"] = compound
+    if compound:
+        existing = position_limits.get("max_contracts") or COMPOUND_RISK_MAX_CONTRACTS
+        position_limits["max_contracts"] = min(existing, COMPOUND_RISK_MAX_CONTRACTS)
+    return position_limits

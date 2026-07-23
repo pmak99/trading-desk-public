@@ -157,6 +157,26 @@ class JobManager:
         """Return True if job already completed successfully today."""
         return self._get_status(today_et(), job_name) == "success"
 
+    def check_dependencies(self, job_name: str) -> tuple[bool, str]:
+        """
+        Check if all dependencies succeeded today.
+
+        Returns:
+            (can_run, reason) - True if can run, else reason why not
+        """
+        deps = self.get_dependencies(job_name)
+        if not deps:
+            return True, ""
+
+        today = today_et()
+
+        for dep in deps:
+            status = self._get_status(today, dep)
+            if status != "success":
+                return False, f"Dependency '{dep}' status: {status}"
+
+        return True, ""
+
     def try_claim_job(self, job_name: str) -> bool:
         """
         Atomically claim a job slot to prevent concurrent duplicate runs.
@@ -177,26 +197,6 @@ class JobManager:
             return conn.total_changes > 0
         finally:
             conn.close()
-
-    def check_dependencies(self, job_name: str) -> tuple[bool, str]:
-        """
-        Check if all dependencies succeeded today.
-
-        Returns:
-            (can_run, reason) - True if can run, else reason why not
-        """
-        deps = self.get_dependencies(job_name)
-        if not deps:
-            return True, ""
-
-        today = today_et()
-
-        for dep in deps:
-            status = self._get_status(today, dep)
-            if status != "success":
-                return False, f"Dependency '{dep}' status: {status}"
-
-        return True, ""
 
     def record_status(self, job_name: str, status: str):
         """Record job completion status to persistent storage.

@@ -270,12 +270,12 @@ class TestCompositeScoring:
 
     @pytest.fixture
     def balanced_scorer(self):
-        """Create balanced scorer (40% VRP, 25% consistency, 15% skew, 20% liquidity)."""
+        """Create balanced scorer (30% VRP, 25% consistency, 15% iv_crush_rate, 10% skew, 20% liquidity)."""
         return TickerScorer(get_config("balanced"))
 
     @pytest.fixture
     def vrp_dominant_scorer(self):
-        """Create VRP-dominant scorer (70% VRP, 20% consistency, 5% skew, 5% liquidity)."""
+        """Create VRP-dominant scorer (65% VRP, 15% consistency, 10% iv_crush_rate, 5% skew, 5% liquidity)."""
         return TickerScorer(get_config("vrp_dominant"))
 
     def test_composite_score_perfect_ticker(self, balanced_scorer):
@@ -285,6 +285,7 @@ class TestCompositeScoring:
             earnings_date=date(2024, 11, 1),
             vrp_ratio=2.5,  # Excellent
             consistency=0.9,  # Excellent
+            iv_crush_rate=1.0,  # 100% crush rate = Excellent
             skew=0.05,  # Neutral
             open_interest=2000,  # Excellent
             bid_ask_spread_pct=3.0,  # Excellent
@@ -293,6 +294,7 @@ class TestCompositeScoring:
 
         assert score.vrp_score == 100.0
         assert score.consistency_score == 100.0
+        assert score.iv_crush_rate_score == 100.0
         assert score.skew_score == 100.0
         assert score.liquidity_score == 100.0
         assert score.composite_score == 100.0
@@ -304,27 +306,28 @@ class TestCompositeScoring:
             earnings_date=date(2024, 11, 1),
             vrp_ratio=2.0,  # 100 points
             consistency=0.8,  # 100 points
+            iv_crush_rate=1.0,  # 100 points
             skew=0.0,  # 100 points
             open_interest=1000,  # 10 points
             bid_ask_spread_pct=5.0,  # 10 points
             volume=500,  # 5 points -> Total liquidity: 100 points
         )
 
-        # 40% * 100 + 25% * 100 + 15% * 100 + 20% * 100 = 100
+        # 30% * 100 + 25% * 100 + 15% * 100 + 10% * 100 + 20% * 100 = 100
         assert score.composite_score == 100.0
 
     def test_composite_score_vrp_dominant_weighting(self, vrp_dominant_scorer):
-        """VRP-dominant config weighs VRP heavily (70%)."""
+        """VRP-dominant config weighs VRP heavily (65%)."""
         score = vrp_dominant_scorer.score_ticker(
             ticker="AAPL",
             earnings_date=date(2024, 11, 1),
             vrp_ratio=2.5,  # 100 points
             consistency=0.3,  # 0 points
-            skew=0.5,  # ~40 points
+            skew=0.5,  # ~62.5 points
             open_interest=50,  # 0 points
         )
 
-        # 70% * 100 + 20% * 0 + 5% * 40 + 5% * 0 = 72
+        # 65% * 100 + 15% * 0 + 10% * 50(neutral default) + 5% * ~62.5 + 5% * 0 ≈ 73
         assert 70.0 <= score.composite_score <= 75.0
 
     def test_composite_score_stores_raw_metrics(self, balanced_scorer):
@@ -358,6 +361,7 @@ class TestRankingAndSelection:
                 earnings_date=date(2024, 11, 1),
                 vrp_score=80.0,
                 consistency_score=80.0,
+                iv_crush_rate_score=80.0,
                 skew_score=80.0,
                 liquidity_score=80.0,
                 composite_score=80.0,
@@ -367,6 +371,7 @@ class TestRankingAndSelection:
                 earnings_date=date(2024, 11, 2),
                 vrp_score=90.0,
                 consistency_score=90.0,
+                iv_crush_rate_score=90.0,
                 skew_score=90.0,
                 liquidity_score=90.0,
                 composite_score=90.0,
@@ -376,6 +381,7 @@ class TestRankingAndSelection:
                 earnings_date=date(2024, 11, 3),
                 vrp_score=70.0,
                 consistency_score=70.0,
+                iv_crush_rate_score=70.0,
                 skew_score=70.0,
                 liquidity_score=70.0,
                 composite_score=70.0,
@@ -400,6 +406,7 @@ class TestRankingAndSelection:
                 earnings_date=date(2024, 11, 1),
                 vrp_score=100.0 - i,
                 consistency_score=100.0 - i,
+                iv_crush_rate_score=100.0 - i,
                 skew_score=100.0 - i,
                 liquidity_score=100.0 - i,
                 composite_score=100.0 - i,
@@ -424,6 +431,7 @@ class TestRankingAndSelection:
                 earnings_date=date(2024, 11, 1),
                 vrp_score=80.0,
                 consistency_score=80.0,
+                iv_crush_rate_score=80.0,
                 skew_score=80.0,
                 liquidity_score=80.0,
                 composite_score=80.0,
@@ -433,6 +441,7 @@ class TestRankingAndSelection:
                 earnings_date=date(2024, 11, 2),
                 vrp_score=50.0,
                 consistency_score=50.0,
+                iv_crush_rate_score=50.0,
                 skew_score=50.0,
                 liquidity_score=50.0,
                 composite_score=50.0,  # Below 60.0
@@ -442,6 +451,7 @@ class TestRankingAndSelection:
                 earnings_date=date(2024, 11, 3),
                 vrp_score=70.0,
                 consistency_score=70.0,
+                iv_crush_rate_score=70.0,
                 skew_score=70.0,
                 liquidity_score=70.0,
                 composite_score=70.0,
@@ -467,6 +477,7 @@ class TestRankingAndSelection:
                 earnings_date=date(2024, 11, 1),
                 vrp_score=40.0,
                 consistency_score=40.0,
+                iv_crush_rate_score=40.0,
                 skew_score=40.0,
                 liquidity_score=40.0,
                 composite_score=40.0,  # All below 60.0

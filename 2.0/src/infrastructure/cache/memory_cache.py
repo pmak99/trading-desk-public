@@ -185,3 +185,18 @@ class CachedOptionsDataProvider:
             self.cache.set(key, result, ttl=60)  # 60 second TTL for chains
 
         return result
+
+    def get_expirations(self, ticker: str):
+        """Get available option expirations with caching (listings change rarely)."""
+        ticker_normalized = ticker.upper()
+        key = f"{CACHE_VERSION}:expirations:{ticker_normalized}"
+        cached = self.cache.get(key)
+
+        if cached is not None:
+            return cached
+
+        result = self.provider.get_expirations(ticker)
+        if result.is_ok:
+            self.cache.set(key, result, ttl=3600)  # 1 hour TTL for listings
+
+        return result

@@ -48,3 +48,49 @@ def test_calculate_position_size_minimum():
         risk_reward=1.0,
     )
     assert size >= 1
+
+
+# ── Compound risk cap (Jul 2026 — parity with 2.0 SizingContext) ──────────
+
+from src.domain.position_sizing import apply_compound_risk_cap
+
+
+def test_compound_cap_high_trr_plus_bearish():
+    pl = {"max_contracts": 50, "max_notional": 25000}
+    out = apply_compound_risk_cap(pl, "HIGH", "bearish")
+    assert out["max_contracts"] == 25
+    assert out["compound_risk_active"] is True
+
+
+def test_compound_cap_strong_bearish_also_fires():
+    out = apply_compound_risk_cap({"max_contracts": 50}, "HIGH", "strong_bearish")
+    assert out["max_contracts"] == 25
+
+
+def test_compound_cap_weak_bearish_does_not_fire():
+    out = apply_compound_risk_cap({"max_contracts": 50}, "HIGH", "weak_bearish")
+    assert out["max_contracts"] == 50
+    assert out["compound_risk_active"] is False
+
+
+def test_compound_cap_normal_trr_bearish_no_cap():
+    out = apply_compound_risk_cap({"max_contracts": 100}, "NORMAL", "bearish")
+    assert out["max_contracts"] == 100
+    assert out["compound_risk_active"] is False
+
+
+def test_compound_cap_never_raises_existing_limit():
+    # Frozen DB row with a tighter limit stays tighter
+    out = apply_compound_risk_cap({"max_contracts": 10}, "HIGH", "bearish")
+    assert out["max_contracts"] == 10
+    assert out["compound_risk_active"] is True
+
+
+def test_compound_cap_none_position_limits_passthrough():
+    assert apply_compound_risk_cap(None, "HIGH", "bearish") is None
+
+
+def test_compound_cap_none_bias_no_cap():
+    out = apply_compound_risk_cap({"max_contracts": 50}, "HIGH", None)
+    assert out["max_contracts"] == 50
+    assert out["compound_risk_active"] is False

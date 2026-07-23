@@ -8,6 +8,14 @@ import logging
 from typing import List
 
 from .constants import (
+    HARVEST_IV_RANK_MIN,
+    HARVEST_IV_RANK_MAX_POINTS,
+    HARVEST_IV_HV_MAX_POINTS,
+    HARVEST_IV_HV_CAP,
+    HARVEST_SKEW_MAX_POINTS,
+    HARVEST_LIQUIDITY_MAX_POINTS,
+    HARVEST_SKEW_SCORES,
+    HARVEST_SKEW_NULL_SCORE,
     SCORE_VRP_MAX_POINTS,
     SCORE_VRP_TARGET,
     SCORE_VRP_USE_LINEAR,
@@ -184,6 +192,89 @@ def calculate_scan_quality_score(result: dict) -> float:
     total = vrp_score + edge_points + liquidity_score + move_score
 
     return round(total, 1)
+
+
+def _rslp30_to_skew_label(r_slp_30) -> str | None:
+    """Map raw r_slp_30 float to skew label string. Returns None when input is None."""
+    if r_slp_30 is None:
+        return None
+    try:
+        v = float(r_slp_30)
+    except (TypeError, ValueError):
+        return None
+    if v < -0.905:
+        return 'STRONG_BEARISH'
+    if v < 0.065:
+        return 'BEARISH'
+    if v < 0.712:
+        return 'WEAK_BEARISH'
+    if v < 1.359:
+        return 'NEUTRAL'
+    if v < 2.006:
+        return 'WEAK_BULLISH'
+    if v < 2.976:
+        return 'BULLISH'
+    return 'STRONG_BULLISH'
+
+
+def calculate_harvest_score(candidate: dict) -> float:
+    """
+    Composite harvest score for 30-45 DTE non-earnings premium candidates (0-100).
+
+    Factors:
+      - IV Rank     (40 pts): linear from iv_rank_min=60 → 0pts to 100 → 40pts
+      - IV/HV ratio (25 pts): linear from 1.0 → 0pts to 2.0+ → 25pts (capped)
+      - Skew        (15 pts): label-based from HARVEST_SKEW_SCORES; NULL → 8pts
+      - Liquidity   (20 pts): max_contracts proxy (≥100 → 20, ≥50 → 12, <50 → 6)
+
+    Args:
+        candidate: Dict with keys iv_rank_1y, iv_hv_ratio, r_slp_30, max_contracts.
+                   Missing keys fall back to conservative defaults (0 pts).
+
+    Returns:
+        Score in [0.0, 100.0], rounded to 1 decimal.
+
+    Raises:
+        TypeError: If candidate is not a dict.
+    """
+    if not isinstance(candidate, dict):
+        raise TypeError(f"candidate must be dict, not {type(candidate).__name__}")
+
+    # Factor 1: IV Rank (max 40 pts)
+    iv_rank = candidate.get('iv_rank_1y', 0.0) or 0.0
+    try:
+        iv_rank = float(iv_rank)
+    except (TypeError, ValueError):
+        iv_rank = 0.0
+    iv_rank_pts = max(0.0, (iv_rank - HARVEST_IV_RANK_MIN) / (100.0 - HARVEST_IV_RANK_MIN)) * HARVEST_IV_RANK_MAX_POINTS
+
+    # Factor 2: IV/HV ratio (max 25 pts, capped at 2.0x)
+    iv_hv = candidate.get('iv_hv_ratio', 1.0) or 1.0
+    try:
+        iv_hv = float(iv_hv)
+    except (TypeError, ValueError):
+        iv_hv = 1.0
+    iv_hv_capped = min(iv_hv, HARVEST_IV_HV_CAP)
+    iv_hv_pts = max(0.0, (iv_hv_capped - 1.0) / (HARVEST_IV_HV_CAP - 1.0)) * HARVEST_IV_HV_MAX_POINTS
+
+    # Factor 3: Skew (max 15 pts)
+    skew_label = _rslp30_to_skew_label(candidate.get('r_slp_30'))
+    skew_pts = HARVEST_SKEW_SCORES.get(skew_label, HARVEST_SKEW_NULL_SCORE) if skew_label else HARVEST_SKEW_NULL_SCORE
+
+    # Factor 4: Liquidity proxy via max_contracts (max 20 pts)
+    max_contracts = candidate.get('max_contracts', 0) or 0
+    try:
+        max_contracts = int(max_contracts)
+    except (TypeError, ValueError):
+        max_contracts = 0
+    if max_contracts >= 100:
+        liq_pts = 20.0
+    elif max_contracts >= 50:
+        liq_pts = 12.0
+    else:
+        liq_pts = 6.0
+
+    return round(iv_rank_pts + iv_hv_pts + skew_pts + liq_pts, 1)
 
 
 def _precalculate_quality_scores(tradeable_results: List[dict]) -> None:

@@ -174,7 +174,7 @@ class AsyncYFinance:
             await asyncio.sleep(self.rate_limit_delay)
 
             # Run sync function in thread pool
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
                 self._executor,
                 self._fetch_ticker_info_sync,

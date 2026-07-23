@@ -123,11 +123,12 @@ class TestVRPZeroMeanMove:
 class TestVRPNaNInfGuards:
     """Tests for NaN and Inf guards on mean_move."""
 
-    def test_negative_close_moves_mean_below_zero(self):
-        """Negative close moves produce negative mean, which should return error.
+    def test_negative_close_moves_use_absolute_magnitude(self):
+        """DB stores signed moves; VRP must average magnitudes, not raw values.
 
-        The VRP guard checks: mean_move <= 0 or isnan or isinf.
-        Negative moves (like -5.0) give a negative mean, caught by <= 0.
+        Four quarters of -5% moves mean the stock reliably moves 5% — the
+        baseline is 5.0, not -5.0 (a raw signed mean would error here and,
+        with mixed signs, cancel toward zero and inflate VRP).
         """
         calc = VRPCalculator(min_quarters=4, move_metric="close")
         moves = make_historical_moves(n=4, close_move_pct=-5.0)
@@ -135,8 +136,9 @@ class TestVRPNaNInfGuards:
 
         result = calc.calculate("TEST", date(2026, 6, 16), implied, moves)
 
-        assert result.is_err
-        assert result.error.code == ErrorCode.INVALID
+        assert result.is_ok
+        assert result.value.vrp_ratio == pytest.approx(2.0)
+        assert float(result.value.historical_mean_move_pct.value) == pytest.approx(5.0)
 
 
 class TestVRPMinimumQuarters:
@@ -406,3 +408,48 @@ class TestVRPConsistencyMetrics:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ============================================================================
+# compute_close_baseline_vrp (gap-inclusive VRP for live A/B, migration 016)
+# ============================================================================
+
+from src.application.metrics.vrp import compute_close_baseline_vrp
+
+
+class TestComputeCloseBaselineVRP:
+    """Tests for the gap-inclusive close-baseline VRP helper."""
+
+    def test_basic_ratio(self):
+        moves = [make_historical_move(close_move_pct=c) for c in (4.0, -6.0, 5.0, -5.0)]
+        mean_close, ratio = compute_close_baseline_vrp(7.5, moves)
+        assert mean_close == pytest.approx(5.0)
+        assert ratio == pytest.approx(1.5)
+
+    def test_uses_absolute_values(self):
+        """Signed moves must not cancel — baseline uses |close_move_pct|."""
+        moves = [make_historical_move(close_move_pct=c) for c in (5.0, -5.0, 5.0, -5.0)]
+        mean_close, ratio = compute_close_baseline_vrp(10.0, moves)
+        assert mean_close == pytest.approx(5.0)
+        assert ratio == pytest.approx(2.0)
+
+    def test_insufficient_quarters_returns_none(self):
+        moves = [make_historical_move(close_move_pct=5.0) for _ in range(3)]
+        mean_close, ratio = compute_close_baseline_vrp(10.0, moves)
+        assert mean_close is None
+        assert ratio is None
+
+    def test_zero_mean_returns_none(self):
+        moves = [make_historical_move(close_move_pct=0.0) for _ in range(4)]
+        mean_close, ratio = compute_close_baseline_vrp(10.0, moves)
+        assert mean_close is None
+        assert ratio is None
+
+    def test_skips_moves_without_close_pct(self):
+        moves = [make_historical_move(close_move_pct=5.0) for _ in range(4)]
+        # Frozen dataclass — rebuild one move without close_move_pct via __dict__ copy
+        import dataclasses
+        broken = dataclasses.replace(moves[0], close_move_pct=None)
+        mean_close, ratio = compute_close_baseline_vrp(10.0, moves[:3] + [broken])
+        assert mean_close is None  # only 3 valid quarters remain
+        assert ratio is None

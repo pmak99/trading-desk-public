@@ -92,8 +92,8 @@ def _validate_cache_config(config: Config, errors: list) -> None:
     if config.cache.l2_ttl <= 0:
         errors.append(f"L2 TTL must be positive, got {config.cache.l2_ttl}")
 
-    # Warn about Alpha Vantage key (not an error, but worth noting)
-    if not config.api.alpha_vantage_key:
+    # Warn about Finnhub key (not an error, but worth noting)
+    if not config.api.finnhub_key:
         logger.warning(
-            "ALPHA_VANTAGE_KEY not set - historical data features may be limited"
+            "FINNHUB_API_KEY not set - earnings calendar features may be limited"
         )

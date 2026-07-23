@@ -4,7 +4,7 @@ Unit tests for profit zone penalty multiplier in StrategyScorer.
 Tests the _calculate_profit_zone_multiplier method which penalizes strategies
 where the profit zone is narrower than the implied move range.
 
-January 2026: Floor raised from 0.3 to 0.6 to reduce Iron Condor suppression.
+January 2026: Floor raised from 0.3 to 0.6.
 """
 
 import pytest
@@ -15,7 +15,7 @@ from src.domain.scoring.strategy_scorer import StrategyScorer
 from src.domain.enums import StrategyType
 
 
-def make_mock_strategy(breakevens: list[float], stock_price: float, strategy_type=StrategyType.IRON_CONDOR):
+def make_mock_strategy(breakevens: list[float], stock_price: float, strategy_type=StrategyType.BULL_PUT_SPREAD):
     """Create a mock Strategy with given breakevens and stock price."""
     strategy = MagicMock()
     strategy.strategy_type = strategy_type
@@ -182,9 +182,9 @@ class TestProfitZonePenaltyJan2026Changes:
         assert multiplier == 0.6
         assert multiplier != 0.3  # Explicitly verify not old value
 
-    def test_impact_on_iron_condor_score(self, scorer):
-        """Iron Condor with tight zone should score higher than old system."""
-        strategy = make_mock_strategy([98.0, 102.0], 100.0, StrategyType.IRON_CONDOR)
+    def test_impact_on_tight_zone_score(self, scorer):
+        """Spread with tight zone should score higher than old system (floor 0.3 → 0.6)."""
+        strategy = make_mock_strategy([98.0, 102.0], 100.0, StrategyType.BULL_PUT_SPREAD)
         vrp = make_mock_vrp(10.0)  # 20% total range, 4% zone = 20% ratio
 
         multiplier = scorer._calculate_profit_zone_multiplier(strategy, vrp)

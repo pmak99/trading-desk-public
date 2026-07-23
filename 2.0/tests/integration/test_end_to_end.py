@@ -163,6 +163,7 @@ class TestTickerScoringIntegration:
         # Validate individual scores (0-100 scale)
         assert 0 <= score.vrp_score <= 100
         assert 0 <= score.consistency_score <= 100
+        assert 0 <= score.iv_crush_rate_score <= 100
         assert 0 <= score.skew_score <= 100
         assert 0 <= score.liquidity_score <= 100
 
@@ -172,11 +173,13 @@ class TestTickerScoringIntegration:
         # With VRP=2.0 (excellent), should have high VRP score
         assert score.vrp_score >= 90.0
 
-        # Composite should be weighted sum
+        # Composite should be weighted sum (balanced preset: vrp=0.30, consistency=0.25,
+        # iv_crush_rate=0.15, skew=0.10, liquidity=0.20)
         expected_composite = (
-            0.40 * score.vrp_score +
+            0.30 * score.vrp_score +
             0.25 * score.consistency_score +
-            0.15 * score.skew_score +
+            0.15 * score.iv_crush_rate_score +
+            0.10 * score.skew_score +
             0.20 * score.liquidity_score
         )
         assert abs(score.composite_score - expected_composite) < 0.01

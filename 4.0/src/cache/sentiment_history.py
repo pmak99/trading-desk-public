@@ -25,6 +25,7 @@ Schema:
 
 import os
 import re
+import sys
 import sqlite3
 import threading
 import logging
@@ -33,6 +34,17 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
+
+# Import sizing thresholds from canonical source
+_root = str(Path(__file__).resolve().parent.parent.parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+from common.constants import (  # noqa: E402
+    STRONG_BULLISH_THRESHOLD,
+    STRONG_BEARISH_THRESHOLD,
+    SIZE_MODIFIER_BULLISH,
+    SIZE_MODIFIER_BEARISH,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,30 +55,15 @@ def _get_size_modifier(sentiment_score: float) -> float:
     """
     Calculate contrarian position sizing modifier.
 
-    Uses same thresholds as sentiment_direction.get_size_modifier() to avoid
-    circular import issues. Constants are defined here to match:
-    - STRONG_BULLISH_THRESHOLD = 0.6
-    - STRONG_BEARISH_THRESHOLD = -0.6
-    - SIZE_MODIFIER_BULLISH = 0.9
-    - SIZE_MODIFIER_BEARISH = 1.1
-
     CAUTION: Based on n=23 samples. Capped at 10% adjustment (was 20%)
     until n=50+ samples collected. Treat as hypothesis.
     """
-    if sentiment_score >= 0.6:
-        return 0.9
-    elif sentiment_score <= -0.6:
-        return 1.1
+    if sentiment_score >= STRONG_BULLISH_THRESHOLD:
+        return SIZE_MODIFIER_BULLISH
+    elif sentiment_score <= STRONG_BEARISH_THRESHOLD:
+        return SIZE_MODIFIER_BEARISH
     return 1.0
 
-
-# Single source of truth for sizing thresholds (imported by sentiment_direction.py)
-SIZING_THRESHOLDS = {
-    'strong_bullish': 0.6,
-    'strong_bearish': -0.6,
-    'modifier_bullish': 0.9,
-    'modifier_bearish': 1.1,
-}
 
 
 class SentimentDirection(Enum):

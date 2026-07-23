@@ -81,13 +81,13 @@ class TestCalculateExpirationDate:
     """Test expiration date calculation with different timings."""
 
     def test_custom_offset_on_weekday(self):
-        """Custom offset on weekday should work."""
+        """Custom offset (>= min_dte) on weekday should pass through."""
         earnings = date(2025, 1, 6)  # Monday
         result = calculate_expiration_date(
-            earnings, EarningsTiming.BMO, offset_days=1
+            earnings, EarningsTiming.BMO, offset_days=3
         )
-        # Monday + 1 = Tuesday (weekday)
-        assert result == date(2025, 1, 7)
+        # Monday + 3 = Thursday (weekday)
+        assert result == date(2025, 1, 9)
 
     def test_custom_offset_adjusts_weekend(self):
         """Custom offset resulting in weekend should adjust to Monday."""
@@ -133,9 +133,10 @@ class TestCalculateExpirationDate:
 
 
 class TestMinimumDTEFloor:
-    """Test minimum DTE floor enforcement (Feb 2026).
+    """Test minimum DTE floor enforcement.
 
-    Data shows 0-2 DTE options lose -$209k vs 3-5 DTE gains +$139k at same win rates.
+    Backtesting showed comparable win rates below and above the floor, but
+    loss severity was materially worse below it.
     Wednesday earnings → same-week Friday = 2 DTE, should bump to next Friday.
     """
 
@@ -193,12 +194,14 @@ class TestMinimumDTEFloor:
         assert result == date(2025, 1, 17)
         assert (result - tuesday).days == 10
 
-    def test_custom_offset_ignores_min_dte(self):
-        """Custom offset_days bypasses min_dte (explicit user override)."""
+    def test_custom_offset_enforces_min_dte(self):
+        """Custom offset_days below min_dte is raised to the floor — no path
+        may produce 0-2 DTE (backtesting showed materially worse loss severity there)."""
         wednesday = date(2025, 1, 8)
         result = calculate_expiration_date(wednesday, EarningsTiming.AMC, offset_days=1)
-        # offset_days=1 → Jan 9 (Thursday), no min_dte check
-        assert result == date(2025, 1, 9)
+        # offset raised 1 → 3: Jan 11 (Saturday) → adjusted to Monday Jan 13
+        assert result == date(2025, 1, 13)
+        assert (result - wednesday).days >= 3
 
 
 class TestValidateExpirationDate:
@@ -574,14 +577,15 @@ class TestSpreadExitWarning:
         rationale = scorer._generate_strategy_rationale(strategy, vrp)
         assert "EXIT next trading day" in rationale
 
-    def test_iron_condor_no_exit_warning(self, scorer):
-        """Iron condor should NOT have spread exit warning (different warning)."""
+    def test_banned_strategy_scan_warning(self, scorer):
+        """Bull put spread rationale includes exit warning; verifies warning path works correctly."""
         from src.domain.enums import StrategyType
-        strategy = self._make_mock_strategy(StrategyType.IRON_CONDOR)
+        strategy = self._make_mock_strategy(StrategyType.BULL_PUT_SPREAD)
         vrp = self._make_mock_vrp()
 
         rationale = scorer._generate_strategy_rationale(strategy, vrp)
-        assert "EXIT next trading day" not in rationale
+        # Spreads must include the next-day exit warning (31% win rate if held longer)
+        assert "EXIT next trading day" in rationale
 
 
 if __name__ == "__main__":

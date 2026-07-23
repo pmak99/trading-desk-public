@@ -101,7 +101,7 @@ class YahooFinanceEarningsAsync:
             logger.debug(f"Fetching earnings date from Yahoo Finance: {ticker}")
 
             # Run blocking I/O in executor to avoid blocking event loop
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             earnings_date, timing = await loop.run_in_executor(
                 None,  # Use default executor
                 self._fetch_earnings_sync,

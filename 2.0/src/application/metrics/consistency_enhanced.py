@@ -118,18 +118,18 @@ class ConsistencyAnalyzerEnhanced:
                 )
             )
 
-        # Extract moves based on configured metric (should match VRP calculator)
-        # FIX: Previously hardcoded to intraday_move_pct, but VRP uses close_move_pct
-        # This caused apples-to-oranges comparison in consistency analysis
+        # Extract move magnitudes based on configured metric (matches VRP calculator).
+        # DB values are signed; consistency measures magnitude stability, so take
+        # abs() — signed values near-cancel and collapse the score to 0.
         if self.move_metric == "close":
-            moves = [float(hm.close_move_pct.value) for hm in historical_moves]
+            moves = [abs(float(hm.close_move_pct.value)) for hm in historical_moves]
         elif self.move_metric == "intraday":
-            moves = [float(hm.intraday_move_pct.value) for hm in historical_moves]
+            moves = [abs(float(hm.intraday_move_pct.value)) for hm in historical_moves]
         elif self.move_metric == "gap":
-            moves = [float(hm.gap_move_pct.value) for hm in historical_moves]
+            moves = [abs(float(hm.gap_move_pct.value)) for hm in historical_moves]
         else:
             # Should never happen due to __init__ validation, but be defensive
-            moves = [float(hm.close_move_pct.value) for hm in historical_moves]
+            moves = [abs(float(hm.close_move_pct.value)) for hm in historical_moves]
 
         # Calculate exponentially-weighted statistics
         weighted_mean = self._exponential_weighted_mean(moves)

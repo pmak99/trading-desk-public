@@ -24,7 +24,7 @@ import tempfile
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 LOCAL_DB = PROJECT_ROOT / "2.0" / "data" / "ivcrush.db"
-GCS_BUCKET = os.environ.get("GCS_BUCKET", "your-gcs-bucket")
+GCS_BUCKET = "your-gcs-bucket"
 GCS_BLOB = "ivcrush.db"
 # Google Drive backup path - auto-detect or use environment variable
 def _find_gdrive_backup_dir() -> Path:
@@ -157,7 +157,8 @@ def sync_historical_moves(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Co
         cloud_records = cloud_conn.execute(f"""
             SELECT ticker, earnings_date, prev_close, earnings_open, earnings_high,
                    earnings_low, earnings_close, intraday_move_pct, gap_move_pct,
-                   close_move_pct, volume_before, volume_earnings, created_at
+                   close_move_pct, volume_before, volume_earnings, created_at,
+                   pre_earnings_straddle_pct, ern_iv_effect
             FROM historical_moves
             WHERE (ticker, earnings_date) IN ({placeholders})
         """, params).fetchall()
@@ -166,8 +167,9 @@ def sync_historical_moves(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Co
             INSERT OR IGNORE INTO historical_moves
             (ticker, earnings_date, prev_close, earnings_open, earnings_high,
              earnings_low, earnings_close, intraday_move_pct, gap_move_pct,
-             close_move_pct, volume_before, volume_earnings, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+             close_move_pct, volume_before, volume_earnings, created_at,
+             pre_earnings_straddle_pct, ern_iv_effect)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, cloud_records)
         stats["local_added"] = len(cloud_records)
 
@@ -182,7 +184,8 @@ def sync_historical_moves(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Co
         local_records = local_conn.execute(f"""
             SELECT ticker, earnings_date, prev_close, earnings_open, earnings_high,
                    earnings_low, earnings_close, intraday_move_pct, gap_move_pct,
-                   close_move_pct, volume_before, volume_earnings, created_at
+                   close_move_pct, volume_before, volume_earnings, created_at,
+                   pre_earnings_straddle_pct, ern_iv_effect
             FROM historical_moves
             WHERE (ticker, earnings_date) IN ({placeholders})
         """, params).fetchall()
@@ -191,8 +194,9 @@ def sync_historical_moves(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Co
             INSERT OR IGNORE INTO historical_moves
             (ticker, earnings_date, prev_close, earnings_open, earnings_high,
              earnings_low, earnings_close, intraday_move_pct, gap_move_pct,
-             close_move_pct, volume_before, volume_earnings, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+             close_move_pct, volume_before, volume_earnings, created_at,
+             pre_earnings_straddle_pct, ern_iv_effect)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, local_records)
         stats["cloud_added"] = len(local_records)
 
@@ -372,9 +376,7 @@ def sync_position_limits(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Con
         log("position_limits table doesn't exist in either database, skipping")
         return stats
 
-    # Create table in cloud if missing (copy schema from local)
-    if local_has_table and not cloud_has_table:
-        cloud_conn.execute("""
+    _POSITION_LIMITS_DDL = """
             CREATE TABLE IF NOT EXISTS position_limits (
                 ticker TEXT PRIMARY KEY,
                 max_contracts INTEGER DEFAULT 100,
@@ -385,33 +387,31 @@ def sync_position_limits(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Con
                 max_move REAL,
                 num_quarters INTEGER,
                 notes TEXT,
-                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                iv_rank_1y REAL,
+                iv_pct_1y REAL,
+                iv30d REAL,
+                hv20d REAL,
+                abs_avg_ern_mv REAL,
+                orats_implied_ern_mv REAL
             )
-        """)
+        """
+
+    # Create table in cloud if missing (copy schema from local)
+    if local_has_table and not cloud_has_table:
+        cloud_conn.execute(_POSITION_LIMITS_DDL)
 
     # Create table in local if missing (copy schema from cloud)
     if cloud_has_table and not local_has_table:
-        local_conn.execute("""
-            CREATE TABLE IF NOT EXISTS position_limits (
-                ticker TEXT PRIMARY KEY,
-                max_contracts INTEGER DEFAULT 100,
-                max_notional REAL DEFAULT 50000,
-                tail_risk_ratio REAL,
-                tail_risk_level TEXT,
-                avg_move REAL,
-                max_move REAL,
-                num_quarters INTEGER,
-                notes TEXT,
-                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        local_conn.execute(_POSITION_LIMITS_DDL)
 
     # Get all records from both (actual schema columns)
     local_records = {
         row[0]: row  # key by ticker
         for row in local_conn.execute("""
             SELECT ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
-                   avg_move, max_move, num_quarters, notes, last_updated
+                   avg_move, max_move, num_quarters, notes, last_updated,
+                   iv_rank_1y, iv_pct_1y, iv30d, hv20d, abs_avg_ern_mv, orats_implied_ern_mv
             FROM position_limits
         """)
     }
@@ -420,7 +420,8 @@ def sync_position_limits(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Con
         row[0]: row
         for row in cloud_conn.execute("""
             SELECT ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
-                   avg_move, max_move, num_quarters, notes, last_updated
+                   avg_move, max_move, num_quarters, notes, last_updated,
+                   iv_rank_1y, iv_pct_1y, iv30d, hv20d, abs_avg_ern_mv, orats_implied_ern_mv
             FROM position_limits
         """)
     }
@@ -436,8 +437,9 @@ def sync_position_limits(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Con
             cloud_conn.execute("""
                 INSERT OR REPLACE INTO position_limits
                 (ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
-                 avg_move, max_move, num_quarters, notes, last_updated)
-                VALUES (?,?,?,?,?,?,?,?,?,?)
+                 avg_move, max_move, num_quarters, notes, last_updated,
+                 iv_rank_1y, iv_pct_1y, iv30d, hv20d, abs_avg_ern_mv, orats_implied_ern_mv)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, local_rec)
             stats["cloud_added"] += 1
 
@@ -446,8 +448,9 @@ def sync_position_limits(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Con
             local_conn.execute("""
                 INSERT OR REPLACE INTO position_limits
                 (ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
-                 avg_move, max_move, num_quarters, notes, last_updated)
-                VALUES (?,?,?,?,?,?,?,?,?,?)
+                 avg_move, max_move, num_quarters, notes, last_updated,
+                 iv_rank_1y, iv_pct_1y, iv30d, hv20d, abs_avg_ern_mv, orats_implied_ern_mv)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, cloud_rec)
             stats["local_added"] += 1
 
@@ -460,16 +463,18 @@ def sync_position_limits(local_conn: sqlite3.Connection, cloud_conn: sqlite3.Con
                 cloud_conn.execute("""
                     INSERT OR REPLACE INTO position_limits
                     (ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
-                     avg_move, max_move, num_quarters, notes, last_updated)
-                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                     avg_move, max_move, num_quarters, notes, last_updated,
+                     iv_rank_1y, iv_pct_1y, iv30d, hv20d, abs_avg_ern_mv, orats_implied_ern_mv)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, local_rec)
                 stats["cloud_added"] += 1
             elif cloud_updated > local_updated:
                 local_conn.execute("""
                     INSERT OR REPLACE INTO position_limits
                     (ticker, max_contracts, max_notional, tail_risk_ratio, tail_risk_level,
-                     avg_move, max_move, num_quarters, notes, last_updated)
-                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                     avg_move, max_move, num_quarters, notes, last_updated,
+                     iv_rank_1y, iv_pct_1y, iv30d, hv20d, abs_avg_ern_mv, orats_implied_ern_mv)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, cloud_rec)
                 stats["local_added"] += 1
 

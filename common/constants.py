@@ -94,38 +94,46 @@ HIGH_BULLISH_WARNING_THRESHOLD = 0.7
 # =============================================================================
 # ORATS Feature Flag
 # =============================================================================
-
-# Set ORATS_ENABLED=false in .env to pause the ORATS subscription.
+# Subscription ended Jun 2026 — ORATS_ENABLED=false everywhere since Jul 2 2026.
 # All ORATS API calls are skipped; branched logic is preserved for re-enabling.
 ORATS_ENABLED: bool = os.getenv("ORATS_ENABLED", "true").lower() == "true"
+
+# Staleness guard for the position_limits ORATS snapshot (Jul 2026).
+# When ORATS_ENABLED=true, snapshot rows older than this are treated as
+# absent - protects against flipping the flag on resubscription without
+# re-running refresh_orats_snapshots.py (frozen 2026-06-24 data would
+# otherwise silently feed sizing Rules A/B and compound-risk detection).
+# 14 days = two missed weekly refreshes; display warnings fire at 10.
+ORATS_SNAPSHOT_MAX_AGE_DAYS: int = 14
 
 
 # =============================================================================
 # ORATS Signal Fusion
+# Thresholds below are z-score breakpoints for classifying a put/call skew
+# slope signal into a 7-bucket directional bias. Re-derive RSLP30_MEAN/STD
+# from your own skew data distribution rather than reusing these as-is.
 # =============================================================================
 
-# rSlp30 distribution (measured on position_limits tickers)
-# Z-score normalization required: raw thresholds at 0 would classify ~60% as STRONG_BULLISH
 RSLP30_MEAN = 1.036
 RSLP30_STD  = 1.294
 
 # Sorted breakpoints: (upper_bound, numeric_level) → first threshold exceeded wins
-# Produces balanced distribution: 6.6% | 15.6% | 17.7% | 21.3% | 18.0% | 14.9% | 5.9%
 RSLP30_THRESHOLDS = [
-    (RSLP30_MEAN - 1.50 * RSLP30_STD, -3),  # < -0.905 → STRONG_BEARISH
-    (RSLP30_MEAN - 0.75 * RSLP30_STD, -2),  # < +0.065 → BEARISH
-    (RSLP30_MEAN - 0.25 * RSLP30_STD, -1),  # < +0.712 → WEAK_BEARISH
-    (RSLP30_MEAN + 0.25 * RSLP30_STD,  0),  # < +1.359 → NEUTRAL
-    (RSLP30_MEAN + 0.75 * RSLP30_STD, +1),  # < +2.006 → WEAK_BULLISH
-    (RSLP30_MEAN + 1.50 * RSLP30_STD, +2),  # < +2.976 → BULLISH
-    (float('inf'),                     +3),  # else      → STRONG_BULLISH
+    (RSLP30_MEAN - 1.50 * RSLP30_STD, -3),  # STRONG_BEARISH
+    (RSLP30_MEAN - 0.75 * RSLP30_STD, -2),  # BEARISH
+    (RSLP30_MEAN - 0.25 * RSLP30_STD, -1),  # WEAK_BEARISH
+    (RSLP30_MEAN + 0.25 * RSLP30_STD,  0),  # NEUTRAL
+    (RSLP30_MEAN + 0.75 * RSLP30_STD, +1),  # WEAK_BULLISH
+    (RSLP30_MEAN + 1.50 * RSLP30_STD, +2),  # BULLISH
+    (float('inf'),                     +3),  # STRONG_BULLISH
 ]
 
-# At median Tradier R²=0.226, ORATS drives 69% of fused signal (0.5 / (0.226 + 0.5))
+# Relative confidence weights when fusing an ORATS-derived skew signal with a
+# Tradier-derived proxy. Tune based on your own signal-quality comparison.
 ORATS_SKEW_CONFIDENCE = 0.5
+TRADIER_PROXY_SKEW_CONFIDENCE = 0.3
 
-# iee/fcst ratio at which Rule B fires (reduce position 50%)
+# Divergence ratio and IV-effect thresholds used by the (now-dormant) ORATS
+# sizing rules. Tune based on your own backtest analysis.
 IEE_DIVERGENCE_RATIO  = 1.5
-
-# Validated: 58.7% win +$218k below 2.0x vs 48.3% win -$231k above
 FCST_ERN_IV_THRESHOLD = 2.0

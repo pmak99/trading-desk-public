@@ -182,9 +182,9 @@ class ConnectionPool:
             # Return connection to pool
             if conn:
                 try:
-                    # Commit any pending transaction
+                    # Roll back any uncommitted transaction — caller is responsible for committing
                     if conn.in_transaction:
-                        conn.commit()
+                        conn.rollback()
 
                     # Return to pool if space available
                     try:

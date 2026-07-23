@@ -1,17 +1,12 @@
 # 5.0 Cloud Autopilot
 
-24/7 cloud-native trading system on GCP Cloud Run. Transforms manual CLI commands into automated pre-market scans, real-time alerts, and Telegram notifications.
+24/7 cloud-native trading system on GCP Cloud Run. Runs scheduled pre-market scans, delivers Telegram alerts, and exposes a REST API for the full IV Crush analysis stack.
 
-**Live:** https://trading-desk-vquzm76kja-ue.a.run.app
+**Live:** `https://your-service.a.run.app` | Rate limit: 60 req/min
 
-## Features
+5.0 ports 2.0's domain math for cloud deployment — it never reimplements it independently. `5.0/common/` is a **shadow copy** of root `common/`; when changing shared logic, update both.
 
-- **12 Scheduled Jobs** - Pre-market prep, sentiment scan, morning digest, outcome recording
-- **Telegram Bot** - Mobile access via `/health`, `/whisper`, `/analyze TICKER`, `/council TICKER`
-- **Full VRP Stack** - VRP, liquidity, skew, and 3-rule direction system (ported from 2.0/4.0)
-- **AI Sentiment** - Perplexity + Finnhub powered
-- **Council** - 6-source AI sentiment consensus for pre-earnings analysis
-- **Performance Optimized** - Parallel analysis (5 concurrent), VRP caching (1-6hr TTL)
+---
 
 ## Quick Start
 
@@ -19,10 +14,8 @@
 
 ```bash
 cd 5.0
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.template .env   # Edit with API keys
-
+../2.0/venv/bin/pip install -r requirements.txt
+cp .env.template .env   # fill in API keys
 export $(cat .env | xargs)
 uvicorn src.main:app --reload --port 8080
 ```
@@ -32,139 +25,172 @@ uvicorn src.main:app --reload --port 8080
 ```bash
 docker build -t ivcrush:local .
 docker run -p 8080:8080 --env-file .env -v $(pwd)/data:/app/data ivcrush:local
-
-# Or with compose
-docker compose -f docker-compose.yml up --build
 ```
+
+### Deploy
+
+```bash
+./deploy.sh           # Full deploy: DB sync → GCS upload → Cloud Run
+./deploy.sh --quick   # Code-only (skip DB sync)
+```
+
+The Claude Code command `/deploy` wraps this and adds `--status`, `--logs`, and `--rollback` (via gcloud directly).
+
+---
 
 ## API Endpoints
 
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/` | GET | None | Health check (public) |
-| `/api/health` | GET | API Key | System health |
-| `/api/analyze?ticker=XXX` | GET | API Key | Deep ticker analysis |
-| `/api/whisper` | GET | API Key | High-VRP opportunities |
-| `/api/scan?date=YYYY-MM-DD` | GET | API Key | Scan specific date |
-| `/api/council?ticker=XXX` | GET | API Key | 6-source AI sentiment council |
-| `/prime` | POST | API Key | Pre-cache sentiment |
-| `/dispatch` | POST | API Key | Job scheduler trigger |
-| `/telegram` | POST | Webhook | Bot commands |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Health ping (no auth) |
+| `/api/health` | GET | System health: APIs, DB, uptime |
+| `/api/analyze?ticker=XXX` | GET | Full analysis |
+| `/api/whisper` | GET | High-VRP opportunities |
+| `/api/scan?date=YYYY-MM-DD` | GET | Scan all earnings on a date |
+| `/api/council?ticker=XXX` | GET | 6-source AI sentiment consensus |
+| `/prime` | POST | Pre-cache sentiment for upcoming earnings |
+| `/dispatch` | POST | Trigger a scheduled job manually |
+| `/telegram` | POST | Telegram webhook (bot commands) |
 
-**Auth:** `curl -H "X-API-Key: $KEY" https://trading-desk-vquzm76kja-ue.a.run.app/api/health`
+**Auth:** `X-API-Key` header required on all `/api/*` and `/prime`/`/dispatch` endpoints.
 
-**Rate Limit:** 60 requests/minute per IP (in-memory sliding window)
+```bash
+curl -H "X-API-Key: $KEY" https://your-service.a.run.app/api/health
+```
 
-## Telegram Bot
+**Known scoring divergence:** cloud scoring (`src/domain/scoring.py`) uses the simpler composite from `common/constants.py` (VRP 55%, Move difficulty 25%, Liquidity 20%), so `/api/whisper` rankings can order tickers differently than the local 2.0 `/whisper`. The 2.0 scan quality score is authoritative for trade decisions.
+
+---
+
+## Telegram Bot Commands
 
 | Command | Description |
 |---------|-------------|
 | `/health` | System status |
-| `/whisper` | Today's high-VRP opportunities |
-| `/analyze TICKER` | Deep analysis |
-| `/council TICKER` | 6-source AI sentiment consensus |
-| `/dashboard` | Grafana metrics link |
+| `/whisper` | High-VRP opportunities |
+| `/analyze TICKER` | Full analysis |
+| `/council TICKER` | 6-source AI sentiment |
 
-**Aliases:** `NIKE`->`NKE`, `GOOGLE`->`GOOGL`, `FACEBOOK`->`META`
+**Common aliases:** NIKE→NKE, GOOGLE→GOOGL, FACEBOOK→META
+
+---
 
 ## Scheduled Jobs
 
-### Weekday (Mon-Fri ET)
+All jobs are gated by `SCHEDULED_JOBS_ENABLED` — set it `false` to silence every Telegram digest/alert while keeping the service up (`/dispatch` returns `{"status":"disabled"}` immediately):
+
+```bash
+gcloud run services update trading-desk --region us-east1 \
+  --update-env-vars SCHEDULED_JOBS_ENABLED=false   # re-enable with =true
+```
+
+### Weekday (Mon–Fri, US/Eastern)
 
 | Time | Job | Description |
 |------|-----|-------------|
-| 5:30 AM | pre-market-prep | Fetch earnings, calculate VRP |
-| 6:30 AM | sentiment-scan | Pre-cache sentiment for high-VRP |
-| 7:30 AM | morning-digest | Top 10 opportunities to Telegram |
-| 10:00 AM | market-open-refresh | Refresh prices after open |
-| 2:30 PM | pre-trade-refresh | Final VRP validation |
+| 5:30 AM | pre-market-prep | Fetch earnings calendar, calculate VRP |
+| 6:30 AM | sentiment-scan | Pre-cache Perplexity sentiment for high-VRP tickers |
+| 7:30 AM | morning-digest | Top 10 opportunities pushed to Telegram |
+| 10:00 AM | market-open-refresh | Refresh prices post-open |
+| 2:30 PM | pre-trade-refresh | Final VRP validation before close |
 | 4:30 PM | after-hours-check | Monitor after-hours moves |
-| 7:00 PM | outcome-recorder | Record earnings outcomes |
-| 8:00 PM | evening-summary | Daily summary notification |
+| 7:00 PM | outcome-recorder | Record earnings outcomes to DB |
+| 8:00 PM | evening-summary | Daily P&L summary to Telegram |
 
 ### Weekend
 
 | Day | Time | Job |
 |-----|------|-----|
-| Sat | 4:00 AM | weekly-backfill (past 7 days) |
-| Sun | 3:00 AM | weekly-backup (DB integrity + GCS) |
+| Sat | 4:00 AM | weekly-backfill (past 7 days of outcomes) |
+| Sun | 3:00 AM | weekly-backup (DB integrity + GCS sync) |
 | Sun | 3:30 AM | weekly-cleanup (expired cache) |
-| Sun | 4:00 AM | calendar-sync (3-month refresh) |
+| Sun | 4:00 AM | calendar-sync (3-month earnings refresh) |
+
+Job implementations live in `src/jobs/handlers/` (one module per job).
+
+---
 
 ## Architecture
 
 ```
 5.0/
 ├── src/
-│   ├── main.py              # FastAPI entry point
-│   ├── api/                 # API layer
-│   │   ├── routers/         # analysis, health, jobs, operations, webhooks
-│   │   ├── middleware.py    # Rate limiting, API key auth
-│   │   ├── dependencies.py  # FastAPI dependency injection
-│   │   └── state.py         # Application state management
-│   ├── core/                # Config, logging, metrics, job manager, database
-│   ├── domain/              # VRP, liquidity, scoring, skew, direction, strategies
-│   ├── integrations/        # Tradier, Perplexity, Finnhub, Telegram, Yahoo, AlphaVantage
-│   ├── formatters/          # Telegram HTML, CLI ASCII formatters
-│   ├── application/         # Business logic (filters)
-│   └── jobs/                # Scheduled job implementations
-├── terraform/               # GCP infrastructure (Cloud Run, monitoring)
-├── data/ivcrush.db          # SQLite database (gitignored)
-├── deploy.sh                # Deploy script (syncs DB + deploys)
+│   ├── main.py                  FastAPI entry point
+│   ├── api/
+│   │   ├── routers/             analyze, whisper, scan, council, health, jobs, operations, webhooks
+│   │   ├── middleware.py        Rate limiting, API key auth
+│   │   ├── dependencies.py      FastAPI dependency injection
+│   │   └── state.py             Application state
+│   ├── core/
+│   │   ├── config.py            Environment config (incl. SCHEDULED_JOBS_ENABLED)
+│   │   ├── database.py          DB connection management
+│   │   ├── job_manager.py       Scheduled job runner
+│   │   ├── logging.py           Structured logging — print(json.dumps()) is intentional Cloud Logging output
+│   │   └── metrics.py           Metrics push
+│   ├── domain/                  VRP, liquidity, skew, direction, scoring (ported from 2.0)
+│   │   └── council/             Council package: types.py, scoring.py, runner.py
+│   ├── integrations/            Tradier, Perplexity, Finnhub, Telegram, Twelve Data, Yahoo, SEC EDGAR, FINRA
+│   ├── formatters/              Telegram HTML and CLI ASCII formatters
+│   ├── application/             Business logic (filters)
+│   └── jobs/                    base.py + handlers/ (one module per scheduled job)
+├── common/                      Shadow copy of root common/ — keep in sync
+├── terraform/                   GCP uptime monitoring + alerting
+├── dashboards/                  Grafana dashboard JSON exports
+├── data/                        ivcrush.db (gitignored, synced from 2.0/data/)
+├── deploy.sh                    Deploy script (--quick to skip DB sync)
 ├── Dockerfile
-├── docker-compose.yml
-├── DEPLOYMENT.md            # Full deployment guide
-└── DESIGN.md                # Architecture details
+└── docker-compose.yml
 ```
 
-## Deployment
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for complete instructions.
-
-```bash
-cd 5.0
-./deploy.sh              # Full deploy with DB sync
-./deploy.sh --quick      # Code-only deploy (faster)
-```
+---
 
 ## Configuration
 
 ```bash
-# API Keys
+# Core
 TRADIER_API_KEY=xxx
-ALPHA_VANTAGE_KEY=xxx
-PERPLEXITY_API_KEY=xxx
 FINNHUB_API_KEY=xxx
-TELEGRAM_BOT_TOKEN=xxx
-TELEGRAM_CHAT_ID=xxx
+PERPLEXITY_API_KEY=xxx
+TWELVE_DATA_KEY=xxx
+DB_PATH=data/ivcrush.db
+
+# Feature flags
+ORATS_ENABLED=false          # ORATS retired Jul 2026 — do not re-enable without a live subscription
+SCHEDULED_JOBS_ENABLED=true  # false = silence all Telegram digests/alerts
 
 # Security
 API_KEY=xxx
+TELEGRAM_BOT_TOKEN=xxx
+TELEGRAM_CHAT_ID=xxx
 TELEGRAM_WEBHOOK_SECRET=xxx
-
-# Database
-DB_PATH=data/ivcrush.db
 
 # GCP
 GOOGLE_CLOUD_PROJECT=trading-desk-prod
-GCS_BUCKET=trading-desk-data
+GCS_BUCKET=your-gcs-bucket
 ```
+
+Secrets are stored in GCP Secret Manager. `deploy.sh` reads them automatically. Both feature flags read from the environment at runtime — toggling requires no code change or redeploy (`gcloud run services update ... --update-env-vars`).
+
+---
 
 ## Monthly Cost
 
 | Item | Cost |
 |------|------|
-| Perplexity API | ~$3-5 |
-| GCP services | ~$1 |
-| **Total** | **~$6/month** |
+| Perplexity API | ~$3–5 |
+| GCP Cloud Run + Storage | ~$1 |
+| **Total** | **~$4–6/month** |
+
+(ORATS $49/month ended with the subscription, Jun 2026.)
+
+---
 
 ## Testing
 
 ```bash
-cd 5.0
-../2.0/venv/bin/python -m pytest tests/ -v    # 507 tests
+../2.0/venv/bin/python -m pytest tests/ -v    # 545 tests
 ```
 
 ---
 
-**Disclaimer:** For research purposes only. Not financial advice.
+*For research purposes only. Not financial advice.*

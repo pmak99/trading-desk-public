@@ -21,6 +21,7 @@ class ScoringWeights:
     # Core metrics
     vrp_weight: float  # VRP ratio importance (implied vs historical move)
     consistency_weight: float  # Historical consistency importance
+    iv_crush_rate_weight: float  # Per-ticker IV crush hit rate (historical crush frequency)
     skew_weight: float  # Skew favorability importance
     liquidity_weight: float  # Liquidity (OI, volume, spreads) importance
 
@@ -29,6 +30,7 @@ class ScoringWeights:
         total = (
             self.vrp_weight
             + self.consistency_weight
+            + self.iv_crush_rate_weight
             + self.skew_weight
             + self.liquidity_weight
         )
@@ -39,6 +41,7 @@ class ScoringWeights:
         for name, weight in [
             ("vrp_weight", self.vrp_weight),
             ("consistency_weight", self.consistency_weight),
+            ("iv_crush_rate_weight", self.iv_crush_rate_weight),
             ("skew_weight", self.skew_weight),
             ("liquidity_weight", self.liquidity_weight),
         ]:
@@ -129,8 +132,9 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
             name="VRP-Dominant",
             description="Prioritizes raw VRP edge over other factors. Baseline strategy.",
             weights=ScoringWeights(
-                vrp_weight=0.70,
-                consistency_weight=0.20,
+                vrp_weight=0.65,
+                consistency_weight=0.15,
+                iv_crush_rate_weight=0.10,
                 skew_weight=0.05,
                 liquidity_weight=0.05,
             ),
@@ -148,11 +152,12 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
         # User profile: Balanced risk, Liquidity First, Skew-Aware, 5-15 trades/week
         "balanced": ScoringConfig(
             name="Balanced",
-            description="Well-rounded approach balancing VRP, consistency, skew, and liquidity.",
+            description="Well-rounded approach balancing VRP, consistency, skew, liquidity, and IV crush rate.",
             weights=ScoringWeights(
-                vrp_weight=0.40,
+                vrp_weight=0.30,
                 consistency_weight=0.25,
-                skew_weight=0.15,
+                iv_crush_rate_weight=0.15,
+                skew_weight=0.10,
                 liquidity_weight=0.20,
             ),
             thresholds=default_thresholds,
@@ -166,9 +171,10 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
             name="Liquidity-First",
             description="Prioritizes liquidity and low slippage. Best for larger position sizes.",
             weights=ScoringWeights(
-                vrp_weight=0.30,
+                vrp_weight=0.25,
                 consistency_weight=0.20,
-                skew_weight=0.15,
+                iv_crush_rate_weight=0.10,
+                skew_weight=0.10,
                 liquidity_weight=0.35,
             ),
             thresholds=default_thresholds,
@@ -183,8 +189,9 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
             description="Favors stocks with predictable earnings moves. Lower variance.",
             weights=ScoringWeights(
                 vrp_weight=0.35,
-                consistency_weight=0.45,
-                skew_weight=0.10,
+                consistency_weight=0.40,
+                iv_crush_rate_weight=0.10,
+                skew_weight=0.05,
                 liquidity_weight=0.10,
             ),
             thresholds=default_thresholds,
@@ -200,7 +207,8 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
             weights=ScoringWeights(
                 vrp_weight=0.35,
                 consistency_weight=0.20,
-                skew_weight=0.30,
+                iv_crush_rate_weight=0.10,
+                skew_weight=0.20,
                 liquidity_weight=0.15,
             ),
             thresholds=default_thresholds,
@@ -214,8 +222,9 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
             name="Aggressive",
             description="Higher volume approach. Lower thresholds, more trades.",
             weights=ScoringWeights(
-                vrp_weight=0.55,
+                vrp_weight=0.45,
                 consistency_weight=0.20,
+                iv_crush_rate_weight=0.10,
                 skew_weight=0.10,
                 liquidity_weight=0.15,
             ),
@@ -235,9 +244,10 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
             name="Conservative",
             description="High-confidence only. Fewer trades, higher win rate expected.",
             weights=ScoringWeights(
-                vrp_weight=0.40,
+                vrp_weight=0.30,
                 consistency_weight=0.35,
-                skew_weight=0.15,
+                iv_crush_rate_weight=0.15,
+                skew_weight=0.10,
                 liquidity_weight=0.10,
             ),
             thresholds=ScoringThresholds(
@@ -256,8 +266,9 @@ def get_all_configs() -> Dict[str, ScoringConfig]:
             name="Hybrid",
             description="Adaptive approach balancing edge and execution quality.",
             weights=ScoringWeights(
-                vrp_weight=0.45,
+                vrp_weight=0.35,
                 consistency_weight=0.20,
+                iv_crush_rate_weight=0.10,
                 skew_weight=0.15,
                 liquidity_weight=0.20,
             ),

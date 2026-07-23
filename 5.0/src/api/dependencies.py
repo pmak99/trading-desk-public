@@ -21,7 +21,6 @@ from src.domain import (
 )
 from src.integrations import (
     TradierClient,
-    AlphaVantageClient,
     PerplexityClient,
     TelegramSender,
     YahooFinanceClient,
@@ -42,7 +41,6 @@ def _get_state() -> AppState:
             job_manager=JobManager(db_path=settings.DB_PATH),
             job_runner=JobRunner(twelvedata_client=twelvedata_client),
             tradier=TradierClient(settings.tradier_api_key),
-            alphavantage=AlphaVantageClient(settings.alpha_vantage_key),
             perplexity=PerplexityClient(
                 api_key=settings.perplexity_api_key,
                 db_path=settings.DB_PATH,
@@ -72,10 +70,6 @@ def get_job_runner() -> JobRunner:
 
 def get_tradier() -> TradierClient:
     return _get_state().tradier
-
-
-def get_alphavantage() -> AlphaVantageClient:
-    return _get_state().alphavantage
 
 
 def get_perplexity() -> PerplexityClient:

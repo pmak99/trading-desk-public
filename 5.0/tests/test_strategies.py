@@ -33,18 +33,37 @@ def test_generate_bear_call_spread():
     assert bear_call is not None
     assert bear_call.short_strike > 135.0  # Above current price
 
-def test_generate_iron_condor_neutral():
-    """Neutral direction generates iron condor."""
-    strategies = generate_strategies(
-        ticker="NVDA",
-        price=135.0,
-        implied_move_pct=8.0,
-        direction="NEUTRAL",
-        liquidity_tier="EXCELLENT"
-    )
+class TestBannedStrategies:
+    """Verifies that permanently banned strategies are never generated."""
 
-    ic = next((s for s in strategies if s.name == "Iron Condor"), None)
-    assert ic is not None
+    def test_generate_neutral_no_iron_condor(self):
+        """Neutral direction generates bull put + bear call spreads, never iron condor (permanently banned)."""
+        strategies = generate_strategies(
+            ticker="NVDA",
+            price=135.0,
+            implied_move_pct=8.0,
+            direction="NEUTRAL",
+            liquidity_tier="EXCELLENT"
+        )
+
+        names = [s.name for s in strategies]
+        assert "Iron Condor" not in names
+        assert "Bull Put Spread" in names
+        assert "Bear Call Spread" in names
+        assert len(strategies) == 2
+
+    def test_generate_bullish_no_iron_condor(self):
+        """Bullish direction never generates iron condor (permanently banned)."""
+        strategies = generate_strategies(
+            ticker="NVDA",
+            price=135.0,
+            implied_move_pct=8.0,
+            direction="BULLISH",
+            liquidity_tier="EXCELLENT"
+        )
+        names = [s.name for s in strategies]
+        assert "Iron Condor" not in names
+        assert "Iron Butterfly" not in names
 
 def test_reject_liquidity_no_strategies():
     """REJECT liquidity still generates strategies (relaxed Feb 2026)."""

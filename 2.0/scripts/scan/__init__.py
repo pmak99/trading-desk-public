@@ -9,7 +9,7 @@ Decomposed from the monolithic scan.py into focused modules:
 - filters: Ticker filtering logic
 - quality_scorer: Composite quality scoring (VRP + liquidity + difficulty)
 - formatters: Result display/formatting (tables, colors, summaries)
-- earnings_fetcher: Earnings source aggregation (AlphaVantage, Yahoo, DB)
+- earnings_fetcher: Earnings source aggregation (Finnhub, Yahoo, DB)
 - workflows: Sequential and parallel scan orchestration
 """
 
@@ -40,7 +40,7 @@ from .constants import (
     SCORE_VRP_USE_LINEAR,
     LIQUIDITY_PRIORITY_ORDER,
     MARKET_CLOSED_INDICATOR,
-    ALPHA_VANTAGE_CALLS_PER_MINUTE,
+    FINNHUB_CALLS_PER_MINUTE,
     RATE_LIMIT_PAUSE_SECONDS,
     CACHE_L1_TTL_SECONDS,
     CACHE_L2_TTL_SECONDS,

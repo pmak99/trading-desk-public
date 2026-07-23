@@ -133,14 +133,14 @@ class BaseJobHandler:
             List of earnings dicts, or None if empty/unavailable
         """
         if horizon:
-            earnings = await self.alphavantage.get_earnings_calendar(horizon=horizon)
+            earnings = await self.finnhub.get_earnings_calendar(horizon=horizon)
         else:
-            earnings = await self.alphavantage.get_earnings_calendar()
+            earnings = await self.finnhub.get_earnings_calendar()
 
         if not earnings:
-            log("warn", "Empty earnings calendar from Alpha Vantage", job=job_name)
+            log("warn", "Empty earnings calendar from Finnhub", job=job_name)
             metrics.count(
-                "ivcrush.job.api_empty", {"job": job_name, "api": "alphavantage"}
+                "ivcrush.job.api_empty", {"job": job_name, "api": "finnhub"}
             )
             return None
         return earnings

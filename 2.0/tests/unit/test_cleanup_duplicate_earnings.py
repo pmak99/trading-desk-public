@@ -19,8 +19,14 @@ from pathlib import Path
 from datetime import datetime, date, timedelta
 
 import sys
+from datetime import date, timedelta
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+def _future(days: int) -> str:
+    """Return an ISO date string N days from today, staying inside the cleanup window."""
+    return (date.today() + timedelta(days=days)).isoformat()
 
 from scripts.sync_earnings_calendar import cleanup_duplicate_earnings
 
@@ -101,22 +107,24 @@ class TestRule1ConfirmedBeatsUnconfirmed:
     def test_removes_unconfirmed_near_confirmed(self, tmp_path):
         """Unconfirmed entry within 90 days of confirmed entry is removed."""
         db = _create_db(tmp_path)
-        _insert(db, "PANW", "2026-05-18", timing="AMC", confirmed=1)
-        _insert(db, "PANW", "2026-05-27", timing="UNKNOWN", confirmed=0)
+        kept_date = _future(5)
+        removed_date = _future(14)
+        _insert(db, "PANW", kept_date, timing="AMC", confirmed=1)
+        _insert(db, "PANW", removed_date, timing="UNKNOWN", confirmed=0)
 
         removed = cleanup_duplicate_earnings(db)
 
         assert len(removed) == 1
-        assert removed[0]["removed_date"] == "2026-05-27"
-        assert removed[0]["kept_date"] == "2026-05-18"
+        assert removed[0]["removed_date"] == removed_date
+        assert removed[0]["kept_date"] == kept_date
         assert _count(db, "PANW") == 1
-        assert _get_dates(db, "PANW") == ["2026-05-18"]
+        assert _get_dates(db, "PANW") == [kept_date]
 
     def test_keeps_unconfirmed_beyond_90_days(self, tmp_path):
         """Unconfirmed entry >90 days from confirmed is kept (different quarter)."""
         db = _create_db(tmp_path)
-        _insert(db, "AAPL", "2026-04-30", timing="AMC", confirmed=1)
-        _insert(db, "AAPL", "2026-08-01", timing="UNKNOWN", confirmed=0)
+        _insert(db, "AAPL", _future(5), timing="AMC", confirmed=1)
+        _insert(db, "AAPL", _future(98), timing="UNKNOWN", confirmed=0)
 
         removed = cleanup_duplicate_earnings(db)
 
@@ -126,15 +134,16 @@ class TestRule1ConfirmedBeatsUnconfirmed:
     def test_multiple_unconfirmed_near_one_confirmed(self, tmp_path):
         """Multiple unconfirmed entries near one confirmed are all removed."""
         db = _create_db(tmp_path)
-        _insert(db, "TSLA", "2026-04-21", timing="AMC", confirmed=1)
-        _insert(db, "TSLA", "2026-04-28", timing="UNKNOWN", confirmed=0)
-        _insert(db, "TSLA", "2026-04-14", timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
+        confirmed_date = _future(10)
+        _insert(db, "TSLA", confirmed_date, timing="AMC", confirmed=1)
+        _insert(db, "TSLA", _future(17), timing="UNKNOWN", confirmed=0)
+        _insert(db, "TSLA", _future(3), timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
 
         removed = cleanup_duplicate_earnings(db)
 
         assert len(removed) == 2
         assert _count(db, "TSLA") == 1
-        assert _get_dates(db, "TSLA") == ["2026-04-21"]
+        assert _get_dates(db, "TSLA") == [confirmed_date]
 
 
 # ============================================================================
@@ -147,34 +156,38 @@ class TestRule2ConfirmedTiebreak:
     def test_keeps_known_timing_over_unknown(self, tmp_path):
         """Within 30 days, confirmed AMC beats confirmed UNKNOWN."""
         db = _create_db(tmp_path)
-        _insert(db, "AA", "2026-04-15", timing="AMC", confirmed=1)
-        _insert(db, "AA", "2026-04-22", timing="UNKNOWN", confirmed=1)
+        amc_date = _future(5)
+        unknown_date = _future(12)
+        _insert(db, "AA", amc_date, timing="AMC", confirmed=1)
+        _insert(db, "AA", unknown_date, timing="UNKNOWN", confirmed=1)
 
         removed = cleanup_duplicate_earnings(db)
 
         assert len(removed) == 1
-        assert removed[0]["removed_date"] == "2026-04-22"
-        assert removed[0]["kept_date"] == "2026-04-15"
+        assert removed[0]["removed_date"] == unknown_date
+        assert removed[0]["kept_date"] == amc_date
         assert _count(db, "AA") == 1
 
     def test_keeps_newer_when_same_timing(self, tmp_path):
         """Within 30 days, same timing, keep most recently updated."""
         db = _create_db(tmp_path)
-        _insert(db, "MSFT", "2026-04-20", timing="AMC", confirmed=1, updated_at=_TS_OLD)
-        _insert(db, "MSFT", "2026-04-22", timing="AMC", confirmed=1, updated_at=_TS_NEW)
+        older_date = _future(10)
+        newer_date = _future(12)
+        _insert(db, "MSFT", older_date, timing="AMC", confirmed=1, updated_at=_TS_OLD)
+        _insert(db, "MSFT", newer_date, timing="AMC", confirmed=1, updated_at=_TS_NEW)
 
         removed = cleanup_duplicate_earnings(db)
 
         assert len(removed) == 1
         # Newer updated_at wins
-        assert removed[0]["kept_date"] == "2026-04-22"
-        assert removed[0]["removed_date"] == "2026-04-20"
+        assert removed[0]["kept_date"] == newer_date
+        assert removed[0]["removed_date"] == older_date
 
     def test_different_quarters_both_kept(self, tmp_path):
         """Confirmed entries >30 days apart are different quarters — both kept."""
         db = _create_db(tmp_path)
-        _insert(db, "VRT", "2026-05-11", timing="AMC", confirmed=1)
-        _insert(db, "VRT", "2026-07-29", timing="UNKNOWN", confirmed=1)
+        _insert(db, "VRT", _future(5), timing="AMC", confirmed=1)
+        _insert(db, "VRT", _future(84), timing="UNKNOWN", confirmed=1)
 
         removed = cleanup_duplicate_earnings(db)
 
@@ -192,21 +205,23 @@ class TestRule3UnconfirmedTiebreak:
     def test_keeps_newest_unconfirmed(self, tmp_path):
         """Two unconfirmed within 90 days — keep most recently updated."""
         db = _create_db(tmp_path)
-        _insert(db, "NFLX", "2026-04-15", timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
-        _insert(db, "NFLX", "2026-04-20", timing="UNKNOWN", confirmed=0, updated_at=_TS_NEW)
+        older_date = _future(5)
+        newer_date = _future(10)
+        _insert(db, "NFLX", older_date, timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
+        _insert(db, "NFLX", newer_date, timing="UNKNOWN", confirmed=0, updated_at=_TS_NEW)
 
         removed = cleanup_duplicate_earnings(db)
 
         assert len(removed) == 1
-        assert removed[0]["removed_date"] == "2026-04-15"
-        assert removed[0]["kept_date"] == "2026-04-20"
+        assert removed[0]["removed_date"] == older_date
+        assert removed[0]["kept_date"] == newer_date
         assert _count(db, "NFLX") == 1
 
     def test_keeps_both_unconfirmed_beyond_90_days(self, tmp_path):
         """Two unconfirmed >90 days apart — both kept."""
         db = _create_db(tmp_path)
-        _insert(db, "AMZN", "2026-05-01", timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
-        _insert(db, "AMZN", "2026-08-10", timing="UNKNOWN", confirmed=0, updated_at=_TS_NEW)
+        _insert(db, "AMZN", _future(5), timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
+        _insert(db, "AMZN", _future(106), timing="UNKNOWN", confirmed=0, updated_at=_TS_NEW)
 
         removed = cleanup_duplicate_earnings(db)
 
@@ -224,59 +239,62 @@ class TestCombinedRules:
     def test_three_entries_confirmed_plus_two_unconfirmed(self, tmp_path):
         """One confirmed + two unconfirmed within 90 days: both unconfirmed removed."""
         db = _create_db(tmp_path)
-        _insert(db, "CRM", "2026-05-25", timing="AMC", confirmed=1)
-        _insert(db, "CRM", "2026-05-26", timing="UNKNOWN", confirmed=0)
-        _insert(db, "CRM", "2026-06-01", timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
+        kept_date = _future(5)
+        _insert(db, "CRM", kept_date, timing="AMC", confirmed=1)
+        _insert(db, "CRM", _future(6), timing="UNKNOWN", confirmed=0)
+        _insert(db, "CRM", _future(12), timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
 
         removed = cleanup_duplicate_earnings(db)
 
         assert len(removed) == 2
         assert _count(db, "CRM") == 1
-        assert _get_dates(db, "CRM") == ["2026-05-25"]
+        assert _get_dates(db, "CRM") == [kept_date]
 
     def test_two_confirmed_within_30d_plus_unconfirmed(self, tmp_path):
         """Two confirmed within 30d + one unconfirmed: unconfirmed removed by Rule 1,
         weaker confirmed removed by Rule 2."""
         db = _create_db(tmp_path)
-        _insert(db, "GOOG", "2026-04-22", timing="AMC", confirmed=1, updated_at=_TS_NEW)
-        _insert(db, "GOOG", "2026-04-28", timing="UNKNOWN", confirmed=1, updated_at=_TS_OLD)
-        _insert(db, "GOOG", "2026-04-25", timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
+        amc_date = _future(10)
+        _insert(db, "GOOG", amc_date, timing="AMC", confirmed=1, updated_at=_TS_NEW)
+        _insert(db, "GOOG", _future(16), timing="UNKNOWN", confirmed=1, updated_at=_TS_OLD)
+        _insert(db, "GOOG", _future(13), timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
 
         removed = cleanup_duplicate_earnings(db)
 
         assert len(removed) == 2
         assert _count(db, "GOOG") == 1
-        assert _get_dates(db, "GOOG") == ["2026-04-22"]
+        assert _get_dates(db, "GOOG") == [amc_date]
 
     def test_keeper_audit_trail_accurate_after_rule2(self, tmp_path):
         """When Rule 2 removes the confirmed entry that Rule 1 initially matched,
         the audit trail should reference the actual surviving confirmed entry."""
         db = _create_db(tmp_path)
-        # Two confirmed entries within 30 days — Rule 2 will keep Apr 22 (AMC, newer)
-        _insert(db, "META", "2026-04-22", timing="AMC", confirmed=1, updated_at=_TS_NEWEST)
-        _insert(db, "META", "2026-04-28", timing="UNKNOWN", confirmed=1, updated_at=_TS_OLD)
-        # One unconfirmed — closest confirmed is Apr 28, but Rule 2 removes Apr 28
-        _insert(db, "META", "2026-04-30", timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
+        # Two confirmed entries within 30 days — Rule 2 will keep AMC (better timing, newer)
+        amc_date = _future(10)
+        _insert(db, "META", amc_date, timing="AMC", confirmed=1, updated_at=_TS_NEWEST)
+        _insert(db, "META", _future(16), timing="UNKNOWN", confirmed=1, updated_at=_TS_OLD)
+        # One unconfirmed — closest confirmed is +16, but Rule 2 removes +16
+        _insert(db, "META", _future(18), timing="UNKNOWN", confirmed=0, updated_at=_TS_OLD)
 
         removed = cleanup_duplicate_earnings(db)
 
         assert len(removed) == 2
         assert _count(db, "META") == 1
-        assert _get_dates(db, "META") == ["2026-04-22"]
+        assert _get_dates(db, "META") == [amc_date]
 
         # Find the Rule 1 removal (unconfirmed entry)
         rule1_removal = [r for r in removed if r["removed_confirmed"] == 0]
         assert len(rule1_removal) == 1
-        # The logged keeper should be Apr 22 (the survivor), NOT Apr 28 (which was itself removed)
-        assert rule1_removal[0]["kept_date"] == "2026-04-22"
+        # The logged keeper should be amc_date (the survivor), NOT +16 (which was itself removed)
+        assert rule1_removal[0]["kept_date"] == amc_date
 
     def test_multiple_tickers_independent(self, tmp_path):
         """Dedup operates independently per ticker."""
         db = _create_db(tmp_path)
-        _insert(db, "AAPL", "2026-04-30", timing="AMC", confirmed=1)
-        _insert(db, "AAPL", "2026-05-05", timing="UNKNOWN", confirmed=0)
-        _insert(db, "MSFT", "2026-04-22", timing="AMC", confirmed=1)
-        _insert(db, "MSFT", "2026-04-28", timing="UNKNOWN", confirmed=0)
+        _insert(db, "AAPL", _future(19), timing="AMC", confirmed=1)
+        _insert(db, "AAPL", _future(24), timing="UNKNOWN", confirmed=0)
+        _insert(db, "MSFT", _future(11), timing="AMC", confirmed=1)
+        _insert(db, "MSFT", _future(17), timing="UNKNOWN", confirmed=0)
 
         removed = cleanup_duplicate_earnings(db)
 
@@ -297,8 +315,8 @@ class TestNoDuplicates:
     def test_single_entry_per_ticker(self, tmp_path):
         """No duplicates when each ticker has one entry."""
         db = _create_db(tmp_path)
-        _insert(db, "NVDA", "2026-05-28", timing="AMC", confirmed=1)
-        _insert(db, "AMD", "2026-05-06", timing="AMC", confirmed=1)
+        _insert(db, "NVDA", _future(5), timing="AMC", confirmed=1)
+        _insert(db, "AMD", _future(10), timing="AMC", confirmed=1)
 
         removed = cleanup_duplicate_earnings(db)
 
@@ -324,21 +342,22 @@ class TestDryRun:
     def test_dry_run_reports_but_does_not_delete(self, tmp_path):
         """Dry run returns removal details but leaves DB unchanged."""
         db = _create_db(tmp_path)
-        _insert(db, "PANW", "2026-05-18", timing="AMC", confirmed=1)
-        _insert(db, "PANW", "2026-05-27", timing="UNKNOWN", confirmed=0)
+        removed_date = _future(14)
+        _insert(db, "PANW", _future(5), timing="AMC", confirmed=1)
+        _insert(db, "PANW", removed_date, timing="UNKNOWN", confirmed=0)
 
         removed = cleanup_duplicate_earnings(db, dry_run=True)
 
         assert len(removed) == 1
-        assert removed[0]["removed_date"] == "2026-05-27"
+        assert removed[0]["removed_date"] == removed_date
         # DB should still have both entries
         assert _count(db, "PANW") == 2
 
     def test_dry_run_then_live(self, tmp_path):
         """Dry run followed by live run produces same results."""
         db = _create_db(tmp_path)
-        _insert(db, "FIG", "2026-05-18", timing="AMC", confirmed=1)
-        _insert(db, "FIG", "2026-05-27", timing="UNKNOWN", confirmed=0)
+        _insert(db, "FIG", _future(5), timing="AMC", confirmed=1)
+        _insert(db, "FIG", _future(14), timing="UNKNOWN", confirmed=0)
 
         dry_removed = cleanup_duplicate_earnings(db, dry_run=True)
         assert _count(db, "FIG") == 2
@@ -359,8 +378,8 @@ class TestConnectionSafety:
     def test_connection_closed_on_exception(self, tmp_path):
         """Connection is closed even when an exception occurs (try/finally)."""
         db = _create_db(tmp_path)
-        _insert(db, "PANW", "2026-05-18", timing="AMC", confirmed=1)
-        _insert(db, "PANW", "2026-05-27", timing="UNKNOWN", confirmed=0)
+        _insert(db, "PANW", _future(5), timing="AMC", confirmed=1)
+        _insert(db, "PANW", _future(14), timing="UNKNOWN", confirmed=0)
 
         # Corrupt the DB path to force an error on the second call
         # First call succeeds (cleans up), second call with bad path should not leak
@@ -379,8 +398,8 @@ class TestConnectionSafety:
     def test_idempotent_second_run(self, tmp_path):
         """Running cleanup twice is safe — second run finds nothing."""
         db = _create_db(tmp_path)
-        _insert(db, "ADI", "2026-05-18", timing="AMC", confirmed=1)
-        _insert(db, "ADI", "2026-05-27", timing="UNKNOWN", confirmed=0)
+        _insert(db, "ADI", _future(5), timing="AMC", confirmed=1)
+        _insert(db, "ADI", _future(14), timing="UNKNOWN", confirmed=0)
 
         first = cleanup_duplicate_earnings(db)
         assert len(first) == 1

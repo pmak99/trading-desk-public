@@ -24,7 +24,7 @@ from src.domain.enums import (
     StrategyType, DirectionalBias, OptionType, Recommendation,
 )
 from src.config.config import StrategyConfig, ScoringWeights, ThresholdsConfig
-from src.application.services.strategy_generator import StrategyGenerator
+from src.application.services.strategy import StrategyGenerator
 from src.application.metrics.liquidity_scorer import LiquidityScorer
 from src.application.metrics.vrp import VRPCalculator
 from src.domain.scoring.strategy_scorer import StrategyScorer
@@ -361,78 +361,67 @@ class TestStrategyTypeSelection:
     def generator(self, default_config, liquidity_scorer):
         return StrategyGenerator(default_config, liquidity_scorer)
 
-    def test_very_high_vrp_neutral_includes_iron_butterfly(self, generator):
-        """VRP >= 2.5 + neutral bias should include Iron Butterfly first."""
-        vrp = _make_vrp(vrp_ratio=2.5)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        assert StrategyType.IRON_BUTTERFLY in types
-        assert types[0] == StrategyType.IRON_BUTTERFLY
-
-    def test_very_high_vrp_neutral_includes_iron_condor(self, generator):
-        """VRP >= 2.5 + neutral should also include Iron Condor."""
-        vrp = _make_vrp(vrp_ratio=2.5)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        assert StrategyType.IRON_CONDOR in types
-
-    def test_high_vrp_neutral_generates_three_strategies(self, generator):
-        """VRP >= 2.0 + neutral should generate 3 strategy types."""
+    def test_high_vrp_neutral_generates_two_strategies(self, generator):
+        """VRP >= 2.0 + neutral generates 2 directional spreads (no IC/IB)."""
         vrp = _make_vrp(vrp_ratio=2.0)
         types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        assert len(types) == 3
-        assert StrategyType.IRON_CONDOR in types
+        assert len(types) == 2
+        assert StrategyType.IRON_CONDOR not in types
         assert StrategyType.BULL_PUT_SPREAD in types
         assert StrategyType.BEAR_CALL_SPREAD in types
 
-    def test_high_vrp_strong_bullish_skips_bear_call(self, generator):
-        """VRP >= 2.0 + strong bullish should skip bear call spread."""
+    def test_high_vrp_strong_bullish_single_strategy(self, generator):
+        """VRP >= 2.0 + strong bullish generates only Bull Put Spread."""
         vrp = _make_vrp(vrp_ratio=2.0)
         types = generator._select_strategy_types(vrp, DirectionalBias.STRONG_BULLISH)
         assert StrategyType.BEAR_CALL_SPREAD not in types
         assert StrategyType.BULL_PUT_SPREAD in types
-        assert len(types) == 2
+        assert len(types) == 1
 
-    def test_high_vrp_strong_bearish_skips_bull_put(self, generator):
-        """VRP >= 2.0 + strong bearish should skip bull put spread."""
+    def test_high_vrp_strong_bearish_single_strategy(self, generator):
+        """VRP >= 2.0 + strong bearish generates only Bear Call Spread."""
         vrp = _make_vrp(vrp_ratio=2.0)
         types = generator._select_strategy_types(vrp, DirectionalBias.STRONG_BEARISH)
         assert StrategyType.BULL_PUT_SPREAD not in types
         assert StrategyType.BEAR_CALL_SPREAD in types
-        assert len(types) == 2
+        assert len(types) == 1
 
-    def test_high_vrp_moderate_bullish_includes_all(self, generator):
-        """VRP >= 2.0 + moderate bullish includes all but prioritizes bullish."""
+    def test_high_vrp_moderate_bullish_two_strategies(self, generator):
+        """VRP >= 2.0 + moderate bullish: Bull Put first, Bear Call second."""
         vrp = _make_vrp(vrp_ratio=2.0)
         types = generator._select_strategy_types(vrp, DirectionalBias.BULLISH)
-        assert len(types) == 3
-        # Bull put spread should be first (prioritized)
+        assert len(types) == 2
         assert types[0] == StrategyType.BULL_PUT_SPREAD
 
-    def test_high_vrp_moderate_bearish_includes_all(self, generator):
-        """VRP >= 2.0 + moderate bearish includes all but prioritizes bearish."""
+    def test_high_vrp_moderate_bearish_two_strategies(self, generator):
+        """VRP >= 2.0 + moderate bearish: Bear Call first, Bull Put second."""
         vrp = _make_vrp(vrp_ratio=2.0)
         types = generator._select_strategy_types(vrp, DirectionalBias.BEARISH)
-        assert len(types) == 3
-        # Bear call spread should be first (prioritized)
+        assert len(types) == 2
         assert types[0] == StrategyType.BEAR_CALL_SPREAD
 
     def test_moderate_vrp_neutral_two_strategies(self, generator):
-        """VRP 1.5-2.0 + neutral should generate 2 strategies."""
+        """VRP 1.5-2.0 + neutral generates 2 directional spreads."""
         vrp = _make_vrp(vrp_ratio=1.7)
         types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
         assert len(types) == 2
-        assert StrategyType.IRON_CONDOR in types
+        assert StrategyType.IRON_CONDOR not in types
+        assert StrategyType.BULL_PUT_SPREAD in types
+        assert StrategyType.BEAR_CALL_SPREAD in types
 
     def test_moderate_vrp_bullish_prioritizes_bull_put(self, generator):
-        """VRP 1.5-2.0 + bullish bias should put bull put first."""
+        """VRP 1.5-2.0 + bullish bias generates only Bull Put Spread."""
         vrp = _make_vrp(vrp_ratio=1.7)
         types = generator._select_strategy_types(vrp, DirectionalBias.BULLISH)
         assert types[0] == StrategyType.BULL_PUT_SPREAD
+        assert len(types) == 1
 
     def test_moderate_vrp_bearish_prioritizes_bear_call(self, generator):
-        """VRP 1.5-2.0 + bearish bias should put bear call first."""
+        """VRP 1.5-2.0 + bearish bias generates only Bear Call Spread."""
         vrp = _make_vrp(vrp_ratio=1.7)
         types = generator._select_strategy_types(vrp, DirectionalBias.STRONG_BEARISH)
         assert types[0] == StrategyType.BEAR_CALL_SPREAD
+        assert len(types) == 1
 
     def test_low_vrp_single_strategy_only(self, generator):
         """VRP < 1.5 should generate only a single strategy."""
@@ -458,6 +447,18 @@ class TestStrategyTypeSelection:
         types = generator._select_strategy_types(vrp, DirectionalBias.BEARISH)
         assert types[0] == StrategyType.BEAR_CALL_SPREAD
 
+    def test_high_trr_restricts_to_single_strategy(self, generator):
+        """HIGH TRR restricts strategy output to a single directional spread."""
+        vrp = _make_vrp(vrp_ratio=2.0)
+        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL, tail_risk_level='HIGH')
+        assert len(types) == 1
+
+    def test_normal_trr_allows_two_strategies(self, generator):
+        """NORMAL TRR allows two strategies for VRP >= 2.0 + neutral."""
+        vrp = _make_vrp(vrp_ratio=2.0)
+        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL, tail_risk_level='NORMAL')
+        assert len(types) == 2
+
     def test_weak_bias_treated_like_neutral(self, generator):
         """Weak bias (strength 1) should be treated similarly to neutral."""
         vrp = _make_vrp(vrp_ratio=2.0)
@@ -465,6 +466,54 @@ class TestStrategyTypeSelection:
         weak_types = generator._select_strategy_types(vrp, DirectionalBias.WEAK_BULLISH)
         # Both should generate the same strategy set
         assert set(neutral_types) == set(weak_types)
+
+
+# ============================================================================
+# Banned Strategy Tests
+# ============================================================================
+
+
+class TestBannedStrategies:
+    """Verifies that permanently banned strategies are never generated."""
+
+    @pytest.fixture
+    def generator(self, default_config, liquidity_scorer):
+        return StrategyGenerator(default_config, liquidity_scorer)
+
+    def test_very_high_vrp_neutral_no_iron_butterfly(self, generator):
+        """VRP >= 2.5 + neutral bias: Iron Butterfly is banned; Bull Put Spread leads."""
+        vrp = _make_vrp(vrp_ratio=2.5)
+        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
+        assert StrategyType.IRON_BUTTERFLY not in types
+        assert StrategyType.BULL_PUT_SPREAD in types
+        assert types[0] == StrategyType.BULL_PUT_SPREAD
+
+    def test_very_high_vrp_neutral_no_iron_condor(self, generator):
+        """VRP >= 2.5 + neutral: Iron Condor is banned from all paths."""
+        vrp = _make_vrp(vrp_ratio=2.5)
+        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
+        assert StrategyType.IRON_CONDOR not in types
+
+    def test_moderate_vrp_neutral_no_iron_condor(self, generator):
+        """VRP 1.5-2.0 + neutral: Iron Condor is still banned."""
+        vrp = _make_vrp(vrp_ratio=1.7)
+        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
+        assert StrategyType.IRON_CONDOR not in types
+
+    def test_low_vrp_no_iron_condor(self, generator):
+        """VRP < 1.5: Iron Condor is still banned."""
+        vrp = _make_vrp(vrp_ratio=1.3)
+        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
+        assert StrategyType.IRON_CONDOR not in types
+
+    def test_no_bias_no_iron_butterfly(self, generator):
+        """Iron Butterfly is banned at every VRP level."""
+        for ratio in [1.3, 1.7, 2.0, 2.5, 3.0]:
+            vrp = _make_vrp(vrp_ratio=ratio)
+            types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
+            assert StrategyType.IRON_BUTTERFLY not in types, (
+                f"IRON_BUTTERFLY appeared at VRP {ratio}x"
+            )
 
 
 # ============================================================================
@@ -697,23 +746,16 @@ class TestDirectionalAlignmentScoring:
         diff = score_weak - score_neutral
         assert abs(diff - 3.0) < 0.01, f"Expected +3 bonus, got {diff:.2f}"
 
-    def test_neutral_strategy_no_adjustment(self, scorer):
-        """Iron condor (neutral) should get no directional adjustment."""
-        ic_legs = [
-            StrategyLeg(strike=Strike(90.0), option_type=OptionType.PUT, action="SELL", contracts=1, premium=Money(2.0)),
-            StrategyLeg(strike=Strike(85.0), option_type=OptionType.PUT, action="BUY", contracts=1, premium=Money(0.5)),
-            StrategyLeg(strike=Strike(110.0), option_type=OptionType.CALL, action="SELL", contracts=1, premium=Money(2.0)),
-            StrategyLeg(strike=Strike(115.0), option_type=OptionType.CALL, action="BUY", contracts=1, premium=Money(0.5)),
-        ]
-        strategy = _make_strategy(strategy_type=StrategyType.IRON_CONDOR)
-        strategy.legs = ic_legs
+    def test_neutral_bias_no_adjustment(self, scorer):
+        """NEUTRAL bias should produce 0 directional adjustment for any strategy type."""
+        strategy = _make_strategy(strategy_type=StrategyType.BULL_PUT_SPREAD)
         vrp = _make_vrp(vrp_ratio=2.0)
 
-        score_neutral = scorer.score_strategy(strategy, vrp, DirectionalBias.NEUTRAL).overall_score
-        score_bearish = scorer.score_strategy(strategy, vrp, DirectionalBias.STRONG_BEARISH).overall_score
+        score_neutral_a = scorer.score_strategy(strategy, vrp, DirectionalBias.NEUTRAL).overall_score
+        score_neutral_b = scorer.score_strategy(strategy, vrp, DirectionalBias.NEUTRAL).overall_score
 
-        # Iron condor is neutral -- should get 0 adjustment regardless of bias
-        assert abs(score_neutral - score_bearish) < 0.01
+        # Neutral bias is deterministic — same score both times
+        assert abs(score_neutral_a - score_neutral_b) < 0.01
 
 
 # ============================================================================

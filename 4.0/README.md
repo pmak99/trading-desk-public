@@ -1,99 +1,89 @@
-# 4.0 AI Sentiment Layer
+# 4.0 AI Sentiment Layer — ARCHIVED (May 2026)
 
-AI-enhanced layer on top of 2.0's VRP system. Adds multi-source sentiment analysis (council consensus, Perplexity, WebSearch) with intelligent caching.
+**This subsystem is archived.** 5.0 reimplemented all sentiment caching natively, and the `sentiment_history` and `sentiment_cache` tables were migrated to `2.0/data/ivcrush.db` (schema migration 015). The `/collect` and `/council` skill commands read and write `ivcrush.db` directly. `4.0/data/sentiment_cache.db` is preserved for reference only.
 
-## Design Principles
+Code is preserved here for reference. Do not extend or depend on this directory. Its tests (139) are not part of active CI.
 
-1. **AI for Discovery, Math for Trading** - Sentiment informs what to look at; 2.0 math decides how to trade
-2. **Import 2.0, Don't Copy** - All core logic comes from 2.0 via `sys.path` injection
-3. **Graceful Degradation** - Sentiment never blocks analysis; falls back to WebSearch then skips
-4. **Cost-Conscious** - 3-hour TTL caching, free fallbacks first
+The sentiment *rules* below remain in force — they are applied by the live skill commands and documented authoritatively in the root [CLAUDE.md](../CLAUDE.md).
 
-## Sentiment-Adjusted Scoring
+---
+
+## What 4.0 Added
 
 ```
-4.0 Score = 2.0 Score x (1 + Sentiment Modifier)
+4.0 Score = 2.0 Score × (1 + Sentiment Modifier)
 ```
 
-| Sentiment | Score Range | Modifier |
-|-----------|-------------|----------|
-| Strong Bullish | >= +0.6 | +5% |
-| Bullish | +0.2 to +0.6 | +3% |
-| Neutral | -0.2 to +0.2 | 0% |
-| Bearish | -0.6 to -0.2 | -7% |
-| Strong Bearish | <= -0.6 | -12% |
+| Sentiment | Modifier | Notes |
+|-----------|:--------:|-------|
+| Any bullish | +1% | Flat rate — strong_bullish is only 23% accurate, no differential justified |
+| Any bearish | 0% | Zeroed May 2026 — 0/4 historical accuracy |
+| Neutral | 0% | — |
 
-**Cutoffs:** 2.0 Score >= 50 (pre-filter) | 4.0 Score >= 55 (post-filter)
+**Score cutoffs:** 2.0 ≥ 50 (pre-filter) → 4.0 ≥ 55 (post-filter)
 
-## Directional Bias Rules
+## Directional Bias (3-Rule System)
 
-3-rule system for adjusting 2.0's skew-based direction using AI sentiment:
+Adjusts 2.0's skew-based direction using sentiment as a secondary signal. Uses the **fused** skew direction, not raw Tradier alone.
 
-| Rule | Condition | Action |
+| Rule | Condition | Result |
 |------|-----------|--------|
-| 1 | Neutral skew + sentiment signal | Sentiment breaks tie |
-| 2 | Conflict (bullish skew + bearish sentiment) | Go neutral (hedge) |
-| 3 | Otherwise | Keep original skew bias |
+| 1 | Skew = NEUTRAL + bullish sentiment (≥+0.3) | BULLISH (sentiment breaks tie) |
+| 2 | Skew conflicts with active opposing sentiment | NEUTRAL (hedge) |
+| 3 | Otherwise | Keep original skew |
 
-## Fallback Chain
+Rule 2 rarely fires since bearish signals are zeroed.
+
+## Sentiment Sources (Fallback Chain)
 
 ```
-1. Check cache (3hr TTL, council > perplexity > websearch)
-   HIT  -> Return cached (FREE)
-   MISS -> Continue
+1. Cache check (3hr TTL, priority: council > perplexity > websearch)
+   HIT  → Return immediately (free)
+   MISS → Continue
 
-2. Perplexity API
-   SUCCESS -> Cache + return
-   FAIL    -> Continue
+2. Perplexity API (~$0.001–0.008/call)
+   SUCCESS → Cache result + return
+   FAIL    → Continue
 
 3. WebSearch (free fallback)
-   SUCCESS -> Cache + return
-   FAIL    -> Graceful degradation (analysis continues without sentiment)
-
-Council mode (/council command) runs 7 sources in parallel for deeper consensus.
+   SUCCESS → Cache result + return
+   FAIL    → Analysis continues without sentiment (graceful degradation)
 ```
 
-## Architecture
+Council mode (`/council`) runs multiple sources in parallel for deeper consensus. Results are cached at `source='council'` and reused by `/analyze`, `/whisper`, and `/alert`.
 
-```
-4.0/
-├── src/
-│   ├── __init__.py               # Imports from 2.0
-│   ├── sentiment_direction.py    # 3-rule directional bias
-│   └── cache/
-│       ├── sentiment_cache.py    # 3-hour TTL cache (council/perplexity/websearch)
-│       └── sentiment_history.py  # Permanent backtesting data
-├── data/
-│   └── sentiment_cache.db        # SQLite (cache + history)
-└── tests/                        # 221 tests
-```
+## Sentiment Format
 
-## Database
-
-SQLite at `data/sentiment_cache.db`:
-
-| Table | Records | Purpose |
-|-------|--------:|---------|
-| `sentiment_cache` | 0 | Short-lived cache (3hr TTL, auto-clears) |
-| `api_budget` | 17 | (dormant) Legacy daily call counts |
-| `sentiment_history` | 27 | Permanent sentiment records for accuracy analysis |
-
-## Structured Sentiment Format
+All sources write the same structured format:
 
 ```
 Direction: [bullish/bearish/neutral]
-Score: [-1 to +1]
+Score: [-1.0 to +1.0]
 Catalysts: [2-3 bullets, max 10 words each]
 Risks: [1-2 bullets, max 10 words each]
 ```
 
-## Testing
+## Prediction Accuracy (May 2026, at archive time)
 
-```bash
-cd 4.0
-../2.0/venv/bin/python -m pytest tests/ -v    # 221 tests
+52 records, 28 with outcomes:
+- Overall: 53.8%
+- Bullish: 58.3% (28/48 predictions)
+- Bearish: 0% (0/4 predictions) → zeroed modifier justified
+
+## Layout
+
+```
+4.0/
+├── src/
+│   ├── sentiment_direction.py    3-rule directional bias adjustment
+│   └── cache/
+│       ├── sentiment_cache.py    3-hour TTL cache
+│       └── sentiment_history.py  Permanent records for accuracy backtesting
+├── data/
+│   └── sentiment_cache.db        SQLite (WAL mode) — superseded by ivcrush.db
+└── tests/                        139 tests (not in CI)
 ```
 
 ---
 
-**Disclaimer:** For research purposes only. Not financial advice.
+*For research purposes only. Not financial advice.*

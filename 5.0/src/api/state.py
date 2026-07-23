@@ -28,7 +28,6 @@ from src.domain import (
 )
 from src.integrations import (
     TradierClient,
-    AlphaVantageClient,
     PerplexityClient,
     TelegramSender,
     YahooFinanceClient,
@@ -124,7 +123,6 @@ class AppState:
     job_manager: Optional[JobManager] = None
     job_runner: Optional[JobRunner] = None
     tradier: Optional[TradierClient] = None
-    alphavantage: Optional[AlphaVantageClient] = None
     perplexity: Optional[PerplexityClient] = None
     telegram: Optional[TelegramSender] = None
     yahoo: Optional[YahooFinanceClient] = None
@@ -203,7 +201,6 @@ async def lifespan(app: FastAPI):
         job_manager=JobManager(db_path=settings.DB_PATH),
         job_runner=JobRunner(twelvedata_client=twelvedata_client),
         tradier=TradierClient(settings.tradier_api_key),
-        alphavantage=AlphaVantageClient(settings.alpha_vantage_key),
         perplexity=PerplexityClient(
             api_key=settings.perplexity_api_key,
             db_path=settings.DB_PATH,

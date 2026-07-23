@@ -153,6 +153,13 @@ def init_database(db_path: Path) -> None:
                 strategy_rr REAL,
                 contracts INTEGER,
 
+                -- Gap-inclusive VRP (live A/B vs intraday baseline, migration 016)
+                historical_close_mean_pct REAL,
+                vrp_close_ratio REAL,
+
+                -- IV term-structure event-vol multiple (migration 017)
+                term_slope_ratio REAL,
+
                 -- Additional context (JSON serialized full analysis)
                 raw_analysis TEXT
             )

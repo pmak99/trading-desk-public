@@ -247,3 +247,80 @@ class TestSkewAnalyzerEnhanced:
         # ATM skew should exist
         assert analysis.skew_atm is not None
         assert isinstance(analysis.skew_atm, Percentage)
+
+
+class TestBiasToNumeric:
+    """bias_to_numeric / numeric_to_bias round-trip."""
+
+    def test_strong_bearish_maps_to_minus_3(self):
+        from src.application.metrics.skew_enhanced import bias_to_numeric
+        from src.domain.enums import DirectionalBias
+        assert bias_to_numeric(DirectionalBias.STRONG_BEARISH) == -3
+
+    def test_strong_bullish_maps_to_plus_3(self):
+        from src.application.metrics.skew_enhanced import bias_to_numeric
+        from src.domain.enums import DirectionalBias
+        assert bias_to_numeric(DirectionalBias.STRONG_BULLISH) == 3
+
+    def test_neutral_maps_to_zero(self):
+        from src.application.metrics.skew_enhanced import bias_to_numeric
+        from src.domain.enums import DirectionalBias
+        assert bias_to_numeric(DirectionalBias.NEUTRAL) == 0
+
+    def test_round_trip_all_levels(self):
+        from src.application.metrics.skew_enhanced import bias_to_numeric, numeric_to_bias
+        from src.domain.enums import DirectionalBias
+        for bias in DirectionalBias:
+            assert numeric_to_bias(bias_to_numeric(bias)) == bias
+
+
+class TestRSlp30ToNumeric:
+    """r_slp_30_to_numeric threshold coverage."""
+
+    def test_below_lower_bound_is_strong_bearish(self):
+        from src.application.metrics.skew_enhanced import r_slp_30_to_numeric
+        assert r_slp_30_to_numeric(-2.0) == -3  # < -0.905
+
+    def test_near_mean_is_neutral(self):
+        from src.application.metrics.skew_enhanced import r_slp_30_to_numeric
+        assert r_slp_30_to_numeric(1.036) == 0   # mean → NEUTRAL
+
+    def test_above_upper_bound_is_strong_bullish(self):
+        from src.application.metrics.skew_enhanced import r_slp_30_to_numeric
+        assert r_slp_30_to_numeric(5.0) == 3   # > 2.976
+
+    def test_known_spot_check_aapl(self):
+        from src.application.metrics.skew_enhanced import r_slp_30_to_numeric
+        # AAPL rSlp30 ≈ 1.268 → NEUTRAL (between 0.712 and 1.359)
+        assert r_slp_30_to_numeric(1.268) == 0
+
+    def test_known_spot_check_jpm(self):
+        from src.application.metrics.skew_enhanced import r_slp_30_to_numeric
+        # JPM rSlp30 ≈ 2.083 → BULLISH (between 2.006 and 2.976)
+        assert r_slp_30_to_numeric(2.083) == 2
+
+
+class TestSkewRSquaredGating:
+    """R²<0.30 gate forces NEUTRAL regardless of slope."""
+
+    @pytest.fixture
+    def provider(self):
+        return Mock()
+
+    @pytest.fixture
+    def analyzer(self, provider):
+        return SkewAnalyzerEnhanced(provider)
+
+    def test_min_points_is_3(self, analyzer):
+        assert analyzer.MIN_POINTS == 3
+
+    def test_bias_confidence_equals_r_squared(self, analyzer, provider):
+        """bias_confidence must equal confidence (R²), not R²*slope_strength."""
+        from src.domain.errors import Ok
+        chain = TestSkewAnalyzerEnhanced().create_chain_with_skew(skew_type="normal")
+        provider.get_option_chain.return_value = Ok(chain)
+        result = analyzer.analyze_skew_curve("TEST", chain.expiration)
+        assert result.is_ok
+        analysis = result.value
+        # bias_confidence == R² (within floating point tolerance)
+        assert abs(analysis.bias_confidence - analysis.confidence) < 0.001

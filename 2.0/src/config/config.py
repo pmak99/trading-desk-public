@@ -21,8 +21,7 @@ class APIConfig:
 
     tradier_api_key: str
     tradier_base_url: str = "https://api.tradier.com/v1"
-    alpha_vantage_key: str = ""
-    alpha_vantage_base_url: str = "https://www.alphavantage.co/query"
+    finnhub_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -101,9 +100,9 @@ class ThresholdsConfig:
     min_theta_good: float = 30.0
     min_vega_good: float = -50.0
 
-    # Minimum DTE floor (Feb 2026)
-    # Data shows 0-2 DTE options lose -$209k vs 3-5 DTE options gain +$139k
-    # Same win rates (~64%) but extreme gamma at 0-2 DTE causes catastrophic losses
+    # Minimum DTE floor
+    # Backtesting showed comparable win rates below and above this floor, but
+    # loss severity was materially worse below it due to extreme gamma.
     # If calculated expiration gives < min_dte from earnings, bump to next Friday
     min_dte: int = 3
 
@@ -121,43 +120,30 @@ class ScoringWeights:
     Weights determine how much each factor contributes to overall strategy score.
     All weights should sum to 100 for interpretability.
 
-    UPDATED POST-LOSS ANALYSIS (Nov 2025):
-    After -$26,930 loss from WDAY/ZS/SYM, TRUE P&L analysis revealed:
-    - Position sizing was fine (collected $3k-$10k credits)
-    - VRP edge was real (8x, 5x, 4x ratios)
-    - PROBLEM: Catastrophic directional moves (3x-8x collected premium)
-    - PROBLEM: Poor liquidity made exits expensive (slippage)
-    - PROBLEM: No stop losses (held to 45-110% of max loss)
+    Post-loss analysis on a run of directional losses found that position
+    sizing and VRP edge selection were sound, but poor liquidity made exits
+    expensive and the absence of stop losses let losers run. That drove
+    liquidity weight up from 0% and reduced everything else proportionally.
+    A later preference update raised POP weight further to prioritize
+    high-probability trades.
 
-    Revised Rationale:
-    - LIQUIDITY (25%): CRITICAL - Can't profit from good setups with bad fills
-                       Raised from 0% to 25% after liquidity-driven losses
-    - POP (30%): Still primary but reduced to make room for liquidity
-    - VRP (20%): Edge quality remains important
-    - R/R (15%): Reduced - was overshadowed by directional risk
-    - Greeks (10%): Unchanged - secondary edge indicators
-
-    USER PREFERENCE UPDATE (Dec 2025):
-    POP increased from 30% to 40% to prioritize high-probability trades.
-    Other factors rebalanced proportionally to maintain 100 total.
-
-    CURRENT weights: POP 40%, Liquidity 22%, VRP 17%, Edge 13%, Greeks 8%
+    Tune these weights based on your own trade-outcome analysis. They must
+    sum to 100 within each variant (with/without Greeks).
     """
 
     # Scoring weights with Greeks available (sum = 100)
-    # USER PREFERENCE (Dec 2025): POP weighted higher for high-probability trades
-    pop_weight: float = 40.0          # Probability of profit (increased from 30%)
-    liquidity_weight: float = 22.0    # Liquidity quality (reduced from 25%)
-    vrp_weight: float = 17.0          # VRP edge strength (reduced from 20%)
-    reward_risk_weight: float = 13.0  # Kelly edge (reduced from 15%)
-    greeks_weight: float = 8.0        # Theta/vega quality (reduced from 10%)
+    pop_weight: float = 40.0          # Probability of profit
+    liquidity_weight: float = 22.0    # Liquidity quality
+    vrp_weight: float = 17.0          # VRP edge strength
+    reward_risk_weight: float = 13.0  # Kelly edge
+    greeks_weight: float = 8.0        # Theta/vega quality
     size_weight: float = 0.0          # Removed (position sizing is handled separately)
 
     # Scoring weights without Greeks (sum = 100)
-    pop_weight_no_greeks: float = 45.0        # Increased from 35%
-    liquidity_weight_no_greeks: float = 26.0  # Reduced from 30%
-    vrp_weight_no_greeks: float = 17.0        # Reduced from 20%
-    reward_risk_weight_no_greeks: float = 12.0  # Reduced from 15%
+    pop_weight_no_greeks: float = 45.0
+    liquidity_weight_no_greeks: float = 26.0
+    vrp_weight_no_greeks: float = 17.0
+    reward_risk_weight_no_greeks: float = 12.0
     size_weight_no_greeks: float = 0.0        # Removed
 
     # Target values for normalization
@@ -244,15 +230,6 @@ class StrategyConfig:
     # Commission
     commission_per_contract: float = 0.30
 
-    # Iron butterfly
-    iron_butterfly_wing_width_pct: float = 0.015
-    iron_butterfly_min_wing_width: float = 3.0
-    ib_pop_base: float = 0.40
-    ib_pop_reference_range: float = 2.0
-    ib_pop_sensitivity: float = 0.10
-    ib_pop_min: float = 0.35
-    ib_pop_max: float = 0.70
-
     # Scoring configuration
     scoring_weights: ScoringWeights = field(default_factory=ScoringWeights)
 
@@ -261,9 +238,8 @@ class StrategyConfig:
 class RateLimitConfig:
     """Rate limiting configuration."""
 
-    # Alpha Vantage: 5 calls/minute, 500 calls/day
-    alpha_vantage_per_minute: int = 5
-    alpha_vantage_per_day: int = 500
+    # Finnhub: 60 calls/minute (free tier)
+    finnhub_per_minute: int = 60
 
     # Tradier: Generally more permissive
     tradier_per_second: int = 10
@@ -366,10 +342,7 @@ class Config:
             tradier_base_url=os.getenv(
                 "TRADIER_BASE_URL", "https://api.tradier.com/v1"
             ),
-            alpha_vantage_key=os.getenv("ALPHA_VANTAGE_KEY", ""),
-            alpha_vantage_base_url=os.getenv(
-                "ALPHA_VANTAGE_BASE_URL", "https://www.alphavantage.co/query"
-            ),
+            finnhub_key=os.getenv("FINNHUB_API_KEY", ""),
         )
 
         # Database configuration
@@ -457,10 +430,7 @@ class Config:
 
         # Rate limits
         rate_limits = RateLimitConfig(
-            alpha_vantage_per_minute=int(
-                os.getenv("ALPHA_VANTAGE_PER_MINUTE", "5")
-            ),
-            alpha_vantage_per_day=int(os.getenv("ALPHA_VANTAGE_PER_DAY", "500")),
+            finnhub_per_minute=int(os.getenv("FINNHUB_PER_MINUTE", "60")),
             tradier_per_second=int(os.getenv("TRADIER_PER_SECOND", "10")),
             tradier_per_minute=int(os.getenv("TRADIER_PER_MINUTE", "120")),
         )
@@ -498,13 +468,6 @@ class Config:
             kelly_min_edge=float(os.getenv("KELLY_MIN_EDGE", "0.05")),
             kelly_min_contracts=int(os.getenv("KELLY_MIN_CONTRACTS", "1")),
             commission_per_contract=float(os.getenv("COMMISSION_PER_CONTRACT", "0.30")),
-            iron_butterfly_wing_width_pct=float(os.getenv("IB_WING_WIDTH_PCT", "0.015")),
-            iron_butterfly_min_wing_width=float(os.getenv("IB_MIN_WING_WIDTH", "3.0")),
-            ib_pop_base=float(os.getenv("IB_POP_BASE", "0.40")),
-            ib_pop_reference_range=float(os.getenv("IB_POP_REFERENCE_RANGE", "2.0")),
-            ib_pop_sensitivity=float(os.getenv("IB_POP_SENSITIVITY", "0.10")),
-            ib_pop_min=float(os.getenv("IB_POP_MIN", "0.35")),
-            ib_pop_max=float(os.getenv("IB_POP_MAX", "0.70")),
         )
 
         # Scan scoring configuration
@@ -590,8 +553,8 @@ class Config:
             )
 
         # Rate limits
-        if self.rate_limits.alpha_vantage_per_minute <= 0:
-            errors.append("alpha_vantage_per_minute must be > 0")
+        if self.rate_limits.finnhub_per_minute <= 0:
+            errors.append("finnhub_per_minute must be > 0")
 
         # Resilience
         if self.resilience.retry_max_attempts < 1:

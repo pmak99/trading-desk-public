@@ -57,6 +57,8 @@ def create_test_db(path: Path) -> sqlite3.Connection:
             volume_before INTEGER,
             volume_earnings INTEGER,
             created_at TEXT,
+            pre_earnings_straddle_pct REAL,
+            ern_iv_effect REAL,
             UNIQUE(ticker, earnings_date)
         )
     """)
@@ -90,7 +92,8 @@ def create_test_db(path: Path) -> sqlite3.Connection:
             earnings_date TEXT,
             actual_move REAL,
             created_at TEXT,
-            UNIQUE(symbol, acquired_date, sale_date, option_type, strike, cost_basis)
+            account_type TEXT NOT NULL DEFAULT 'TAXABLE',
+            UNIQUE(symbol, acquired_date, sale_date, option_type, strike, cost_basis, account_type)
         )
     """)
     conn.commit()
@@ -379,7 +382,7 @@ class TestGCSValidation:
 
     def test_valid_bucket_name(self):
         """Valid bucket names should pass validation."""
-        assert _validate_gcs_name("trading-desk-data") == "trading-desk-data"
+        assert _validate_gcs_name("your-gcs-bucket") == "your-gcs-bucket"
         assert _validate_gcs_name("my.bucket.name") == "my.bucket.name"
         assert _validate_gcs_name("bucket_with_underscore") == "bucket_with_underscore"
 

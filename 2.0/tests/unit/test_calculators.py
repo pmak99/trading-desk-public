@@ -4,6 +4,8 @@ Unit tests for calculator modules.
 
 import pytest
 from datetime import date, timedelta
+
+FUTURE_EXPIRATION = date.today() + timedelta(days=45)
 from src.application.metrics.implied_move import ImpliedMoveCalculator
 from src.application.metrics.vrp import VRPCalculator
 from src.domain.types import (
@@ -49,7 +51,7 @@ class TestImpliedMoveCalculator:
 
         chain = OptionChain(
             ticker="TEST",
-            expiration=date(2026, 6, 23),
+            expiration=FUTURE_EXPIRATION,
             stock_price=stock_price,
             calls=calls,
             puts=puts,
@@ -80,7 +82,7 @@ class TestImpliedMoveCalculator:
     def test_calculate_no_chain(self, mock_options_provider):
         """Test error when no option chain available."""
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("MISSING", date(2026, 6, 16))
+        result = calc.calculate("MISSING", date.today() + timedelta(days=45))
 
         assert result.is_err
         assert result.error.code == ErrorCode.NODATA
@@ -111,7 +113,7 @@ class TestImpliedMoveCalculator:
 
         chain = OptionChain(
             ticker="TEST",
-            expiration=date(2026, 6, 23),
+            expiration=FUTURE_EXPIRATION,
             stock_price=stock_price,
             calls=calls,
             puts=puts,
@@ -136,7 +138,7 @@ class TestVRPCalculator:
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
-        expiration = date(2026, 6, 23)
+        expiration = FUTURE_EXPIRATION
 
         # Implied move: 10%
         implied_move = ImpliedMove(
@@ -188,7 +190,7 @@ class TestVRPCalculator:
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
-        expiration = date(2026, 6, 23)
+        expiration = FUTURE_EXPIRATION
 
         # Implied move: 7.5%
         implied_move = ImpliedMove(
@@ -240,7 +242,7 @@ class TestVRPCalculator:
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
-        expiration = date(2026, 6, 23)
+        expiration = FUTURE_EXPIRATION
 
         # Implied move: 5%
         implied_move = ImpliedMove(
@@ -289,7 +291,7 @@ class TestVRPCalculator:
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
-        expiration = date(2026, 6, 23)
+        expiration = FUTURE_EXPIRATION
 
         implied_move = ImpliedMove(
             ticker=ticker,

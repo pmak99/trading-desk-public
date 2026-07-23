@@ -10,6 +10,9 @@ from src.application.metrics.implied_move_interpolated import ImpliedMoveCalcula
 from src.domain.types import Money, Percentage, Strike, OptionChain, OptionQuote, ImpliedMove
 from src.domain.errors import ErrorCode
 
+# Relative future date so these fixtures never go stale (calculator rejects past expirations)
+FUTURE_EXPIRATION = date.today() + timedelta(days=45)
+
 
 class TestImpliedMoveCalculatorInterpolated:
     """Test interpolated straddle calculation."""
@@ -41,7 +44,7 @@ class TestImpliedMoveCalculatorInterpolated:
         Returns:
             OptionChain
         """
-        expiration = date(2026, 6, 15)
+        expiration = FUTURE_EXPIRATION
 
         calls = {}
         puts = {}
@@ -142,7 +145,7 @@ class TestImpliedMoveCalculatorInterpolated:
 
     def test_missing_lower_strike_error(self, calculator, provider):
         """Test error when lower bracket strike is missing."""
-        expiration = date(2026, 6, 15)
+        expiration = FUTURE_EXPIRATION
 
         # Only upper strikes available
         chain = OptionChain(
@@ -230,7 +233,7 @@ class TestImpliedMoveCalculatorInterpolated:
             AppError(ErrorCode.EXTERNAL, "API error")
         )
 
-        result = calculator.calculate("TEST", date(2026, 6, 15))
+        result = calculator.calculate("TEST", FUTURE_EXPIRATION)
 
         assert result.is_err
         assert result.error.code == ErrorCode.EXTERNAL
@@ -238,7 +241,7 @@ class TestImpliedMoveCalculatorInterpolated:
     def test_iv_interpolation(self, calculator, provider):
         """Test that IVs are also interpolated."""
         # Create chain with different IVs at each strike
-        expiration = date(2026, 6, 15)
+        expiration = FUTURE_EXPIRATION
 
         chain = OptionChain(
             ticker="TEST",

@@ -56,7 +56,7 @@ steps:
           --max-instances 3 \
           --timeout 300 \
           --set-secrets 'SECRETS=trading-desk-secrets:latest' \
-          --set-env-vars 'GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GCS_BUCKET=trading-desk-data'
+          --set-env-vars 'GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GCS_BUCKET=your-gcs-bucket'
 
 images:
   - 'gcr.io/$PROJECT_ID/trading-desk:latest'

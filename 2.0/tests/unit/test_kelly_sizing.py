@@ -8,7 +8,7 @@ based on probability of profit, win/loss ratio, and edge.
 import pytest
 from src.domain.types import Money
 from src.config.config import StrategyConfig, ScoringWeights
-from src.application.services.strategy_generator import StrategyGenerator
+from src.application.services.strategy import StrategyGenerator
 from src.application.metrics.liquidity_scorer import LiquidityScorer
 
 
@@ -166,10 +166,10 @@ class TestKellySizing:
 
         assert contracts == 1, f"Should return minimum for negative expectancy, got {contracts}"
 
-    def test_kelly_iron_condor_scenario(self, generator):
+    def test_kelly_moderate_pop_scenario(self, generator):
         """
-        Test realistic iron condor:
-        - Collects $2.00 total credit
+        Test moderate-POP bull put spread scenario:
+        - Collects $2.00 credit
         - Max loss $3.00 (width - credit)
         - 65% POP
 
@@ -189,8 +189,8 @@ class TestKellySizing:
 
         contracts = generator._calculate_contracts_kelly(max_profit, max_loss, pop)
 
-        assert contracts >= 4, f"Expected ~5 contracts for iron condor, got {contracts}"
-        assert contracts <= 6, f"Expected ~5 contracts for iron condor, got {contracts}"
+        assert contracts >= 4, f"Expected ~5 contracts for spread, got {contracts}"
+        assert contracts <= 6, f"Expected ~5 contracts for spread, got {contracts}"
 
     def test_kelly_invalid_max_loss(self, generator):
         """Test handling of invalid (zero/negative) max_loss."""

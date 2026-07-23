@@ -12,7 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.state import lifespan
 from src.api.middleware import rate_limit_middleware, add_security_headers, add_request_id, limit_request_size
-from src.api.routers import health, analysis, operations, webhooks, jobs
+from src.api.routers import health, operations, webhooks, jobs
+from src.api.routers.scan import router as scan_router
+from src.api.routers.analyze import router as analyze_router
+from src.api.routers.whisper import router as whisper_router
+from src.api.routers.council import router as council_router
 
 # Re-export for backward compatibility (tests import from src.main)
 from src.api.dependencies import (  # noqa: F401
@@ -20,7 +24,6 @@ from src.api.dependencies import (  # noqa: F401
     get_job_manager,
     get_job_runner,
     get_tradier,
-    get_alphavantage,
     get_perplexity,
     get_telegram,
     get_yahoo,
@@ -37,7 +40,7 @@ from src.api.state import (  # noqa: F401
     _mask_sensitive,
     InMemoryRateLimiter,
 )
-from src.api.routers.analysis import (  # noqa: F401
+from src.api.routers.analysis_common import (  # noqa: F401
     _analyze_single_ticker,
     _scan_tickers_for_whisper,
     MAX_SCAN_TIME_SECONDS,
@@ -74,7 +77,10 @@ app.middleware("http")(add_request_id)
 
 # Register routers
 app.include_router(health.router)
-app.include_router(analysis.router)
+app.include_router(scan_router)
+app.include_router(analyze_router)
+app.include_router(whisper_router)
+app.include_router(council_router)
 app.include_router(operations.router)
 app.include_router(webhooks.router)
 app.include_router(jobs.router)

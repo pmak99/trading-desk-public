@@ -45,7 +45,7 @@ class OptionsDataProvider(Protocol):
 class EarningsDataProvider(Protocol):
     """
     Interface for fetching earnings calendar data.
-    Implementation: AlphaVantageAPI
+    Implementation: FinnhubAPI
     """
 
     def get_earnings_date(self, ticker: str) -> Result[date, AppError]:
@@ -62,7 +62,7 @@ class EarningsDataProvider(Protocol):
 class PriceHistoryProvider(Protocol):
     """
     Interface for fetching historical price data.
-    Implementation: AlphaVantageAPI or database
+    Implementation: FinnhubAPI or database
     """
 
     def get_daily_prices(

@@ -12,8 +12,9 @@ VIX Regimes:
 """
 
 import logging
+import threading
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 from src.domain.types import Percentage
 from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
@@ -77,52 +78,68 @@ class MarketConditionsAnalyzer:
         """
         self.provider = provider
         self.vix_symbol = vix_symbol
+        self._cached_conditions: Optional[MarketConditions] = None
+        self._cache_expires: Optional[datetime] = None
+        self._cache_ttl_seconds: int = 900  # 15-minute TTL — one fetch per scan session
+        self._cache_lock = threading.Lock()
 
     def get_current_conditions(self) -> Result[MarketConditions, AppError]:
         """
         Get current market conditions and VIX regime.
 
+        Results are cached for 5 minutes so a scan of N tickers makes one
+        VIX API call rather than N.
+
         Returns:
             Result with MarketConditions or AppError
         """
-        logger.info("Analyzing market conditions (VIX regime)")
+        with self._cache_lock:
+            now = datetime.now()
+            if self._cached_conditions and self._cache_expires and now < self._cache_expires:
+                logger.debug("Returning cached VIX conditions (TTL not expired)")
+                return Ok(self._cached_conditions)
 
-        # Get VIX data
-        vix_result = self._get_vix_level()
-        if vix_result.is_err:
-            return Err(vix_result.error)
+            logger.info("Analyzing market conditions (VIX regime)")
 
-        vix_level = vix_result.value
+            # Get VIX data
+            vix_result = self._get_vix_level()
+            if vix_result.is_err:
+                return Err(vix_result.error)
 
-        # Classify regime
-        regime = self._classify_regime(vix_level.value)
+            vix_level = vix_result.value
 
-        # Calculate regime score (0-100)
-        regime_score = self._calculate_regime_score(vix_level.value)
+            # Classify regime
+            regime = self._classify_regime(vix_level.value)
 
-        # Determine trend (would need historical data - simplified for now)
-        trend = self._estimate_trend(vix_level.value)
+            # Calculate regime score (0-100)
+            regime_score = self._calculate_regime_score(vix_level.value)
 
-        # Get strategy adjustment guidance
-        strategy_adjustment = self._get_strategy_adjustment(regime)
-        position_multiplier = self._get_position_size_multiplier(regime)
+            # Determine trend (would need historical data - simplified for now)
+            trend = self._estimate_trend(vix_level.value)
 
-        conditions = MarketConditions(
-            vix_level=vix_level,
-            regime=regime,
-            regime_score=regime_score,
-            trend=trend,
-            analysis_time=datetime.now(),
-            strategy_adjustment=strategy_adjustment,
-            position_size_multiplier=position_multiplier,
-        )
+            # Get strategy adjustment guidance
+            strategy_adjustment = self._get_strategy_adjustment(regime)
+            position_multiplier = self._get_position_size_multiplier(regime)
 
-        logger.info(
-            f"Market conditions: VIX={vix_level.value:.1f}% ({regime}), "
-            f"trend={trend}, size_adj={position_multiplier:.2f}x"
-        )
+            conditions = MarketConditions(
+                vix_level=vix_level,
+                regime=regime,
+                regime_score=regime_score,
+                trend=trend,
+                analysis_time=datetime.now(),
+                strategy_adjustment=strategy_adjustment,
+                position_size_multiplier=position_multiplier,
+            )
 
-        return Ok(conditions)
+            logger.info(
+                f"Market conditions: VIX={vix_level.value:.1f}% ({regime}), "
+                f"trend={trend}, size_adj={position_multiplier:.2f}x"
+            )
+
+            self._cached_conditions = conditions
+            self._cache_expires = now + timedelta(seconds=self._cache_ttl_seconds)
+
+            return Ok(conditions)
 
     def _get_vix_level(self) -> Result[Percentage, AppError]:
         """

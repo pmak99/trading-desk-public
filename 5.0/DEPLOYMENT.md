@@ -119,7 +119,7 @@ cp .env.template .env
 
 Edit `.env` with your actual keys:
 ```bash
-SECRETS={"TRADIER_API_KEY":"xxx","ALPHA_VANTAGE_KEY":"xxx","PERPLEXITY_API_KEY":"xxx","TELEGRAM_BOT_TOKEN":"7123456789:AAF...","TELEGRAM_CHAT_ID":"123456789"}
+SECRETS={"TRADIER_API_KEY":"xxx","PERPLEXITY_API_KEY":"xxx","TELEGRAM_BOT_TOKEN":"7123456789:AAF...","TELEGRAM_CHAT_ID":"123456789","FINNHUB_API_KEY":"xxx"}
 ```
 
 ### 2.2 Build and Run
@@ -218,7 +218,7 @@ gcloud config set run/region us-east1
 cat > /tmp/trading-desk-secrets.json << 'EOF'
 {
   "TRADIER_API_KEY": "your_tradier_key",
-  "ALPHA_VANTAGE_KEY": "your_alphavantage_key",
+  "FINNHUB_API_KEY": "your_finnhub_key",
   "PERPLEXITY_API_KEY": "your_perplexity_key",
   "TELEGRAM_BOT_TOKEN": "7123456789:AAF...",
   "TELEGRAM_CHAT_ID": "123456789"
@@ -576,7 +576,7 @@ Since SQLite is serverless and synced via GCS, we use a **manual migration appro
 2. **Breaking changes** (column renames, type changes):
    ```bash
    # 1. Download current database
-   gsutil cp gs://trading-desk-data/ivcrush.db /tmp/ivcrush_backup.db
+   gsutil cp gs://your-gcs-bucket/ivcrush.db /tmp/ivcrush_backup.db
 
    # 2. Apply migration manually
    sqlite3 /tmp/ivcrush_backup.db "ALTER TABLE job_status ADD COLUMN retry_count INTEGER DEFAULT 0;"
@@ -585,7 +585,7 @@ Since SQLite is serverless and synced via GCS, we use a **manual migration appro
    sqlite3 /tmp/ivcrush_backup.db "PRAGMA integrity_check;"
 
    # 4. Upload migrated database (during low-traffic window)
-   gsutil cp /tmp/ivcrush_backup.db gs://trading-desk-data/ivcrush.db
+   gsutil cp /tmp/ivcrush_backup.db gs://your-gcs-bucket/ivcrush.db
 
    # 5. Deploy code with new schema
    gcloud builds submit && gcloud run deploy trading-desk ...
@@ -594,10 +594,10 @@ Since SQLite is serverless and synced via GCS, we use a **manual migration appro
 3. **Rollback procedure**:
    ```bash
    # List backup versions
-   gsutil ls -la gs://trading-desk-data/ivcrush.db
+   gsutil ls -la gs://your-gcs-bucket/ivcrush.db
 
    # Restore specific version
-   gsutil cp gs://trading-desk-data/ivcrush.db#<generation> gs://trading-desk-data/ivcrush.db
+   gsutil cp gs://your-gcs-bucket/ivcrush.db#<generation> gs://your-gcs-bucket/ivcrush.db
    ```
 
 ### Example: Adding a Column
@@ -642,7 +642,7 @@ gcloud run deploy trading-desk --image gcr.io/trading-desk-prod/trading-desk --r
 
 # Sync database manually
 cp ../2.0/data/ivcrush.db data/ivcrush.db
-gsutil cp data/ivcrush.db gs://trading-desk-data/ivcrush.db
+gsutil cp data/ivcrush.db gs://your-gcs-bucket/ivcrush.db
 
 # Update secrets
 gcloud secrets versions add trading-desk-secrets --data-file=/tmp/new-secrets.json

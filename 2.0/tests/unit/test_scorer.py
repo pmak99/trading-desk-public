@@ -17,7 +17,8 @@ def default_config():
         description="Test config",
         weights=ScoringWeights(
             vrp_weight=0.40,
-            consistency_weight=0.30,
+            consistency_weight=0.25,
+            iv_crush_rate_weight=0.05,
             skew_weight=0.15,
             liquidity_weight=0.15,
         ),
@@ -259,6 +260,7 @@ class TestCompositeScoring:
             weights=ScoringWeights(
                 vrp_weight=1.0,
                 consistency_weight=0.0,
+                iv_crush_rate_weight=0.0,
                 skew_weight=0.0,
                 liquidity_weight=0.0,
             ),
@@ -291,9 +293,9 @@ class TestRankingAndSelection:
     def test_ranking_order(self, scorer):
         """Scores should be ranked by composite score."""
         scores = [
-            TickerScore("A", date(2024, 10, 1), 80, 70, 60, 50, 70.0),
-            TickerScore("B", date(2024, 10, 2), 90, 80, 70, 60, 85.0),
-            TickerScore("C", date(2024, 10, 3), 70, 60, 50, 40, 60.0),
+            TickerScore("A", date(2024, 10, 1), 80, 70, 50, 60, 50, 70.0),
+            TickerScore("B", date(2024, 10, 2), 90, 80, 50, 70, 60, 85.0),
+            TickerScore("C", date(2024, 10, 3), 70, 60, 50, 50, 40, 60.0),
         ]
 
         ranked = scorer.rank_and_select(scores)
@@ -309,16 +311,16 @@ class TestRankingAndSelection:
     def test_selection_limit(self, scorer):
         """Only top N should be selected."""
         scores = [
-            TickerScore("A", date(2024, 10, 1), 80, 70, 60, 50, 80.0),
-            TickerScore("B", date(2024, 10, 2), 90, 80, 70, 60, 85.0),
-            TickerScore("C", date(2024, 10, 3), 70, 60, 50, 40, 75.0),
+            TickerScore("A", date(2024, 10, 1), 80, 70, 50, 60, 50, 80.0),
+            TickerScore("B", date(2024, 10, 2), 90, 80, 50, 70, 60, 85.0),
+            TickerScore("C", date(2024, 10, 3), 70, 60, 50, 50, 40, 75.0),
         ]
 
         # Config with max 2 positions
         config = ScoringConfig(
             name="Test",
             description="Test",
-            weights=ScoringWeights(0.4, 0.3, 0.15, 0.15),
+            weights=ScoringWeights(0.4, 0.25, 0.05, 0.15, 0.15),
             thresholds=ScoringThresholds(),
             max_positions=2,
             min_score=60.0,
@@ -334,9 +336,9 @@ class TestRankingAndSelection:
     def test_minimum_score_filter(self, scorer):
         """Scores below minimum should not be qualified."""
         scores = [
-            TickerScore("A", date(2024, 10, 1), 80, 70, 60, 50, 70.0),
-            TickerScore("B", date(2024, 10, 2), 50, 40, 30, 20, 45.0),  # Below 60
-            TickerScore("C", date(2024, 10, 3), 70, 60, 50, 40, 62.0),
+            TickerScore("A", date(2024, 10, 1), 80, 70, 50, 60, 50, 70.0),
+            TickerScore("B", date(2024, 10, 2), 50, 40, 50, 30, 20, 45.0),  # Below 60
+            TickerScore("C", date(2024, 10, 3), 70, 60, 50, 50, 40, 62.0),
         ]
 
         ranked = scorer.rank_and_select(scores)

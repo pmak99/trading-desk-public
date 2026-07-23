@@ -22,14 +22,16 @@ class TestScoringWeights:
     def test_valid_weights_sum_to_one(self):
         """Valid weights that sum to 1.0."""
         weights = ScoringWeights(
-            vrp_weight=0.40,
+            vrp_weight=0.30,
             consistency_weight=0.25,
-            skew_weight=0.15,
+            iv_crush_rate_weight=0.15,
+            skew_weight=0.10,
             liquidity_weight=0.20,
         )
-        assert weights.vrp_weight == 0.40
+        assert weights.vrp_weight == 0.30
         assert weights.consistency_weight == 0.25
-        assert weights.skew_weight == 0.15
+        assert weights.iv_crush_rate_weight == 0.15
+        assert weights.skew_weight == 0.10
         assert weights.liquidity_weight == 0.20
 
     def test_weights_must_sum_to_one(self):
@@ -38,16 +40,18 @@ class TestScoringWeights:
             ScoringWeights(
                 vrp_weight=0.50,
                 consistency_weight=0.25,
+                iv_crush_rate_weight=0.15,
                 skew_weight=0.15,
-                liquidity_weight=0.15,  # Total = 1.05, invalid
+                liquidity_weight=0.15,  # Total = 1.20, invalid
             )
 
     def test_weights_allow_small_floating_point_error(self):
         """Weights allow small floating point errors."""
         weights = ScoringWeights(
-            vrp_weight=0.4001,  # Small rounding error
+            vrp_weight=0.3001,  # Small rounding error
             consistency_weight=0.25,
-            skew_weight=0.15,
+            iv_crush_rate_weight=0.15,
+            skew_weight=0.10,
             liquidity_weight=0.1999,
         )
         assert weights is not None
@@ -58,8 +62,9 @@ class TestScoringWeights:
             ScoringWeights(
                 vrp_weight=-0.1,
                 consistency_weight=0.55,
+                iv_crush_rate_weight=0.15,
                 skew_weight=0.15,
-                liquidity_weight=0.40,
+                liquidity_weight=0.25,
             )
 
     def test_weight_above_one_rejected(self):
@@ -68,8 +73,9 @@ class TestScoringWeights:
             ScoringWeights(
                 vrp_weight=1.5,
                 consistency_weight=-0.2,
+                iv_crush_rate_weight=0.10,
                 skew_weight=0.15,
-                liquidity_weight=-0.45,
+                liquidity_weight=-0.55,
             )
 
 
@@ -145,9 +151,10 @@ class TestScoringConfig:
     def test_scoring_config_creation(self):
         """ScoringConfig can be created with all fields."""
         weights = ScoringWeights(
-            vrp_weight=0.40,
+            vrp_weight=0.30,
             consistency_weight=0.25,
-            skew_weight=0.15,
+            iv_crush_rate_weight=0.15,
+            skew_weight=0.10,
             liquidity_weight=0.20,
         )
         thresholds = ScoringThresholds()
@@ -196,7 +203,8 @@ class TestPredefinedConfigs:
         config = get_config("vrp_dominant")
 
         assert config.name == "VRP-Dominant"
-        assert config.weights.vrp_weight == 0.70
+        assert config.weights.vrp_weight == 0.65
+        assert config.weights.iv_crush_rate_weight == 0.10
         assert config.thresholds.vrp_excellent == 2.2
         assert config.thresholds.vrp_good == 1.6
         assert config.thresholds.vrp_marginal == 1.3
@@ -208,9 +216,10 @@ class TestPredefinedConfigs:
         config = get_config("balanced")
 
         assert config.name == "Balanced"
-        assert config.weights.vrp_weight == 0.40
+        assert config.weights.vrp_weight == 0.30
         assert config.weights.consistency_weight == 0.25
-        assert config.weights.skew_weight == 0.15
+        assert config.weights.iv_crush_rate_weight == 0.15
+        assert config.weights.skew_weight == 0.10
         assert config.weights.liquidity_weight == 0.20
         assert config.max_positions == 12
         assert config.min_score == 60.0
@@ -243,14 +252,14 @@ class TestPredefinedConfigs:
 
         assert config.name == "Liquidity-First"
         assert config.weights.liquidity_weight == 0.35  # Highest liquidity weight
-        assert config.weights.vrp_weight == 0.30
+        assert config.weights.vrp_weight == 0.25
 
     def test_consistency_heavy_config(self):
         """Consistency-Heavy config prioritizes consistency."""
         config = get_config("consistency_heavy")
 
         assert config.name == "Consistency-Heavy"
-        assert config.weights.consistency_weight == 0.45  # Highest consistency weight
+        assert config.weights.consistency_weight == 0.40  # Highest consistency weight
         assert config.max_positions == 8
         assert config.min_score == 65.0
 
@@ -259,14 +268,14 @@ class TestPredefinedConfigs:
         config = get_config("skew_aware")
 
         assert config.name == "Skew-Aware"
-        assert config.weights.skew_weight == 0.30  # Highest skew weight
+        assert config.weights.skew_weight == 0.20  # Highest skew weight among non-VRP factors
 
     def test_hybrid_config(self):
         """Hybrid config balances multiple factors."""
         config = get_config("hybrid")
 
         assert config.name == "Hybrid"
-        assert config.weights.vrp_weight == 0.45
+        assert config.weights.vrp_weight == 0.35
         assert config.min_score == 62.0
 
     def test_get_config_case_insensitive(self):

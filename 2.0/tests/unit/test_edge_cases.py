@@ -7,6 +7,8 @@ and failure scenarios that may occur in production.
 
 import pytest
 from datetime import date, timedelta
+
+FUTURE_EXPIRATION = date.today() + timedelta(days=45)
 from decimal import Decimal
 from pathlib import Path
 
@@ -25,7 +27,7 @@ class TestZeroAndNegativeValues:
         mock_options_provider.set_stock_price("DEAD", Money(0))
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("DEAD", date(2026, 6, 23))
+        result = calc.calculate("DEAD", FUTURE_EXPIRATION)
 
         assert result.is_err
         # Returns NODATA since no option chain is set for DEAD
@@ -68,17 +70,17 @@ class TestEmptyAndMissingData:
         # Create empty chain
         empty_chain = OptionChain(
             ticker="EMPTY",
-            expiration=date(2026, 6, 23),
+            expiration=FUTURE_EXPIRATION,
             stock_price=stock_price,
             calls={},
             puts={},
         )
         mock_options_provider.set_option_chain(
-            "EMPTY", date(2026, 6, 23), empty_chain
+            "EMPTY", FUTURE_EXPIRATION, empty_chain
         )
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("EMPTY", date(2026, 6, 23))
+        result = calc.calculate("EMPTY", FUTURE_EXPIRATION)
 
         assert result.is_err
         assert result.unwrap_err().code == ErrorCode.NODATA
@@ -102,17 +104,17 @@ class TestEmptyAndMissingData:
 
         chain = OptionChain(
             ticker="NOATM",
-            expiration=date(2026, 6, 23),
+            expiration=FUTURE_EXPIRATION,
             stock_price=stock_price,
             calls=calls,
             puts=puts,
         )
         mock_options_provider.set_option_chain(
-            "NOATM", date(2026, 6, 23), chain
+            "NOATM", FUTURE_EXPIRATION, chain
         )
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("NOATM", date(2026, 6, 23))
+        result = calc.calculate("NOATM", FUTURE_EXPIRATION)
 
         # No ATM strikes should return error (cannot calculate straddle)
         assert result.is_err, "Expected error for chain with no ATM strikes"
@@ -286,17 +288,17 @@ class TestBoundaryConditions:
 
         chain = OptionChain(
             ticker="SINGLE",
-            expiration=date(2026, 6, 23),
+            expiration=FUTURE_EXPIRATION,
             stock_price=stock_price,
             calls=calls,
             puts=puts,
         )
         mock_options_provider.set_option_chain(
-            "SINGLE", date(2026, 6, 23), chain
+            "SINGLE", FUTURE_EXPIRATION, chain
         )
 
         calc = ImpliedMoveCalculator(mock_options_provider)
-        result = calc.calculate("SINGLE", date(2026, 6, 23))
+        result = calc.calculate("SINGLE", FUTURE_EXPIRATION)
 
         assert result.is_ok
 
@@ -431,7 +433,6 @@ class TestConfigurationEdgeCases:
         config = Config(
             api=APIConfig(
                 tradier_api_key="test_key",
-                alpha_vantage_key="test_av_key",
             ),
             database=DatabaseConfig(path=tmp_path / "test.db"),
             cache=CacheConfig(l1_ttl=1, l2_ttl=2),  # Minimum valid TTLs
@@ -443,7 +444,7 @@ class TestConfigurationEdgeCases:
             strategy=StrategyConfig(),
             scan=ScanConfig(),
             rate_limits=RateLimitConfig(
-                alpha_vantage_per_minute=1,  # Minimum
+                finnhub_per_minute=1,  # Minimum
                 tradier_per_second=1,
             ),
             resilience=ResilienceConfig(
@@ -477,7 +478,6 @@ class TestConfigurationEdgeCases:
         config = Config(
             api=APIConfig(
                 tradier_api_key="test_key",
-                alpha_vantage_key="",
             ),
             database=DatabaseConfig(path=tmp_path / "test.db"),
             cache=CacheConfig(l1_ttl=30, l2_ttl=30),  # Equal!

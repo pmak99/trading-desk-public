@@ -12,7 +12,7 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT="trading-desk-prod"
 REGION="us-east1"
 SERVICE="trading-desk"
-GCS_BUCKET="gs://trading-desk-data"
+GCS_BUCKET="gs://your-gcs-bucket"
 
 cd "$SCRIPT_DIR"
 

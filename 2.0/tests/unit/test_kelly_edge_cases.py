@@ -13,7 +13,7 @@ Tests boundary conditions in _calculate_contracts_kelly:
 import pytest
 from src.domain.types import Money
 from src.config.config import StrategyConfig, ScoringWeights
-from src.application.services.strategy_generator import StrategyGenerator
+from src.application.services.strategy import StrategyGenerator
 from src.application.metrics.liquidity_scorer import LiquidityScorer
 
 

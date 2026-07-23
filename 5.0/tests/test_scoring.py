@@ -40,14 +40,14 @@ def test_calculate_score_reject_liquidity():
     assert reject_result["total_score"] < 90  # Penalized from perfect score
 
 def test_apply_sentiment_modifier_bullish():
-    """Bullish sentiment modifier applied to base score."""
+    """Sentiment modifiers default to neutral (0%) — tune in constants.py based on your own accuracy backtesting."""
     modified = apply_sentiment_modifier(80, sentiment_score=0.8)
-    assert modified >= 80.0
+    assert modified == 80.0  # 80 * 1.0 (default: no modifier)
 
 def test_apply_sentiment_modifier_bearish():
-    """Bearish sentiment modifier applied to base score."""
+    """Sentiment modifiers default to neutral (0%)."""
     modified = apply_sentiment_modifier(80, sentiment_score=-0.8)
-    assert modified >= 80.0
+    assert modified == 80.0  # 80 * 1.0 (default: no modifier)
 
 def test_apply_sentiment_modifier_neutral():
     """Neutral sentiment has no effect."""

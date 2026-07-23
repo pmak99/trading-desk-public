@@ -232,8 +232,8 @@ class TestFilterPathIntegration:
         mock_sentiment_cache.get_sentiment.return_value = None
 
         # Patch settings module in the analysis router where _analyze_single_ticker lives
-        with patch("src.api.routers.analysis.settings", mock_settings):
-            from src.api.routers.analysis import _analyze_single_ticker
+        with patch("src.api.routers.analysis_common.settings", mock_settings):
+            from src.api.routers.analysis_common import _analyze_single_ticker
 
             semaphore = asyncio.Semaphore(5)
             result = await _analyze_single_ticker(
@@ -291,8 +291,8 @@ class TestFilterPathIntegration:
         mock_sentiment_cache = MagicMock()
         mock_sentiment_cache.get_sentiment.return_value = None
 
-        with patch("src.api.routers.analysis.settings", mock_settings):
-            from src.api.routers.analysis import _analyze_single_ticker
+        with patch("src.api.routers.analysis_common.settings", mock_settings):
+            from src.api.routers.analysis_common import _analyze_single_ticker
 
             semaphore = asyncio.Semaphore(5)
             result = await _analyze_single_ticker(
@@ -355,8 +355,8 @@ class TestFilterPathIntegration:
         mock_sentiment_cache = MagicMock()
         mock_sentiment_cache.get_sentiment.return_value = None
 
-        with patch("src.api.routers.analysis.settings", mock_settings):
-            from src.api.routers.analysis import _analyze_single_ticker
+        with patch("src.api.routers.analysis_common.settings", mock_settings):
+            from src.api.routers.analysis_common import _analyze_single_ticker
 
             semaphore = asyncio.Semaphore(5)
             await _analyze_single_ticker(

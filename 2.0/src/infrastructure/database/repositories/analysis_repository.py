@@ -53,6 +53,9 @@ class AnalysisRepository(ResilientRepository):
         analysis: TickerAnalysis,
         market_conditions: Optional[MarketConditions] = None,
         selected_strategy: Optional[Strategy] = None,
+        historical_close_mean_pct: Optional[float] = None,
+        vrp_close_ratio: Optional[float] = None,
+        term_slope_ratio: Optional[float] = None,
     ) -> None:
         """
         Log analysis run to database.
@@ -61,6 +64,9 @@ class AnalysisRepository(ResilientRepository):
             analysis: Complete ticker analysis
             market_conditions: Market conditions at time of analysis (optional)
             selected_strategy: Strategy selected for execution (optional)
+            historical_close_mean_pct: Mean |close_move_pct| baseline (gap-inclusive)
+            vrp_close_ratio: Implied move / close baseline — live A/B vs intraday VRP
+            term_slope_ratio: Front ATM IV / ~30d-out ATM IV (>1 = backwardation)
         """
         try:
             with self._get_connection() as conn:
@@ -126,10 +132,17 @@ class AnalysisRepository(ResilientRepository):
                             strategy_rr,
                             contracts,
 
+                            -- Gap-inclusive VRP (live A/B vs intraday baseline)
+                            historical_close_mean_pct,
+                            vrp_close_ratio,
+
+                            -- IV term-structure event-vol multiple
+                            term_slope_ratio,
+
                             -- Additional context
                             raw_analysis
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             datetime.now().isoformat(),
@@ -149,6 +162,9 @@ class AnalysisRepository(ResilientRepository):
                             strategy_pop,
                             strategy_rr,
                             contracts,
+                            historical_close_mean_pct,
+                            vrp_close_ratio,
+                            term_slope_ratio,
                             self._serialize_analysis(analysis),
                         ),
                     )
@@ -187,7 +203,7 @@ class AnalysisRepository(ResilientRepository):
             List of analysis records as dictionaries
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
@@ -228,7 +244,7 @@ class AnalysisRepository(ResilientRepository):
             Dict mapping regime name to statistics
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 cursor.execute(
@@ -273,7 +289,7 @@ class AnalysisRepository(ResilientRepository):
             Dict mapping strategy type to count
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
 
                 cursor.execute(

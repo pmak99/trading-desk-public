@@ -449,8 +449,12 @@ def calculate_earnings_move(
     # Gap move: reference close -> reaction open (preserves sign)
     gap_move_pct = (reaction_price.open - reference_close) / reference_close * 100
 
-    # Intraday move: high-low range as % (always positive)
-    intraday_move_pct = abs((reaction_price.high - reaction_price.low) / reference_close * 100)
+    # Intraday move: reaction-day open -> close, signed (matches expand_universe.py
+    # and the June 2026 re-backfill; consumers take abs() for magnitude)
+    if reaction_price.open == 0:
+        logger.warning(f"  Reaction open is zero")
+        return None
+    intraday_move_pct = (reaction_price.close - reaction_price.open) / reaction_price.open * 100
 
     # Close move: reference close -> reaction close (preserves sign)
     close_move_pct = (reaction_price.close - reference_close) / reference_close * 100

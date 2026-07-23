@@ -39,7 +39,7 @@ def mock_settings():
     """Patch settings with test values for all handler tests."""
     with patch("src.jobs.handlers.settings") as s:
         s.tradier_api_key = "test_tradier_key"
-        s.alpha_vantage_key = "test_av_key"
+        s.finnhub_api_key = "test_finnhub_key"
         s.perplexity_api_key = "test_pplx_key"
         s.telegram_bot_token = "test_bot_token"
         s.telegram_chat_id = "123456"
@@ -60,7 +60,7 @@ def runner(mock_settings):
 
     # Mock all lazy-initialized clients
     jr._tradier = AsyncMock()
-    jr._alphavantage = AsyncMock()
+    jr._finnhub = AsyncMock()
     jr._perplexity = AsyncMock()
     jr._telegram = AsyncMock()
     jr._yahoo = AsyncMock()
@@ -114,7 +114,7 @@ class TestFetchEarningsWithDbFallback:
             {"symbol": "MSFT", "report_date": "2026-02-09", "timing": "BMO"},
         ]
 
-        with patch("src.jobs.handlers.today_et", return_value="2026-02-07"):
+        with patch("src.jobs.handlers.helpers.today_et", return_value="2026-02-07"):
             result = await fetch_earnings_with_db_fallback(av, repo, days=5)
 
         assert len(result) == 1
@@ -133,7 +133,7 @@ class TestFetchEarningsWithDbFallback:
             {"symbol": "GOOG", "report_date": "2026-02-10", "timing": "AMC"},
         ]
 
-        with patch("src.jobs.handlers.today_et", return_value="2026-02-07"):
+        with patch("src.jobs.handlers.helpers.today_et", return_value="2026-02-07"):
             result = await fetch_earnings_with_db_fallback(av, repo, days=3)
 
         assert result[0]["symbol"] == "GOOG"
@@ -151,7 +151,7 @@ class TestFetchEarningsWithDbFallback:
             {"symbol": "TSLA", "report_date": "2026-02-09", "timing": "AMC"},
         ]
 
-        with patch("src.jobs.handlers.today_et", return_value="2026-02-07"):
+        with patch("src.jobs.handlers.helpers.today_et", return_value="2026-02-07"):
             result = await fetch_earnings_with_db_fallback(av, repo, days=5)
 
         assert len(result) == 1
@@ -167,7 +167,7 @@ class TestFetchEarningsWithDbFallback:
         repo = MagicMock()
         repo.get_upcoming_earnings.return_value = []
 
-        with patch("src.jobs.handlers.today_et", return_value="2026-02-07"):
+        with patch("src.jobs.handlers.helpers.today_et", return_value="2026-02-07"):
             result = await fetch_earnings_with_db_fallback(av, repo, days=5)
 
         assert result == []
@@ -182,7 +182,7 @@ class TestFetchEarningsWithDbFallback:
         repo = MagicMock()
         repo.get_upcoming_earnings.return_value = []
 
-        with patch("src.jobs.handlers.today_et", return_value="2026-02-07"):
+        with patch("src.jobs.handlers.helpers.today_et", return_value="2026-02-07"):
             await fetch_earnings_with_db_fallback(av, repo, days=14)
 
         repo.get_upcoming_earnings.assert_called_once_with("2026-02-07", 14)
@@ -497,8 +497,8 @@ class TestPreMarketPrep:
     @pytest.mark.asyncio
     async def test_empty_calendar_returns_success(self, runner, mock_settings):
         """Empty earnings calendar returns success (not warning) — warning blocks all downstream jobs."""
-        with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock) as mock_fallback, \
-             patch("src.jobs.handlers.HistoricalMovesRepository"):
+        with patch("src.jobs.handlers.pre_market_prep.fetch_earnings_with_db_fallback", new_callable=AsyncMock) as mock_fallback, \
+             patch("src.jobs.handlers.pre_market_prep.HistoricalMovesRepository"):
             mock_fallback.return_value = []
             result = await runner._pre_market_prep()
 
@@ -517,10 +517,10 @@ class TestPreMarketPrep:
 
         runner._tradier.get_quote.return_value = {"last": 180.0}
 
-        with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et") as mock_now, \
+        with patch("src.jobs.handlers.pre_market_prep.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
+             patch("src.jobs.handlers.pre_market_prep.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.pre_market_prep.today_et", return_value=today), \
+             patch("src.jobs.handlers.pre_market_prep.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.today_et", return_value=today), \
              patch("src.jobs.base.now_et") as mock_base_now, \
@@ -547,10 +547,10 @@ class TestPreMarketPrep:
         # Return None price
         runner._tradier.get_quote.return_value = {"last": None, "close": None, "prevclose": None}
 
-        with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et") as mock_now, \
+        with patch("src.jobs.handlers.pre_market_prep.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
+             patch("src.jobs.handlers.pre_market_prep.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.pre_market_prep.today_et", return_value=today), \
+             patch("src.jobs.handlers.pre_market_prep.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.today_et", return_value=today), \
              patch("src.jobs.base.now_et") as mock_base_now, \
@@ -572,10 +572,10 @@ class TestPreMarketPrep:
         mock_repo.get_tracked_tickers.return_value = {"AAPL"}
         mock_repo.get_average_move.return_value = None  # No historical data
 
-        with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et") as mock_now, \
+        with patch("src.jobs.handlers.pre_market_prep.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
+             patch("src.jobs.handlers.pre_market_prep.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.pre_market_prep.today_et", return_value=today), \
+             patch("src.jobs.handlers.pre_market_prep.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.today_et", return_value=today), \
              patch("src.jobs.base.now_et") as mock_base_now, \
@@ -604,10 +604,10 @@ class TestPreMarketPrep:
             Exception("Tradier timeout"),
         ]
 
-        with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et") as mock_now, \
+        with patch("src.jobs.handlers.pre_market_prep.fetch_earnings_with_db_fallback", new_callable=AsyncMock, return_value=earnings), \
+             patch("src.jobs.handlers.pre_market_prep.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.pre_market_prep.today_et", return_value=today), \
+             patch("src.jobs.handlers.pre_market_prep.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.today_et", return_value=today), \
              patch("src.jobs.base.now_et") as mock_base_now, \
@@ -631,7 +631,7 @@ class TestSentimentScan:
     @pytest.mark.asyncio
     async def test_empty_calendar_returns_success(self, runner, mock_settings):
         """Empty calendar returns success (not warning) with zero candidates."""
-        runner._alphavantage.get_earnings_calendar.return_value = []
+        runner._finnhub.get_earnings_calendar.return_value = []
 
         result = await runner._sentiment_scan()
 
@@ -643,7 +643,7 @@ class TestSentimentScan:
     async def test_already_cached_tickers_skipped(self, runner, mock_settings):
         """Tickers with existing cached sentiment are skipped."""
         today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
+        runner._finnhub.get_earnings_calendar.return_value = _make_earnings(
             ["AAPL"], report_date=today
         )
 
@@ -654,10 +654,10 @@ class TestSentimentScan:
         # Already cached
         mock_cache.get_sentiment.return_value = {"score": 0.6, "direction": "NEUTRAL"}
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et") as mock_now, \
+        with patch("src.jobs.handlers.sentiment_scan.today_et", return_value=today), \
+             patch("src.jobs.handlers.sentiment_scan.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
+             patch("src.jobs.handlers.sentiment_scan.SentimentCacheRepository", return_value=mock_cache), \
              patch("src.jobs.base.today_et", return_value=today), \
              patch("src.jobs.base.now_et") as mock_base_now, \
              patch("src.jobs.base.settings", mock_settings):
@@ -674,7 +674,7 @@ class TestSentimentScan:
     async def test_low_vrp_tickers_not_primed(self, runner, mock_settings):
         """Tickers with VRP below VRP_DISCOVERY are not added to candidates."""
         today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
+        runner._finnhub.get_earnings_calendar.return_value = _make_earnings(
             ["AAPL"], report_date=today
         )
 
@@ -698,13 +698,13 @@ class TestSentimentScan:
             "has_weekly_options": True,
         }
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et") as mock_now, \
+        with patch("src.jobs.handlers.sentiment_scan.today_et", return_value=today), \
+             patch("src.jobs.handlers.sentiment_scan.now_et") as mock_now, \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
-             patch("src.jobs.handlers.calculate_vrp", return_value={"vrp_ratio": 1.1, "tier": "SKIP"}), \
-             patch("src.jobs.handlers.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
-             patch("src.jobs.handlers.get_implied_move_with_fallback", return_value=(4.0, True)), \
+             patch("src.jobs.handlers.sentiment_scan.SentimentCacheRepository", return_value=mock_cache), \
+             patch("src.jobs.handlers.sentiment_scan.calculate_vrp", return_value={"vrp_ratio": 1.1, "tier": "SKIP"}), \
+             patch("src.jobs.handlers.sentiment_scan.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
+             patch("src.jobs.handlers.sentiment_scan.get_implied_move_with_fallback", return_value=(4.0, True)), \
              patch("src.jobs.base.today_et", return_value=today), \
              patch("src.jobs.base.now_et") as mock_base_now, \
              patch("src.jobs.base.settings", mock_settings), \
@@ -730,14 +730,14 @@ class TestMorningDigest:
     @pytest.mark.asyncio
     async def test_empty_calendar_sends_warning_telegram(self, runner, mock_settings):
         """Empty earnings calendar (DB + AV both empty) sends Telegram warning."""
-        runner._alphavantage.get_earnings_calendar.return_value = []
+        runner._finnhub.get_earnings_calendar.return_value = []
         runner._telegram.send_message.return_value = True
 
         mock_repo = MagicMock()
         mock_repo.get_upcoming_earnings.return_value = []
 
-        with patch("src.jobs.handlers.today_et", return_value="2026-02-09"), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo):
+        with patch("src.jobs.handlers.morning_digest.today_et", return_value="2026-02-09"), \
+             patch("src.jobs.handlers.morning_digest.HistoricalMovesRepository", return_value=mock_repo):
             result = await runner._morning_digest()
 
         assert result["status"] == "warning"
@@ -775,14 +775,14 @@ class TestMorningDigest:
 
         real_now = ET.localize(datetime(2026, 2, 9, 7, 30, 0))
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et", return_value=real_now), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
+        with patch("src.jobs.handlers.morning_digest.today_et", return_value=today), \
+             patch("src.jobs.handlers.morning_digest.now_et", return_value=real_now), \
+             patch("src.jobs.handlers.morning_digest.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
-             patch("src.jobs.handlers.calculate_vrp", return_value={"vrp_ratio": 1.1, "tier": "SKIP"}), \
-             patch("src.jobs.handlers.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
-             patch("src.jobs.handlers.get_implied_move_with_fallback", return_value=(4.0, True)), \
+             patch("src.jobs.handlers.morning_digest.SentimentCacheRepository", return_value=mock_cache), \
+             patch("src.jobs.handlers.morning_digest.calculate_vrp", return_value={"vrp_ratio": 1.1, "tier": "SKIP"}), \
+             patch("src.jobs.handlers.morning_digest.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
+             patch("src.jobs.handlers.morning_digest.get_implied_move_with_fallback", return_value=(4.0, True)), \
              patch("src.jobs.base.today_et", return_value=today), \
              patch("src.jobs.base.now_et", return_value=real_now), \
              patch("src.jobs.base.settings", mock_settings), \
@@ -827,19 +827,19 @@ class TestMorningDigest:
 
         real_now = ET.localize(datetime(2026, 2, 9, 7, 30, 0))
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et", return_value=real_now), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
+        with patch("src.jobs.handlers.morning_digest.today_et", return_value=today), \
+             patch("src.jobs.handlers.morning_digest.now_et", return_value=real_now), \
+             patch("src.jobs.handlers.morning_digest.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache), \
-             patch("src.jobs.handlers.calculate_vrp", return_value={"vrp_ratio": 2.5, "tier": "EXCELLENT"}), \
-             patch("src.jobs.handlers.calculate_score", return_value={"total_score": 80}), \
-             patch("src.jobs.handlers.apply_sentiment_modifier", return_value=82), \
-             patch("src.jobs.handlers.generate_strategies", return_value=[]), \
-             patch("src.jobs.handlers.get_direction", return_value="NEUTRAL"), \
-             patch("src.jobs.handlers.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
-             patch("src.jobs.handlers.get_implied_move_with_fallback", return_value=(8.0, True)), \
-             patch("src.jobs.handlers.format_digest", return_value="<b>Test Digest</b>"), \
+             patch("src.jobs.handlers.morning_digest.SentimentCacheRepository", return_value=mock_cache), \
+             patch("src.jobs.handlers.morning_digest.calculate_vrp", return_value={"vrp_ratio": 2.5, "tier": "EXCELLENT"}), \
+             patch("src.jobs.handlers.morning_digest.calculate_score", return_value={"total_score": 80}), \
+             patch("src.jobs.handlers.morning_digest.apply_sentiment_modifier", return_value=82), \
+             patch("src.jobs.handlers.morning_digest.generate_strategies", return_value=[]), \
+             patch("src.jobs.handlers.morning_digest.get_direction", return_value="NEUTRAL"), \
+             patch("src.jobs.handlers.morning_digest.fetch_real_implied_move", new_callable=AsyncMock, return_value=mock_im_result), \
+             patch("src.jobs.handlers.morning_digest.get_implied_move_with_fallback", return_value=(8.0, True)), \
+             patch("src.jobs.handlers.morning_digest.format_digest", return_value="<b>Test Digest</b>"), \
              patch("src.jobs.base.today_et", return_value=today), \
              patch("src.jobs.base.now_et", return_value=real_now), \
              patch("src.jobs.base.settings", mock_settings), \
@@ -864,7 +864,7 @@ class TestAfterHoursCheck:
     @pytest.mark.asyncio
     async def test_no_qualified_candidates_returns_early(self, runner, mock_settings):
         """Returns early when no tickers were qualified by digest/pre-trade."""
-        with patch("src.jobs.handlers.today_et", return_value="2026-02-25"), \
+        with patch("src.jobs.handlers.after_hours_check.today_et", return_value="2026-02-25"), \
              patch("src.jobs.base.BaseJobHandler._get_daily_candidates", return_value=set()):
 
             result = await runner._after_hours_check()
@@ -873,13 +873,13 @@ class TestAfterHoursCheck:
         assert result["checked"] == 0
         assert "No qualified candidates" in result["note"]
         # Should NOT call earnings API
-        runner._alphavantage.get_earnings_calendar.assert_not_called()
+        runner._finnhub.get_earnings_calendar.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_filters_to_qualified_tickers_only(self, runner, mock_settings):
         """Only tickers from daily_candidates are checked, micro-caps excluded."""
         today = "2026-02-25"
-        runner._alphavantage.get_earnings_calendar.return_value = [
+        runner._finnhub.get_earnings_calendar.return_value = [
             {"symbol": "CRM", "report_date": today},
             {"symbol": "EDXC", "report_date": today},  # micro-cap, not in candidates
             {"symbol": "ENSV", "report_date": today},  # micro-cap, not in candidates
@@ -901,10 +901,10 @@ class TestAfterHoursCheck:
             "Close": {"2026-02-25": 200.0}
         })
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
+        with patch("src.jobs.handlers.after_hours_check.today_et", return_value=today), \
              patch("src.jobs.base.today_et", return_value=today), \
              patch("src.jobs.base.BaseJobHandler._get_daily_candidates", return_value=qualified), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.after_hours_check.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.settings", mock_settings):
 
             result = await runner._after_hours_check()
@@ -916,9 +916,9 @@ class TestAfterHoursCheck:
     @pytest.mark.asyncio
     async def test_empty_calendar_returns_warning(self, runner, mock_settings):
         """Empty earnings calendar returns warning."""
-        runner._alphavantage.get_earnings_calendar.return_value = []
+        runner._finnhub.get_earnings_calendar.return_value = []
 
-        with patch("src.jobs.handlers.today_et", return_value="2026-02-25"), \
+        with patch("src.jobs.handlers.after_hours_check.today_et", return_value="2026-02-25"), \
              patch("src.jobs.base.BaseJobHandler._get_daily_candidates", return_value={"CRM"}):
 
             result = await runner._after_hours_check()
@@ -936,16 +936,16 @@ class TestOutcomeRecorder:
     @pytest.mark.asyncio
     async def test_empty_calendar_returns_warning(self, runner, mock_settings):
         """Empty earnings calendar returns warning."""
-        runner._alphavantage.get_earnings_calendar.return_value = []
+        runner._finnhub.get_earnings_calendar.return_value = []
 
         mock_repo = MagicMock()
         mock_repo.get_upcoming_earnings.return_value = []
 
         real_now = ET.localize(datetime(2026, 2, 9, 19, 0, 0))
 
-        with patch("src.jobs.handlers.today_et", return_value="2026-02-09"), \
-             patch("src.jobs.handlers.now_et", return_value=real_now), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo):
+        with patch("src.jobs.handlers.outcome_recorder.today_et", return_value="2026-02-09"), \
+             patch("src.jobs.handlers.outcome_recorder.now_et", return_value=real_now), \
+             patch("src.jobs.handlers.outcome_recorder.HistoricalMovesRepository", return_value=mock_repo):
 
             result = await runner._outcome_recorder()
 
@@ -957,7 +957,7 @@ class TestOutcomeRecorder:
         """BMO earnings uses prev_day_close -> earnings_day_close."""
         today = "2026-02-09"
 
-        runner._alphavantage.get_earnings_calendar.return_value = [
+        runner._finnhub.get_earnings_calendar.return_value = [
             {"symbol": "AAPL", "report_date": today, "timing": "BMO"},
         ]
 
@@ -976,9 +976,9 @@ class TestOutcomeRecorder:
 
         real_now = ET.localize(datetime(2026, 2, 9, 19, 0, 0))
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et", return_value=real_now), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo):
+        with patch("src.jobs.handlers.outcome_recorder.today_et", return_value=today), \
+             patch("src.jobs.handlers.outcome_recorder.now_et", return_value=real_now), \
+             patch("src.jobs.handlers.outcome_recorder.HistoricalMovesRepository", return_value=mock_repo):
 
             result = await runner._outcome_recorder()
 
@@ -997,7 +997,7 @@ class TestOutcomeRecorder:
         """Already recorded earnings are skipped."""
         today = "2026-02-09"
 
-        runner._alphavantage.get_earnings_calendar.return_value = [
+        runner._finnhub.get_earnings_calendar.return_value = [
             {"symbol": "AAPL", "report_date": today, "timing": "BMO"},
         ]
 
@@ -1010,9 +1010,9 @@ class TestOutcomeRecorder:
 
         real_now = ET.localize(datetime(2026, 2, 9, 19, 0, 0))
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et", return_value=real_now), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo):
+        with patch("src.jobs.handlers.outcome_recorder.today_et", return_value=today), \
+             patch("src.jobs.handlers.outcome_recorder.now_et", return_value=real_now), \
+             patch("src.jobs.handlers.outcome_recorder.HistoricalMovesRepository", return_value=mock_repo):
 
             result = await runner._outcome_recorder()
 
@@ -1026,7 +1026,7 @@ class TestOutcomeRecorder:
         today = "2026-02-09"
         yesterday = "2026-02-08"
 
-        runner._alphavantage.get_earnings_calendar.return_value = [
+        runner._finnhub.get_earnings_calendar.return_value = [
             {"symbol": "MSFT", "report_date": yesterday, "timing": "AMC"},
         ]
 
@@ -1044,9 +1044,9 @@ class TestOutcomeRecorder:
 
         real_now = ET.localize(datetime(2026, 2, 9, 19, 0, 0))
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et", return_value=real_now), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo):
+        with patch("src.jobs.handlers.outcome_recorder.today_et", return_value=today), \
+             patch("src.jobs.handlers.outcome_recorder.now_et", return_value=real_now), \
+             patch("src.jobs.handlers.outcome_recorder.HistoricalMovesRepository", return_value=mock_repo):
 
             result = await runner._outcome_recorder()
 
@@ -1063,7 +1063,7 @@ class TestOutcomeRecorder:
         """Invalid ticker formats (preferred stocks, warrants) are filtered."""
         today = "2026-02-09"
 
-        runner._alphavantage.get_earnings_calendar.return_value = [
+        runner._finnhub.get_earnings_calendar.return_value = [
             {"symbol": "COF-PI", "report_date": today, "timing": "BMO"},  # Preferred stock
             {"symbol": "ACHR+", "report_date": today, "timing": "BMO"},   # Warrant
         ]
@@ -1073,9 +1073,9 @@ class TestOutcomeRecorder:
 
         real_now = ET.localize(datetime(2026, 2, 9, 19, 0, 0))
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et", return_value=real_now), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo):
+        with patch("src.jobs.handlers.outcome_recorder.today_et", return_value=today), \
+             patch("src.jobs.handlers.outcome_recorder.now_et", return_value=real_now), \
+             patch("src.jobs.handlers.outcome_recorder.HistoricalMovesRepository", return_value=mock_repo):
 
             result = await runner._outcome_recorder()
 
@@ -1087,7 +1087,7 @@ class TestOutcomeRecorder:
         """Tickers with fewer than 2 price data points are skipped."""
         today = "2026-02-09"
 
-        runner._alphavantage.get_earnings_calendar.return_value = [
+        runner._finnhub.get_earnings_calendar.return_value = [
             {"symbol": "AAPL", "report_date": today, "timing": "BMO"},
         ]
 
@@ -1102,9 +1102,9 @@ class TestOutcomeRecorder:
 
         real_now = ET.localize(datetime(2026, 2, 9, 19, 0, 0))
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.now_et", return_value=real_now), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo):
+        with patch("src.jobs.handlers.outcome_recorder.today_et", return_value=today), \
+             patch("src.jobs.handlers.outcome_recorder.now_et", return_value=real_now), \
+             patch("src.jobs.handlers.outcome_recorder.HistoricalMovesRepository", return_value=mock_repo):
 
             result = await runner._outcome_recorder()
 
@@ -1128,7 +1128,8 @@ class TestWeeklyBackup:
         """When DB file doesn't exist, returns success with backed_up=False."""
         mock_settings.DB_PATH = "/nonexistent/path/ivcrush.db"
 
-        result = await runner._weekly_backup()
+        with patch("src.jobs.handlers.weekly_backup.settings", mock_settings):
+            result = await runner._weekly_backup()
 
         assert result["status"] == "success"
         assert result["backed_up"] is False
@@ -1143,7 +1144,8 @@ class TestWeeklyBackup:
         try:
             mock_settings.DB_PATH = tmp_path
 
-            with patch("src.jobs.handlers.sqlite3") as mock_sqlite:
+            with patch("src.jobs.handlers.weekly_backup.settings", mock_settings), \
+                 patch("src.jobs.handlers.weekly_backup.sqlite3") as mock_sqlite:
                 mock_conn = MagicMock()
                 mock_cursor = MagicMock()
                 mock_cursor.fetchone.return_value = ("corrupt page found",)
@@ -1168,10 +1170,11 @@ class TestWeeklyBackup:
 
             real_now = ET.localize(datetime(2026, 2, 7, 3, 0, 0))
 
-            with patch("src.jobs.handlers.sqlite3") as mock_sqlite, \
-                 patch("src.jobs.handlers.now_et", return_value=real_now), \
-                 patch("src.jobs.handlers.DatabaseSync") as mock_sync_cls, \
-                 patch("src.jobs.handlers.shutil"):
+            with patch("src.jobs.handlers.weekly_backup.settings", mock_settings), \
+                 patch("src.jobs.handlers.weekly_backup.sqlite3") as mock_sqlite, \
+                 patch("src.jobs.handlers.weekly_backup.now_et", return_value=real_now), \
+                 patch("src.jobs.handlers.weekly_backup.DatabaseSync") as mock_sync_cls, \
+                 patch("src.jobs.handlers.weekly_backup.shutil"):
                 # Integrity passes
                 mock_conn = MagicMock()
                 mock_cursor = MagicMock()
@@ -1207,10 +1210,11 @@ class TestWeeklyBackup:
 
             real_now = ET.localize(datetime(2026, 2, 7, 3, 0, 0))
 
-            with patch("src.jobs.handlers.sqlite3") as mock_sqlite, \
-                 patch("src.jobs.handlers.now_et", return_value=real_now), \
-                 patch("src.jobs.handlers.DatabaseSync") as mock_sync_cls, \
-                 patch("src.jobs.handlers.shutil"):
+            with patch("src.jobs.handlers.weekly_backup.settings", mock_settings), \
+                 patch("src.jobs.handlers.weekly_backup.sqlite3") as mock_sqlite, \
+                 patch("src.jobs.handlers.weekly_backup.now_et", return_value=real_now), \
+                 patch("src.jobs.handlers.weekly_backup.DatabaseSync") as mock_sync_cls, \
+                 patch("src.jobs.handlers.weekly_backup.shutil"):
                 mock_conn = MagicMock()
                 mock_cursor = MagicMock()
                 mock_cursor.fetchone.return_value = ("ok",)
@@ -1244,7 +1248,7 @@ class TestWeeklyCleanup:
         mock_cache = MagicMock()
         mock_cache.clear_expired.return_value = 42
 
-        with patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache):
+        with patch("src.jobs.handlers.weekly_cleanup.SentimentCacheRepository", return_value=mock_cache):
             result = await runner._weekly_cleanup()
 
         assert result["status"] == "success"
@@ -1256,7 +1260,7 @@ class TestWeeklyCleanup:
         mock_cache = MagicMock()
         mock_cache.clear_expired.side_effect = Exception("DB locked")
 
-        with patch("src.jobs.handlers.SentimentCacheRepository", return_value=mock_cache):
+        with patch("src.jobs.handlers.weekly_cleanup.SentimentCacheRepository", return_value=mock_cache):
             result = await runner._weekly_cleanup()
 
         assert result["status"] == "error"
@@ -1273,7 +1277,7 @@ class TestCalendarSync:
     @pytest.mark.asyncio
     async def test_empty_calendar_returns_warning(self, runner, mock_settings):
         """Empty calendar returns warning status."""
-        runner._alphavantage.get_earnings_calendar.return_value = []
+        runner._finnhub.get_earnings_calendar.return_value = []
 
         with patch("src.jobs.base.settings", mock_settings):
             result = await runner._calendar_sync()
@@ -1285,7 +1289,7 @@ class TestCalendarSync:
     async def test_upserts_and_uploads_to_gcs(self, runner, mock_settings):
         """Calendar sync upserts earnings and uploads to GCS."""
         earnings_data = _make_earnings(["AAPL", "MSFT", "NVDA"], report_date="2026-03-15")
-        runner._alphavantage.get_earnings_calendar.return_value = earnings_data
+        runner._finnhub.get_earnings_calendar.return_value = earnings_data
 
         mock_repo = MagicMock()
         mock_repo.upsert_earnings_calendar.return_value = 3
@@ -1294,10 +1298,10 @@ class TestCalendarSync:
         mock_sync.upload.return_value = True
         mock_sync.local_path = "/tmp/sync_path"
 
-        with patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.DatabaseSync", return_value=mock_sync), \
-             patch("src.jobs.handlers.shutil"), \
-             patch("src.jobs.handlers.Path"), \
+        with patch("src.jobs.handlers.calendar_sync.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.calendar_sync.DatabaseSync", return_value=mock_sync), \
+             patch("src.jobs.handlers.calendar_sync.shutil"), \
+             patch("src.jobs.handlers.calendar_sync.Path"), \
              patch("src.jobs.base.settings", mock_settings):
 
             result = await runner._calendar_sync()
@@ -1311,15 +1315,15 @@ class TestCalendarSync:
     async def test_gcs_upload_failure_still_succeeds(self, runner, mock_settings):
         """GCS upload failure does not fail the whole job."""
         earnings_data = _make_earnings(["AAPL"], report_date="2026-03-15")
-        runner._alphavantage.get_earnings_calendar.return_value = earnings_data
+        runner._finnhub.get_earnings_calendar.return_value = earnings_data
 
         mock_repo = MagicMock()
         mock_repo.upsert_earnings_calendar.return_value = 1
 
-        with patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.DatabaseSync", side_effect=Exception("GCS error")), \
-             patch("src.jobs.handlers.Path"), \
-             patch("src.jobs.handlers.shutil"), \
+        with patch("src.jobs.handlers.calendar_sync.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.calendar_sync.DatabaseSync", side_effect=Exception("GCS error")), \
+             patch("src.jobs.handlers.calendar_sync.Path"), \
+             patch("src.jobs.handlers.calendar_sync.shutil"), \
              patch("src.jobs.base.settings", mock_settings):
 
             result = await runner._calendar_sync()
@@ -1405,16 +1409,16 @@ class TestWeeklyBackfill:
     @pytest.mark.asyncio
     async def test_empty_calendar_returns_warning(self, runner, mock_settings):
         """Empty earnings returns warning."""
-        runner._alphavantage.get_earnings_calendar.return_value = []
+        runner._finnhub.get_earnings_calendar.return_value = []
 
         mock_repo = MagicMock()
         mock_repo.get_upcoming_earnings.return_value = []
 
         real_now = ET.localize(datetime(2026, 2, 9, 4, 0, 0))
 
-        with patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.today_et", return_value="2026-02-09"), \
-             patch("src.jobs.handlers.now_et", return_value=real_now):
+        with patch("src.jobs.handlers.weekly_backfill.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.weekly_backfill.today_et", return_value="2026-02-09"), \
+             patch("src.jobs.handlers.weekly_backfill.now_et", return_value=real_now):
             result = await runner._weekly_backfill()
 
         assert result["status"] == "warning"
@@ -1425,7 +1429,7 @@ class TestWeeklyBackfill:
         """BMO earnings use prev_day_close as reference for move calculation."""
         # Earnings from 3 days ago
         earnings_date = "2026-02-06"
-        runner._alphavantage.get_earnings_calendar.return_value = [
+        runner._finnhub.get_earnings_calendar.return_value = [
             {"symbol": "AAPL", "report_date": earnings_date, "timing": "BMO"},
         ]
 
@@ -1445,10 +1449,10 @@ class TestWeeklyBackfill:
         # now_et() returns Feb 9 (3 days after earnings)
         mock_now_val = ET.localize(datetime(2026, 2, 9, 19, 0, 0))
 
-        with patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.now_et", return_value=mock_now_val), \
-             patch("src.jobs.handlers.MARKET_TZ", ET), \
-             patch("src.jobs.handlers.today_et", return_value="2026-02-09"):
+        with patch("src.jobs.handlers.weekly_backfill.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.weekly_backfill.now_et", return_value=mock_now_val), \
+             patch("src.jobs.handlers.weekly_backfill.MARKET_TZ", ET), \
+             patch("src.jobs.handlers.weekly_backfill.today_et", return_value="2026-02-09"):
             result = await runner._weekly_backfill()
 
         assert result["backfilled"] == 1
@@ -1462,7 +1466,7 @@ class TestWeeklyBackfill:
     async def test_amc_backfill_uses_next_day_reaction(self, runner, mock_settings):
         """AMC earnings use next_day as reaction day."""
         earnings_date = "2026-02-06"
-        runner._alphavantage.get_earnings_calendar.return_value = [
+        runner._finnhub.get_earnings_calendar.return_value = [
             {"symbol": "MSFT", "report_date": earnings_date, "timing": "AMC"},
         ]
 
@@ -1480,10 +1484,10 @@ class TestWeeklyBackfill:
 
         mock_now_val = ET.localize(datetime(2026, 2, 9, 4, 0, 0))
 
-        with patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.now_et", return_value=mock_now_val), \
-             patch("src.jobs.handlers.MARKET_TZ", ET), \
-             patch("src.jobs.handlers.today_et", return_value="2026-02-09"):
+        with patch("src.jobs.handlers.weekly_backfill.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.weekly_backfill.now_et", return_value=mock_now_val), \
+             patch("src.jobs.handlers.weekly_backfill.MARKET_TZ", ET), \
+             patch("src.jobs.handlers.weekly_backfill.today_et", return_value="2026-02-09"):
             result = await runner._weekly_backfill()
 
         assert result["backfilled"] == 1
@@ -1497,7 +1501,7 @@ class TestWeeklyBackfill:
     async def test_duplicate_backfill_skipped(self, runner, mock_settings):
         """Earnings already recorded in historical_moves are skipped."""
         earnings_date = "2026-02-06"
-        runner._alphavantage.get_earnings_calendar.return_value = [
+        runner._finnhub.get_earnings_calendar.return_value = [
             {"symbol": "AAPL", "report_date": earnings_date, "timing": "BMO"},
         ]
 
@@ -1510,10 +1514,10 @@ class TestWeeklyBackfill:
 
         mock_now_val = ET.localize(datetime(2026, 2, 9, 4, 0, 0))
 
-        with patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.now_et", return_value=mock_now_val), \
-             patch("src.jobs.handlers.MARKET_TZ", ET), \
-             patch("src.jobs.handlers.today_et", return_value="2026-02-09"):
+        with patch("src.jobs.handlers.weekly_backfill.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.weekly_backfill.now_et", return_value=mock_now_val), \
+             patch("src.jobs.handlers.weekly_backfill.MARKET_TZ", ET), \
+             patch("src.jobs.handlers.weekly_backfill.today_et", return_value="2026-02-09"):
             result = await runner._weekly_backfill()
 
         assert result["backfilled"] == 0
@@ -1532,16 +1536,16 @@ class TestEveningSummary:
         """When no earnings today, evening summary is skipped (no Telegram)."""
         today = "2026-02-09"
         # Return earnings for different date
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
+        runner._finnhub.get_earnings_calendar.return_value = _make_earnings(
             ["AAPL"], report_date="2026-02-10"
         )
 
         mock_repo = MagicMock()
         mock_repo.get_tracked_tickers.return_value = {"AAPL"}
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.filter_to_tracked_tickers") as mock_filter:
+        with patch("src.jobs.handlers.evening_summary.today_et", return_value=today), \
+             patch("src.jobs.handlers.evening_summary.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.evening_summary.filter_to_tracked_tickers") as mock_filter:
             mock_filter.return_value = []
 
             result = await runner._evening_summary()
@@ -1555,7 +1559,7 @@ class TestEveningSummary:
     async def test_earnings_with_recorded_moves_sends_summary(self, runner, mock_settings):
         """Sends summary when there are today's earnings with recorded outcomes."""
         today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
+        runner._finnhub.get_earnings_calendar.return_value = _make_earnings(
             ["AAPL", "NVDA"], report_date=today
         )
 
@@ -1569,9 +1573,9 @@ class TestEveningSummary:
 
         runner._telegram.send_message.return_value = True
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.filter_to_tracked_tickers") as mock_filter:
+        with patch("src.jobs.handlers.evening_summary.today_et", return_value=today), \
+             patch("src.jobs.handlers.evening_summary.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.evening_summary.filter_to_tracked_tickers") as mock_filter:
             mock_filter.return_value = _make_earnings(["AAPL", "NVDA"], report_date=today)
 
             result = await runner._evening_summary()
@@ -1585,7 +1589,7 @@ class TestEveningSummary:
     async def test_earnings_no_outcomes_yet_skips_summary(self, runner, mock_settings):
         """When earnings today but no recorded outcomes, summary is skipped."""
         today = "2026-02-09"
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
+        runner._finnhub.get_earnings_calendar.return_value = _make_earnings(
             ["AAPL"], report_date=today
         )
 
@@ -1593,9 +1597,9 @@ class TestEveningSummary:
         mock_repo.get_tracked_tickers.return_value = {"AAPL"}
         mock_repo.get_moves.return_value = []  # No outcomes recorded yet
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
-             patch("src.jobs.handlers.HistoricalMovesRepository", return_value=mock_repo), \
-             patch("src.jobs.handlers.filter_to_tracked_tickers") as mock_filter:
+        with patch("src.jobs.handlers.evening_summary.today_et", return_value=today), \
+             patch("src.jobs.handlers.evening_summary.HistoricalMovesRepository", return_value=mock_repo), \
+             patch("src.jobs.handlers.evening_summary.filter_to_tracked_tickers") as mock_filter:
             mock_filter.return_value = _make_earnings(["AAPL"], report_date=today)
 
             result = await runner._evening_summary()
@@ -1615,7 +1619,7 @@ class TestMarketOpenRefresh:
     @pytest.mark.asyncio
     async def test_empty_calendar_returns_warning(self, runner, mock_settings):
         """Empty calendar returns warning."""
-        runner._alphavantage.get_earnings_calendar.return_value = []
+        runner._finnhub.get_earnings_calendar.return_value = []
 
         with patch("src.jobs.base.settings", mock_settings):
             result = await runner._market_open_refresh()
@@ -1628,14 +1632,14 @@ class TestMarketOpenRefresh:
         """No earnings today returns success with zero refreshed."""
         today = "2026-02-09"
         # Earnings are for tomorrow, not today
-        runner._alphavantage.get_earnings_calendar.return_value = _make_earnings(
+        runner._finnhub.get_earnings_calendar.return_value = _make_earnings(
             ["AAPL"], report_date="2026-02-10"
         )
 
         mock_repo = MagicMock()
         mock_repo.get_tracked_tickers.return_value = {"AAPL"}
 
-        with patch("src.jobs.handlers.today_et", return_value=today), \
+        with patch("src.jobs.handlers.market_open_refresh.today_et", return_value=today), \
              patch("src.jobs.base.HistoricalMovesRepository", return_value=mock_repo), \
              patch("src.jobs.base.today_et", return_value=today), \
              patch("src.jobs.base.settings", mock_settings):
@@ -1705,8 +1709,8 @@ class TestEvaluateVrp:
 @pytest.mark.asyncio
 async def test_pre_market_prep_empty_calendar_returns_success(runner):
     """Empty earnings calendar must return success, not warning — warning blocks all downstream jobs."""
-    with patch("src.jobs.handlers.fetch_earnings_with_db_fallback", new_callable=AsyncMock) as mock_fallback, \
-         patch("src.jobs.handlers.HistoricalMovesRepository"):
+    with patch("src.jobs.handlers.pre_market_prep.fetch_earnings_with_db_fallback", new_callable=AsyncMock) as mock_fallback, \
+         patch("src.jobs.handlers.pre_market_prep.HistoricalMovesRepository"):
         mock_fallback.return_value = []
         result = await runner._pre_market_prep()
     assert result["status"] == "success", f"Expected success, got: {result['status']}"
@@ -1716,7 +1720,7 @@ async def test_pre_market_prep_empty_calendar_returns_success(runner):
 @pytest.mark.asyncio
 async def test_pre_market_prep_fallback_exception_does_not_propagate(runner):
     """If fetch_earnings_with_db_fallback raises, _pre_market_prep must not propagate it."""
-    with patch("src.jobs.handlers.fetch_earnings_with_db_fallback",
+    with patch("src.jobs.handlers.pre_market_prep.fetch_earnings_with_db_fallback",
                new_callable=AsyncMock) as mock_fallback:
         mock_fallback.side_effect = Exception("AV rate limit + DB also failed")
         result = await runner.run("pre-market-prep")
@@ -1728,7 +1732,7 @@ async def test_pre_market_prep_fallback_exception_does_not_propagate(runner):
 @pytest.mark.asyncio
 async def test_sentiment_scan_empty_calendar_returns_success(runner):
     """Sentiment scan: empty calendar must return success, not warning."""
-    runner._alphavantage.get_earnings_calendar = AsyncMock(return_value=[])
+    runner._finnhub.get_earnings_calendar = AsyncMock(return_value=[])
     with patch.object(runner, "_fetch_earnings", new_callable=AsyncMock) as mock_fetch:
         mock_fetch.return_value = None  # simulates empty
         result = await runner._sentiment_scan()

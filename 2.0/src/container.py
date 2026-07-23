@@ -13,7 +13,7 @@ from typing import Optional
 from src.config.config import Config
 from src.config.validation import validate_configuration
 from src.infrastructure.api.tradier import TradierAPI
-from src.infrastructure.api.alpha_vantage import AlphaVantageAPI
+from src.infrastructure.api.finnhub import FinnhubAPI
 from src.infrastructure.cache.memory_cache import MemoryCache, CachedOptionsDataProvider
 from src.infrastructure.cache.hybrid_cache import HybridCache
 from src.infrastructure.database.repositories.earnings_repository import (
@@ -28,12 +28,12 @@ from src.application.metrics.liquidity_scorer import LiquidityScorer
 from src.application.metrics.market_conditions import MarketConditionsAnalyzer
 from src.application.metrics.adaptive_thresholds import AdaptiveThresholdCalculator
 from src.application.services.analyzer import TickerAnalyzer
-from src.application.services.strategy_generator import StrategyGenerator
+from src.application.services.strategy import StrategyGenerator
 from src.application.services.health import HealthCheckService
 from src.application.async_metrics.vrp_analyzer_async import AsyncTickerAnalyzer
 from src.infrastructure.database.repositories.analysis_repository import AnalysisRepository
 from src.utils.rate_limiter import (
-    create_alpha_vantage_limiter,
+    create_finnhub_limiter,
     create_tradier_limiter,
 )
 from src.utils.circuit_breaker import CircuitBreaker
@@ -74,7 +74,7 @@ class Container:
         if run_migrations:
             self._run_migrations()
         self._tradier: Optional[TradierAPI] = None
-        self._alphavantage: Optional[AlphaVantageAPI] = None
+        self._finnhub: Optional[FinnhubAPI] = None
         self._cache: Optional[MemoryCache] = None
         self._hybrid_cache: Optional[HybridCache] = None
         self._cached_options_provider: Optional[CachedOptionsDataProvider] = None
@@ -93,7 +93,7 @@ class Container:
         self._analysis_repo: Optional[AnalysisRepository] = None
         self._health_check_service: Optional[HealthCheckService] = None
         self._tradier_breaker: Optional[CircuitBreaker] = None
-        self._alpha_vantage_breaker: Optional[CircuitBreaker] = None
+        self._finnhub_breaker: Optional[CircuitBreaker] = None
         self._db_pool: Optional[ConnectionPool] = None
         self._concurrent_scanner: Optional[ConcurrentScanner] = None
 
@@ -154,17 +154,16 @@ class Container:
         return self._cached_options_provider
 
     @property
-    def alphavantage(self) -> AlphaVantageAPI:
-        """Get Alpha Vantage API client."""
-        if self._alphavantage is None:
-            rate_limiter = create_alpha_vantage_limiter()
-            self._alphavantage = AlphaVantageAPI(
-                api_key=self.config.api.alpha_vantage_key,
-                base_url=self.config.api.alpha_vantage_base_url,
-                rate_limiter=rate_limiter.limiters[0],  # Use per-minute limiter
+    def finnhub(self) -> FinnhubAPI:
+        """Get Finnhub API client."""
+        if self._finnhub is None:
+            rate_limiter = create_finnhub_limiter()
+            self._finnhub = FinnhubAPI(
+                api_key=self.config.api.finnhub_key,
+                rate_limiter=rate_limiter,
             )
-            logger.debug("Created AlphaVantageAPI client")
-        return self._alphavantage
+            logger.debug("Created FinnhubAPI client")
+        return self._finnhub
 
     @property
     def db_pool(self) -> ConnectionPool:
@@ -449,12 +448,9 @@ class Container:
     def setup_api_resilience(self):
         """Setup circuit breaker protection for all external APIs.
 
-        Wraps all Tradier and Alpha Vantage API methods with circuit breakers
-        to prevent cascading failures when APIs are down.
-
         Protected methods:
         - Tradier: get_option_chain, get_stock_price, get_expirations
-        - Alpha Vantage: get_earnings_calendar, get_daily_prices
+        - Finnhub: get_earnings_calendar
         """
         # Setup Tradier circuit breaker
         if self._tradier_breaker is None:
@@ -481,30 +477,30 @@ class Container:
                     setattr(self._tradier, method_name, create_wrapper(original_method))
                     logger.debug(f"Tradier API method '{method_name}' wrapped with circuit breaker")
 
-        # Setup Alpha Vantage circuit breaker
-        if self._alpha_vantage_breaker is None:
-            self._alpha_vantage_breaker = CircuitBreaker(
-                name="alpha_vantage", failure_threshold=3, recovery_timeout=120
+        # Setup Finnhub circuit breaker
+        if self._finnhub_breaker is None:
+            self._finnhub_breaker = CircuitBreaker(
+                name="finnhub", failure_threshold=3, recovery_timeout=120
             )
-            logger.info("Circuit breaker installed for Alpha Vantage API")
+            logger.info("Circuit breaker installed for Finnhub API")
 
-        # Wrap all Alpha Vantage API methods
-        if self._alpha_vantage is not None:
-            av_methods = ['get_earnings_calendar', 'get_daily_prices']
+        # Wrap Finnhub API methods
+        if self._finnhub is not None:
+            finnhub_methods = ['get_earnings_calendar']
 
-            for method_name in av_methods:
-                if hasattr(self._alpha_vantage, method_name):
-                    original_method = getattr(self._alpha_vantage, method_name)
+            for method_name in finnhub_methods:
+                if hasattr(self._finnhub, method_name):
+                    original_method = getattr(self._finnhub, method_name)
 
                     # Create closure to capture original_method
                     def create_wrapper(orig):
                         @wraps(orig)
                         def wrapper(*args, **kwargs):
-                            return self._alpha_vantage_breaker.call(orig, *args, **kwargs)
+                            return self._finnhub_breaker.call(orig, *args, **kwargs)
                         return wrapper
 
-                    setattr(self._alpha_vantage, method_name, create_wrapper(original_method))
-                    logger.debug(f"Alpha Vantage API method '{method_name}' wrapped with circuit breaker")
+                    setattr(self._finnhub, method_name, create_wrapper(original_method))
+                    logger.debug(f"Finnhub API method '{method_name}' wrapped with circuit breaker")
 
     # ========================================================================
     # Factory Methods (for testing)

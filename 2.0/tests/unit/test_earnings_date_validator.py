@@ -30,22 +30,22 @@ class TestEarningsDateValidator:
         return mock
 
     @pytest.fixture
-    def mock_alpha_vantage(self):
-        """Mock Alpha Vantage data source."""
+    def mock_finnhub(self):
+        """Mock Finnhub data source."""
         mock = Mock()
         mock.get_earnings_calendar = Mock()
         return mock
 
     @pytest.fixture
-    def validator(self, mock_yahoo_finance, mock_alpha_vantage):
+    def validator(self, mock_yahoo_finance, mock_finnhub):
         """Create validator with mocked data sources."""
         return EarningsDateValidator(
             yahoo_finance=mock_yahoo_finance,
-            alpha_vantage=mock_alpha_vantage,
+            finnhub=mock_finnhub,
             max_date_diff_days=7,
         )
 
-    def test_no_conflict_same_date(self, validator, mock_yahoo_finance, mock_alpha_vantage):
+    def test_no_conflict_same_date(self, validator, mock_yahoo_finance, mock_finnhub):
         """Test when both sources agree on the same date."""
         ticker = "AAPL"
         earnings_date = date(2025, 12, 15)
@@ -55,7 +55,7 @@ class TestEarningsDateValidator:
         mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
             (earnings_date, timing)
         )
-        mock_alpha_vantage.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
             [(ticker, earnings_date, timing)]
         )
 
@@ -68,7 +68,7 @@ class TestEarningsDateValidator:
         assert not validation.has_conflict
         assert len(validation.sources) == 2
 
-    def test_conflict_detected(self, validator, mock_yahoo_finance, mock_alpha_vantage):
+    def test_conflict_detected(self, validator, mock_yahoo_finance, mock_finnhub):
         """Test when sources disagree by more than threshold."""
         ticker = "MRVL"
         yf_date = date(2025, 12, 2)
@@ -79,7 +79,7 @@ class TestEarningsDateValidator:
         mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
             (yf_date, timing)
         )
-        mock_alpha_vantage.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
             [(ticker, av_date, timing)]
         )
 
@@ -92,7 +92,7 @@ class TestEarningsDateValidator:
         assert validation.has_conflict  # Should detect conflict (8 days > 7 day threshold)
         assert len(validation.sources) == 2
 
-    def test_yahoo_finance_priority(self, validator, mock_yahoo_finance, mock_alpha_vantage):
+    def test_yahoo_finance_priority(self, validator, mock_yahoo_finance, mock_finnhub):
         """Test that Yahoo Finance has higher priority in consensus."""
         ticker = "SNOW"
         yf_date = date(2025, 12, 10)
@@ -103,7 +103,7 @@ class TestEarningsDateValidator:
         mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
             (yf_date, timing)
         )
-        mock_alpha_vantage.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
             [(ticker, av_date, timing)]
         )
 
@@ -114,7 +114,7 @@ class TestEarningsDateValidator:
         # Yahoo Finance should win due to higher confidence (1.0 vs 0.7)
         assert validation.consensus_date == yf_date
 
-    def test_only_yahoo_finance_available(self, validator, mock_yahoo_finance, mock_alpha_vantage):
+    def test_only_yahoo_finance_available(self, validator, mock_yahoo_finance, mock_finnhub):
         """Test when only Yahoo Finance data is available."""
         ticker = "CRM"
         earnings_date = date(2025, 12, 8)
@@ -125,7 +125,7 @@ class TestEarningsDateValidator:
             (earnings_date, timing)
         )
         # Alpha Vantage fails
-        mock_alpha_vantage.get_earnings_calendar.return_value = Result.Err(
+        mock_finnhub.get_earnings_calendar.return_value = Result.Err(
             AppError(ErrorCode.NODATA, "No data")
         )
 
@@ -137,7 +137,7 @@ class TestEarningsDateValidator:
         assert len(validation.sources) == 1
         assert validation.sources[0].source == EarningsSource.YAHOO_FINANCE
 
-    def test_no_data_from_any_source(self, validator, mock_yahoo_finance, mock_alpha_vantage):
+    def test_no_data_from_any_source(self, validator, mock_yahoo_finance, mock_finnhub):
         """Test when no sources return data."""
         ticker = "INVALID"
 
@@ -145,7 +145,7 @@ class TestEarningsDateValidator:
         mock_yahoo_finance.get_next_earnings_date.return_value = Result.Err(
             AppError(ErrorCode.NODATA, "No data")
         )
-        mock_alpha_vantage.get_earnings_calendar.return_value = Result.Err(
+        mock_finnhub.get_earnings_calendar.return_value = Result.Err(
             AppError(ErrorCode.NODATA, "No data")
         )
 
@@ -154,7 +154,7 @@ class TestEarningsDateValidator:
         assert result.is_err
         assert "No earnings date found from any source" in result.error.message
 
-    def test_different_timings(self, validator, mock_yahoo_finance, mock_alpha_vantage):
+    def test_different_timings(self, validator, mock_yahoo_finance, mock_finnhub):
         """Test when sources disagree on timing."""
         ticker = "PATH"
         earnings_date = date(2025, 12, 5)
@@ -165,7 +165,7 @@ class TestEarningsDateValidator:
         mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
             (earnings_date, yf_timing)
         )
-        mock_alpha_vantage.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
             [(ticker, earnings_date, av_timing)]
         )
 
@@ -238,10 +238,10 @@ class TestEarningsDateValidator:
         """Test that confidence weights are correct."""
         assert validator.SOURCE_CONFIDENCE[EarningsSource.YAHOO_FINANCE] == 1.0
         assert validator.SOURCE_CONFIDENCE[EarningsSource.EARNINGS_WHISPER] == 0.85
-        assert validator.SOURCE_CONFIDENCE[EarningsSource.ALPHA_VANTAGE] == 0.70
+        assert validator.SOURCE_CONFIDENCE[EarningsSource.FINNHUB] == 0.70
         assert validator.SOURCE_CONFIDENCE[EarningsSource.DATABASE] == 0.60
 
-    def test_max_date_diff_threshold(self, validator, mock_yahoo_finance, mock_alpha_vantage):
+    def test_max_date_diff_threshold(self, validator, mock_yahoo_finance, mock_finnhub):
         """Test that conflict is detected when dates differ beyond threshold."""
         ticker = "TEST"
         yf_date = date(2025, 12, 1)
@@ -251,7 +251,7 @@ class TestEarningsDateValidator:
         mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
             (yf_date, timing)
         )
-        mock_alpha_vantage.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
             [(ticker, av_date, timing)]
         )
 
@@ -264,7 +264,7 @@ class TestEarningsDateValidator:
         date_diff = (validation.sources[1].earnings_date - validation.sources[0].earnings_date).days
         assert abs(date_diff) == 9
 
-    def test_no_conflict_within_threshold(self, validator, mock_yahoo_finance, mock_alpha_vantage):
+    def test_no_conflict_within_threshold(self, validator, mock_yahoo_finance, mock_finnhub):
         """Test that no conflict when dates differ within threshold."""
         ticker = "TEST"
         yf_date = date(2025, 12, 1)
@@ -274,7 +274,7 @@ class TestEarningsDateValidator:
         mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
             (yf_date, timing)
         )
-        mock_alpha_vantage.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
             [(ticker, av_date, timing)]
         )
 

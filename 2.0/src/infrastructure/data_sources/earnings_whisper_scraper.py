@@ -1,27 +1,21 @@
 """
 Earnings Whisper scraper for most anticipated earnings.
 
-Primary: X/Twitter @eWhispers account (playwright browser automation - no auth required)
-Fallback: Image file with OCR parsing
+Primary: earningswhispers.com direct HTTP scraping
+Fallback: Image file with OCR parsing, then database
 """
 
 import logging
 import re
-import os
 import hashlib
-import time
 import tempfile
-import signal
 import threading
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Tuple
 from pathlib import Path
 from enum import Enum
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 import requests
-import tempfile
 from dotenv import load_dotenv
 
 from src.domain.errors import Result, AppError, ErrorCode
@@ -150,13 +144,17 @@ def get_week_monday(target_date: Optional[datetime] = None) -> datetime:
 
 
 class EarningsWhisperScraper:
-    """Scraper for most anticipated earnings using PRAW and OCR."""
+    """Scraper for most anticipated earnings from earningswhispers.com."""
 
-    # Search configuration
-    FLAIR_SEARCH_LIMIT = 20  # Last ~5 weeks of earnings threads
-    FLAIR_SEARCH_TIME_FILTER = 'month'
-    TEXT_SEARCH_LIMIT = 10
-    TEXT_SEARCH_TIME_FILTER = 'month'
+    # earningswhispers.com configuration
+    # The public /calendar page renders its ticker list client-side via JS (jQuery
+    # $.getJSON against /api/calweekview) — a plain HTTP GET of the page never
+    # contains ticker data. We call the same internal API the page's own JS uses.
+    # This is an undocumented endpoint (no public API contract) — keep call volume
+    # low (cached ~1x/week via get_shared_cache) to stay well under any rate limiting.
+    EARNINGSWHISPERS_URL = "https://www.earningswhispers.com/calendar"
+    EARNINGSWHISPERS_WEEKVIEW_URL = "https://www.earningswhispers.com/api/calweekview/{date}/all"
+    EARNINGSWHISPERS_TIMEOUT = 15  # seconds
 
     # Image download configuration
     MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
@@ -169,43 +167,6 @@ class EarningsWhisperScraper:
 
     # Pre-compiled regex patterns for better performance
     _TICKER_PATTERN = re.compile(r'\b([A-Z]{1,5})\b')  # 1-5 uppercase letters (standard ticker format)
-    _DATE_PATTERN = re.compile(r'(\d{1,2})/(\d{1,2})')
-    _WRITTEN_DATE_PATTERN = re.compile(
-        r'(january|february|march|april|may|june|july|august|'
-        r'september|october|november|december)\s+(\d{1,2})',
-        re.IGNORECASE
-    )
-
-    # Month name to number mapping
-    _MONTH_NAMES = {
-        'january': 1, 'february': 2, 'march': 3, 'april': 4,
-        'may': 5, 'june': 6, 'july': 7, 'august': 8,
-        'september': 9, 'october': 10, 'november': 11, 'december': 12
-    }
-
-    # Twitter scraping configuration
-    TWITTER_URL = "https://twitter.com/eWhispers"
-    PAGE_LOAD_TIMEOUT_MS = 15000  # 15 seconds (reduced from 30)
-    TWEET_WAIT_TIMEOUT_MS = 8000  # 8 seconds (reduced from 10)
-    MAX_TWEETS_TO_CHECK = 50
-    OVERALL_TIMEOUT_SECONDS = 30  # Total timeout for entire Twitter fetch operation
-
-    # CSS selectors with fallbacks for robustness
-    TWEET_SELECTORS = [
-        'article[data-testid="tweet"]',
-        'article[role="article"]',  # fallback if data-testid changes
-    ]
-    TWEET_TEXT_SELECTORS = [
-        '[data-testid="tweetText"]',
-        '[lang]',  # fallback - tweets usually have lang attribute
-    ]
-
-    # Regex patterns for extracting tickers from Reddit markdown
-    TICKER_PATTERNS = [
-        re.compile(r'\[([A-Z]{1,5})\]\(http'),           # [TICKER](url)
-        re.compile(r'\*\*([A-Z]{1,5})\*\*'),             # **TICKER**
-        re.compile(r'^[-*]\s+([A-Z]{1,5})\s+[\(\[]')    # - TICKER (date)
-    ]
 
     # Words to exclude from OCR ticker extraction (common false positives)
     EXCLUDED_WORDS = {
@@ -235,18 +196,13 @@ class EarningsWhisperScraper:
 
     def __init__(self, cache=None):
         """
-        Initialize Twitter scraper (playwright), OCR cache, and circuit breakers.
+        Initialize earningswhispers.com scraper, OCR cache, and circuit breakers.
 
         Args:
             cache: Optional cache instance for caching whisper results by week
         """
-        # Playwright requires no initialization - works directly
-        self.twitter_available = True
-        logger.debug("Twitter scraper ready (playwright browser automation - no auth required)")
-
-        # Rate limiting for Twitter scraping (avoid triggering anti-bot measures)
-        self._last_twitter_request: Optional[float] = None
-        self._min_request_interval = 5.0  # minimum seconds between requests
+        self.ew_available = True
+        logger.debug("EarningsWhispers scraper ready")
 
         # OCR result cache: {url_hash: (tickers, timestamp)}
         # Bounded to prevent memory leaks; protected by lock for thread safety
@@ -258,8 +214,8 @@ class EarningsWhisperScraper:
         self._cache = cache
 
         # Circuit breakers for external dependencies
-        self._twitter_breaker = CircuitBreaker(
-            name="Twitter",
+        self._ew_breaker = CircuitBreaker(
+            name="EarningsWhispers",
             failure_threshold=3,
             recovery_timeout=120,  # 2 minutes
             success_threshold=2
@@ -344,26 +300,26 @@ class EarningsWhisperScraper:
 
         logger.info(f"Fetching earnings for week of {monday_str}")
 
-        # Try Twitter first (with circuit breaker + overall timeout)
-        if self.twitter_available and not self._twitter_breaker.is_open():
-            try:
-                result = self._fetch_twitter_with_timeout(monday)
-                if result.is_ok:
-                    tickers = result.value
-                    logger.info(f"✓ Retrieved {len(tickers)} tickers from Twitter")
+        # Try earningswhispers.com first
+        if self.ew_available and not self._ew_breaker.is_open():
+            result = self._fetch_from_earningswhispers(monday)
+            if result.is_ok:
+                tickers = result.value
+                logger.info(f"✓ Retrieved {len(tickers)} tickers from EarningsWhispers")
+                self._ew_breaker._on_success()
 
-                    # Cache the result (week-specific)
-                    if self._cache:
-                        cache_key = f"whisper_tickers:{monday_str}"
-                        self._cache.set(cache_key, tickers)
-                        logger.debug(f"Cached whisper tickers for week {monday_str}")
+                # Cache the result (week-specific)
+                if self._cache:
+                    cache_key = f"whisper_tickers:{monday_str}"
+                    self._cache.set(cache_key, tickers)
+                    logger.debug(f"Cached whisper tickers for week {monday_str}")
 
-                    return result
-                logger.warning(f"Twitter fetch failed: {result.error}")
-            except Exception as e:
-                logger.warning(f"Twitter fetch exception: {e}")
-                # Record failure for circuit breaker
-                self._twitter_breaker._on_failure()
+                return result
+
+            logger.warning(f"EarningsWhispers fetch failed: {result.error}")
+            # Network errors trip the breaker; NODATA (page loaded but no tickers) does not
+            if result.error.code == ErrorCode.EXTERNAL:
+                self._ew_breaker._on_failure()
 
         # Fallback to image if provided
         if fallback_image:
@@ -398,30 +354,89 @@ class EarningsWhisperScraper:
 
         return Result.Err(AppError(
             ErrorCode.EXTERNAL,
-            "All methods failed (Twitter, image, database)",
+            "All methods failed (earningswhispers.com, image, database)",
             context={"week_monday": monday.strftime("%Y-%m-%d")}
         ))
 
-    def _fetch_twitter_with_timeout(self, monday: datetime) -> Result[List[str], AppError]:
-        """Fetch from Twitter with an overall timeout to prevent hangs."""
-        def fetch_task():
-            return self._twitter_breaker.call(self._fetch_from_twitter, monday)
+    def _fetch_from_earningswhispers(self, week_monday: datetime) -> Result[List[str], AppError]:
+        """Fetch most anticipated earnings from earningswhispers.com.
 
-        # Use ThreadPoolExecutor for timeout (works on all platforms)
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(fetch_task)
-            try:
-                result = future.result(timeout=self.OVERALL_TIMEOUT_SECONDS)
-                return result
-            except FuturesTimeoutError:
-                logger.warning(f"Twitter fetch timed out after {self.OVERALL_TIMEOUT_SECONDS}s")
+        Calls the site's internal calweekview API directly (the same endpoint its
+        own front-end JS calls via $.getJSON) since the static page HTML never
+        contains ticker data — it's injected client-side after load. The API
+        requires a session cookie (ASP.NET antiforgery token) that's only set by
+        first loading the /calendar page — without it the API silently returns an
+        empty 200. We reproduce the same two-request flow a real browser makes:
+        load the page once to establish the session, then call the API with it.
+        """
+        date_str = week_monday.strftime("%Y%m%d")
+        monday_str = week_monday.strftime("%Y-%m-%d")
+        logger.info(f"Fetching most anticipated tickers from earningswhispers.com for {monday_str}")
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+        }
+
+        try:
+            with requests.Session() as session:
+                session.headers.update(headers)
+
+                page_url = f"{self.EARNINGSWHISPERS_URL}?date={monday_str}"
+                page_response = session.get(page_url, timeout=self.EARNINGSWHISPERS_TIMEOUT)
+                page_response.raise_for_status()
+
+                api_url = self.EARNINGSWHISPERS_WEEKVIEW_URL.format(date=date_str)
+                response = session.get(
+                    api_url,
+                    headers={
+                        "Accept": "text/plain, */*; q=0.01",
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Referer": page_url,
+                    },
+                    timeout=self.EARNINGSWHISPERS_TIMEOUT,
+                )
+                response.raise_for_status()
+
+            if not response.text.strip():
+                logger.warning("Empty response from earningswhispers.com calweekview API")
                 return Result.Err(AppError(
-                    ErrorCode.EXTERNAL,
-                    f"Twitter fetch timed out after {self.OVERALL_TIMEOUT_SECONDS} seconds"
+                    ErrorCode.NODATA,
+                    "Empty response from earningswhispers.com — possibly rate limited or week not yet published"
                 ))
-            except Exception as e:
-                logger.warning(f"Twitter fetch failed: {e}")
-                return Result.Err(AppError(ErrorCode.EXTERNAL, str(e)))
+
+            tickers = self._parse_earningswhispers_weekview(response.text)
+            if not tickers:
+                logger.warning("No tickers found in earningswhispers.com calweekview response")
+                return Result.Err(AppError(
+                    ErrorCode.NODATA,
+                    "No tickers found on earningswhispers.com calweekview response"
+                ))
+
+            logger.info(f"EarningsWhispers: extracted {len(tickers)} tickers")
+            return Result.Ok(tickers)
+
+        except requests.RequestException as e:
+            logger.warning(f"EarningsWhispers request failed: {e}")
+            return Result.Err(AppError(ErrorCode.EXTERNAL, f"EarningsWhispers fetch error: {e}"))
+
+    def _parse_earningswhispers_weekview(self, html_fragment: str) -> List[str]:
+        """Extract ticker symbols from the calweekview HTML fragment.
+
+        The fragment marks each day's "most anticipated" companies with a
+        background-image URL like /api/verticallogos/AVNT,SOTK,HELE, — tickers
+        without a logo (i.e. not anticipated) appear only in the fuller
+        /api/caldata/{date} feed, which this deliberately does not use.
+        """
+        tickers = []
+        for match in re.finditer(r'/api/verticallogos/([A-Z,]+)', html_fragment):
+            for ticker in match.group(1).split(','):
+                if ticker and ticker not in self.EXCLUDED_WORDS and ticker not in tickers:
+                    tickers.append(ticker)
+        return tickers
 
     def _fetch_from_database(
         self,
@@ -450,16 +465,19 @@ class EarningsWhisperScraper:
 
             # Get tickers with earnings in the target week
             # Order by historical move count (proxy for popularity/importance)
+            # INNER JOIN (not LEFT) is deliberate: a ticker only has historical_moves
+            # rows if it has previously been tracked as a real, optionable US-listed
+            # stock. This excludes OTC/pink-sheet/foreign tickers that happen to have
+            # an earnings_calendar row but no options market (e.g. FRCOF, RHUHF,
+            # SVNDY) — those passed through with a LEFT JOIN and produced a "most
+            # anticipated" list full of untradeable names (Jul 2026).
             query = """
-                SELECT DISTINCT ec.ticker
+                SELECT ec.ticker, COUNT(*) as move_count
                 FROM earnings_calendar ec
-                LEFT JOIN (
-                    SELECT ticker, COUNT(*) as move_count
-                    FROM historical_moves
-                    GROUP BY ticker
-                ) hm ON ec.ticker = hm.ticker
+                INNER JOIN historical_moves hm ON ec.ticker = hm.ticker
                 WHERE ec.earnings_date BETWEEN ? AND ?
-                ORDER BY COALESCE(hm.move_count, 0) DESC
+                GROUP BY ec.ticker
+                ORDER BY move_count DESC
                 LIMIT 30
             """
 
@@ -484,229 +502,8 @@ class EarningsWhisperScraper:
             logger.error(f"Database fallback failed: {e}")
             return Result.Err(AppError(ErrorCode.EXTERNAL, f"Database error: {e}"))
 
-    def _fetch_from_twitter(self, week_monday: datetime) -> Result[List[str], AppError]:
-        """Fetch from @eWhispers Twitter account using playwright browser automation (circuit breaker protected)."""
-        # Rate limiting - wait if needed
-        if self._last_twitter_request is not None:
-            elapsed = time.time() - self._last_twitter_request
-            if elapsed < self._min_request_interval:
-                wait_time = self._min_request_interval - elapsed
-                logger.debug(f"Rate limiting: waiting {wait_time:.1f}s before Twitter request")
-                time.sleep(wait_time)
-
-        start_time = time.time()
-        monday_str = f"{week_monday.month}/{week_monday.day}"
-        logger.info(f"Scraping @eWhispers tweets for week {monday_str}")
-
-        browser = None
-        try:
-            with sync_playwright() as p:
-                try:
-                    # Launch headless browser
-                    logger.debug("Launching headless Chromium browser")
-                    browser = p.chromium.launch(headless=True)
-                    page = browser.new_page()
-
-                    # Set user agent to avoid bot detection
-                    page.set_extra_http_headers({
-                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-                    })
-
-                    # Navigate to @eWhispers Twitter profile
-                    logger.debug(f"Navigating to {self.TWITTER_URL}")
-                    try:
-                        # Use 'load' instead of 'networkidle' - Twitter keeps making requests
-                        response = page.goto(self.TWITTER_URL, wait_until='load', timeout=self.PAGE_LOAD_TIMEOUT_MS)
-                        logger.debug(f"Page loaded with status: {response.status}")
-                    except PlaywrightTimeout as e:
-                        logger.error(f"Timeout navigating to Twitter: {e}")
-                        # Debug screenshot only if debug logging enabled
-                        if logger.isEnabledFor(logging.DEBUG):
-                            with tempfile.NamedTemporaryFile(suffix=".png", prefix="twitter_debug_", delete=False) as f:
-                                screenshot_path = f.name
-                            page.screenshot(path=screenshot_path)
-                            logger.debug(f"Debug screenshot saved to {screenshot_path}")
-                        return Result.Err(AppError(ErrorCode.EXTERNAL, f"Navigation timeout: {e}"))
-
-                    # Debug logging only
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Page title: {page.title()}")
-                        logger.debug(f"Current URL: {page.url}")
-
-                    # Wait for tweets to load - try primary selector, fallback to alternative
-                    tweet_selector = None
-                    for selector in self.TWEET_SELECTORS:
-                        try:
-                            logger.debug(f"Waiting for tweets with selector: {selector}")
-                            page.wait_for_selector(selector, timeout=self.TWEET_WAIT_TIMEOUT_MS)
-                            tweet_selector = selector
-                            logger.debug(f"Found tweets using selector: {selector}")
-                            break
-                        except PlaywrightTimeout:
-                            logger.debug(f"Selector {selector} timed out, trying next...")
-                            continue
-
-                    if not tweet_selector:
-                        logger.warning("All tweet selectors failed - page may require authentication")
-                        return Result.Err(AppError(
-                            ErrorCode.EXTERNAL,
-                            "Could not find tweets - page may require authentication"
-                        ))
-
-                    # Extract tweet elements
-                    tweet_elements = page.query_selector_all(tweet_selector)
-                    logger.info(f"Found {len(tweet_elements)} tweets")
-
-                    # Check tweets for matching week
-                    for i, tweet_elem in enumerate(tweet_elements):
-                        if i >= self.MAX_TWEETS_TO_CHECK:
-                            logger.debug(f"Reached max tweet check limit ({self.MAX_TWEETS_TO_CHECK})")
-                            break
-
-                        # Extract text - try primary selector, fallback to alternative
-                        text_elem = None
-                        for text_selector in self.TWEET_TEXT_SELECTORS:
-                            text_elem = tweet_elem.query_selector(text_selector)
-                            if text_elem:
-                                break
-
-                        if not text_elem:
-                            logger.debug(f"Tweet {i+1}: No text element found")
-                            continue
-
-                        tweet_text = text_elem.inner_text()
-                        logger.debug(f"Tweet {i+1}: {tweet_text[:100]}...")
-
-                        # Check if this tweet matches the requested week
-                        if self._matches_week_in_tweet(tweet_text, week_monday):
-                            logger.info(f"Found matching tweet for week {monday_str}")
-
-                            # Parse tickers from tweet text
-                            tickers = self._parse_twitter_text(tweet_text)
-                            if tickers:
-                                duration = time.time() - start_time
-                                logger.info(f"Extracted {len(tickers)} tickers in {duration:.1f}s")
-                                return Result.Ok(tickers)
-
-                    # No matching tweet found
-                    return Result.Err(AppError(
-                        ErrorCode.NODATA,
-                        f"No matching tweet found for {week_monday.strftime('%Y-%m-%d')}"
-                    ))
-
-                finally:
-                    # Ensure browser is always closed
-                    if browser:
-                        try:
-                            browser.close()
-                        except Exception as e:
-                            logger.debug(f"Error closing browser: {e}")
-
-        except Exception as e:
-            logger.error(f"Twitter scraper exception: {type(e).__name__}: {e}", exc_info=True)
-            return Result.Err(AppError(ErrorCode.EXTERNAL, f"Twitter scraper error: {e}"))
-        finally:
-            # Update rate limiting timestamp
-            self._last_twitter_request = time.time()
-
-    def _matches_week_in_tweet(self, tweet_text: str, week_monday: datetime) -> bool:
-        """Check if tweet text matches the requested week.
-
-        Args:
-            tweet_text: Tweet text content
-            week_monday: Target Monday datetime to match
-
-        Returns:
-            True if tweet matches the week, False otherwise
-        """
-        # Try written month format first (e.g., "November 17, 2025")
-        written_matches = self._WRITTEN_DATE_PATTERN.findall(tweet_text.lower())
-
-        if written_matches:
-            month_name, day_str = written_matches[0]
-            try:
-                tweet_month = self._MONTH_NAMES[month_name.lower()]
-                tweet_day = int(day_str)
-
-                matches_date = tweet_month == week_monday.month and tweet_day == week_monday.day
-                if matches_date:
-                    logger.debug(f"Tweet date {month_name} {tweet_day} matches {week_monday.strftime('%Y-%m-%d')}")
-                    return True
-            except (ValueError, KeyError) as e:
-                logger.debug(f"Failed to parse written date: {e}")
-
-        # Fall back to numeric date pattern (e.g., "11/17")
-        matches = self._DATE_PATTERN.findall(tweet_text)
-
-        if not matches:
-            return False
-
-        # Get the first date from tweet (should be Monday)
-        month_str, day_str = matches[0]
-
-        try:
-            tweet_month = int(month_str)
-            tweet_day = int(day_str)
-
-            # Validate reasonable date ranges
-            if not (1 <= tweet_month <= 12):
-                logger.debug(f"Invalid month {tweet_month} in tweet")
-                return False
-            if not (1 <= tweet_day <= 31):
-                logger.debug(f"Invalid day {tweet_day} in tweet")
-                return False
-
-            # Match if same month and day
-            matches_date = tweet_month == week_monday.month and tweet_day == week_monday.day
-
-            if matches_date:
-                logger.debug(f"Tweet date {tweet_month}/{tweet_day} matches {week_monday.strftime('%Y-%m-%d')}")
-
-            return matches_date
-
-        except (ValueError, OverflowError) as e:
-            logger.debug(f"Failed to parse date from tweet: {e}")
-            return False
-
-    def _parse_twitter_text(self, tweet_text: str) -> List[str]:
-        """Extract ticker symbols from @eWhispers tweet text.
-
-        Twitter format is cleaner than OCR - tickers are listed with $ prefix or
-        in a structured format. This method extracts all valid ticker symbols.
-
-        Args:
-            tweet_text: Full text of the tweet
-
-        Returns:
-            List of ticker symbols, deduplicated and order-preserved
-        """
-        tickers = []
-
-        # Extract tickers - Twitter often uses $TICKER format
-        # Also extract any 1-5 uppercase letter words
-        for line in tweet_text.split('\n'):
-            # Skip header lines
-            if any(skip in line.lower() for skip in ['most anticipated', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'week beginning']):
-                continue
-
-            # Extract $TICKER format (e.g., $NVDA, $WMT)
-            dollar_tickers = re.findall(r'\$([A-Z]{1,5})\b', line)
-            for ticker in dollar_tickers:
-                if ticker not in self.EXCLUDED_WORDS and ticker not in tickers:
-                    tickers.append(ticker)
-                    logger.debug(f"Extracted ticker ($ format): {ticker}")
-
-            # Extract plain uppercase tickers (1-5 letters)
-            plain_tickers = self._TICKER_PATTERN.findall(line)
-            for ticker in plain_tickers:
-                if ticker not in self.EXCLUDED_WORDS and len(ticker) >= self.MIN_TICKER_LENGTH and ticker not in tickers:
-                    tickers.append(ticker)
-                    logger.debug(f"Extracted ticker: {ticker}")
-
-        return list(dict.fromkeys(tickers))  # Remove duplicates, preserve order
-
     def _download_and_parse_image(self, image_url: str) -> Result[List[str], AppError]:
-        """Download Reddit image and parse with OCR.
+        """Download image from URL and parse with OCR.
 
         Args:
             image_url: URL to the image to download and parse

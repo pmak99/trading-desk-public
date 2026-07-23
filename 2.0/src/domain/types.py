@@ -5,8 +5,6 @@ All types are immutable (frozen dataclasses) to ensure thread safety
 and prevent accidental mutations.
 """
 
-import sys as _sys
-from pathlib import Path as _Path
 from dataclasses import dataclass
 from decimal import Decimal, getcontext
 from datetime import date, datetime, timezone
@@ -22,6 +20,9 @@ from src.domain.enums import (
     DirectionalBias
 )
 
+import sys as _sys
+from pathlib import Path as _Path
+
 _root = str(_Path(__file__).resolve().parent.parent.parent.parent)
 if _root not in _sys.path:
     _sys.path.insert(0, _root)
@@ -29,6 +30,7 @@ if _root not in _sys.path:
 from common.constants import (  # noqa: E402
     FCST_ERN_IV_THRESHOLD,
     IEE_DIVERGENCE_RATIO,
+    ORATS_SNAPSHOT_MAX_AGE_DAYS,
 )
 
 # Set Decimal precision for financial calculations
@@ -41,6 +43,122 @@ MAX_PERCENTAGE = 1000.0  # Allow up to 1000% for extreme gains
 
 # Response size limits (bytes)
 MAX_API_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB to prevent OOM attacks
+
+
+# ============================================================================
+# ORATS Signal Fusion Support Types
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class PositionLimitsSnapshot:
+    """Raw DB row from position_limits for one ticker. Single read feeds skew + sizing."""
+    fcst_ern_iv_effect: Optional[float] = None
+    iee_earn_effect: Optional[float]    = None
+    r_slp_30: Optional[float]          = None
+
+
+def snapshot_is_stale(
+    last_updated: Optional[str],
+    max_age_days: int = ORATS_SNAPSHOT_MAX_AGE_DAYS,
+) -> bool:
+    """Whether a position_limits snapshot row is too old to trust.
+
+    Resubscription safety (Jul 2026): ORATS_ENABLED gates *whether* the
+    snapshot is read, not its freshness — without this guard, flipping the
+    flag back on without re-running refresh_orats_snapshots.py would feed
+    the frozen 2026-06-24 data into sizing Rules A/B and compound-risk
+    detection as if live. Unknown/unparseable age fails closed (stale).
+    """
+    if not last_updated:
+        return True
+    try:
+        updated = date.fromisoformat(str(last_updated)[:10])
+    except ValueError:
+        return True
+    return (date.today() - updated).days > max_age_days
+
+
+@dataclass(frozen=True)
+class SizingContext:
+    """Unified contract cap logic. Replaces config.max_contracts at all call sites."""
+    trr_level: Optional[str]            = None  # 'LOW' | 'NORMAL' | 'HIGH'
+    fcst_ern_iv_effect: Optional[float] = None
+    iee_earn_effect: Optional[float]    = None
+    # Fused directional bias (Tradier + ORATS/proxy) at analysis time.
+    # Feeds the compound-risk cap; None when skew analysis was unavailable.
+    fused_bias: Optional[DirectionalBias] = None
+
+    # Compound tail risk hard cap (calibrated May 2026, N=15 outcomes)
+    COMPOUND_RISK_MAX_CONTRACTS = 25
+
+    @property
+    def trr_cap(self) -> int:
+        return 50 if self.trr_level == 'HIGH' else 100
+
+    @property
+    def bearish_fused_skew(self) -> bool:
+        return self.fused_bias in (
+            DirectionalBias.BEARISH, DirectionalBias.STRONG_BEARISH
+        )
+
+    @property
+    def compound_risk_active(self) -> bool:
+        """>=2 of [TRR HIGH, sizing alarm, bearish fused skew] fired."""
+        signals = sum([
+            self.trr_level == 'HIGH',
+            self.iv_effect_reduction,
+            self.bearish_fused_skew,
+        ])
+        return signals >= 2
+
+    @property
+    def iv_effect_reduction(self) -> bool:
+        if self.fcst_ern_iv_effect is not None and self.fcst_ern_iv_effect >= FCST_ERN_IV_THRESHOLD:
+            return True
+        if self.fcst_ern_iv_effect is not None and self.fcst_ern_iv_effect > 0 and self.iee_earn_effect is not None:
+            if self.iee_earn_effect / self.fcst_ern_iv_effect >= IEE_DIVERGENCE_RATIO:
+                return True
+        return False
+
+    @property
+    def firing_signal(self) -> Optional[str]:
+        trr_fired = self.trr_level == 'HIGH'
+        iv_signal = self._iv_signal_label()
+        if self.compound_risk_active:
+            parts = []
+            if trr_fired:
+                parts.append('TRR_HIGH')
+            if iv_signal:
+                parts.append(iv_signal)
+            if self.bearish_fused_skew:
+                parts.append(f'{self.fused_bias.value.upper()}_SKEW')
+            return f"COMPOUND_RISK({' + '.join(parts)})"
+        if trr_fired and iv_signal:
+            return f'TRR_HIGH + {iv_signal}'
+        if trr_fired:
+            return 'TRR_HIGH'
+        return iv_signal
+
+    def _iv_signal_label(self) -> Optional[str]:
+        fcst = self.fcst_ern_iv_effect
+        iee  = self.iee_earn_effect
+        if fcst is not None and fcst >= FCST_ERN_IV_THRESHOLD:
+            if iee is not None and iee / fcst >= IEE_DIVERGENCE_RATIO:
+                return f'FCST({fcst:.2f}x) + IEE_DIVERGENCE({iee/fcst:.2f}x)'
+            return f'FCST_ERN_IV({fcst:.2f}x)'
+        if fcst is not None and fcst > 0 and iee is not None and iee / fcst >= IEE_DIVERGENCE_RATIO:
+            return f'IEE_DIVERGENCE({iee/fcst:.2f}x)'
+        return None
+
+    @property
+    def effective_max_contracts(self) -> int:
+        if self.compound_risk_active:
+            return self.COMPOUND_RISK_MAX_CONTRACTS
+        contracts = self.trr_cap
+        if self.iv_effect_reduction:
+            contracts = contracts // 2
+        return max(1, contracts)
 
 
 # ============================================================================
@@ -304,7 +422,7 @@ class HistoricalMove:
     earnings_close: Money
 
     # Core metrics
-    intraday_move_pct: Percentage  # high-low range
+    intraday_move_pct: Percentage  # signed open→close on reaction day (Jun 2026 convention; consumers take abs())
     gap_move_pct: Percentage        # open vs prev_close
     close_move_pct: Percentage      # close vs prev_close
 
@@ -382,6 +500,11 @@ class TermStructureResult:
     ivs: List[Percentage]
     slope: float  # Positive = contango, Negative = backwardation
     is_backwardation: bool
+    # Front ATM IV / back ATM IV — the event-vol multiple (Jun 2026).
+    # >1 = backwardation; comparable across absolute vol levels, unlike slope.
+    # Academic basis: Xie (Columbia) SLOPE factor — adds predictive power
+    # for earnings IV crush beyond the implied/historical move ratio.
+    slope_ratio: Optional[float] = None
 
 
 # ============================================================================
@@ -411,8 +534,21 @@ class TickerAnalysis:
     skew: Optional[SkewResult] = None
     term_structure: Optional[TermStructureResult] = None
 
+    # Sizing constraints (populated when generate_strategies=True)
+    sizing_context: Optional[SizingContext] = None
+
     # Strategy recommendations (optional)
     strategies: Optional['StrategyRecommendation'] = None
+
+    # Calendar spread pilot candidate (Jun 2026) — generated only when
+    # elevated tail risk (TRR HIGH / ORATS sizing alarm) coincides with
+    # IV backwardation; alternative to skipping the event entirely.
+    calendar_candidate: Optional['Strategy'] = None
+
+    # Gap-inclusive close-to-close VRP (A/B vs intraday baseline, Jun 2026).
+    # None when fewer than 4 quarters of close_move_pct data are available.
+    vrp_close_ratio: Optional[float] = None
+    historical_close_mean_pct: Optional[float] = None
 
     # Overall recommendation
     recommendation: Recommendation = Recommendation.SKIP
@@ -446,6 +582,9 @@ class StrategyLeg:
     action: str  # "BUY" or "SELL"
     contracts: int
     premium: Money  # Price per contract
+    # Per-leg expiration for multi-expiry structures (calendar spreads).
+    # None = leg expires at Strategy.expiration (all vertical spreads).
+    expiration: Optional[date] = None
 
     @property
     def is_long(self) -> bool:
@@ -546,6 +685,14 @@ class Strategy:
             wing_put = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.PUT)
             return f"ATM: {atm_call.strike}C/{atm_put.strike}P | Wings: {wing_put.strike}P/{wing_call.strike}C"
 
+        elif self.strategy_type == StrategyType.CALENDAR_SPREAD:
+            short = next(leg for leg in self.legs if leg.is_short)
+            long = next(leg for leg in self.legs if leg.is_long)
+            opt = 'C' if short.option_type == OptionType.CALL else 'P'
+            back = long.expiration.isoformat() if long.expiration else '?'
+            return (f"Sell {short.strike}{opt} {self.expiration} / "
+                    f"Buy {long.strike}{opt} {back}")
+
         return "N/A"
 
     @property
@@ -609,56 +756,3 @@ def to_market_time(dt: datetime) -> datetime:
 def utc_now() -> datetime:
     """Get current time in UTC."""
     return datetime.now(tz=timezone.utc)
-
-
-# ============================================================================
-# ORATS Signal Fusion Support Types
-# ============================================================================
-
-
-@dataclass(frozen=True)
-class PositionLimitsSnapshot:
-    """Raw DB row from position_limits for one ticker. Single read feeds skew + sizing."""
-    fcst_ern_iv_effect: Optional[float] = None
-    iee_earn_effect: Optional[float]    = None
-    r_slp_30: Optional[float]          = None
-
-
-@dataclass(frozen=True)
-class SizingContext:
-    """Unified contract cap logic."""
-    trr_level: Optional[str]            = None  # 'LOW' | 'NORMAL' | 'HIGH'
-    fcst_ern_iv_effect: Optional[float] = None
-    iee_earn_effect: Optional[float]    = None
-
-    @property
-    def trr_cap(self) -> int:
-        return 50 if self.trr_level == 'HIGH' else 100
-
-    @property
-    def iv_effect_reduction(self) -> bool:
-        if self.fcst_ern_iv_effect is not None and self.fcst_ern_iv_effect >= FCST_ERN_IV_THRESHOLD:
-            return True
-        if self.fcst_ern_iv_effect is not None and self.fcst_ern_iv_effect > 0 and self.iee_earn_effect is not None:
-            if self.iee_earn_effect / self.fcst_ern_iv_effect >= IEE_DIVERGENCE_RATIO:
-                return True
-        return False
-
-    @property
-    def firing_signal(self) -> Optional[str]:
-        trr_fired = self.trr_level == 'HIGH'
-        iv_signal = self._iv_signal_label()
-        if trr_fired and iv_signal:
-            return f'TRR_HIGH + {iv_signal}'
-        if trr_fired:
-            return 'TRR_HIGH'
-        return iv_signal
-
-    def _iv_signal_label(self) -> Optional[str]:
-        if self.fcst_ern_iv_effect is not None and self.fcst_ern_iv_effect >= FCST_ERN_IV_THRESHOLD:
-            return f'FCST_ERN_IV={self.fcst_ern_iv_effect:.1f}x'
-        if self.fcst_ern_iv_effect is not None and self.fcst_ern_iv_effect > 0 and self.iee_earn_effect is not None:
-            ratio = self.iee_earn_effect / self.fcst_ern_iv_effect
-            if ratio >= IEE_DIVERGENCE_RATIO:
-                return f'IEE_DIVERGENCE={ratio:.2f}x'
-        return None
