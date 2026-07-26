@@ -33,7 +33,7 @@ playwright==1.61.0
 # Utilities
 python-dateutil==2.9.0.post0
 tzdata==2025.3
-update-checker==0.18.0
+update-checker==1.0.0
 psutil==7.2.2
 peewee==3.19.0
 tqdm==4.69.0
