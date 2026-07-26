@@ -16,7 +16,7 @@ google-cloud-storage==3.13.0
 google-cloud-secret-manager==2.30.0
 
 # Timezone
-pytz==2026.2
+pytz==2026.3.post1
 
 # Testing
 pytest==9.1.1
