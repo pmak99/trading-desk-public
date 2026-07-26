@@ -35,7 +35,7 @@ python-dateutil==2.9.0.post0
 tzdata==2025.3
 update-checker==0.18.0
 psutil==7.2.2
-peewee==3.19.0
+peewee==4.2.6
 tqdm==4.69.0
 
 # Network & Security
