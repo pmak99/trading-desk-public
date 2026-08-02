@@ -1,12 +1,12 @@
 # Web framework
-fastapi==0.139.2
-uvicorn[standard]==0.51.0
+fastapi==0.141.1
+uvicorn[standard]==0.52.0
 
 # HTTP client (async)
 httpx==0.28.1
 
 # Yahoo Finance (for prices/historical data)
-yfinance==1.5.1
+yfinance==1.5.2
 
 # Retry logic
 tenacity==9.1.4
