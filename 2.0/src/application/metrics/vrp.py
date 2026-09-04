@@ -1,0 +1,320 @@
+"""
+VRP (Volatility Risk Premium) Calculator - Tier 1 Core Metric
+
+Compares implied move to historical mean move to identify edge.
+This is the core signal for the IV Crush strategy.
+
+Metric Selection:
+==================
+The VRP calculation compares implied move (from ATM straddle) to historical moves.
+Three historical move metrics are available (all stored SIGNED in the database;
+this module takes absolute values before averaging — direction is irrelevant to
+move magnitude):
+
+1. close_move_pct: Earnings close vs previous close
+   - Matches ATM straddle expectation (close-to-close movement)
+
+2. intraday_move_pct: Earnings-day open -> close (PRODUCTION DEFAULT)
+   - Net intraday move on the reaction day, excludes the overnight gap
+   - For gap-dominant tickers, cross-validate with ORATS abs_avg_ern_mv
+     (close-to-close) — see /analyze --fresh-history
+
+3. gap_move_pct: Earnings open vs previous close
+   - Gap move only, ignores intraday action
+
+Default comes from config.algorithms.vrp_move_metric ("intraday").
+"""
+
+import logging
+import numpy as np
+from datetime import date
+from typing import List
+from src.domain.types import (
+    Percentage,
+    VRPResult,
+    HistoricalMove,
+    ImpliedMove,
+)
+from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
+from src.domain.enums import Recommendation
+
+logger = logging.getLogger(__name__)
+
+
+class VRPCalculator:
+    """
+    Calculate VRP ratio and generate trading recommendation.
+
+    VRP Ratio = Implied Move / Historical Mean |Move|
+
+    Thresholds come from config (BALANCED profile, production default):
+        - Excellent: >= 1.8x
+        - Good: >= 1.4x
+        - Marginal: >= 1.2x
+        - Skip: < 1.2x (insufficient edge)
+    (Constructor defaults of 7.0/4.0/1.5 are the deprecated LEGACY profile;
+    the container always passes config values.)
+
+    Edge Score: Risk-adjusted metric using consistency
+        edge_score = vrp_ratio / (1 + consistency)
+        Higher consistency (lower MAD) = higher edge score
+    """
+
+    def __init__(
+        self,
+        threshold_excellent: float = 7.0,
+        threshold_good: float = 4.0,
+        threshold_marginal: float = 1.5,
+        min_quarters: int = 4,
+        move_metric: str = "close",  # "close", "intraday", or "gap"
+    ):
+        self.thresholds = {
+            'excellent': threshold_excellent,
+            'good': threshold_good,
+            'marginal': threshold_marginal,
+        }
+        self.min_quarters = min_quarters
+        self.move_metric = move_metric
+
+        # Validate metric
+        if move_metric not in ["close", "intraday", "gap"]:
+            raise ValueError(
+                f"Invalid move_metric: {move_metric}. "
+                f"Must be 'close', 'intraday', or 'gap'"
+            )
+
+    def calculate(
+        self,
+        ticker: str,
+        expiration: date,
+        implied_move: ImpliedMove,
+        historical_moves: List[HistoricalMove],
+    ) -> Result[VRPResult, AppError]:
+        """
+        Calculate VRP ratio and recommendation.
+
+        Args:
+            ticker: Stock symbol
+            expiration: Option expiration date
+            implied_move: Calculated implied move
+            historical_moves: Past earnings moves (min 4 quarters)
+
+        Returns:
+            Result with VRPResult or AppError
+        """
+        logger.info(f"Calculating VRP: {ticker} (metric={self.move_metric})")
+
+        # Validate historical data
+        if not historical_moves:
+            return Err(
+                AppError(
+                    ErrorCode.NODATA,
+                    f"No historical moves for {ticker}",
+                )
+            )
+
+        if len(historical_moves) < self.min_quarters:
+            return Err(
+                AppError(
+                    ErrorCode.NODATA,
+                    f"Need {self.min_quarters}+ quarters, got {len(historical_moves)}",
+                )
+            )
+
+        # Extract historical move magnitudes based on configured metric.
+        # DB values are signed; VRP compares against move MAGNITUDE, so take
+        # abs() — a raw mean lets up/down moves cancel and inflates VRP.
+        if self.move_metric == "close":
+            historical_pcts = [
+                abs(float(move.close_move_pct.value)) for move in historical_moves
+            ]
+        elif self.move_metric == "intraday":
+            historical_pcts = [
+                abs(float(move.intraday_move_pct.value)) for move in historical_moves
+            ]
+        elif self.move_metric == "gap":
+            historical_pcts = [
+                abs(float(move.gap_move_pct.value)) for move in historical_moves
+            ]
+        else:
+            return Err(
+                AppError(
+                    ErrorCode.CONFIGURATION,
+                    f"Invalid move_metric: {self.move_metric}",
+                )
+            )
+
+        # Calculate mean historical move
+        mean_move = np.mean(historical_pcts)
+
+        if mean_move <= 0 or np.isnan(mean_move) or np.isinf(mean_move):
+            return Err(
+                AppError(
+                    ErrorCode.INVALID,
+                    f"Invalid mean move: {mean_move}",
+                )
+            )
+
+        # Guard against near-zero mean_move to avoid numerical instability
+        if mean_move < 1e-6:
+            logger.warning(
+                f"{ticker}: mean_move ({mean_move}) is near zero, "
+                f"returning 0.0 VRP ratio to avoid division instability"
+            )
+            result = VRPResult(
+                ticker=ticker,
+                expiration=expiration,
+                implied_move_pct=implied_move.implied_move_pct,
+                historical_mean_move_pct=Percentage(mean_move),
+                vrp_ratio=0.0,
+                edge_score=0.0,
+                recommendation=Recommendation.SKIP,
+            )
+            return Ok(result)
+
+        # Calculate VRP ratio
+        implied_pct = float(implied_move.implied_move_pct.value)
+        vrp_ratio = implied_pct / mean_move
+
+        # Calculate consistency (using MAD - Median Absolute Deviation)
+        median_move = np.median(historical_pcts)
+        mad = np.median(np.abs(np.array(historical_pcts) - median_move))
+        consistency_factor = mad / median_move if median_move > 0 else 999
+
+        # Calculate edge score (risk-adjusted VRP)
+        # Higher consistency (lower MAD) = higher edge score
+        edge_score = vrp_ratio / (1 + consistency_factor)
+
+        # Determine recommendation
+        if vrp_ratio >= self.thresholds['excellent']:
+            recommendation = Recommendation.EXCELLENT
+        elif vrp_ratio >= self.thresholds['good']:
+            recommendation = Recommendation.GOOD
+        elif vrp_ratio >= self.thresholds['marginal']:
+            recommendation = Recommendation.MARGINAL
+        else:
+            recommendation = Recommendation.SKIP
+
+        result = VRPResult(
+            ticker=ticker,
+            expiration=expiration,
+            implied_move_pct=implied_move.implied_move_pct,
+            historical_mean_move_pct=Percentage(mean_move),
+            vrp_ratio=vrp_ratio,
+            edge_score=edge_score,
+            recommendation=recommendation,
+        )
+
+        logger.info(
+            f"{ticker}: VRP {vrp_ratio:.2f}x "
+            f"(implied: {implied_pct:.2f}%, historical: {mean_move:.2f}%) "
+            f"→ {recommendation.value.upper()}"
+        )
+
+        return Ok(result)
+
+    def calculate_with_consistency(
+        self,
+        ticker: str,
+        expiration: date,
+        implied_move: ImpliedMove,
+        historical_moves: List[HistoricalMove],
+    ) -> Result[tuple[VRPResult, dict], AppError]:
+        """
+        Calculate VRP with detailed consistency metrics.
+
+        Returns:
+            Result with (VRPResult, consistency_dict)
+        """
+        vrp_result = self.calculate(
+            ticker, expiration, implied_move, historical_moves
+        )
+
+        if vrp_result.is_err:
+            return vrp_result
+
+        # Calculate detailed consistency metrics using the same metric as VRP
+        # (abs() for the same reason as calculate(): magnitudes, not direction)
+        if self.move_metric == "close":
+            historical_pcts = [
+                abs(float(move.close_move_pct.value)) for move in historical_moves
+            ]
+        elif self.move_metric == "intraday":
+            historical_pcts = [
+                abs(float(move.intraday_move_pct.value)) for move in historical_moves
+            ]
+        else:  # gap
+            historical_pcts = [
+                abs(float(move.gap_move_pct.value)) for move in historical_moves
+            ]
+
+        mean = np.mean(historical_pcts)
+        median = np.median(historical_pcts)
+        std = np.std(historical_pcts)
+        mad = np.median(np.abs(np.array(historical_pcts) - median))
+
+        # Calculate tail risk metrics
+        max_move = max(historical_pcts)
+        min_move = min(historical_pcts)
+        tail_risk_ratio = max_move / mean if mean > 0 else 0
+
+        # TRR thresholds for position sizing
+        # > 2.5: HIGH TAIL RISK (reduce size 50%)
+        # 1.5-2.5: NORMAL (standard sizing)
+        # < 1.5: LOW TAIL RISK (can increase slightly)
+        if tail_risk_ratio > 2.5:
+            tail_risk_level = 'HIGH'
+        elif tail_risk_ratio >= 1.5:
+            tail_risk_level = 'NORMAL'
+        else:
+            tail_risk_level = 'LOW'
+
+        consistency = {
+            'mean': mean,
+            'median': median,
+            'std': std,
+            'mad': mad,
+            'mad_pct': (mad / median * 100) if median > 0 else 0,
+            'cv': (std / mean) if mean > 0 else 0,  # Coefficient of variation
+            'sample_size': len(historical_moves),
+            # Tail risk metrics (NEW)
+            'max_move': max_move,
+            'min_move': min_move,
+            'tail_risk_ratio': tail_risk_ratio,
+            'tail_risk_level': tail_risk_level,
+        }
+
+        return Ok((vrp_result.value, consistency))
+
+
+def compute_close_baseline_vrp(
+    implied_move_pct: float,
+    historical_moves: List[HistoricalMove],
+    min_quarters: int = 4,
+) -> tuple:
+    """
+    Compute the gap-inclusive (close-to-close) VRP alongside the production
+    intraday VRP for live A/B comparison.
+
+    Universe backtest (Jun 2026, 7,948 events, 2025-06 train/test split):
+    ranking by close-baseline VRP raised top-20% crush rate from 81.2% to
+    84.9% out-of-sample vs the intraday baseline, because intraday_move_pct
+    excludes the overnight gap (the ORCL failure mode). Logged to
+    analysis_log.vrp_close_ratio on every analysis until enough live
+    earnings outcomes accumulate to decide a convention migration.
+
+    Returns:
+        (historical_close_mean_pct, vrp_close_ratio) — either may be None
+        when close data is insufficient.
+    """
+    close_pcts = [
+        abs(float(m.close_move_pct.value))
+        for m in historical_moves
+        if m.close_move_pct is not None
+    ]
+    if len(close_pcts) < min_quarters:
+        return None, None
+    mean_close = float(np.mean(close_pcts))
+    if mean_close < 1e-6 or np.isnan(mean_close) or np.isinf(mean_close):
+        return None, None
+    return mean_close, implied_move_pct / mean_close

@@ -1,0 +1,52 @@
+# Core Dependencies
+yfinance==1.7.0
+requests==2.34.2
+python-dotenv==1.2.3
+pandas==3.0.5
+numpy==2.5.2
+pytz==2026.3.post1
+
+# Testing
+pytest==9.1.1
+pytest-cov==7.1.0
+pytest-asyncio==1.4.0
+pytest-timeout==2.4.0
+coverage==7.16.0
+
+# Data Processing
+beautifulsoup4==4.15.0
+lxml==6.1.2
+soupsieve==2.9.2
+
+# Utilities
+python-dateutil==2.9.0.post0
+tzdata==2026.3
+peewee==4.4.0
+tqdm==4.70.0
+
+# Network & Security
+certifi==2026.7.22
+urllib3==2.7.0
+websockets==17.1
+curl_cffi==0.16.2
+cffi==2.1.1
+pycparser==3.0
+
+# Supporting Libraries
+charset-normalizer==3.5.1
+idna==3.19
+six==1.17.0
+multitasking==0.0.13
+packaging==26.3
+platformdirs==4.11.5
+pluggy==1.6.0
+iniconfig==2.3.0
+typing_extensions==4.16.0
+protobuf==7.36.0
+Pygments==2.21.0
+
+# MCP SDK — required by scripts/mcp/finnhub_server.py (the repo-local Finnhub
+# MCP server). Not imported by any trading code path; without it the /council,
+# /analyze, /calendar, /health, /postmortem and /taco Finnhub steps lose their
+# data source, but the 2.0 engine itself still runs.
+mcp==2.1.1

@@ -1,0 +1,366 @@
+"""
+Database schema initialization for IV Crush 2.0.
+
+Creates SQLite database with proper indexes and constraints.
+"""
+
+import os
+import sqlite3
+import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def init_database(db_path: Path) -> None:
+    """
+    Initialize database schema.
+
+    Creates 5 tables:
+    1. earnings_calendar - Earnings events
+    2. historical_moves - Historical price movements
+    3. ticker_metadata - Ticker info (sector, market cap)
+    4. analysis_log - Analysis results log
+    5. rate_limits - API rate limit tracking
+
+    Args:
+        db_path: Path to SQLite database file
+    """
+    # Ensure parent directory exists
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Verify directory is writable
+    if not os.access(db_path.parent, os.W_OK):
+        raise PermissionError(
+            f"Database directory is not writable: {db_path.parent}"
+        )
+
+    # Check if database already initialized to prevent race conditions
+    if db_path.exists():
+        if verify_database(db_path):
+            logger.debug(f"Database already initialized: {db_path}")
+            # Ensure WAL mode is set even for existing databases
+            _ensure_wal_mode(db_path)
+            return
+
+    # Use exclusive mode to prevent concurrent initialization
+    # URI mode allows isolation_level parameter
+    conn = sqlite3.connect(
+        f"file:{db_path}?mode=rwc",
+        uri=True,
+        isolation_level='EXCLUSIVE',
+        timeout=30
+    )
+    cursor = conn.cursor()
+
+    try:
+        # CRITICAL: Enable foreign key constraints (disabled by default in SQLite)
+        cursor.execute('PRAGMA foreign_keys=ON')
+
+        # Enable WAL mode for better concurrency and performance
+        cursor.execute('PRAGMA journal_mode=WAL')
+        cursor.execute('PRAGMA synchronous=NORMAL')  # Safe with WAL
+        cursor.execute('PRAGMA busy_timeout=5000')   # 5 second timeout on locks
+        logger.info("Database configured: foreign_keys=ON, WAL mode enabled, busy_timeout=5s")
+
+        # Table 1: Earnings Calendar
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS earnings_calendar (
+                ticker TEXT NOT NULL,
+                earnings_date DATE NOT NULL,
+                timing TEXT NOT NULL CHECK(timing IN ('BMO', 'AMC', 'DMH', 'UNKNOWN')),
+                confirmed BOOLEAN DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_validated_at DATETIME,
+                PRIMARY KEY (ticker, earnings_date)
+            )
+        ''')
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_earnings_date ON earnings_calendar(earnings_date)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_earnings_ticker ON earnings_calendar(ticker)'
+        )
+
+        # Table 2: Historical Moves
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS historical_moves (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                earnings_date DATE NOT NULL,
+                prev_close REAL NOT NULL,
+                earnings_open REAL NOT NULL,
+                earnings_high REAL NOT NULL,
+                earnings_low REAL NOT NULL,
+                earnings_close REAL NOT NULL,
+                intraday_move_pct REAL NOT NULL,
+                gap_move_pct REAL NOT NULL,
+                close_move_pct REAL NOT NULL,
+                volume_before INTEGER,
+                volume_earnings INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(ticker, earnings_date)
+            )
+        ''')
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_moves_ticker ON historical_moves(ticker)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_moves_date ON historical_moves(earnings_date)'
+        )
+
+        # Table 3: Ticker Metadata
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ticker_metadata (
+                ticker TEXT PRIMARY KEY,
+                company_name TEXT,
+                sector TEXT,
+                industry TEXT,
+                market_cap REAL,
+                avg_volume INTEGER,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Table 4: Analysis Log (Enhanced for meta-analysis)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS analysis_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME NOT NULL,
+                ticker TEXT NOT NULL,
+                earnings_date DATE NOT NULL,
+                expiration DATE NOT NULL,
+
+                -- Core metrics
+                implied_move_pct REAL NOT NULL,
+                historical_mean_pct REAL NOT NULL,
+                vrp_ratio REAL NOT NULL,
+                recommendation TEXT NOT NULL,
+                confidence REAL,
+
+                -- Consistency
+                consistency_score REAL,
+
+                -- Market conditions
+                vix_level REAL,
+                vix_regime TEXT,
+
+                -- Strategy selected
+                strategy_type TEXT,
+                strategy_score REAL,
+                strategy_pop REAL,
+                strategy_rr REAL,
+                contracts INTEGER,
+
+                -- Gap-inclusive VRP (live A/B vs intraday baseline, migration 016)
+                historical_close_mean_pct REAL,
+                vrp_close_ratio REAL,
+
+                -- IV term-structure event-vol multiple (migration 017)
+                term_slope_ratio REAL,
+
+                -- Recent-move streak, observational only (migration 020)
+                recent_move_up_count INTEGER,
+                recent_move_qtrs INTEGER,
+
+                -- Additional context (JSON serialized full analysis)
+                raw_analysis TEXT
+            )
+        ''')
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_ticker ON analysis_log(ticker)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_timestamp ON analysis_log(timestamp)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_recommendation ON analysis_log(recommendation)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_regime ON analysis_log(vix_regime)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_analysis_strategy ON analysis_log(strategy_type)'
+        )
+
+        # Table 5: Rate Limits (for tracking API usage)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS rate_limits (
+                service TEXT NOT NULL,
+                window_start DATETIME NOT NULL,
+                window_type TEXT NOT NULL CHECK(window_type IN ('minute', 'hour', 'day')),
+                request_count INTEGER DEFAULT 0,
+                PRIMARY KEY (service, window_start, window_type)
+            )
+        ''')
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_rate_limits_service ON rate_limits(service, window_start)'
+        )
+
+        # Table 6: Cache (L2 persistent cache - Phase 2)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS cache (
+                key TEXT PRIMARY KEY,
+                value BLOB NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_cache_timestamp ON cache(timestamp)'
+        )
+
+        conn.commit()
+        logger.info(f"✓ Database initialized: {db_path}")
+
+    except sqlite3.Error as e:
+        logger.error(f"Database initialization failed: {e}")
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def verify_database(db_path: Path) -> bool:
+    """
+    Verify database schema is correct.
+
+    Args:
+        db_path: Path to SQLite database
+
+    Returns:
+        True if all tables exist with correct structure
+    """
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+
+        required_tables = [
+            'earnings_calendar',
+            'historical_moves',
+            'ticker_metadata',
+            'analysis_log',
+            'rate_limits',
+            'cache',
+        ]
+
+        for table in required_tables:
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,)
+            )
+            if not cursor.fetchone():
+                logger.error(f"Missing table: {table}")
+                return False
+
+        conn.close()
+        logger.info("✓ Database schema verified")
+        return True
+
+    except sqlite3.Error as e:
+        logger.error(f"Database verification failed: {e}")
+        return False
+
+
+def drop_all_tables(db_path: Path) -> None:
+    """
+    Drop all tables. USE WITH CAUTION.
+    Only for testing or complete reset.
+
+    Args:
+        db_path: Path to SQLite database
+    """
+    # Define allowed tables to prevent SQL injection
+    ALLOWED_TABLES = frozenset([
+        'earnings_calendar',
+        'historical_moves',
+        'ticker_metadata',
+        'analysis_log',
+        'rate_limits',
+        'cache',
+    ])
+
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+
+    try:
+        for table in ALLOWED_TABLES:
+            # Bracket-quote table name for defense-in-depth (whitelist is primary guard)
+            cursor.execute(f'DROP TABLE IF EXISTS [{table}]')
+
+        conn.commit()
+        logger.warning(f"All tables dropped from {db_path}")
+    finally:
+        conn.close()
+
+
+def _ensure_wal_mode(db_path: Path) -> None:
+    """
+    Ensure database is using WAL mode with optimal settings.
+
+    Args:
+        db_path: Path to SQLite database
+    """
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30)
+        cursor = conn.cursor()
+
+        # CRITICAL: Enable foreign key constraints
+        cursor.execute('PRAGMA foreign_keys=ON')
+
+        # Check current journal mode
+        current_mode = cursor.execute('PRAGMA journal_mode').fetchone()[0]
+
+        if current_mode.lower() != 'wal':
+            # Set WAL mode
+            cursor.execute('PRAGMA journal_mode=WAL')
+            cursor.execute('PRAGMA synchronous=NORMAL')
+            cursor.execute('PRAGMA busy_timeout=5000')
+            conn.commit()
+            logger.info(f"✓ Foreign keys ON, WAL mode enabled for existing database: {db_path}")
+        else:
+            logger.debug(f"Database already using WAL mode (foreign_keys=ON): {db_path}")
+
+        conn.close()
+    except sqlite3.Error as e:
+        logger.error(f"Failed to ensure WAL mode: {e}")
+
+
+def optimize_database(db_path: Path) -> None:
+    """
+    Run ANALYZE to update query optimizer statistics.
+
+    Should be run periodically (weekly) to keep query planner statistics current.
+    Critical for optimal JOIN and index performance as data grows.
+
+    Args:
+        db_path: Path to SQLite database
+    """
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30)
+        conn.execute('PRAGMA foreign_keys=ON')
+        cursor = conn.cursor()
+
+        logger.info(f"Running ANALYZE on {db_path.name}...")
+
+        # Collect statistics for all tables
+        cursor.execute('ANALYZE')
+        conn.commit()
+
+        # Report statistics
+        cursor.execute("SELECT COUNT(*) FROM sqlite_stat1")
+        stat_count = cursor.fetchone()[0]
+        logger.info(f"✓ Database statistics updated ({stat_count} stat entries)")
+
+        conn.close()
+    except sqlite3.Error as e:
+        logger.error(f"Failed to analyze database: {e}")
+
+
+if __name__ == "__main__":
+    # Quick test
+    from src.config.config import get_config
+
+    config = get_config()
+    init_database(config.database.path)
+    verify_database(config.database.path)

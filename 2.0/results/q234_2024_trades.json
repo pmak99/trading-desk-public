@@ -1,0 +1,1465 @@
+{
+  "period": {
+    "start": "2024-04-01",
+    "end": "2024-12-31"
+  },
+  "trade_count": 208,
+  "trades": [
+    {
+      "ticker": "DAL",
+      "earnings_date": "2024-04-10",
+      "actual_move": 2.2823201589234694,
+      "directional_move": 2.2823201589234694,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "APLD",
+      "earnings_date": "2024-04-11",
+      "actual_move": 2.6755827241100745,
+      "directional_move": 2.6755827241100745,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "JPM",
+      "earnings_date": "2024-04-12",
+      "actual_move": 6.467773537542218,
+      "directional_move": 6.467773537542218,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "UAL",
+      "earnings_date": "2024-04-16",
+      "actual_move": 1.1208554439837188,
+      "directional_move": 1.1208554439837188,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ASML",
+      "earnings_date": "2024-04-17",
+      "actual_move": 7.094743254519355,
+      "directional_move": 7.094743254519355,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "NFLX",
+      "earnings_date": "2024-04-18",
+      "actual_move": 0.5100302873373509,
+      "directional_move": 0.5100302873373509,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "TSM",
+      "earnings_date": "2024-04-18",
+      "actual_move": 4.862246671266549,
+      "directional_move": 4.862246671266549,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "ENPH",
+      "earnings_date": "2024-04-23",
+      "actual_move": 2.68754064183428,
+      "directional_move": 2.68754064183428,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "SPOT",
+      "earnings_date": "2024-04-23",
+      "actual_move": 11.41272716674364,
+      "directional_move": 11.41272716674364,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "TSLA",
+      "earnings_date": "2024-04-23",
+      "actual_move": 1.851453409026092,
+      "directional_move": 1.851453409026092,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "CMG",
+      "earnings_date": "2024-04-24",
+      "actual_move": 0.40342877819432643,
+      "directional_move": 0.40342877819432643,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "META",
+      "earnings_date": "2024-04-24",
+      "actual_move": 0.5240839073397097,
+      "directional_move": 0.5240839073397097,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "NOW",
+      "earnings_date": "2024-04-24",
+      "actual_move": 0.7206917784381441,
+      "directional_move": 0.7206917784381441,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GOOG",
+      "earnings_date": "2024-04-25",
+      "actual_move": 1.9553045987589273,
+      "directional_move": 1.9553045987589273,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GOOGL",
+      "earnings_date": "2024-04-25",
+      "actual_move": 1.9669394820604462,
+      "directional_move": 1.9669394820604462,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "INTC",
+      "earnings_date": "2024-04-25",
+      "actual_move": 1.7681155113236504,
+      "directional_move": 1.7681155113236504,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MSFT",
+      "earnings_date": "2024-04-25",
+      "actual_move": 2.449513059742166,
+      "directional_move": 2.449513059742166,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "SNAP",
+      "earnings_date": "2024-04-25",
+      "actual_move": 2.8880839081918044,
+      "directional_move": 2.8880839081918044,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "SOFI",
+      "earnings_date": "2024-04-29",
+      "actual_move": 10.482843980454886,
+      "directional_move": 10.482843980454886,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "AMD",
+      "earnings_date": "2024-04-30",
+      "actual_move": 1.1360749688514007,
+      "directional_move": 1.1360749688514007,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "AMZN",
+      "earnings_date": "2024-04-30",
+      "actual_move": 3.2935491228684097,
+      "directional_move": 3.2935491228684097,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "PINS",
+      "earnings_date": "2024-04-30",
+      "actual_move": 0.9769035769168571,
+      "directional_move": 0.9769035769168571,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "PYPL",
+      "earnings_date": "2024-04-30",
+      "actual_move": 1.3882674053326953,
+      "directional_move": 1.3882674053326953,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "SMCI",
+      "earnings_date": "2024-04-30",
+      "actual_move": 3.543557341407829,
+      "directional_move": 3.543557341407829,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "CVNA",
+      "earnings_date": "2024-05-01",
+      "actual_move": 5.0289414628895095,
+      "directional_move": 5.0289414628895095,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "AAPL",
+      "earnings_date": "2024-05-02",
+      "actual_move": 2.2032050071114657,
+      "directional_move": 2.2032050071114657,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "NVO",
+      "earnings_date": "2024-05-02",
+      "actual_move": 4.016721625738238,
+      "directional_move": 4.016721625738238,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "HIMS",
+      "earnings_date": "2024-05-06",
+      "actual_move": 3.463582430914089,
+      "directional_move": 3.463582430914089,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "PLTR",
+      "earnings_date": "2024-05-06",
+      "actual_move": 8.05829047112983,
+      "directional_move": 8.05829047112983,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ANET",
+      "earnings_date": "2024-05-07",
+      "actual_move": 1.732306492707063,
+      "directional_move": 1.732306492707063,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "DIS",
+      "earnings_date": "2024-05-07",
+      "actual_move": 9.513187629890846,
+      "directional_move": 9.513187629890846,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "OSCR",
+      "earnings_date": "2024-05-07",
+      "actual_move": 4.217191214371818,
+      "directional_move": 4.217191214371818,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "RDDT",
+      "earnings_date": "2024-05-07",
+      "actual_move": 2.3410007404163733,
+      "directional_move": 2.3410007404163733,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "UPST",
+      "earnings_date": "2024-05-07",
+      "actual_move": 4.970876452992264,
+      "directional_move": 4.970876452992264,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "SHOP",
+      "earnings_date": "2024-05-08",
+      "actual_move": 18.585338017316,
+      "directional_move": 18.585338017316,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "SKYT",
+      "earnings_date": "2024-05-08",
+      "actual_move": 5.820607665285052,
+      "directional_move": 5.820607665285052,
+      "timing": "DMH"
+    },
+    {
+      "ticker": "RBLX",
+      "earnings_date": "2024-05-09",
+      "actual_move": 22.05995124849973,
+      "directional_move": 22.05995124849973,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "DOCN",
+      "earnings_date": "2024-05-10",
+      "actual_move": 10.220987812171717,
+      "directional_move": 10.220987812171717,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "WMT",
+      "earnings_date": "2024-05-16",
+      "actual_move": 6.986465292001615,
+      "directional_move": 6.986465292001615,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "AMAT",
+      "earnings_date": "2024-05-16",
+      "actual_move": 1.590866172165986,
+      "directional_move": 1.590866172165986,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "TGT",
+      "earnings_date": "2024-05-22",
+      "actual_move": 8.030556785215072,
+      "directional_move": 8.030556785215072,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "NVDA",
+      "earnings_date": "2024-05-22",
+      "actual_move": 0.4570866962732883,
+      "directional_move": 0.4570866962732883,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ASAN",
+      "earnings_date": "2024-05-30",
+      "actual_move": 4.923970199232295,
+      "directional_move": 4.923970199232295,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MDB",
+      "earnings_date": "2024-05-30",
+      "actual_move": 7.182847072015602,
+      "directional_move": 7.182847072015602,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GTLB",
+      "earnings_date": "2024-06-03",
+      "actual_move": 0.2542889073466674,
+      "directional_move": 0.2542889073466674,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GME",
+      "earnings_date": "2024-06-07",
+      "actual_move": 39.377014444959904,
+      "directional_move": 39.377014444959904,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "ORCL",
+      "earnings_date": "2024-06-11",
+      "actual_move": 0.49799351373058903,
+      "directional_move": 0.49799351373058903,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "AVGO",
+      "earnings_date": "2024-06-12",
+      "actual_move": 2.3599913767198397,
+      "directional_move": 2.3599913767198397,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "OXM",
+      "earnings_date": "2024-06-12",
+      "actual_move": 0.980193674650855,
+      "directional_move": 0.980193674650855,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ADBE",
+      "earnings_date": "2024-06-13",
+      "actual_move": 0.24572268136879508,
+      "directional_move": 0.24572268136879508,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ACN",
+      "earnings_date": "2024-06-20",
+      "actual_move": 7.292781573505307,
+      "directional_move": 7.292781573505307,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "FDX",
+      "earnings_date": "2024-06-25",
+      "actual_move": 0.05068212548989714,
+      "directional_move": 0.05068212548989714,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MU",
+      "earnings_date": "2024-06-26",
+      "actual_move": 0.8786727867539784,
+      "directional_move": 0.8786727867539784,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "DAL",
+      "earnings_date": "2024-07-11",
+      "actual_move": 3.9906216564548624,
+      "directional_move": 3.9906216564548624,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "WFC",
+      "earnings_date": "2024-07-12",
+      "actual_move": 6.017289768256175,
+      "directional_move": 6.017289768256175,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "C",
+      "earnings_date": "2024-07-12",
+      "actual_move": 1.810993326764647,
+      "directional_move": 1.810993326764647,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "JPM",
+      "earnings_date": "2024-07-12",
+      "actual_move": 1.2099283590675365,
+      "directional_move": 1.2099283590675365,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "GS",
+      "earnings_date": "2024-07-15",
+      "actual_move": 2.573559673770338,
+      "directional_move": 2.573559673770338,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "BAC",
+      "earnings_date": "2024-07-16",
+      "actual_move": 5.3473438434049125,
+      "directional_move": 5.3473438434049125,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "MS",
+      "earnings_date": "2024-07-16",
+      "actual_move": 0.9120277653989886,
+      "directional_move": 0.9120277653989886,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "UNH",
+      "earnings_date": "2024-07-16",
+      "actual_move": 6.500164807139826,
+      "directional_move": 6.500164807139826,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "JNJ",
+      "earnings_date": "2024-07-17",
+      "actual_move": 3.688504646444645,
+      "directional_move": 3.688504646444645,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "ASML",
+      "earnings_date": "2024-07-17",
+      "actual_move": 12.743973709060732,
+      "directional_move": 12.743973709060732,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "UAL",
+      "earnings_date": "2024-07-17",
+      "actual_move": 0.2761866772001046,
+      "directional_move": 0.2761866772001046,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "NFLX",
+      "earnings_date": "2024-07-18",
+      "actual_move": 0.6826744193171465,
+      "directional_move": 0.6826744193171465,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "TSM",
+      "earnings_date": "2024-07-18",
+      "actual_move": 0.3913592918851316,
+      "directional_move": 0.3913592918851316,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "CMCSA",
+      "earnings_date": "2024-07-23",
+      "actual_move": 2.5803247638652422,
+      "directional_move": 2.5803247638652422,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "ENPH",
+      "earnings_date": "2024-07-23",
+      "actual_move": 1.050218155963504,
+      "directional_move": 1.050218155963504,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GOOG",
+      "earnings_date": "2024-07-23",
+      "actual_move": 0.13634989873147138,
+      "directional_move": 0.13634989873147138,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GOOGL",
+      "earnings_date": "2024-07-23",
+      "actual_move": 0.06605033763895259,
+      "directional_move": 0.06605033763895259,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "SPOT",
+      "earnings_date": "2024-07-23",
+      "actual_move": 11.961413057287933,
+      "directional_move": 11.961413057287933,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "TSLA",
+      "earnings_date": "2024-07-23",
+      "actual_move": 2.0396762498772216,
+      "directional_move": 2.0396762498772216,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "CMG",
+      "earnings_date": "2024-07-24",
+      "actual_move": 1.4652720626885072,
+      "directional_move": 1.4652720626885072,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "NOW",
+      "earnings_date": "2024-07-24",
+      "actual_move": 4.52633811396333,
+      "directional_move": 4.52633811396333,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ABBV",
+      "earnings_date": "2024-07-25",
+      "actual_move": 3.3823214424931365,
+      "directional_move": 3.3823214424931365,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "MCD",
+      "earnings_date": "2024-07-29",
+      "actual_move": 3.7381144741231886,
+      "directional_move": 3.7381144741231886,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "SBUX",
+      "earnings_date": "2024-07-30",
+      "actual_move": 0.9840411251190487,
+      "directional_move": 0.9840411251190487,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "PFE",
+      "earnings_date": "2024-07-30",
+      "actual_move": 2.1809955436457398,
+      "directional_move": 2.1809955436457398,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "MRK",
+      "earnings_date": "2024-07-30",
+      "actual_move": 9.805914142704873,
+      "directional_move": 9.805914142704873,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "AMD",
+      "earnings_date": "2024-07-30",
+      "actual_move": 0.9373864462209303,
+      "directional_move": 0.9373864462209303,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ANET",
+      "earnings_date": "2024-07-30",
+      "actual_move": 2.8482217167111807,
+      "directional_move": 2.8482217167111807,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MSFT",
+      "earnings_date": "2024-07-30",
+      "actual_move": 0.8928302036058815,
+      "directional_move": 0.8928302036058815,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "PINS",
+      "earnings_date": "2024-07-30",
+      "actual_move": 0.026772312813339184,
+      "directional_move": 0.026772312813339184,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "PYPL",
+      "earnings_date": "2024-07-30",
+      "actual_move": 8.585004226651014,
+      "directional_move": 8.585004226651014,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "SOFI",
+      "earnings_date": "2024-07-30",
+      "actual_move": 1.2278329266664776,
+      "directional_move": 1.2278329266664776,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "QCOM",
+      "earnings_date": "2024-07-31",
+      "actual_move": 8.392222372426863,
+      "directional_move": 8.392222372426863,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "BA",
+      "earnings_date": "2024-07-31",
+      "actual_move": 2.001501381220094,
+      "directional_move": 2.001501381220094,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "CVNA",
+      "earnings_date": "2024-07-31",
+      "actual_move": 5.0875508836930745,
+      "directional_move": 5.0875508836930745,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "META",
+      "earnings_date": "2024-07-31",
+      "actual_move": 2.5130105464383194,
+      "directional_move": 2.5130105464383194,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "AAPL",
+      "earnings_date": "2024-08-01",
+      "actual_move": 1.675070299286458,
+      "directional_move": 1.675070299286458,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "AMZN",
+      "earnings_date": "2024-08-01",
+      "actual_move": 1.556310017014146,
+      "directional_move": 1.556310017014146,
+      "timing": "DMH"
+    },
+    {
+      "ticker": "INTC",
+      "earnings_date": "2024-08-01",
+      "actual_move": 5.497726509239452,
+      "directional_move": 5.497726509239452,
+      "timing": "DMH"
+    },
+    {
+      "ticker": "RBLX",
+      "earnings_date": "2024-08-01",
+      "actual_move": 6.430640544810795,
+      "directional_move": 6.430640544810795,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "SNAP",
+      "earnings_date": "2024-08-01",
+      "actual_move": 3.8288234751663777,
+      "directional_move": 3.8288234751663777,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "XOM",
+      "earnings_date": "2024-08-02",
+      "actual_move": 0.05985359989353908,
+      "directional_move": 0.05985359989353908,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "CVX",
+      "earnings_date": "2024-08-02",
+      "actual_move": 2.666738108569287,
+      "directional_move": 2.666738108569287,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "HIMS",
+      "earnings_date": "2024-08-05",
+      "actual_move": 1.4789546644493106,
+      "directional_move": 1.4789546644493106,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "PLTR",
+      "earnings_date": "2024-08-05",
+      "actual_move": 2.6273226537742027,
+      "directional_move": 2.6273226537742027,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "CAT",
+      "earnings_date": "2024-08-06",
+      "actual_move": 3.042946615557034,
+      "directional_move": 3.042946615557034,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "RDDT",
+      "earnings_date": "2024-08-06",
+      "actual_move": 4.312622256142579,
+      "directional_move": 4.312622256142579,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "SMCI",
+      "earnings_date": "2024-08-06",
+      "actual_move": 1.332064503553327,
+      "directional_move": 1.332064503553327,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "UPST",
+      "earnings_date": "2024-08-06",
+      "actual_move": 0.23094815848156633,
+      "directional_move": 0.23094815848156633,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "DIS",
+      "earnings_date": "2024-08-07",
+      "actual_move": 4.457041003035668,
+      "directional_move": 4.457041003035668,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "NVO",
+      "earnings_date": "2024-08-07",
+      "actual_move": 8.369188234824149,
+      "directional_move": 8.369188234824149,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "OSCR",
+      "earnings_date": "2024-08-07",
+      "actual_move": 3.0760231768879374,
+      "directional_move": 3.0760231768879374,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "SHOP",
+      "earnings_date": "2024-08-07",
+      "actual_move": 17.834743547097087,
+      "directional_move": 17.834743547097087,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "SKYT",
+      "earnings_date": "2024-08-07",
+      "actual_move": 4.187604837285504,
+      "directional_move": 4.187604837285504,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "LLY",
+      "earnings_date": "2024-08-08",
+      "actual_move": 9.476270280527304,
+      "directional_move": 9.476270280527304,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "DOCN",
+      "earnings_date": "2024-08-08",
+      "actual_move": 5.054150108195554,
+      "directional_move": 5.054150108195554,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "RCAT",
+      "earnings_date": "2024-08-08",
+      "actual_move": 4.123707285899507,
+      "directional_move": 4.123707285899507,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "HD",
+      "earnings_date": "2024-08-13",
+      "actual_move": 1.2319018935752812,
+      "directional_move": 1.2319018935752812,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "OKLO",
+      "earnings_date": "2024-08-13",
+      "actual_move": 5.248225185090594,
+      "directional_move": 5.248225185090594,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "WMT",
+      "earnings_date": "2024-08-15",
+      "actual_move": 6.58315227646683,
+      "directional_move": 6.58315227646683,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "AMAT",
+      "earnings_date": "2024-08-15",
+      "actual_move": 5.058762646102199,
+      "directional_move": 5.058762646102199,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "TGT",
+      "earnings_date": "2024-08-21",
+      "actual_move": 11.20032432748605,
+      "directional_move": 11.20032432748605,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "CRM",
+      "earnings_date": "2024-08-28",
+      "actual_move": 2.006056987358774,
+      "directional_move": 2.006056987358774,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "APLD",
+      "earnings_date": "2024-08-28",
+      "actual_move": 6.765331297483983,
+      "directional_move": 6.765331297483983,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "NVDA",
+      "earnings_date": "2024-08-28",
+      "actual_move": 2.0966515727281165,
+      "directional_move": 2.0966515727281165,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MDB",
+      "earnings_date": "2024-08-29",
+      "actual_move": 4.3973345448567045,
+      "directional_move": 4.3973345448567045,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ASAN",
+      "earnings_date": "2024-09-03",
+      "actual_move": 5.47653225308128,
+      "directional_move": 5.47653225308128,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GTLB",
+      "earnings_date": "2024-09-03",
+      "actual_move": 5.738399015067732,
+      "directional_move": 5.738399015067732,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "AVGO",
+      "earnings_date": "2024-09-05",
+      "actual_move": 0.843481183692249,
+      "directional_move": 0.843481183692249,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ORCL",
+      "earnings_date": "2024-09-09",
+      "actual_move": 1.353909230607199,
+      "directional_move": 1.353909230607199,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GME",
+      "earnings_date": "2024-09-10",
+      "actual_move": 3.298965926022874,
+      "directional_move": 3.298965926022874,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "OXM",
+      "earnings_date": "2024-09-11",
+      "actual_move": 0.34785240290860675,
+      "directional_move": 0.34785240290860675,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ADBE",
+      "earnings_date": "2024-09-12",
+      "actual_move": 1.0630936383485616,
+      "directional_move": 1.0630936383485616,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "FDX",
+      "earnings_date": "2024-09-19",
+      "actual_move": 0.7445460329671412,
+      "directional_move": 0.7445460329671412,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MU",
+      "earnings_date": "2024-09-25",
+      "actual_move": 1.8829704476481308,
+      "directional_move": 1.8829704476481308,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "COST",
+      "earnings_date": "2024-09-26",
+      "actual_move": 0.7683757877463075,
+      "directional_move": 0.7683757877463075,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ACN",
+      "earnings_date": "2024-09-26",
+      "actual_move": 5.565952198311327,
+      "directional_move": 5.565952198311327,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "NKE",
+      "earnings_date": "2024-10-01",
+      "actual_move": 0.825778357679962,
+      "directional_move": 0.825778357679962,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "APLD",
+      "earnings_date": "2024-10-09",
+      "actual_move": 5.73248171633194,
+      "directional_move": 5.73248171633194,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "DAL",
+      "earnings_date": "2024-10-10",
+      "actual_move": 1.0623717215709483,
+      "directional_move": 1.0623717215709483,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "WFC",
+      "earnings_date": "2024-10-11",
+      "actual_move": 5.6104023118179285,
+      "directional_move": 5.6104023118179285,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "JPM",
+      "earnings_date": "2024-10-11",
+      "actual_move": 4.43994973763361,
+      "directional_move": 4.43994973763361,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "BAC",
+      "earnings_date": "2024-10-15",
+      "actual_move": 0.548796461885258,
+      "directional_move": 0.548796461885258,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "GS",
+      "earnings_date": "2024-10-15",
+      "actual_move": 0.0707693004204459,
+      "directional_move": 0.0707693004204459,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "C",
+      "earnings_date": "2024-10-15",
+      "actual_move": 5.105292313536778,
+      "directional_move": 5.105292313536778,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "UNH",
+      "earnings_date": "2024-10-15",
+      "actual_move": 8.111995827086977,
+      "directional_move": 8.111995827086977,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "JNJ",
+      "earnings_date": "2024-10-15",
+      "actual_move": 1.5470237856771267,
+      "directional_move": 1.5470237856771267,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "ASML",
+      "earnings_date": "2024-10-15",
+      "actual_move": 16.26102970852256,
+      "directional_move": 16.26102970852256,
+      "timing": "DMH"
+    },
+    {
+      "ticker": "UAL",
+      "earnings_date": "2024-10-15",
+      "actual_move": 0.8185176805487304,
+      "directional_move": 0.8185176805487304,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MS",
+      "earnings_date": "2024-10-16",
+      "actual_move": 6.4961610705539545,
+      "directional_move": 6.4961610705539545,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "NFLX",
+      "earnings_date": "2024-10-17",
+      "actual_move": 2.0441560663728633,
+      "directional_move": 2.0441560663728633,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "TSM",
+      "earnings_date": "2024-10-17",
+      "actual_move": 9.793039636772537,
+      "directional_move": 9.793039636772537,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "ENPH",
+      "earnings_date": "2024-10-22",
+      "actual_move": 2.001775298210442,
+      "directional_move": 2.001775298210442,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "BA",
+      "earnings_date": "2024-10-23",
+      "actual_move": 1.7638273943547444,
+      "directional_move": 1.7638273943547444,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "NOW",
+      "earnings_date": "2024-10-23",
+      "actual_move": 1.1187994329405526,
+      "directional_move": 1.1187994329405526,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "TSLA",
+      "earnings_date": "2024-10-23",
+      "actual_move": 1.981927467094233,
+      "directional_move": 1.981927467094233,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MCD",
+      "earnings_date": "2024-10-29",
+      "actual_move": 0.6031413987189861,
+      "directional_move": 0.6031413987189861,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "PFE",
+      "earnings_date": "2024-10-29",
+      "actual_move": 1.3860098900253421,
+      "directional_move": 1.3860098900253421,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "AMD",
+      "earnings_date": "2024-10-29",
+      "actual_move": 3.9582303048599607,
+      "directional_move": 3.9582303048599607,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "CMG",
+      "earnings_date": "2024-10-29",
+      "actual_move": 0.1815128686864083,
+      "directional_move": 0.1815128686864083,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GOOG",
+      "earnings_date": "2024-10-29",
+      "actual_move": 1.6632897121115895,
+      "directional_move": 1.6632897121115895,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GOOGL",
+      "earnings_date": "2024-10-29",
+      "actual_move": 1.7754241997450126,
+      "directional_move": 1.7754241997450126,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "PYPL",
+      "earnings_date": "2024-10-29",
+      "actual_move": 3.9598010570714153,
+      "directional_move": 3.9598010570714153,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "RDDT",
+      "earnings_date": "2024-10-29",
+      "actual_move": 2.5853382915460887,
+      "directional_move": 2.5853382915460887,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "SNAP",
+      "earnings_date": "2024-10-29",
+      "actual_move": 1.68067511236839,
+      "directional_move": 1.68067511236839,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "SOFI",
+      "earnings_date": "2024-10-29",
+      "actual_move": 6.434310458927019,
+      "directional_move": 6.434310458927019,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "SBUX",
+      "earnings_date": "2024-10-30",
+      "actual_move": 0.07187613172572448,
+      "directional_move": 0.07187613172572448,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ABBV",
+      "earnings_date": "2024-10-30",
+      "actual_move": 6.360517608086136,
+      "directional_move": 6.360517608086136,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "LLY",
+      "earnings_date": "2024-10-30",
+      "actual_move": 6.280570420513401,
+      "directional_move": 6.280570420513401,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "CAT",
+      "earnings_date": "2024-10-30",
+      "actual_move": 2.134146633935107,
+      "directional_move": 2.134146633935107,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "CVNA",
+      "earnings_date": "2024-10-30",
+      "actual_move": 0.6850665406431367,
+      "directional_move": 0.6850665406431367,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "META",
+      "earnings_date": "2024-10-30",
+      "actual_move": 0.24947800952586177,
+      "directional_move": 0.24947800952586177,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MSFT",
+      "earnings_date": "2024-10-30",
+      "actual_move": 0.13426895702852398,
+      "directional_move": 0.13426895702852398,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MRK",
+      "earnings_date": "2024-10-31",
+      "actual_move": 2.394358213927508,
+      "directional_move": 2.394358213927508,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "CMCSA",
+      "earnings_date": "2024-10-31",
+      "actual_move": 3.3854058788786134,
+      "directional_move": 3.3854058788786134,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "AAPL",
+      "earnings_date": "2024-10-31",
+      "actual_move": 1.8209534484514327,
+      "directional_move": 1.8209534484514327,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "AMZN",
+      "earnings_date": "2024-10-31",
+      "actual_move": 3.284388507953564,
+      "directional_move": 3.284388507953564,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "INTC",
+      "earnings_date": "2024-10-31",
+      "actual_move": 3.497752493195555,
+      "directional_move": 3.497752493195555,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "RBLX",
+      "earnings_date": "2024-10-31",
+      "actual_move": 19.888738879105045,
+      "directional_move": 19.888738879105045,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "XOM",
+      "earnings_date": "2024-11-01",
+      "actual_move": 1.5670581023144559,
+      "directional_move": 1.5670581023144559,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "CVX",
+      "earnings_date": "2024-11-01",
+      "actual_move": 2.855784705203322,
+      "directional_move": 2.855784705203322,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "DOCN",
+      "earnings_date": "2024-11-04",
+      "actual_move": 13.47048678263047,
+      "directional_move": 13.47048678263047,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "HIMS",
+      "earnings_date": "2024-11-04",
+      "actual_move": 1.9646346097205079,
+      "directional_move": 1.9646346097205079,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "PLTR",
+      "earnings_date": "2024-11-04",
+      "actual_move": 1.2165991025997092,
+      "directional_move": 1.2165991025997092,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "QCOM",
+      "earnings_date": "2024-11-06",
+      "actual_move": 4.267383128967916,
+      "directional_move": 4.267383128967916,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "NVO",
+      "earnings_date": "2024-11-06",
+      "actual_move": 4.331241899132912,
+      "directional_move": 4.331241899132912,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "ANET",
+      "earnings_date": "2024-11-07",
+      "actual_move": 1.8670812033584914,
+      "directional_move": 1.8670812033584914,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "OSCR",
+      "earnings_date": "2024-11-07",
+      "actual_move": 12.282957067422688,
+      "directional_move": 12.282957067422688,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "PINS",
+      "earnings_date": "2024-11-07",
+      "actual_move": 0.5035604031240293,
+      "directional_move": 0.5035604031240293,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "SKYT",
+      "earnings_date": "2024-11-07",
+      "actual_move": 5.460060092086943,
+      "directional_move": 5.460060092086943,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "UPST",
+      "earnings_date": "2024-11-07",
+      "actual_move": 2.7602847186038857,
+      "directional_move": 2.7602847186038857,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "HD",
+      "earnings_date": "2024-11-12",
+      "actual_move": 1.27606403390003,
+      "directional_move": 1.27606403390003,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "SHOP",
+      "earnings_date": "2024-11-12",
+      "actual_move": 21.035671468547843,
+      "directional_move": 21.035671468547843,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "SPOT",
+      "earnings_date": "2024-11-12",
+      "actual_move": 2.242866026054701,
+      "directional_move": 2.242866026054701,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "DIS",
+      "earnings_date": "2024-11-14",
+      "actual_move": 6.230530855367959,
+      "directional_move": 6.230530855367959,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "OKLO",
+      "earnings_date": "2024-11-14",
+      "actual_move": 3.4662012118936243,
+      "directional_move": 3.4662012118936243,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "AMAT",
+      "earnings_date": "2024-11-14",
+      "actual_move": 1.7561116487682236,
+      "directional_move": 1.7561116487682236,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "WMT",
+      "earnings_date": "2024-11-19",
+      "actual_move": 2.997127756384484,
+      "directional_move": 2.997127756384484,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "TGT",
+      "earnings_date": "2024-11-20",
+      "actual_move": 21.410125993986217,
+      "directional_move": 21.410125993986217,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "NVDA",
+      "earnings_date": "2024-11-20",
+      "actual_move": 0.7618500812682308,
+      "directional_move": 0.7618500812682308,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "CRM",
+      "earnings_date": "2024-12-03",
+      "actual_move": 0.12687735164606645,
+      "directional_move": 0.12687735164606645,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ASAN",
+      "earnings_date": "2024-12-05",
+      "actual_move": 2.337333463943941,
+      "directional_move": 2.337333463943941,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GTLB",
+      "earnings_date": "2024-12-05",
+      "actual_move": 0.7812449851859528,
+      "directional_move": 0.7812449851859528,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MDB",
+      "earnings_date": "2024-12-09",
+      "actual_move": 1.9598168625351933,
+      "directional_move": 1.9598168625351933,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ORCL",
+      "earnings_date": "2024-12-09",
+      "actual_move": 0.6468832591371808,
+      "directional_move": 0.6468832591371808,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "GME",
+      "earnings_date": "2024-12-10",
+      "actual_move": 3.5803794811083027,
+      "directional_move": 3.5803794811083027,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ADBE",
+      "earnings_date": "2024-12-11",
+      "actual_move": 0.5264610085143515,
+      "directional_move": 0.5264610085143515,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "OXM",
+      "earnings_date": "2024-12-11",
+      "actual_move": 0.9845238214280964,
+      "directional_move": 0.9845238214280964,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "COST",
+      "earnings_date": "2024-12-12",
+      "actual_move": 0.6333669351791958,
+      "directional_move": 0.6333669351791958,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "AVGO",
+      "earnings_date": "2024-12-12",
+      "actual_move": 1.3864655494703977,
+      "directional_move": 1.3864655494703977,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "RCAT",
+      "earnings_date": "2024-12-16",
+      "actual_move": 26.974488341533622,
+      "directional_move": 26.974488341533622,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "MU",
+      "earnings_date": "2024-12-18",
+      "actual_move": 4.327808016741309,
+      "directional_move": 4.327808016741309,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "NKE",
+      "earnings_date": "2024-12-19",
+      "actual_move": 0.26007558295282046,
+      "directional_move": 0.26007558295282046,
+      "timing": "AMC"
+    },
+    {
+      "ticker": "ACN",
+      "earnings_date": "2024-12-19",
+      "actual_move": 7.06250584364412,
+      "directional_move": 7.06250584364412,
+      "timing": "BMO"
+    },
+    {
+      "ticker": "FDX",
+      "earnings_date": "2024-12-19",
+      "actual_move": 0.995752223304277,
+      "directional_move": 0.995752223304277,
+      "timing": "AMC"
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+# Environment variables
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.db-journal
+*.db-wal
+*.db-shm
+cache.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# Backups (auto-synced to Google Drive/My Drive/Trading/Database Backups)
+backups/*.db
+backups/*.db.gz
+backups/.backup.lock
+backups/*.tmp.*
+!backups/.gitkeep
+
+# Pre-restore safety backups
+data/*.db.pre-restore-*
+
+# Exclude sensitive 2025 trade statements
+../docs/2025 Trades/

@@ -1,0 +1,54 @@
+# IV Crush Metrics Ranked by Importance
+
+## ⭐⭐⭐⭐⭐ **Critical Metrics** (Must Have)
+
+| Metric | Available in Setup | Essential Because |
+|--------|-------------------|-------------------|
+| **IV Rank/Percentile** | ✅ Yes (Alpha Vantage + Tradier) | Core metric - identifies when IV is historically elevated for maximum crush potential |
+| **ATM Straddle Price %** | ✅ Yes (Tradier/Yahoo) | Defines expected move and helps size your short strikes appropriately |
+| **Historical IV Crush %** | ⚠️ Partial (Must build database) | Validates which tickers consistently deliver profitable crushes |
+| **Bid-Ask Spreads** | ✅ Yes (Tradier) | Direct impact on P&L - wide spreads can eliminate profits |
+
+## ⭐⭐⭐⭐ **Very Important** (Highly Recommended)
+
+| Metric | Available in Setup | Essential Because |
+|--------|-------------------|-------------------|
+| **IV/HV Ratio** | ✅ Yes (Tradier + calculation) | Confirms options are overpriced relative to actual movement |
+| **Historical Earnings Moves** | ⚠️ Partial (Build from Yahoo/AV) | Identifies stocks that consistently move less than expected |
+| **IV Term Structure** | ✅ Yes (Tradier) | Confirms earnings premium is in front month |
+| **Strike Granularity** | ✅ Yes (Tradier) | Determines ability to create optimal spread widths |
+
+## ⭐⭐⭐ **Important** (Strong Filters)
+
+| Metric | Available in Setup | Essential Because |
+|--------|-------------------|-------------------|
+| **Market Cap** | ✅ Yes (Yahoo/Alpha Vantage) | Filters out erratic small-caps with unpredictable moves |
+| **Put/Call Skew** | ✅ Yes (Tradier) | Warns of directional bias that could hurt iron condors |
+| **Days Since Last Earnings** | ✅ Yes (Yahoo/Alpha Vantage) | Prevents false positives from non-earnings events |
+| **Average Daily Volume** | ✅ Yes (Yahoo/Alpha Vantage) | Ensures underlying stability and option liquidity |
+
+## ⭐⭐ **Nice to Have** (Risk Refinement)
+
+| Metric | Available in Setup | Essential Because |
+|--------|-------------------|-------------------|
+| **Short Interest** | ✅ Yes (Yahoo Finance) | Avoid squeeze risk but rare impact |
+| **Correlation to Index** | ⚠️ Partial (Calculate from AV) | Portfolio hedging consideration |
+
+## ⭐ **Optional** (Minimal Impact)
+
+| Metric | Available in Setup | Essential Because |
+|--------|-------------------|-------------------|
+| **Open Interest** | ✅ Yes (Already using) | You already have this - keep it |
+| **Liquidity** | ✅ Yes (Already using) | You already have this - keep it |
+| **Daily IV Change** | ✅ Yes (Already using) | You already have this - keep it |
+
+---
+
+## **Recommended Implementation Order:**
+
+1. **First Priority:** Add the four 5-star metrics immediately
+2. **Second Priority:** Implement IV/HV ratio and historical earnings moves (biggest bang for buck)
+3. **Third Priority:** Add the 3-star filters to reduce false positives
+4. **Fourth Priority:** Consider 2-star metrics if you have spare development time
+
+**Note on Data Gaps:** The main gap in your setup is historical IV crush data - you'll need to start collecting and storing post-earnings IV changes to build this database. Everything else is accessible through your current APIs.

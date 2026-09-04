@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.env
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+venv/
+.pytest_cache/
+.coverage
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate*
+terraform/terraform.tfvars
+terraform/.terraform.lock.hcl

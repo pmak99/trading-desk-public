@@ -1,0 +1,50 @@
+{
+  "analysis_date": "2025-11-13T22:34:06.954467",
+  "configurations": [
+    {
+      "name": "Very Short (1 year)",
+      "quarters": 4,
+      "tickers_analyzed": 53,
+      "avg_consistency": 38.90002081227239,
+      "avg_move_count": 4,
+      "avg_std_dev": 2.950541051038589,
+      "coverage_rate": 100.0
+    },
+    {
+      "name": "Short (2 years)",
+      "quarters": 8,
+      "tickers_analyzed": 53,
+      "avg_consistency": 28.797681398084748,
+      "avg_move_count": 8,
+      "avg_std_dev": 3.234210074837609,
+      "coverage_rate": 100.0
+    },
+    {
+      "name": "Baseline (3 years)",
+      "quarters": 12,
+      "tickers_analyzed": 50,
+      "avg_consistency": 28.40352213042591,
+      "avg_move_count": 12,
+      "avg_std_dev": 3.2606299865717845,
+      "coverage_rate": 94.33962264150944
+    },
+    {
+      "name": "Long (4 years)",
+      "quarters": 16,
+      "tickers_analyzed": 0,
+      "avg_consistency": 0.0,
+      "avg_move_count": 0,
+      "avg_std_dev": 0.0,
+      "coverage_rate": 0.0
+    },
+    {
+      "name": "Very Long (5 years)",
+      "quarters": 20,
+      "tickers_analyzed": 0,
+      "avg_consistency": 0.0,
+      "avg_move_count": 0,
+      "avg_std_dev": 0.0,
+      "coverage_rate": 0.0
+    }
+  ]
+}

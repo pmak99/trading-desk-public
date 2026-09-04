@@ -1,0 +1,105 @@
+# Environment variables - NEVER COMMIT API KEYS
+.env
+.env.backup*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Claude Code
+.claude/settings.json
+.claude/settings.local.json
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git worktrees
+.worktrees/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Data and logs (root level only - legacy cleanup)
+/data/
+/logs/
+*.log
+*.csv
+!tests/**/fixtures/*.csv
+
+# Legacy directories (removed in cleanup)
+/src/
+/profiling/
+/benchmarks/
+
+# Cache files (persistent API cache)
+src/data/cache/
+
+# Profiling results in version directories
+1.0/profiling/results/*.prof
+1.0/profiling/results/*.txt
+1.0/benchmarks/results/*.json
+2.0/profiling/results/*.prof
+2.0/profiling/results/*.txt
+2.0/benchmarks/results/*.json
+
+# Data directories in version directories (test databases, etc.)
+1.0/data/
+2.0/data/
+4.0/data/
+5.0/data/
+*.db
+
+# Database files - catch-all pattern (prevent ivcrush.db from any directory)
+**/ivcrush.db
+**/ivcrush.db-journal
+**/ivcrush.db-wal
+
+# Jupyter
+.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+3.0/.env
+
+# Backup files
+*.backup-*
+*.bak
+
+# Exclude sensitive 2025 trade statements and analysis
+docs/2025 Trades/
+.worktrees/

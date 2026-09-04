@@ -1,0 +1,78 @@
+name: PR Tests
+
+on:
+  pull_request:
+    branches:
+      - '**'
+    types: [opened, synchronize, reopened]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        # Keep in step with 5.0/Dockerfile — the deployed image and CI should
+        # not run different Python minors.
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install -r requirements.txt
+        pip install -e 2.0/
+
+    - name: Run 2.0 tests
+      run: |
+        cd 2.0
+        python -m pytest tests/ -v --tb=short --no-cov
+      continue-on-error: false
+
+    # 4.0 and 6.0 are archived and deliberately not run here: 6.0 no longer
+    # exists at that path (moved to archived/6.0/), and 4.0 has known
+    # failing tests from sentiment-neutralization drift.
+    - name: Run 5.0 tests
+      run: |
+        cd 5.0
+        pip install -r requirements.txt
+        python -m pytest tests/ -v --tb=short --no-cov
+      continue-on-error: false
+
+    - name: Test summary
+      run: |
+        echo "✅ All active test suites passed"
+        echo "  - 2.0: Core math engine"
+        echo "  - 5.0: Cloud autopilot"
+        echo "  - 4.0, 6.0: archived, not part of CI"
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Secret scanning
+        # Pinned: @main is a moving branch, and trusting it to float in the
+        # step that scans for leaked secrets is the wrong place to take a
+        # supply-chain risk.
+        uses: trufflesecurity/trufflehog@v3.97.1
+        with:
+          extra_args: --only-verified
+
+  dependency-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt pip-audit
+      - name: Check for vulnerabilities
+        run: pip-audit

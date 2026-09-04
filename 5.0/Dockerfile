@@ -1,0 +1,50 @@
+# Trading Desk 5.0 - Autopilot
+# Cloud Run compatible container
+
+# Keep in step with .github/workflows/pr-tests.yml and 2.0/venv (both 3.12).
+# This was 3.11 while everything that actually ran the tests was on 3.12, so
+# the deployed image was the only place that Python minor was ever exercised.
+# The patch level is deliberately left floating: rebuilds should pick up
+# upstream security fixes without a manual digest bump.
+FROM python:3.12-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies (gcc for building, curl for healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first (for caching)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy shared module (copied from root by deploy.sh)
+COPY common/ ./common/
+
+# Copy application code
+COPY src/ ./src/
+
+# Copy data directory with historical moves database
+COPY data/ ./data/
+
+# Set Python path
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Run as non-root user for security
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Cloud Run expects port 8080
+ENV PORT=8080
+EXPOSE 8080
+
+# Health check (use curl instead of Python for reliability)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/ || exit 1
+
+# Run the application
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]

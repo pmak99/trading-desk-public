@@ -1,0 +1,51 @@
+Here’s a ranked table of key metrics for your IV crush earnings strategy, grouped by **star rating** (highest first), showing their **availability in your workflow** and **summary of essentiality**. Metrics are grouped so you can prioritize what’s most impactful and feasible for your short spreads/iron condors before earnings.
+
+### ⭐⭐⭐⭐⭐ (Mission-Critical)
+
+| Metric                          | Star Rating | Available in Setup | Essentiality & Notes                                                      |
+|----------------------------------|:-----------:|:------------------:|---------------------------------------------------------------------------|
+| IV/HV Ratio                     | ⭐⭐⭐⭐⭐      | Yes               | Crucial for finding premium-rich stocks. Directly implementable via Tradier/Alpha Vantage. Most predictive for IV crush.       |
+| Implied Move vs. Historical Move| ⭐⭐⭐⭐⭐      | Yes               | Defends you against outlier moves. ATM straddle pricing and earnings history are available via Tradier and Alpha Vantage.      |
+| Open Interest & Liquidity        | ⭐⭐⭐⭐⭐      | Yes               | Prevents slippage, widens strike choices. Fully covered by Tradier.                           |
+
+### ⭐⭐⭐⭐ (Strongly Recommended)
+
+| Metric              | Star Rating | Available in Setup | Essentiality & Notes                                                      |
+|---------------------|:-----------:|:------------------:|---------------------------------------------------------------------------|
+| IV Rank / Percentile| ⭐⭐⭐⭐       | Yes, if logged daily| Lets you know if IV is at/near peak. Requires daily IV snapshot storage; easily added to workflow.              |
+| Vega Exposure (Net) | ⭐⭐⭐⭐       | Partial           | Provided by Tradier Greeks (with ~1hr delay); great for sizing and assessing profit potential.                  |
+| Theta Exposure      | ⭐⭐⭐⭐       | Partial           | In Tradier Greeks (w/ delay). Important for overnight profit expectations.                                       |
+
+### ⭐⭐⭐ (Useful but Secondary)
+
+| Metric                | Star Rating | Available in Setup | Essentiality & Notes                                                      |
+|-----------------------|:-----------:|:------------------:|---------------------------------------------------------------------------|
+| Volatility Skew       | ⭐⭐⭐        | Partial            | Tradier provides data; useful for extra edge/sentiment on direction. Helps weed out dangerous setups.           |
+| Premium Remaining vs. Target | ⭐⭐⭐  | Yes               | Manual but straightforward. Simplifies exit rules and management.                                              |
+
+### ⭐⭐ (Nice-to-Have, Not Critical)
+
+| Metric                       | Star Rating | Available in Setup | Essentiality & Notes                                                      |
+|------------------------------|:-----------:|:------------------:|---------------------------------------------------------------------------|
+| Historical IV Crush % (by ticker)| ⭐⭐     | Manual build       | Very powerful for model calibration, but no plug-and-play API; would need to script and log over time.           |
+| Reddit/Unusual Flow Signal   | ⭐⭐         | Yes                | Useful for tiebreakers or avoiding crowded trades; not primary to edge.                                         |
+
+***
+
+#### Key
+- **Available in Setup**: Yes (can be queried/calculated), Partial (live data delayed, or manual intervention), Manual build (data exists, but requires local scripting/historical DB)
+- **Essentiality & Notes**: Provides implementation impact summary.
+
+***
+
+### Implementation Tip
+Focus on the **⭐⭐⭐⭐⭐ and ⭐⭐⭐⭐ groups** for immediate P&L impact—they are both feasible and essential for your entry/exit timing and consistent profits. Higher star = greater effect on edge and risk mitigation for your exact IV crush short spread workflow. Lower star metrics can be layered in for model improvement after the core is working well.[1][2][3][4][5][6][7][8]
+
+[1](https://tradingblock.com/blog/iv-rank-vs-iv-percentile)
+[2](https://www.reddit.com/r/wallstreetbets/comments/g7kyv9/iv_percentile_iv_rank_the_vega_story_not_many_know/)
+[3](https://docs.tradier.com/reference/brokerage-api-markets-get-options-chains)
+[4](https://orats.com/blog/new-live-data-api-for-options-prices-greeks-theos-and-ivs)
+[5](https://orats.com/docs/core-research)
+[6](https://www.fintut.com/alpha-vantage-earnings-calendar/)
+[7](https://hexdocs.pm/alpha_vantage/AlphaVantage.FundamentalData.html)
+[8](https://alpaca.markets/learn/option-greeks)

@@ -1,0 +1,20 @@
+# Cloud Build ignore file
+# Note: .db files are NOT ignored here (needed for historical_moves)
+
+# WAL/SHM sidecar files must never ship -- if one is stale/mismatched
+# against the main .db file (e.g. left over from local testing), SQLite
+# corrupts the file on open ("database disk image is malformed").
+# deploy.sh checkpoints+removes these before build, but exclude here too
+# as defense in depth.
+*.db-wal
+*.db-shm
+
+__pycache__/
+*.pyc
+.env
+venv/
+.pytest_cache/
+.coverage
+.git/
+*.md
+tests/
