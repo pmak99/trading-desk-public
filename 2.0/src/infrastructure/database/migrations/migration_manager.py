@@ -112,6 +112,7 @@ class MigrationManager:
             db_path: Path to SQLite database
         """
         self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.migrations: List[Migration] = []
         self._load_migrations()
 

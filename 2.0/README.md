@@ -102,7 +102,7 @@ scripts/scan/                   Live scan/whisper/harvest pipeline
 6. Run polynomial IV skew analysis (Tradier)
 7. Run historical consistency scoring
 8. Load `position_limits` snapshot → build `SizingContext` (TRR + contract caps)
-9. Fuse Tradier skew with `r_slp_30` → final `DirectionalBias` (ORATS gone: Tradier `slope_atm` proxy at confidence 0.3)
+9. Fuse Tradier skew with `r_slp_30` → final `DirectionalBias` (ORATS disabled: Tradier `slope_atm` proxy at confidence 0.3)
 10. Generate trade strategies (SINGLE + SPREAD)
 11. Compute IV term structure (front vs ~30d-out ATM IV); when elevated tail risk coincides with ≥1.10x backwardation, build the calendar spread pilot candidate (max 10 contracts, defined risk)
 12. Log to `analysis_log` — includes `vrp_close_ratio` and `term_slope_ratio` for live forward validation
@@ -115,10 +115,10 @@ Applied in `SizingContext`, enforced by the strategy package:
 |--------|------|--------|
 | TRR HIGH (>2.5x) | Hard cap: 50 contracts | Active |
 | Compound tail risk (≥2 of TRR HIGH / sizing alarm / bearish fused skew) | 25 contracts or skip | Active |
-| `fcst_ern_iv_effect` ≥ 2.0x (Rule A) | Reduce size 50% | **Dormant** — ORATS retired |
-| `iee_earn_effect / fcst` ≥ 1.5x (Rule B) | Reduce size 50% | **Dormant** — ORATS retired |
+| `fcst_ern_iv_effect` ≥ 2.0x (Rule A) | Reduce size 50% | **Inactive** — requires ORATS |
+| `iee_earn_effect / fcst` ≥ 1.5x (Rule B) | Reduce size 50% | **Inactive** — requires ORATS |
 
-Rules A and B never compounded — only one 50% IV cut. TRR cap stacks with either. Since the ORATS sunset (Jul 2026), sizing relies on VRP tier + TRR + compound-risk skew.
+Rules A and B never compounded — only one 50% IV cut. TRR cap stacks with either. While ORATS is disabled, sizing relies on VRP tier + TRR + compound-risk skew.
 
 ## Skew Fusion
 
@@ -130,7 +130,7 @@ result = clamp(round(fused), -3, +3) → DirectionalBias
 ```
 
 - With a live ORATS `r_slp_30`: confidence 0.5.
-- ORATS retired (current state): `compute_tradier_r_slp30_proxy(slope_atm)` substitutes at confidence 0.3 — direction preserved, magnitude softened. Proxy: `RSLP30_MEAN - (slope_atm / 150) × 2 × RSLP30_STD`.
+- ORATS disabled (current state): `compute_tradier_r_slp30_proxy(slope_atm)` substitutes at confidence 0.3 — direction preserved, magnitude softened. Proxy: `RSLP30_MEAN - (slope_atm / 150) × 2 × RSLP30_STD`.
 - The fused result is **not persisted** — `bias_predictions` stores Tradier-only skew; the fused value is computed fresh each run.
 
 ## Term Structure & Calendar Pilot (Jun 2026)
@@ -141,18 +141,18 @@ result = clamp(round(fused), -3, +3) → DirectionalBias
 
 Track both live A/Bs (VRP denominator + term structure) with `/ab-status`.
 
-## ORATS — RETIRED (Jul 2026)
+## ORATS — Disabled
 
-Subscription ended ~Jun 25 2026; `ORATS_ENABLED=false` everywhere since Jul 2 2026. The `position_limits` ORATS snapshot is **frozen at 2026-06-24** — the staleness warnings in `/analyze`/`/harvest` mean "historical snapshot", not "run a refresh". Historical backfill data in `historical_moves` (`ern_iv_effect`, `pre_earnings_straddle_pct`) is permanent and unaffected.
+`ORATS_ENABLED=false` by default. The `position_limits` ORATS snapshot is **frozen at 2026-06-24** — the staleness warnings in `/analyze`/`/harvest` mean "historical snapshot", not "run a refresh". Historical backfill data in `historical_moves` (`ern_iv_effect`, `pre_earnings_straddle_pct`) is permanent and unaffected.
 
 | Script | Status |
 |--------|--------|
-| `refresh_orats_snapshots.py` | Retired — last run 2026-06-24 |
-| `fetch_orats_ticker.py` | Retired — returns auth error |
+| `refresh_orats_snapshots.py` | Inactive — last run 2026-06-24 |
+| `fetch_orats_ticker.py` | Inactive — no-op while `ORATS_ENABLED=false` |
 | `backfill_orats_straddle.py`, `backfill_orats_ivrank.py`, `backfill_orats_cores_extra.py` | Completed one-time backfills (May 2026); data permanent |
 | `track_iv_weekly.py` | **ACTIVE** — Tradier, not ORATS (see below) |
 
-Retired scripts are kept in the repo in case of resubscription.
+These scripts are kept in the repo for when ORATS is re-enabled.
 
 ## IV History (self-built IVR)
 
@@ -203,9 +203,9 @@ VRP_THRESHOLD_MODE=BALANCED   # CONSERVATIVE | BALANCED | AGGRESSIVE
 TWELVE_DATA_KEY=xxx           # Historical prices (800 calls/day free)
 ALPHA_VANTAGE_KEY=xxx         # Earnings calendar
 
-# Retired
-ORATS_API_KEY=xxx             # Dead key — kept for provenance
-ORATS_ENABLED=false           # Jul 2 2026; branched logic preserved for resubscription
+# Optional (disabled by default)
+ORATS_API_KEY=xxx             # Kept for provenance
+ORATS_ENABLED=false           # Branched logic preserved for future use
 ```
 
 Source with `set -a && source .env && set +a` so Python subprocesses see the keys.
