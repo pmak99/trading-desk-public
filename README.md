@@ -110,7 +110,7 @@ Trading Desk/
 | `earnings_calendar` | 23,093 | Upcoming and past earnings dates |
 | `strategies` | 285 TAXABLE + 59 IRA | Normalized: acquired=open, sale=close. No inverted dates. |
 | `trade_journal` | 794 TAXABLE + 258 IRA | Raw Fidelity legs/fills |
-| `position_limits` | 431 | TRR + contract limits + ORATS snapshot (**frozen 2026-06-24** — ORATS retired) |
+| `position_limits` | 431 | TRR + contract limits + ORATS snapshot (**frozen 2026-06-24** — ORATS disabled) |
 | `iv_history` | grows weekly | Weekly Tradier ATM IV snapshots for 9 harvest tickers; self-built IVR after 52 weeks (~June 2027) |
 | `bias_predictions` | 74 | Tradier-only skew plus compound risk columns (`compound_risk_active`, `r_slp_30`, `fused_bias`, `trr_level`, `sizing_alarm`) |
 | `analysis_log` | grows | Analysis snapshots — `implied_move_pct`, `vrp_ratio`, `vix_level`, `recommendation`; since Jun 2026 also `vrp_close_ratio` (gap-inclusive VRP live A/B) and `term_slope_ratio` (IV term-structure) |
@@ -140,7 +140,7 @@ Empty placeholders: `cache`, `rate_limits`, `backtest_runs`, `backtest_trades`, 
 | Finnhub | Analyst data + news (5.0 council), earnings calendar fallback | Active |
 | Twelve Data | Historical prices (800 calls/day free tier) | Active |
 | Perplexity | AI sentiment | Active |
-| ORATS | Live IV / sizing signals | **RETIRED Jul 2026** — subscription ended; historical backfill data (`ern_iv_effect`, `pre_earnings_straddle_pct`) is permanent; `position_limits` snapshot frozen at 2026-06-24 |
+| ORATS | Live IV / sizing signals | **Disabled** — off by default (`ORATS_ENABLED=false`); historical backfill data (`ern_iv_effect`, `pre_earnings_straddle_pct`) is permanent; `position_limits` snapshot frozen at 2026-06-24 |
 
 ```bash
 TRADIER_API_KEY=xxx
@@ -148,8 +148,8 @@ ALPHA_VANTAGE_KEY=xxx
 TWELVE_DATA_KEY=xxx
 PERPLEXITY_API_KEY=xxx
 FINNHUB_API_KEY=xxx
-ORATS_API_KEY=xxx         # dead — kept for provenance only
-ORATS_ENABLED=false       # retired Jul 2 2026
+ORATS_API_KEY=xxx         # kept for provenance only
+ORATS_ENABLED=false       # disabled by default
 DB_PATH=data/ivcrush.db
 ```
 
