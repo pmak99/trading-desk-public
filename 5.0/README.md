@@ -155,7 +155,7 @@ TWELVE_DATA_KEY=xxx
 DB_PATH=data/ivcrush.db
 
 # Feature flags
-ORATS_ENABLED=false          # ORATS retired Jul 2026 — do not re-enable without a live subscription
+ORATS_ENABLED=false          # disabled by default — requires a live ORATS subscription to enable
 SCHEDULED_JOBS_ENABLED=true  # false = silence all Telegram digests/alerts
 
 # Security
