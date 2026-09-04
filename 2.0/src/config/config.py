@@ -346,7 +346,7 @@ class Config:
         )
 
         # Database configuration
-        db_path = os.getenv("DB_PATH", "2.0/data/iv_crush_v2.db")
+        db_path = os.getenv("DB_PATH", "data/iv_crush_v2.db")
         database = DatabaseConfig(
             path=Path(db_path),
             timeout=int(os.getenv("DB_TIMEOUT", "30")),
