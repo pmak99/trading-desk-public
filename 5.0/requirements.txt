@@ -12,7 +12,7 @@ yfinance==1.7.0
 tenacity==9.1.4
 
 # Google Cloud
-google-cloud-storage==3.13.1
+google-cloud-storage==3.14.1
 google-cloud-secret-manager==2.30.0
 
 # Timezone
