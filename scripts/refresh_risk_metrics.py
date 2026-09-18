@@ -43,6 +43,12 @@ def refresh_risk_metrics(conn) -> int:
     Always writes one row per window, even where a window has too little data
     for a ratio (sharpe/sortino NULL, n_months possibly 0) — so the panel never
     returns zero rows purely because a window has no trades yet.
+
+    Every row carries `computed_at` (migration 8). It is set here, from one
+    `now()` evaluated per statement, rather than by a column DEFAULT: the point
+    of the column is to say when THIS refresh ran, so that a weekly refresh
+    that has stopped shows as a stale timestamp on the panel instead of a
+    number indistinguishable from a fresh one.
     """
     import bootstrap_sharpe as bs
 
@@ -59,8 +65,8 @@ def refresh_risk_metrics(conn) -> int:
             series = bs.trailing_window_series(monthly, months)
             cur.execute(
                 "INSERT INTO risk_metrics_snapshot"
-                " (window_months, sharpe, sortino, n_months)"
-                " VALUES (%s, %s, %s, %s)",
+                " (window_months, sharpe, sortino, n_months, computed_at)"
+                " VALUES (%s, %s, %s, %s, now())",
                 (months, bs.sharpe_ratio(series), bs.sortino_ratio(series),
                  len(series)),
             )

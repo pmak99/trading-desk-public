@@ -80,3 +80,58 @@ def test_refresh_is_idempotent(db):
         conn.commit()
         n = conn.execute("SELECT COUNT(*) FROM risk_metrics_snapshot").fetchone()[0]
     assert n == len(RISK_WINDOWS)
+
+
+def test_every_row_carries_the_time_it_was_computed(db):
+    """Migration 8. Without this the panel cannot tell a current Sharpe from
+    one left behind by a refresh that stopped running weeks ago — the table is
+    precomputed, so a stalled job looks exactly like a healthy one."""
+    with connect() as conn:
+        refresh_risk_metrics(conn)
+        conn.commit()
+        stamps = [
+            r.computed_at
+            for r in conn.execute(
+                "SELECT computed_at FROM risk_metrics_snapshot").fetchall()
+        ]
+    assert len(stamps) == len(RISK_WINDOWS)
+    assert all(s is not None for s in stamps), (
+        "a row with no computed_at defeats the column: it reads as 'never "
+        "refreshed' on the panel")
+
+
+def test_computed_at_has_no_column_default(db):
+    """Deliberately no DEFAULT now() (migration 8): the value must come from
+    the refresh that produced the row. A DEFAULT would stamp any INSERT --
+    including a hand-written one or a restore -- as though a refresh had just
+    run, which is the single thing this column exists to rule out."""
+    with connect() as conn:
+        default = conn.execute(
+            "SELECT column_default FROM information_schema.columns"
+            " WHERE table_name = 'risk_metrics_snapshot'"
+            "   AND column_name = 'computed_at'"
+            "   AND table_schema = current_schema()"
+        ).fetchone()[0]
+    assert default is None, (
+        f"computed_at gained a column DEFAULT ({default!r}); it must be written "
+        "by refresh_risk_metrics.py so a stalled refresh shows as a stale stamp")
+
+
+def test_a_later_refresh_advances_the_stamp(db):
+    """now() is transaction time, so the advance is only observable across
+    transactions -- which is exactly how the weekly job runs."""
+    with connect() as conn:
+        refresh_risk_metrics(conn)
+        conn.commit()
+        first = conn.execute(
+            "SELECT max(computed_at) FROM risk_metrics_snapshot").fetchone()[0]
+
+    with connect() as conn:
+        refresh_risk_metrics(conn)
+        conn.commit()
+        second = conn.execute(
+            "SELECT max(computed_at) FROM risk_metrics_snapshot").fetchone()[0]
+
+    assert second > first, (
+        "a second refresh reused the first one's timestamp: the panel would "
+        "show a stale stamp as fresh")

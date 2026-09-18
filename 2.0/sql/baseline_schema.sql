@@ -1,4 +1,4 @@
--- Postgres baseline schema for ivcrush: the CURRENT schema, version 7.
+-- Postgres baseline schema for ivcrush: the CURRENT schema, version 8.
 --
 -- ⚠️ Maintained by hand since 2026-09-13, and kept equal to production.
 -- Until then this file was generated from the SQLite database by
@@ -419,11 +419,15 @@ CREATE INDEX idx_whisper_cache_expires ON whisper_cache (expires_at);
 -- Derived, recomputed weekly by refresh_risk_metrics.py; never migrated.
 -- Sharpe/Sortino need net_campaigns()'s netting rule, which is not
 -- expressible as a SQL aggregate (docs/SHARPE_ANALYSIS_2026-09.md section 2).
+-- computed_at is nullable and has no DEFAULT (migration 8): it must be written
+-- by the refresh that produced the row, so that a stalled weekly refresh shows
+-- as a stale timestamp on the panel instead of an indistinguishable number.
 CREATE TABLE "risk_metrics_snapshot" (
     "window_months" int PRIMARY KEY,
     "sharpe"        double precision,
     "sortino"       double precision,
-    "n_months"      int
+    "n_months"      int,
+    "computed_at"   timestamptz
 );
 
 -- Derived, recomputed weekly by refresh_rule_evidence.py; never migrated.

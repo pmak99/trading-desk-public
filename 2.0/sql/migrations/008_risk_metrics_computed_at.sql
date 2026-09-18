@@ -1,0 +1,28 @@
+-- Migration 8: risk_metrics_snapshot.computed_at (2026-09-17).
+--
+-- Applied by MigrationManager, all statements in ONE transaction. Statements
+-- are split on semicolons, so no semicolon may appear inside a statement or a
+-- comment.
+--
+-- WHY: risk_metrics_snapshot is derived, refreshed weekly by
+-- scripts/refresh_risk_metrics.py, and read by the trading_risk_metrics panel.
+-- Until now nothing in the row said WHEN it was computed, so if the weekly
+-- refresh stopped the panel would keep showing the last Sharpe it managed to
+-- write, indefinitely, with nothing on the dashboard or in the database
+-- distinguishing that from a fresh number. rule_evidence_snapshot (migration
+-- 7) carries computed_at for exactly this reason -- this brings the older
+-- snapshot table up to the same standard.
+--
+-- NULLABLE, deliberately, and existing rows are NOT backfilled. The four rows
+-- already in the table were computed at some earlier weekly refresh whose time
+-- is not recoverable. Defaulting them to now() would assert a falsehood -- that
+-- numbers computed days ago were computed at migration time -- which is the one
+-- thing this column exists to prevent. They read NULL until the next refresh
+-- rewrites the table, and the panel renders that as an explicit unknown. This
+-- follows refresh_risk_metrics.py's own rule for the 1-month window: a NULL is
+-- more honest than a hidden value.
+--
+-- Deliberately no DEFAULT now() either: the column must be written by the
+-- refresh that produced the row, not by whatever transaction happens to insert
+-- it. refresh_risk_metrics.py sets it explicitly on every row.
+ALTER TABLE "risk_metrics_snapshot" ADD COLUMN "computed_at" timestamptz;

@@ -607,8 +607,8 @@ GROUP BY scenario
 ORDER BY pnl DESC;
 
 -- name: trading_risk_metrics
--- Computed in Python (scripts/grafana_snapshot.py::add_risk_metrics), not
--- here: Sharpe/Sortino need net_campaigns()'s netting rule (each option leg
+-- Computed in Python (scripts/refresh_risk_metrics.py::refresh_risk_metrics),
+-- not here: Sharpe/Sortino need net_campaigns()'s netting rule (each option leg
 -- claimed by at most one overlapping single-name stock campaign, per
 -- docs/SHARPE_ANALYSIS_2026-09.md §2), which is not expressible as a plain
 -- SQL aggregate. This is a deliberately trivial read of a precomputed table,
@@ -616,8 +616,15 @@ ORDER BY pnl DESC;
 -- ab_evaluate_live.py, never reimplemented in a panel query). 1- and
 -- 3-month windows are too few data points for these ratios to mean much
 -- statistically -- shown anyway, as a directional trend line, not a claim.
+-- computed shows WHEN the weekly refresh last wrote the row (migration 8). A
+-- precomputed panel cannot otherwise distinguish a current Sharpe from one
+-- left behind by a refresh that stopped running weeks ago. Rendered with
+-- to_char, never as a bare timestamp: text has no timezone for the browser to
+-- reinterpret. NULL reads 'never' -- rows written before migration 8, whose
+-- real compute time is not recoverable.
 SELECT window_months, ROUND((sharpe)::numeric, 2) AS sharpe, ROUND((sortino)::numeric, 2) AS sortino,
-       n_months
+       n_months,
+       COALESCE(to_char(computed_at, 'YYYY-MM-DD HH24:MI'), 'never') AS computed
 FROM risk_metrics_snapshot
 ORDER BY window_months;
 

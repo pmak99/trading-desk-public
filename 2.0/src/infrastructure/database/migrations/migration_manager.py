@@ -85,7 +85,7 @@ logger = logging.getLogger(__name__)
 # The version 2.0/sql/baseline_schema.sql embodies -- see the module docstring.
 # Version 1 was the cutover baseline (the whole SQLite lineage in one row);
 # the file has since absorbed migrations 2 to 6.
-BASELINE_VERSION = 7
+BASELINE_VERSION = 8
 BASELINE_NAME = "baseline_postgres_2026_09"
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[4] / "sql" / "migrations"

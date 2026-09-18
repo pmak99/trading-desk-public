@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Restore the trading database from a nightly pg_dump.
+# Restore the trading database from a pg_dump (nightly, hourly or a named one).
 #
 # Rewritten 2026-09-12. The previous version of this file restored a SQLite
 # file into 2.0/data/ivcrush.db -- which nothing has read since the Postgres
@@ -81,18 +81,38 @@ if [ -n "${LIST:-}" ]; then
         exit 1
     fi
     printf '%sAvailable dumps in %s:%s\n' "$GREEN" "$BACKUP_DIR" "$NC"
-    # `ls -t`, not `find -printf`: -printf is GNU-only and this script has to
-    # run on the Mac too. Our own filenames, so no spaces or newlines.
+    # Every dump, newest first: nightly (ivcrush-YYYY-MM-DD), hourly
+    # (ivcrush-intraday-*Z, UTC) and the hand-taken pre-change copies (pre-*),
+    # which are often exactly what an incident needs. `ls -t`, not
+    # `find -printf`: -printf is GNU-only and this script has to run on the Mac
+    # too. Our own filenames, so no spaces or newlines.
     # shellcheck disable=SC2012
-    ls -t "$BACKUP_DIR"/ivcrush-*.dump 2>/dev/null \
-        | while read -r f; do printf '  %-44s %6s\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"; done
+    ls -t "$BACKUP_DIR"/*.dump 2>/dev/null \
+        | while read -r f; do printf '  %-48s %6s\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"; done
     exit 0
 fi
 
 # ---- pick a dump -------------------------------------------------------------
+# The newest COMPLETE scheduled dump, nightly or hourly, by modification time.
+#   * By time, never by name. It used to `sort | tail -1` by name, and
+#     `ivcrush-intraday-*` sorts after every `ivcrush-YYYY-...` (i > 2) whatever
+#     its age: with the hourly timer stopped, a 40h-old hourly dump would have
+#     beaten last night's.
+#   * Complete = has its manifest. pg-backup.sh writes the manifest only after
+#     pg_dump returns, so this skips a dump still being written at :05.
+#   * Scheduled shapes only. A hand-taken pre-* dump is a deliberate choice;
+#     name it with --dump PATH (--list shows them).
 if [ -z "$DUMP" ]; then
-    DUMP=$(find "$BACKUP_DIR" -maxdepth 1 -name 'ivcrush-*.dump' -type f 2>/dev/null | sort | tail -1)
-    [ -n "$DUMP" ] || die "no dump found in $BACKUP_DIR (try --dump PATH, or --list)"
+    # >>> pick-dump
+    # ls -t is the portable newest-first (-printf is GNU-only; this runs on the
+    # Mac too), and these are our own filenames: no spaces, no newlines.
+    # shellcheck disable=SC2012,SC2045
+    for f in $(ls -t "$BACKUP_DIR"/ivcrush-????-??-??.dump \
+                     "$BACKUP_DIR"/ivcrush-intraday-*.dump 2>/dev/null); do
+        if [ -s "$f.manifest" ]; then DUMP="$f"; break; fi
+    done
+    # <<< pick-dump
+    [ -n "$DUMP" ] || die "no complete dump found in $BACKUP_DIR (try --dump PATH, or --list)"
 fi
 [ -r "$DUMP" ] || die "cannot read $DUMP"
 
