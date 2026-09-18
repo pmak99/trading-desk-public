@@ -1,7 +1,5 @@
-"""Wind-down guard for capital earmarked against a known future liquidity
-event (e.g. an expected IPO or vesting date) that also funds TACO trades.
-Protection is time-based (days to the event), not dollar-capped — adjust
-IPO_EXPECTED_DATE / IPO_FUND_RELEASED in constants.py for your own event."""
+"""IPO wind-down guard — the only capital protection chosen for the
+capital pool funding TACO trades (time-based, no dollar caps)."""
 
 from datetime import date
 from enum import Enum
@@ -44,9 +42,9 @@ def entries_allowed(today: date, ipo_date: date = IPO_EXPECTED_DATE,
     if phase in (WinddownPhase.LOCKED, WinddownPhase.LIQUIDATE):
         return False, (
             f"entries locked: {(ipo_date - today).days} days to expected "
-            f"liquidity event ({ipo_date}) — fund must be liquid by then. "
-            f"Flip IPO_FUND_RELEASED in scripts/taco/constants.py once released.")
+            f"Anthropic IPO ({ipo_date}) — fund must be liquid at pricing. "
+            f"Flip IPO_FUND_RELEASED in scripts/taco/constants.py post-IPO.")
     if phase == WinddownPhase.BANNER:
         return True, (f"WIND-DOWN: {(ipo_date - today).days} days to expected "
-                      f"liquidity event {ipo_date} — entries lock at T-30")
+                      f"IPO {ipo_date} — entries lock at T-30")
     return True, ""

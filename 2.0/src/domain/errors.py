@@ -8,7 +8,17 @@ explicit in type signatures and prevents silent failures.
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import TypeVar, Generic, Callable, Any, Optional
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Literal,
+    NoReturn,
+    Optional,
+    TypeAlias,
+    TypeVar,
+    Union,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +43,11 @@ class AppError:
     code: ErrorCode
     message: str
     context: Optional[dict] = None
+    # The call got no usable answer and was not sent again, so the same call made
+    # again may succeed; the caller decides whether to make it. Set only where a
+    # client hands its retry to the caller: a Tradier option chain, which
+    # CachedOptionsDataProvider re-prices on a new slot (tradier.CHAINS_PATH).
+    retryable: bool = False
 
     def __str__(self):
         ctx = f" | {self.context}" if self.context else ""
@@ -40,101 +55,111 @@ class AppError:
 
 
 T = TypeVar('T')
+U = TypeVar('U')
 E = TypeVar('E', bound=AppError)
+F = TypeVar('F', bound=AppError)
 
 
 @dataclass
-class Result(Generic[T, E]):
-    """
-    Result type for functional error handling.
+class Ok(Generic[T]):
+    """The success half of Result: a value, and no error."""
 
-    A Result is either Ok(value) or Err(error), never both.
-    Forces explicit error handling at call sites.
-
-    Examples:
-        result = calculate_something()
-        if result.is_ok:
-            value = result.value
-        else:
-            handle_error(result.error)
-    """
-
-    value: Optional[T] = None
-    error: Optional[E] = None
-    _is_ok: bool = True  # Track state explicitly to handle Ok(None)
-
-    @classmethod
-    def Ok(cls, value: T) -> 'Result[T, AppError]':
-        """Create a successful result."""
-        return Result(value=value, _is_ok=True)
-
-    @classmethod
-    def Err(cls, error: AppError) -> 'Result[T, AppError]':
-        """Create an error result."""
-        return Result(error=error, _is_ok=False)
+    value: T
 
     @property
-    def is_ok(self) -> bool:
-        """True if result is Ok."""
-        return self._is_ok and self.error is None
+    def is_ok(self) -> Literal[True]:
+        return True
 
     @property
-    def is_err(self) -> bool:
-        """True if result is Err."""
-        return not self._is_ok or self.error is not None
+    def is_err(self) -> Literal[False]:
+        return False
+
+    @property
+    def error(self) -> None:
+        return None
 
     def unwrap(self) -> T:
-        """
-        Get the value or raise exception if error.
-        Use only when you're certain result is Ok.
-        """
-        if self.is_err:
-            raise Exception(str(self.error))
         return self.value
 
-    def unwrap_err(self) -> E:
-        """
-        Get the error or raise exception if Ok.
-        Use for testing or when you expect an error.
-        """
-        if self.is_ok:
-            raise Exception("Result is Ok, not Err")
-        return self.error
+    def unwrap_err(self) -> NoReturn:
+        raise Exception("Result is Ok, not Err")
 
-    def unwrap_or(self, default: T) -> T:
-        """Get value or return default if error."""
-        return self.value if self.is_ok else default
+    def unwrap_or(self, default: object) -> T:
+        return self.value
 
-    def map(self, func: Callable[[T], Any]) -> 'Result[Any, E]':
+    def map(self, func: Callable[[T], U]) -> 'Result[U, AppError]':
         """
-        Transform the value if Ok, otherwise propagate error.
+        Transform the value, catching what the function raises.
 
         Catches expected calculation errors (ValueError, TypeError, ArithmeticError, ZeroDivisionError)
         and converts them to CALCULATION errors. Logs unexpected exceptions as warnings before
         converting them.
         """
-        if self.is_err:
-            return Result.Err(self.error)
         try:
-            return Result.Ok(func(self.value))
+            return Ok(func(self.value))
         except (ValueError, TypeError, ArithmeticError, ZeroDivisionError) as e:
             # Expected calculation errors - convert to CALCULATION error
-            return Result.Err(AppError(ErrorCode.CALCULATION, str(e)))
+            return Err(AppError(ErrorCode.CALCULATION, str(e)))
         except Exception as e:
             # Unexpected error - log as warning before converting
             logger.warning(
                 f"Unexpected error in Result.map: {type(e).__name__}: {str(e)}",
                 exc_info=True
             )
-            return Result.Err(AppError(ErrorCode.CALCULATION, f"Unexpected error: {str(e)}"))
+            return Err(AppError(ErrorCode.CALCULATION, f"Unexpected error: {str(e)}"))
 
-    def and_then(self, func: Callable[[T], 'Result[Any, E]']) -> 'Result[Any, E]':
+    def and_then(self, func: Callable[[T], 'Result[U, F]']) -> 'Result[U, F]':
         """Chain operations that return Results."""
-        if self.is_err:
-            return Result.Err(self.error)
         return func(self.value)
 
 
-# Convenience aliases
-Ok = Result.Ok
-Err = Result.Err
+@dataclass
+class Err(Generic[E]):
+    """The failure half of Result: an error, and no value."""
+
+    error: E
+
+    @property
+    def is_ok(self) -> Literal[False]:
+        return False
+
+    @property
+    def is_err(self) -> Literal[True]:
+        return True
+
+    @property
+    def value(self) -> None:
+        return None
+
+    def unwrap(self) -> NoReturn:
+        raise Exception(str(self.error))
+
+    def unwrap_err(self) -> E:
+        return self.error
+
+    def unwrap_or(self, default: U) -> U:
+        return default
+
+    def map(self, func: Callable[[Any], Any]) -> 'Err[E]':
+        """Propagate the error; the function is never called."""
+        return Err(self.error)
+
+    def and_then(self, func: Callable[[Any], Any]) -> 'Err[E]':
+        """Propagate the error; the function is never called."""
+        return Err(self.error)
+
+
+# Result[T, E] is either Ok(value) or Err(error), never both, and forces explicit
+# error handling at call sites:
+#
+#     result = calculate_something()
+#     if result.is_err:
+#         return Err(result.error)      # result is Err[E] here
+#     value = result.value              # and Ok[T] here: value is T, not T | None
+#
+# is_ok and is_err are literal True/False on each class, which is what lets a
+# type checker narrow the union on them. Until 2026-09-14 Result was a single
+# dataclass with `value: Optional[T]`, so no check narrowed anything and every
+# `.value` read as possibly None. Build results with Ok(...) and Err(...);
+# isinstance checks take (Ok, Err), since a subscripted Union is not a class.
+Result: TypeAlias = Union[Ok[T], Err[E]]

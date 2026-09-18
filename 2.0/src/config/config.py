@@ -5,32 +5,55 @@ Loads configuration from environment variables with sensible defaults.
 All configuration is immutable and validated at startup.
 """
 
-import os
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, List
+from typing import List, Optional
+
 from dotenv import load_dotenv
+
+from src.domain.scoring.weights import ScoringWeights
+from src.domain.vrp_tier import VRP_EXCELLENT_FROM, VRP_GOOD_FROM, VRP_MARGINAL_FROM
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class APIConfig:
-    """API credentials and endpoints."""
+    """API credentials, endpoints and subscriptions.
 
-    tradier_api_key: str
+    `from_env()` is the one reader of these variables in the repo
+    (tests/unit/test_config_env_readers.py fails on another). Keys are
+    `repr=False`: a logged Config or a traceback's locals never carries one.
+    """
+
+    tradier_api_key: str = field(repr=False)
     tradier_base_url: str = "https://api.tradier.com/v1"
-    finnhub_key: str = ""
+    finnhub_key: str = field(default="", repr=False)
+    twelve_data_key: str = field(default="", repr=False)
+    # ORATS: subscription ended Jun 2026, key dead since 2026-07-02. Off unless
+    # ORATS_ENABLED is exactly "true" (any case). Until 2026-09-14 the flag lived
+    # in common/constants.py and an unset variable meant ON, which would read the
+    # position_limits snapshot frozen at 2026-06-24 into sizing. The branched
+    # logic stays for a resubscription.
+    orats_enabled: bool = False
 
+    @classmethod
+    def from_env(cls) -> "APIConfig":
+        """Read the environment as it is now. Does not load 2.0/.env.
 
-@dataclass(frozen=True)
-class DatabaseConfig:
-    """Database configuration."""
-
-    path: Path
-    timeout: int = 30
-    max_retries: int = 3
+        For code that needs a key at call time without a Config in hand (the
+        Twelve Data fetch, record_moves' Finnhub gate, TACO's fallbacks).
+        `Config.from_env()` loads .env first and then calls this.
+        """
+        return cls(
+            tradier_api_key=os.getenv("TRADIER_API_KEY", ""),
+            tradier_base_url=os.getenv("TRADIER_BASE_URL", "https://api.tradier.com/v1"),
+            finnhub_key=os.getenv("FINNHUB_API_KEY", ""),
+            twelve_data_key=os.getenv("TWELVE_DATA_KEY", ""),
+            orats_enabled=os.getenv("ORATS_ENABLED", "false").lower() == "true",
+        )
 
 
 @dataclass(frozen=True)
@@ -46,15 +69,11 @@ class CacheConfig:
 class ThresholdsConfig:
     """Trading thresholds and parameters."""
 
-    # VRP ratio thresholds
-    # THRESHOLD PROFILES (select via vrp_threshold_mode):
-    # - CONSERVATIVE: 2.0x/1.5x/1.2x - Higher selectivity, fewer trades
-    # - BALANCED:     1.8x/1.4x/1.2x - Good edge/frequency balance (DEFAULT)
-    # - AGGRESSIVE:   1.5x/1.3x/1.1x - More opportunities
-    vrp_threshold_mode: str = "BALANCED"
-    vrp_excellent: float = 1.8
-    vrp_good: float = 1.4
-    vrp_marginal: float = 1.2
+    # VRP tiers (CLAUDE.md §1). Not read from the environment, and not adjusted
+    # by VIX on any path since 2026-09-14 (scripts/research/vix_adaptive_thresholds.py).
+    vrp_excellent: float = VRP_EXCELLENT_FROM
+    vrp_good: float = VRP_GOOD_FROM
+    vrp_marginal: float = VRP_MARGINAL_FROM
 
     # Liquidity filters - 4-TIER SYSTEM (RELAXED Feb 2026)
     # Relaxed thresholds to allow more tickers while still penalizing poor liquidity in scoring
@@ -100,9 +119,8 @@ class ThresholdsConfig:
     min_theta_good: float = 30.0
     min_vega_good: float = -50.0
 
-    # Minimum DTE floor (Feb 2026)
-    # Backtesting showed comparable win rates below and above this floor, but
-    # loss severity was materially worse below it due to extreme gamma.
+    # Minimum DTE floor (Feb 2026). Evidence: CLAUDE.md §5, printed by
+    # scripts/rule_evidence.py -- same win rate at 0-2 and 3-5 DTE, larger losses at 0-2.
     # If calculated expiration gives < min_dte from earnings, bump to next Friday
     min_dte: int = 3
 
@@ -113,72 +131,11 @@ class ThresholdsConfig:
 
 
 @dataclass(frozen=True)
-class ScoringWeights:
-    """
-    Strategy scoring weights configuration.
-
-    Weights determine how much each factor contributes to overall strategy score.
-    All weights should sum to 100 for interpretability.
-
-    Post-loss analysis on a run of directional losses found that position
-    sizing and VRP edge selection were sound, but poor liquidity made exits
-    expensive and the absence of stop losses let losers run. That drove
-    liquidity weight up from 0% and reduced everything else proportionally.
-    A later preference update raised POP weight further to prioritize
-    high-probability trades.
-
-    Tune these weights based on your own trade-outcome analysis. They must
-    sum to 100 within each variant (with/without Greeks).
-    """
-
-    # Scoring weights with Greeks available (sum = 100)
-    # USER PREFERENCE (Dec 2025): POP weighted higher for high-probability trades
-    pop_weight: float = 40.0          # Probability of profit (increased from 30%)
-    liquidity_weight: float = 22.0    # Liquidity quality (reduced from 25%)
-    vrp_weight: float = 17.0          # VRP edge strength (reduced from 20%)
-    reward_risk_weight: float = 13.0  # Kelly edge (reduced from 15%)
-    greeks_weight: float = 8.0        # Theta/vega quality (reduced from 10%)
-    size_weight: float = 0.0          # Removed (position sizing is handled separately)
-
-    # Scoring weights without Greeks (sum = 100)
-    pop_weight_no_greeks: float = 45.0        # Increased from 35%
-    liquidity_weight_no_greeks: float = 26.0  # Reduced from 30%
-    vrp_weight_no_greeks: float = 17.0        # Reduced from 20%
-    reward_risk_weight_no_greeks: float = 12.0  # Reduced from 15%
-    size_weight_no_greeks: float = 0.0        # Removed
-
-    # Target values for normalization
-    target_pop: float = 0.65      # 65% POP is target
-    target_rr: float = 0.30        # 30% R/R is target
-    target_vrp: float = 2.0        # 2.0x VRP is excellent
-    target_theta: float = 50.0     # $50/day theta is excellent
-    target_vega: float = 100.0     # -$100 vega is excellent
-
-    # NEW: Liquidity scoring targets (post-loss analysis addition)
-    target_liquidity_oi: float = 5000.0      # Target open interest
-    target_liquidity_spread: float = 5.0     # Target bid-ask spread %
-    target_liquidity_volume: float = 500.0   # Target daily volume
-
-    # Rationale generation thresholds
-    vrp_excellent_threshold: float = 2.0   # VRP >= 2.0 is "excellent"
-    vrp_strong_threshold: float = 1.5      # VRP >= 1.5 is "strong"
-    rr_favorable_threshold: float = 0.35   # R/R >= 0.35 is "favorable"
-    pop_high_threshold: float = 0.70       # POP >= 70% is "high"
-    theta_positive_threshold: float = 30.0  # Theta > $30/day mentioned in rationale
-    vega_beneficial_threshold: float = -50.0  # Vega < -$50 benefits from IV crush
-
-    # Liquidity thresholds for rationale
-    liquidity_excellent_threshold: str = "EXCELLENT"
-    liquidity_acceptable_threshold: str = "WARNING"
-
-
-@dataclass(frozen=True)
 class ScanConfig:
     """Scan mode scoring configuration."""
 
     # Quality score factors (sum = 100)
     score_vrp_max_points: float = 35.0
-    score_vrp_target: float = 3.0
     score_edge_max_points: float = 30.0
     score_edge_target: float = 4.0
     score_liquidity_max_points: float = 20.0
@@ -218,14 +175,29 @@ class StrategyConfig:
     min_credit_per_spread: float = 0.20
     min_reward_risk: float = 0.25
 
-    # Position sizing - Kelly Criterion based
-    risk_budget_per_trade: float = 20000.0
+    # Position sizing: a fixed dollar-risk rule, not Kelly (sizing.py). Matches
+    # .env.example and CLAUDE.md; the scan's liquidity check sizes from it too.
+    risk_budget_per_trade: float = 250000.0
     max_contracts: int = 100
+
+    # Dollar-risk warning (advisory only — never blocks a recommendation).
+    # The contract cap above is not a risk cap: it only equals a dollar budget
+    # when max loss per contract happens to be ~$500. Set to 0 to disable.
+    max_loss_warn_threshold: float = 50000.0
+
+    # Sizing tiers (CLAUDE.md "Sizing rules in order"). These drive the LIVE
+    # cap via SizingContext; max_contracts above only applies on the fallback
+    # path where no SizingContext is built. Defaults match the values that
+    # were hardcoded in SizingContext before Sep 2026.
+    sizing_base_cap: int = 100            # rule 5: maximum ever (a ceiling)
+    sizing_default_cap: int = 50          # rule 4: cap when no flag fires
+    sizing_trr_high_cap: int = 50         # rule 3: HIGH TRR hard cap
+    sizing_compound_risk_cap: int = 25    # rules 1-2: compound tail risk
+    sizing_reduction_factor: float = 0.5  # rules 4, 8: 50% reduction each
 
     # Kelly Criterion parameters
     use_kelly_sizing: bool = True
     kelly_fraction: float = 0.25
-    kelly_min_edge: float = 0.05
     kelly_min_contracts: int = 1
 
     # Commission
@@ -245,6 +217,27 @@ class RateLimitConfig:
     # Tradier: Generally more permissive
     tradier_per_minute: int = 120
 
+    # Twelve Data's Basic plan: 800 calls a UTC day per key. Every process on a
+    # host counts its calls in one file and is refused past the ceiling
+    # (src/utils/rate_limiter.py DailyCallCounter); 20 are left for another host.
+    twelve_data_daily_ceiling: int = 780
+    twelve_data_usage_file: str = "~/.local/state/trading-desk/twelve_data_calls"
+
+    @classmethod
+    def from_env(cls) -> "RateLimitConfig":
+        """Read the environment as it is now. Does not load 2.0/.env.
+
+        The Twelve Data gate is made on a process's first Twelve Data call, with
+        no Config in hand. `Config.from_env()` loads .env first and then calls this.
+        """
+        return cls(
+            finnhub_per_minute=int(os.getenv("FINNHUB_PER_MINUTE", "60")),
+            tradier_per_minute=int(os.getenv("TRADIER_PER_MINUTE", "120")),
+            twelve_data_daily_ceiling=int(os.getenv("TWELVE_DATA_DAILY_CEILING", "780")),
+            twelve_data_usage_file=os.getenv("TWELVE_DATA_USAGE_FILE")
+            or cls.twelve_data_usage_file,
+        )
+
 
 @dataclass(frozen=True)
 class AlgorithmConfig:
@@ -253,20 +246,18 @@ class AlgorithmConfig:
     # Enable Phase 4 enhanced algorithms
     use_interpolated_move: bool = True  # Straddle interpolation between strikes
     use_enhanced_skew: bool = True      # Polynomial-fitted volatility skew
-    use_enhanced_consistency: bool = True  # Exponential-weighted consistency
+    use_enhanced_consistency: bool = True  # Consistency, trend and trust of the VRP moves
 
     # Algorithm parameters (optional overrides)
     skew_min_points: int = 5            # Minimum points for polynomial fit
-    consistency_decay_factor: float = 0.85  # Exponential weight decay
     interpolation_tolerance: float = 0.01   # Strike match tolerance (dollars)
 
-    # VRP calculation metric selection
-    vrp_move_metric: str = "intraday"  # "close", "intraday", or "gap"
-    # Rationale:
-    # - "close": Earnings close vs prev close (matches ATM straddle expectation)
-    # - "intraday": High-low range on earnings day (captures intraday volatility)
-    # - "gap": Open vs prev close (gap move only)
-    # Changed to "intraday" to capture full volatility range for IV crush strategy
+    # The move VRP divides by. Fixed, not an env override: the tier cutoffs,
+    # SCORE_VRP_TARGET and target_vrp are calibrated to it
+    # (scripts/research/vrp_close_calibration.py). "close" = mean
+    # |prev close -> reaction close|, the move a held position eats. It was
+    # "intraday" (open -> close, gap excluded) until the 2026-09 migration.
+    vrp_move_metric: str = "close"
 
 
 @dataclass(frozen=True)
@@ -280,11 +271,27 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class TelegramConfig:
+    """Telegram bot credentials for digests, alerts and job failure reports.
+
+    Optional by design: absence is the normal state on a machine that only runs
+    the CLI, and must never fail Config.from_env(). Callers gate on
+    is_configured rather than assuming the values are present.
+    """
+
+    bot_token: Optional[str] = field(default=None, repr=False)
+    chat_id: Optional[str] = None
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.bot_token and self.chat_id)
+
+
+@dataclass(frozen=True)
 class Config:
     """Main configuration container."""
 
     api: APIConfig
-    database: DatabaseConfig
     cache: CacheConfig
     thresholds: ThresholdsConfig
     strategy: StrategyConfig
@@ -292,6 +299,7 @@ class Config:
     rate_limits: RateLimitConfig
     algorithms: AlgorithmConfig
     logging: LoggingConfig
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
 
     @classmethod
     def from_env(cls, env_file: Optional[str] = None) -> 'Config':
@@ -307,32 +315,42 @@ class Config:
         Raises:
             ValueError: If required environment variables are missing.
         """
+        # src/config/config.py -> up 3 levels is the 2.0/ project root.
+        # Anchored to __file__ rather than cwd so the defaults below resolve
+        # identically however the process was launched.
+        project_root = Path(__file__).parent.parent.parent
+
         # Load .env file if specified or default
         if env_file:
             load_dotenv(env_file)
         else:
-            # Try to load from project root (src/config/config.py -> go up 3 levels to project root)
-            project_root = Path(__file__).parent.parent.parent
             env_path = project_root / ".env"
             if env_path.exists():
                 load_dotenv(env_path)
 
-        # API configuration
-        api = APIConfig(
-            tradier_api_key=os.getenv("TRADIER_API_KEY", ""),
-            tradier_base_url=os.getenv(
-                "TRADIER_BASE_URL", "https://api.tradier.com/v1"
-            ),
-            finnhub_key=os.getenv("FINNHUB_API_KEY", ""),
-        )
+        # API configuration: keys, endpoints, the ORATS switch
+        api = APIConfig.from_env()
 
-        # Database configuration
-        db_path = os.getenv("DB_PATH", "data/iv_crush_v2.db")
-        database = DatabaseConfig(
-            path=Path(db_path),
-            timeout=int(os.getenv("DB_TIMEOUT", "30")),
-            max_retries=int(os.getenv("DB_MAX_RETRIES", "3")),
-        )
+        # NOTE: `DatabaseConfig` was removed at the tail of the Postgres
+        # migration. It carried a `path` (plus an unread timeout and
+        # max_retries), and the connection target now comes from PG* in the
+        # environment via common/db.py and pg_pool -- no path is passed
+        # anywhere. Its last real consumer was anchoring the SQLite
+        # `scan_cache.db`, and that cache moved into the Postgres
+        # `whisper_cache` table on 2026-09-12.
+        #
+        # This also retires the CI hazard the old comment here described: a
+        # cwd-relative DB_PATH resolving to 2.0/2.0/data/. A wrong DSN fails to
+        # connect; there is no path left to resolve wrongly.
+
+        # NOTE: `job_status_path` was removed at the Postgres port. It existed
+        # only because a whole-file `gsutil cp` kept wiping the server's
+        # job_status rows -- that table was never in sync_databases.py's
+        # row-level merge, so it had no protection against a wholesale
+        # overwrite (CLAUDE.md, Sep 11 2026). Splitting it into its own SQLite
+        # file was the interim fix. There is one database now and no file-copy
+        # sync, so the failure mode cannot occur and the separate file has no
+        # remaining purpose.
 
         # Cache configuration
         cache = CacheConfig(
@@ -341,49 +359,10 @@ class Config:
             enabled=os.getenv("CACHE_ENABLED", "true").lower() == "true",
         )
 
-        # Thresholds configuration with profile support
-        # VRP threshold profiles (can be overridden via env vars)
-        vrp_mode = os.getenv("VRP_THRESHOLD_MODE", "BALANCED").upper()
-
-        # Define threshold profiles
-        vrp_profiles = {
-            "CONSERVATIVE": {"excellent": 2.0, "good": 1.5, "marginal": 1.2},
-            "BALANCED":     {"excellent": 1.8, "good": 1.4, "marginal": 1.2},
-            "AGGRESSIVE":   {"excellent": 1.5, "good": 1.3, "marginal": 1.1},
-            "LEGACY":       {"excellent": 7.0, "good": 4.0, "marginal": 1.5},
-        }
-
-        # Apply profile (with env var override capability)
-        if vrp_mode not in vrp_profiles:
-            logger.warning(
-                f"Invalid VRP_THRESHOLD_MODE '{vrp_mode}', defaulting to BALANCED. "
-                f"Valid modes: {', '.join(vrp_profiles.keys())}"
-            )
-            vrp_mode = "BALANCED"
-
-        profile = vrp_profiles[vrp_mode]
-        logger.info(f"Using VRP threshold profile: {vrp_mode}")
-
-        # Check for individual threshold overrides and warn
-        overrides = []
-        if os.getenv("VRP_EXCELLENT"):
-            overrides.append(f"VRP_EXCELLENT={os.getenv('VRP_EXCELLENT')} (profile default: {profile['excellent']})")
-        if os.getenv("VRP_GOOD"):
-            overrides.append(f"VRP_GOOD={os.getenv('VRP_GOOD')} (profile default: {profile['good']})")
-        if os.getenv("VRP_MARGINAL"):
-            overrides.append(f"VRP_MARGINAL={os.getenv('VRP_MARGINAL')} (profile default: {profile['marginal']})")
-
-        if overrides:
-            logger.warning(
-                f"Individual VRP threshold env vars are overriding {vrp_mode} profile: "
-                + ", ".join(overrides)
-            )
-
+        # VRP tiers are ThresholdsConfig's defaults (src/domain/vrp_tier.py). The
+        # VRP_THRESHOLD_MODE profiles and VRP_EXCELLENT/GOOD/MARGINAL overrides
+        # were removed 2026-09-14: they let .env grade on a ladder CLAUDE.md does not have.
         thresholds = ThresholdsConfig(
-            vrp_threshold_mode=vrp_mode,
-            vrp_excellent=float(os.getenv("VRP_EXCELLENT", str(profile["excellent"]))),
-            vrp_good=float(os.getenv("VRP_GOOD", str(profile["good"]))),
-            vrp_marginal=float(os.getenv("VRP_MARGINAL", str(profile["marginal"]))),
             # 4-TIER LIQUIDITY SYSTEM (RELAXED Feb 2026)
             # REJECT: spread > 25%
             liquidity_reject_min_oi=int(os.getenv("LIQUIDITY_REJECT_MIN_OI", "10")),
@@ -410,10 +389,7 @@ class Config:
         )
 
         # Rate limits
-        rate_limits = RateLimitConfig(
-            finnhub_per_minute=int(os.getenv("FINNHUB_PER_MINUTE", "60")),
-            tradier_per_minute=int(os.getenv("TRADIER_PER_MINUTE", "120")),
-        )
+        rate_limits = RateLimitConfig.from_env()
 
         # Strategy configuration
         strategy = StrategyConfig(
@@ -424,11 +400,16 @@ class Config:
             spread_width_threshold=float(os.getenv("SPREAD_WIDTH_THRESHOLD", "20.0")),
             min_credit_per_spread=float(os.getenv("MIN_CREDIT_PER_SPREAD", "0.20")),
             min_reward_risk=float(os.getenv("MIN_REWARD_RISK", "0.25")),
-            risk_budget_per_trade=float(os.getenv("RISK_BUDGET_PER_TRADE", "20000.0")),
+            risk_budget_per_trade=float(os.getenv("RISK_BUDGET_PER_TRADE", "250000.0")),
             max_contracts=int(os.getenv("MAX_CONTRACTS", "100")),
+            max_loss_warn_threshold=float(os.getenv("MAX_LOSS_WARN_THRESHOLD", "50000.0")),
+            sizing_base_cap=int(os.getenv("SIZING_BASE_CAP", "100")),
+            sizing_default_cap=int(os.getenv("SIZING_DEFAULT_CAP", "50")),
+            sizing_trr_high_cap=int(os.getenv("SIZING_TRR_HIGH_CAP", "50")),
+            sizing_compound_risk_cap=int(os.getenv("SIZING_COMPOUND_RISK_CAP", "25")),
+            sizing_reduction_factor=float(os.getenv("SIZING_REDUCTION_FACTOR", "0.5")),
             use_kelly_sizing=os.getenv("USE_KELLY_SIZING", "true").lower() == "true",
             kelly_fraction=float(os.getenv("KELLY_FRACTION", "0.25")),
-            kelly_min_edge=float(os.getenv("KELLY_MIN_EDGE", "0.05")),
             kelly_min_contracts=int(os.getenv("KELLY_MIN_CONTRACTS", "1")),
             commission_per_contract=float(os.getenv("COMMISSION_PER_CONTRACT", "0.30")),
         )
@@ -442,9 +423,7 @@ class Config:
             use_enhanced_skew=os.getenv("USE_ENHANCED_SKEW", "true").lower() == "true",
             use_enhanced_consistency=os.getenv("USE_ENHANCED_CONSISTENCY", "true").lower() == "true",
             skew_min_points=int(os.getenv("SKEW_MIN_POINTS", "5")),
-            consistency_decay_factor=float(os.getenv("CONSISTENCY_DECAY_FACTOR", "0.85")),
             interpolation_tolerance=float(os.getenv("INTERPOLATION_TOLERANCE", "0.01")),
-            vrp_move_metric=os.getenv("VRP_MOVE_METRIC", "intraday"),
         )
 
         # Logging
@@ -459,9 +438,15 @@ class Config:
             console_output=os.getenv("LOG_CONSOLE", "true").lower() == "true",
         )
 
+        # Telegram (optional). `or None` rather than a "" default so a key that
+        # is present-but-blank in .env reads as absent, not as configured.
+        telegram = TelegramConfig(
+            bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
+            chat_id=os.getenv("TELEGRAM_CHAT_ID") or None,
+        )
+
         return cls(
             api=api,
-            database=database,
             cache=cache,
             thresholds=thresholds,
             strategy=strategy,
@@ -469,6 +454,7 @@ class Config:
             rate_limits=rate_limits,
             algorithms=algorithms,
             logging=logging,
+            telegram=telegram,
         )
 
     def validate(self) -> List[str]:
@@ -483,12 +469,6 @@ class Config:
         # API keys
         if not self.api.tradier_api_key:
             errors.append("TRADIER_API_KEY is required")
-
-        # Database path parent must exist
-        if not self.database.path.parent.exists():
-            errors.append(
-                f"Database directory does not exist: {self.database.path.parent}"
-            )
 
         # Threshold validation - range checks
         for name, value in [
@@ -517,52 +497,12 @@ class Config:
         # Rate limits
         if self.rate_limits.finnhub_per_minute <= 0:
             errors.append("finnhub_per_minute must be > 0")
+        if self.rate_limits.twelve_data_daily_ceiling <= 0:
+            errors.append("twelve_data_daily_ceiling must be > 0")
 
         return errors
 
 
-# Singleton config instance (lazy loaded)
-_config: Optional[Config] = None
-
-
-def get_config(validate: bool = True) -> Config:
-    """
-    Get global config instance.
-    Loads from environment on first call.
-
-    Args:
-        validate: If True, validates config and logs warnings for issues.
-                  Set to False for testing with incomplete config.
-
-    Returns:
-        Config instance
-
-    Raises:
-        ValueError: In production mode if required config is missing
-    """
-    global _config
-    if _config is None:
-        _config = Config.from_env()
-
-        if validate:
-            errors = _config.validate()
-            if errors:
-                import logging
-                logger = logging.getLogger(__name__)
-
-                # Always log validation errors
-                for error in errors:
-                    logger.warning(f"Configuration issue: {error}")
-
-                # Check if TRADIER_API_KEY is missing - this is critical
-                critical_errors = [e for e in errors if "TRADIER_API_KEY" in e]
-                if critical_errors:
-                    logger.error("TRADIER_API_KEY is required for options data")
-
-    return _config
-
-
-def reset_config():
-    """Reset config singleton (useful for testing)."""
-    global _config
-    _config = None
+# The process-global `get_config()` / `reset_config()` singleton was removed
+# 2026-09-14: nothing called either. Entry points build `Config.from_env()` and
+# hand it to `Container`, which validates it (src/config/validation.py).

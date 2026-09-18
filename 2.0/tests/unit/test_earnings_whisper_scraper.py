@@ -3,21 +3,20 @@ Tests for EarningsWhisperScraper — earningswhispers.com direct scraping.
 
 TDD: tests written before implementation.
 """
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-import pytest
 from datetime import datetime
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.domain.errors import ErrorCode
 
 
 @pytest.fixture
 def scraper():
-    from src.infrastructure.data_sources.earnings_whisper_scraper import EarningsWhisperScraper
+    from src.infrastructure.data_sources.earnings_whisper_scraper import (
+        EarningsWhisperScraper,
+    )
     return EarningsWhisperScraper()
 
 
@@ -155,7 +154,6 @@ def test_fetch_from_earningswhispers_returns_err_on_timeout(scraper):
 
 def test_try_fetch_week_falls_back_to_database_when_ew_returns_nodata(scraper):
     """When earningswhispers returns NODATA, should fall through to DB fallback."""
-    from src.domain.errors import AppError
     monday = datetime(2026, 5, 26)
 
     with patch("requests.Session.get", side_effect=[_mock_response(""), _mock_response(SAMPLE_HTML_NO_TICKERS)]):
@@ -184,3 +182,58 @@ def test_ew_circuit_breaker_trips_after_repeated_failures(scraper):
                 scraper._try_fetch_week(monday)
 
     assert scraper._ew_breaker.is_open()
+
+
+# ---------------------------------------------------------------------------
+# the shared week cache
+# ---------------------------------------------------------------------------
+
+class _RecordingCache:
+    def __init__(self):
+        self.rows, self.sets = {}, []
+
+    def get(self, key):
+        return self.rows.get(key)
+
+    def set(self, key, value, ttl=None):
+        self.sets.append((key, value, ttl))
+        self.rows[key] = value
+
+
+def test_an_earningswhispers_list_is_cached_for_the_week():
+    """The shared cache's own L2 TTL (6 days, scan/constants.py) applies to the real list."""
+    from src.infrastructure.data_sources.earnings_whisper_scraper import (
+        EarningsWhisperScraper,
+    )
+
+    cache = _RecordingCache()
+    scraper = EarningsWhisperScraper(cache=cache)
+    with patch("requests.Session.get", side_effect=[_mock_response(""), _mock_response(SAMPLE_HTML)]):
+        result = scraper._try_fetch_week(datetime(2026, 5, 25))
+
+    assert result.is_ok
+    assert [(key, ttl) for key, _, ttl in cache.sets] == [("whisper_tickers:2026-05-25", None)]
+    assert scraper._try_fetch_week(datetime(2026, 5, 25)).value == result.value
+
+
+def test_a_database_fallback_list_is_cached_for_an_hour_not_the_week():
+    """The fallback is the week's reporters, not the "most anticipated" list.
+    Cached for the week in the shared table, one failed EarningsWhispers call on
+    either host would serve it to every /whisper and morning digest until the
+    week ended; an hour spares the endpoint without hiding its recovery."""
+    from src.infrastructure.data_sources.earnings_whisper_scraper import (
+        WHISPER_FALLBACK_TTL_SECONDS,
+        EarningsWhisperScraper,
+    )
+
+    cache = _RecordingCache()
+    scraper = EarningsWhisperScraper(cache=cache)
+    with patch("requests.Session.get",
+               side_effect=[_mock_response(""), _mock_response(SAMPLE_HTML_NO_TICKERS)]):
+        with patch.object(scraper, "_fetch_from_database",
+                          return_value=MagicMock(is_ok=True, value=["AAPL", "MSFT"])):
+            result = scraper._try_fetch_week(datetime(2026, 5, 25))
+
+    assert result.is_ok
+    assert WHISPER_FALLBACK_TTL_SECONDS == 3600
+    assert cache.sets == [("whisper_tickers:2026-05-25", ["AAPL", "MSFT"], 3600)]

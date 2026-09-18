@@ -7,10 +7,19 @@
 # refresh. This wrapper derives the repo root so the graph lands in
 # 2.0/data/ (gitignored) regardless of where the repo is checked out.
 #
+# The root is the MAIN checkout's, not this script's — otherwise every git
+# worktree would quietly get its own separate graph instead of sharing the one
+# knowledge base. Unlike the other wrappers this failure is silent: the memory
+# server starts fine and simply writes somewhere new.
+#
 # stdout is the MCP transport — diagnostics go to stderr only.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/mcp/repo-root.sh
+source "$SCRIPT_DIR/repo-root.sh"
+
+REPO_ROOT="$(mcp_main_checkout_root "$(cd "$SCRIPT_DIR/../.." && pwd)")"
 export MEMORY_FILE_PATH="$REPO_ROOT/2.0/data/memory-graph.json"
 
 if ! command -v npx >/dev/null 2>&1; then

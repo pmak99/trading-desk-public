@@ -8,11 +8,11 @@ Handles SIGTERM and SIGINT to ensure clean shutdown:
 - Logs shutdown event
 """
 
-import signal
-import sys
 import atexit
 import logging
-from typing import Callable, List
+import signal
+import sys
+from typing import Callable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ class GracefulShutdown:
 
 
 # Global shutdown handler (singleton)
-_shutdown_handler: GracefulShutdown = None
+_shutdown_handler: Optional[GracefulShutdown] = None
 
 
 def get_shutdown_handler() -> GracefulShutdown:

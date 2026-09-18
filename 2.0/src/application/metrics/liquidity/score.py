@@ -1,6 +1,7 @@
 """Data types for liquidity scoring: LiquidityScore output DTO and LiquidityThresholds config."""
 from dataclasses import dataclass
 from typing import Optional
+
 from src.domain.types import Money
 
 

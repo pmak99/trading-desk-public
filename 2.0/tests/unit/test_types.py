@@ -2,17 +2,19 @@
 Unit tests for domain types.
 """
 
-import pytest
+from datetime import date
 from decimal import Decimal
-from datetime import date, timedelta
+
+import pytest
+
+from src.domain.enums import EarningsTiming, Recommendation
 from src.domain.types import (
     Money,
+    OptionChain,
+    OptionQuote,
     Percentage,
     Strike,
-    OptionQuote,
-    OptionChain,
 )
-from src.domain.enums import EarningsTiming, Recommendation
 
 
 class TestMoney:

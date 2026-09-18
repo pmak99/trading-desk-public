@@ -9,18 +9,13 @@ Tests defensive programming features added in Dec 2025:
 - Graceful degradation for parsing errors
 - Negative value clamping (negative values clamped to 0)
 
-SCORING FORMULA (Updated Dec 2025):
-- VRP Score (55 max): (vrp_ratio / 4.0) * 55, continuous scaling (no cap)
+SCORING FORMULA (Updated Dec 2025; VRP target moved to close-to-close 2026-09):
+- VRP Score (55 max): (vrp_ratio / 2.16) * 55, continuous scaling (no cap)
 - Edge Score (0): Disabled (redundant with VRP)
 - Liquidity Score (20 max): EXCELLENT=20, GOOD=16, WARNING=12, REJECT=4
 - Move Score (25 max): (1 - implied_pct/20%) * 25, continuous scaling, default=12.5
 """
 
-import sys
-from pathlib import Path
-
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.scan import calculate_scan_quality_score
 
@@ -65,26 +60,26 @@ def test_missing_data_defaults():
     print(f"✅ PASS: Empty dict uses conservative defaults = {expected}")
 
     # Missing implied move
-    # VRP: (4.0/4.0)*55 = 55
+    # VRP: (2.16/2.16)*55 = 55
     # Liq: 12 (WARNING)
     # Move: 12.5 (default)
     # Total: 79.5
     result = calculate_scan_quality_score({
-        'vrp_ratio': 4.0,
+        'vrp_ratio': 2.16,
         'edge_score': 3.0,  # Ignored (disabled)
         'liquidity_tier': 'WARNING'
     })
     print(f"Missing implied_move_pct: {result}")
     assert result == 79.5, f"Expected 79.5, got {result}"
-    print(f"✅ PASS: Missing implied_move uses default middle score (12.5)")
+    print("✅ PASS: Missing implied_move uses default middle score (12.5)")
 
     # Unknown liquidity tier → WARNING default
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (1.62/2.16)*55 = 41.25
     # Liq: 12 (WARNING - default for unknown)
     # Move: (1 - 10/20)*25 = 12.5
     # Total: 65.8 (rounded)
     result = calculate_scan_quality_score({
-        'vrp_ratio': 3.0,
+        'vrp_ratio': 1.62,
         'edge_score': 4.0,  # Ignored
         'liquidity_tier': 'SOMETHING_WEIRD',
         'implied_move_pct': '10%'
@@ -92,7 +87,7 @@ def test_missing_data_defaults():
     print(f"Unknown liquidity tier: {result}")
     expected = 41.25 + 12 + 12.5  # 65.75 → 65.8
     assert result == round(expected, 1), f"Expected {round(expected, 1)}, got {result}"
-    print(f"✅ PASS: Unknown liquidity uses WARNING default (12 pts)")
+    print("✅ PASS: Unknown liquidity uses WARNING default (12 pts)")
 
 
 def test_malformed_data_handling():
@@ -115,7 +110,7 @@ def test_malformed_data_handling():
     print(f"Invalid VRP (string): {result}")
     expected = 0 + 12 + 12.5  # 24.5
     assert result == expected, f"Expected {expected}, got {result}"
-    print(f"✅ PASS: Invalid VRP string defaults to 0.0")
+    print("✅ PASS: Invalid VRP string defaults to 0.0")
 
     # Invalid VRP (dict type)
     result = calculate_scan_quality_score({
@@ -126,7 +121,7 @@ def test_malformed_data_handling():
     })
     print(f"Invalid VRP (dict): {result}")
     assert result == expected, f"Expected {expected}, got {result}"
-    print(f"✅ PASS: Invalid VRP dict defaults to 0.0")
+    print("✅ PASS: Invalid VRP dict defaults to 0.0")
 
     # Invalid VRP (list type)
     result = calculate_scan_quality_score({
@@ -137,15 +132,15 @@ def test_malformed_data_handling():
     })
     print(f"Invalid VRP (list): {result}")
     assert result == expected, f"Expected {expected}, got {result}"
-    print(f"✅ PASS: Invalid VRP list defaults to 0.0")
+    print("✅ PASS: Invalid VRP list defaults to 0.0")
 
     # Invalid edge score (ignored anyway, but shouldn't crash)
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (1.62/2.16)*55 = 41.25
     # Liq: 12 (WARNING)
     # Move: (1 - 10/20)*25 = 12.5
     # Total: 65.8
     result = calculate_scan_quality_score({
-        'vrp_ratio': 3.0,
+        'vrp_ratio': 1.62,
         'edge_score': 'invalid',
         'liquidity_tier': 'WARNING',
         'implied_move_pct': '10%'
@@ -153,15 +148,15 @@ def test_malformed_data_handling():
     print(f"Invalid edge_score (string): {result}")
     expected = 41.25 + 12 + 12.5  # 65.75 → 65.8
     assert result == round(expected, 1), f"Expected {round(expected, 1)}, got {result}"
-    print(f"✅ PASS: Invalid edge_score is ignored (disabled)")
+    print("✅ PASS: Invalid edge_score is ignored (disabled)")
 
     # Invalid implied move (can't parse) → default 12.5
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (1.62/2.16)*55 = 41.25
     # Liq: 12 (WARNING)
     # Move: 12.5 (error default)
     # Total: 65.8
     result = calculate_scan_quality_score({
-        'vrp_ratio': 3.0,
+        'vrp_ratio': 1.62,
         'edge_score': 4.0,
         'liquidity_tier': 'WARNING',
         'implied_move_pct': 'garbage%'
@@ -169,7 +164,7 @@ def test_malformed_data_handling():
     print(f"Invalid implied_move_pct: {result}")
     expected = 41.25 + 12 + 12.5  # 65.75 → 65.8
     assert result == round(expected, 1), f"Expected {round(expected, 1)}, got {result}"
-    print(f"✅ PASS: Invalid implied_move uses default (12.5)")
+    print("✅ PASS: Invalid implied_move uses default (12.5)")
 
 
 def test_percentage_object_handling():
@@ -184,12 +179,12 @@ def test_percentage_object_handling():
             self.value = value
 
     # Test with Percentage object (7.5%)
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (1.62/2.16)*55 = 41.25
     # Liq: 12 (WARNING)
     # Move: (1 - 7.5/20)*25 = 15.625
     # Total: 68.9
     result = calculate_scan_quality_score({
-        'vrp_ratio': 3.0,
+        'vrp_ratio': 1.62,
         'edge_score': 4.0,
         'liquidity_tier': 'WARNING',
         'implied_move_pct': MockPercentage(7.5)
@@ -197,18 +192,18 @@ def test_percentage_object_handling():
     print(f"Percentage object (7.5%): {result}")
     expected = 41.25 + 12 + 15.625  # 68.875 → 68.9
     assert result == round(expected, 1), f"Expected {round(expected, 1)}, got {result}"
-    print(f"✅ PASS: Percentage object handled correctly")
+    print("✅ PASS: Percentage object handled correctly")
 
     # Test with string percentage
     result = calculate_scan_quality_score({
-        'vrp_ratio': 3.0,
+        'vrp_ratio': 1.62,
         'edge_score': 4.0,
         'liquidity_tier': 'WARNING',
         'implied_move_pct': '7.5%'
     })
     print(f"String percentage ('7.5%'): {result}")
     assert result == round(expected, 1), f"Expected {round(expected, 1)}, got {result}"
-    print(f"✅ PASS: String percentage handled correctly")
+    print("✅ PASS: String percentage handled correctly")
 
 
 def test_boundary_conditions():
@@ -217,53 +212,53 @@ def test_boundary_conditions():
     print("TEST 5: Boundary Conditions")
     print("="*80)
 
-    # Perfect VRP (4x = target), EXCELLENT liquidity, easy move (8%)
-    # VRP: (4.0/4.0)*55 = 55
+    # Perfect VRP (at target), EXCELLENT liquidity, easy move (8%)
+    # VRP: (2.16/2.16)*55 = 55
     # Liq: 20 (EXCELLENT)
     # Move: (1 - 8/20)*25 = 15.0
     # Total: 90.0
     result = calculate_scan_quality_score({
-        'vrp_ratio': 4.0,
+        'vrp_ratio': 2.16,
         'edge_score': 4.0,
         'liquidity_tier': 'EXCELLENT',
         'implied_move_pct': '8.0%'
     })
-    print(f"Perfect VRP (4.0x), EXCELLENT liq, 8% move: {result}")
+    print(f"Perfect VRP (2.16x), EXCELLENT liq, 8% move: {result}")
     expected = 55 + 20 + 15.0  # 90.0
     assert result == expected, f"Expected {expected}, got {result}"
-    print(f"✅ PASS: Good score achievable (90.0)")
+    print("✅ PASS: Good score achievable (90.0)")
 
     # High VRP exceeds target - continuous scaling
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (1.62/2.16)*55 = 41.25
     # Liq: 12 (WARNING)
     # Move: (1 - 12/20)*25 = 10.0
     # Total: 63.3
     result = calculate_scan_quality_score({
-        'vrp_ratio': 3.0,
+        'vrp_ratio': 1.62,
         'edge_score': 4.0,
         'liquidity_tier': 'WARNING',
         'implied_move_pct': '12.0%'
     })
-    print(f"VRP 3.0x, WARNING liq, 12% move: {result}")
+    print(f"VRP 1.62x, WARNING liq, 12% move: {result}")
     expected = 41.25 + 12 + 10.0  # 63.25 → 63.2
     assert result == round(expected, 1), f"Expected {round(expected, 1)}, got {result}"
-    print(f"✅ PASS: 12.0% move gets 10.0 pts")
+    print("✅ PASS: 12.0% move gets 10.0 pts")
 
     # Just above 12% implied move
-    # VRP: (3.0/4.0)*55 = 41.25
+    # VRP: (1.62/2.16)*55 = 41.25
     # Liq: 12 (WARNING)
     # Move: (1 - 12.1/20)*25 = 9.875
     # Total: 63.1
     result = calculate_scan_quality_score({
-        'vrp_ratio': 3.0,
+        'vrp_ratio': 1.62,
         'edge_score': 4.0,
         'liquidity_tier': 'WARNING',
         'implied_move_pct': '12.1%'
     })
-    print(f"VRP 3.0x, 12.1% move: {result}")
+    print(f"VRP 1.62x, 12.1% move: {result}")
     expected = 41.25 + 12 + (1 - 12.1/20)*25  # 63.1
     assert result == round(expected, 1), f"Expected {round(expected, 1)}, got {result}"
-    print(f"✅ PASS: 12.1% gets slightly less than 12.0%")
+    print("✅ PASS: 12.1% gets slightly less than 12.0%")
 
 
 def test_extreme_values():
@@ -273,20 +268,20 @@ def test_extreme_values():
     print("="*80)
 
     # Extremely high VRP - no cap in continuous mode!
-    # VRP: (100/4.0)*55 = 1375
+    # VRP: (54.0/2.16)*55 = 1375
     # Liq: 20 (EXCELLENT)
     # Move: (1 - 5/20)*25 = 18.75
     # Total: 1413.8 (no cap!)
     result = calculate_scan_quality_score({
-        'vrp_ratio': 100.0,
+        'vrp_ratio': 54.0,
         'edge_score': 50.0,
         'liquidity_tier': 'EXCELLENT',
         'implied_move_pct': '5%'
     })
-    print(f"Extreme VRP (100x): {result}")
-    expected = (100/4.0)*55 + 20 + (1 - 5/20)*25  # 1413.75 → 1413.8
+    print(f"Extreme VRP (54.0x): {result}")
+    expected = (54.0/2.16)*55 + 20 + (1 - 5/20)*25  # 1413.75 → 1413.8
     assert result == round(expected, 1), f"Expected {round(expected, 1)}, got {result}"
-    print(f"✅ PASS: Extreme VRP not capped (continuous scaling)")
+    print("✅ PASS: Extreme VRP not capped (continuous scaling)")
 
     # Zero values - minimum possible
     # VRP: 0
@@ -302,15 +297,15 @@ def test_extreme_values():
     print(f"All zeros/minimums: {result}")
     expected = 0 + 4 + 0  # 4.0
     assert result == expected, f"Expected {expected}, got {result}"
-    print(f"✅ PASS: Minimum score possible (4.0)")
+    print("✅ PASS: Minimum score possible (4.0)")
 
     # Negative values (should be clamped to 0)
-    # VRP: max(0, -5.0/4.0)*55 = 0
+    # VRP: max(0, -2.7/2.16)*55 = 0
     # Liq: 12 (WARNING)
     # Move: (1 - 10/20)*25 = 12.5
     # Total: 24.5
     result = calculate_scan_quality_score({
-        'vrp_ratio': -5.0,
+        'vrp_ratio': -2.7,
         'edge_score': -10.0,
         'liquidity_tier': 'WARNING',
         'implied_move_pct': '10%'

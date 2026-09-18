@@ -1,36 +1,25 @@
 #!/usr/bin/env python3
 """
 Parse Fidelity CSV exports (Realized Gains/Losses or Transaction History)
-and correlate with VRP data from the ivcrush database.
+and correlate with historical earnings moves from Postgres (PG* in the
+environment).
 
 Supports flexible column matching for different Fidelity export formats.
 """
 
-import csv
 import json
-import sqlite3
 import os
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Tuple
-from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
-from journal.models import Trade, Strategy
-from journal.parsing import (
-    COLUMN_MAPPINGS,
-    find_column,
-    parse_money,
-    parse_date,
-    parse_option_description,
-    parse_occ_symbol,
-)
-
 from journal.csv_reader import parse_fidelity_csv
-
-
-from journal.vrp_correlation import correlate_with_vrp
-from journal.statistics import group_trades_into_strategies, calculate_strategy_statistics, calculate_statistics
 from journal.reporting import export_journal_csv, print_summary
+from journal.statistics import (
+    calculate_strategy_statistics,
+    group_trades_into_strategies,
+)
+from journal.vrp_correlation import correlate_with_vrp
+
 
 def main():
     import argparse
@@ -42,8 +31,6 @@ def main():
 
     parser = argparse.ArgumentParser(description='Parse Fidelity CSV exports')
     parser.add_argument('csv_file', nargs='?', help='Path to Fidelity CSV export')
-    parser.add_argument('--db', default=str(project_root / '2.0' / 'data' / 'ivcrush.db'),
-                       help='Path to ivcrush database for VRP correlation')
     parser.add_argument('--output', default=str(project_root / 'docs' / '2025 Trades'),
                        help='Output directory')
     parser.add_argument('--verbose', '-v', action='store_true',
@@ -100,14 +87,14 @@ def main():
 
     if skipped_rows and args.verbose:
         print(f"      Skipped {len(skipped_rows)} rows:")
-        for num, reason, data in skipped_rows[:10]:
+        for num, reason, _data in skipped_rows[:10]:
             print(f"        Row {num}: {reason}")
         if len(skipped_rows) > 10:
             print(f"        ... and {len(skipped_rows) - 10} more")
 
     # Correlate with VRP
     print("\n[2/4] Correlating with earnings data...")
-    trades, correlated = correlate_with_vrp(trades, args.db)
+    trades, correlated = correlate_with_vrp(trades)
     print(f"      Matched {correlated} trades to earnings events")
 
     # Calculate stats

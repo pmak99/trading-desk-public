@@ -1,305 +1,188 @@
-#!/bin/bash
-# Database Restore Script
-# Restores ivcrush.db from automated backups
+#!/usr/bin/env bash
+# Restore the trading database from a nightly pg_dump.
+#
+# Rewritten 2026-09-12. The previous version of this file restored a SQLite
+# file into 2.0/data/ivcrush.db -- which nothing has read since the Postgres
+# migration. That is the worst kind of leftover: in an incident it would run,
+# print success, and leave the operator believing the database was restored.
+#
+# Companion to the host-side restore-verify job, which proves monthly that
+# the dump reconstitutes. This is the one you reach for when you actually need
+# the data back.
+#
+# ⚠️ DEFAULTS TO A SIDE-BY-SIDE DATABASE, NOT PRODUCTION. Restoring over live
+# `ivcrush` is destructive and irreversible, so it needs --into-live plus a
+# typed confirmation. The safe default lets you inspect a restored copy and
+# copy rows across, which is what an incident usually actually needs.
+#
+# Usage:
+#   restore_database.sh                       # newest dump -> ivcrush_restored
+#   restore_database.sh --list                # show available dumps
+#   restore_database.sh --dump PATH           # a specific dump
+#   restore_database.sh --target NAME         # a different side-by-side name
+#   restore_database.sh --into-live           # overwrite production (asks)
 
-set -euo pipefail  # Exit on error, unset vars, pipeline failures
+set -uo pipefail
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-BOLD='\033[1m'
-NC='\033[0m'
-
-# Get absolute script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="$(cd "$SCRIPT_DIR/.." && pwd)/.env"
 
-# Use absolute paths
-BACKUP_DIR="${PROJECT_ROOT}/backups"
-DB_FILE="${PROJECT_ROOT}/data/ivcrush.db"
+# Where nightly dumps land. the server is the host that makes them; from the Mac,
+# pass --dump with a path pulled off Drive or the backup host.
+BACKUP_DIR="${PG_BACKUP_DIR:-/home/trading/backups}"
+TARGET="ivcrush_restored"
+DUMP=""
+INTO_LIVE=0
 
-# Validate we're in the correct project structure
-if [ ! -f "${PROJECT_ROOT}/trade.sh" ]; then
-    echo -e "${RED}Error: Script not in expected location${NC}" >&2
-    echo "Expected trade.sh at: ${PROJECT_ROOT}/trade.sh" >&2
-    exit 1
-fi
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; NC=$'\033[0m'
+log()  { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+die()  { printf '%s%s%s\n' "$RED" "FATAL: $*" "$NC" >&2; exit 1; }
 
-# Check if backups directory exists
-if [ ! -d "$BACKUP_DIR" ]; then
-    echo -e "${RED}Error: Backups directory not found${NC}"
-    echo "Expected: $BACKUP_DIR"
-    exit 1
-fi
-
-# Ensure backup directory is not a symlink
-if [ -L "$BACKUP_DIR" ]; then
-    echo -e "${RED}Error: Backup directory is a symlink (security risk)${NC}" >&2
-    exit 1
-fi
-
-# List available backups
-echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
-echo -e "${BLUE}${BOLD}    Database Restore - IV Crush 2.0${NC}"
-echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
-echo ""
-
-# Safer array population (bash 3.2+ compatible)
-# Use temporary file to avoid process substitution (bash 4+ only)
-backups=()
-temp_file=$(mktemp)
-trap 'rm -f "$temp_file"' EXIT
-
-find "$BACKUP_DIR" -maxdepth 1 -name "ivcrush_*.db" -type f -print | sort -r > "$temp_file"
-
-while IFS= read -r file; do
-    backups+=("$file")
-done < "$temp_file"
-
-rm -f "$temp_file"
-
-# Validate and filter backups
-valid_backups=()
-if [ ${#backups[@]} -gt 0 ]; then
-    for backup in "${backups[@]}"; do
-        filename=$(basename "$backup")
-
-        # SECURITY: Validate filename matches expected pattern exactly
-        # Format: ivcrush_YYYYMMDD_HHMMSS.db
-        if [[ "$filename" =~ ^ivcrush_[0-9]{8}_[0-9]{6}\.db$ ]]; then
-            valid_backups+=("$backup")
-        else
-            echo -e "${YELLOW}Warning: Skipping invalid backup file: $filename${NC}" >&2
-        fi
-    done
-fi
-
-if [ ${#valid_backups[@]} -eq 0 ]; then
-    echo -e "${RED}Error: No valid backups found in $BACKUP_DIR${NC}"
-    echo ""
-    echo "Backups are created automatically when you run ./trade.sh"
-    echo "Run any analysis command first to create a backup."
-    exit 1
-fi
-
-echo -e "${GREEN}Available backups:${NC}"
-echo ""
-
-# Display numbered list with timestamps and sizes
-for i in "${!valid_backups[@]}"; do
-    backup="${valid_backups[$i]}"
-    filename=$(basename "$backup")
-
-    # Use parameter expansion instead of sed (safer)
-    timestamp="${filename#ivcrush_}"  # Remove prefix
-    timestamp="${timestamp%.db}"      # Remove suffix
-    timestamp="${timestamp//_/ }"     # Replace first underscore with space
-
-    # Get file size portably (macOS and Linux)
-    if stat -f%z "$backup" >/dev/null 2>&1; then
-        # macOS
-        size_bytes=$(stat -f%z "$backup")
-    else
-        # Linux
-        size_bytes=$(stat -c%s "$backup")
-    fi
-
-    # Convert to human-readable
-    if [ "$size_bytes" -lt 1024 ]; then
-        size="${size_bytes}B"
-    elif [ "$size_bytes" -lt 1048576 ]; then
-        size="$((size_bytes / 1024))KB"
-    else
-        size="$((size_bytes / 1048576))MB"
-    fi
-
-    # Determine age based on modification time
-    file_mtime=$(stat -f%m "$backup" 2>/dev/null || stat -c%Y "$backup" 2>/dev/null)
-    current_time=$(date +%s)
-    age_seconds=$((current_time - file_mtime))
-
-    if [ "$age_seconds" -lt 86400 ]; then
-        age="< 1 day"
-    elif [ "$age_seconds" -lt 604800 ]; then
-        age="< 7 days"
-    else
-        age="> 7 days"
-    fi
-
-    printf "${BOLD}%2d)${NC} %s  ${YELLOW}%s${NC}  ${BLUE}(%s)${NC}\n" $((i+1)) "$timestamp" "$size" "$age"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --list)      LIST=1; shift ;;
+        --dump)      DUMP="${2:-}"; shift 2 ;;
+        --target)    TARGET="${2:-}"; shift 2 ;;
+        --into-live) INTO_LIVE=1; shift ;;
+        -h|--help)   sed -n '2,23p' "$0" | sed 's/^# \?//'; exit 0 ;;
+        *)           die "unknown argument: $1" ;;
+    esac
 done
 
-echo ""
-echo -e "${YELLOW}Current database:${NC}"
-if [ -f "$DB_FILE" ]; then
-    current_size=$(ls -lh "$DB_FILE" | awk '{print $5}')
-    current_modified=$(ls -l "$DB_FILE" | awk '{print $6, $7, $8}')
-    echo "  $DB_FILE - $current_size (modified: $current_modified)"
-else
-    echo "  No database found (will be created from backup)"
-fi
+[ -r "$ENV_FILE" ] || die "cannot read $ENV_FILE"
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+set +a
 
-echo ""
-read -r -p "Select backup number to restore (or 'q' to quit): " selection
+# ⚠️ Resolve the client binaries rather than trusting PATH -- on the Mac libpq
+# is keg-only and none of psql/pg_restore are on the Bash tool's PATH (~/.zshrc
+# is not consulted there). Same candidate list as scripts/db, deliberately: if
+# one of these grows a new location, both need it.
+find_pg() {
+    local name="$1" p
+    p="$(command -v "$name" || true)"
+    [ -n "$p" ] && { printf '%s' "$p"; return 0; }
+    for p in "/opt/homebrew/opt/libpq/bin/$name" \
+             "/usr/local/opt/libpq/bin/$name" \
+             "/usr/bin/$name"; do
+        [ -x "$p" ] && { printf '%s' "$p"; return 0; }
+    done
+    return 1
+}
+PSQL="$(find_pg psql)"             || die "psql not found (Mac: brew install libpq)"
+PG_RESTORE="$(find_pg pg_restore)" || die "pg_restore not found (Mac: brew install libpq)"
 
-# Sanitize input - allow only alphanumeric and q/Q
-selection=$(echo "$selection" | tr -cd '[:alnum:]')
-
-# Handle quit
-if [ "$selection" = "q" ] || [ "$selection" = "Q" ]; then
-    echo "Restore cancelled."
+# ---- --list ------------------------------------------------------------------
+if [ -n "${LIST:-}" ]; then
+    if [ ! -d "$BACKUP_DIR" ]; then
+        echo "No backup directory at $BACKUP_DIR."
+        echo "On the Mac, fetch one from Drive or the backup host and pass --dump PATH."
+        exit 1
+    fi
+    printf '%sAvailable dumps in %s:%s\n' "$GREEN" "$BACKUP_DIR" "$NC"
+    # `ls -t`, not `find -printf`: -printf is GNU-only and this script has to
+    # run on the Mac too. Our own filenames, so no spaces or newlines.
+    # shellcheck disable=SC2012
+    ls -t "$BACKUP_DIR"/ivcrush-*.dump 2>/dev/null \
+        | while read -r f; do printf '  %-44s %6s\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"; done
     exit 0
 fi
 
-# Validate selection is a positive integer
-if ! [[ "$selection" =~ ^[0-9]+$ ]]; then
-    echo -e "${RED}Error: Please enter a number or 'q'${NC}"
-    exit 1
+# ---- pick a dump -------------------------------------------------------------
+if [ -z "$DUMP" ]; then
+    DUMP=$(find "$BACKUP_DIR" -maxdepth 1 -name 'ivcrush-*.dump' -type f 2>/dev/null | sort | tail -1)
+    [ -n "$DUMP" ] || die "no dump found in $BACKUP_DIR (try --dump PATH, or --list)"
 fi
+[ -r "$DUMP" ] || die "cannot read $DUMP"
 
-# Check range
-if [ "$selection" -lt 1 ] || [ "$selection" -gt ${#valid_backups[@]} ]; then
-    echo -e "${RED}Error: Selection out of range (1-${#valid_backups[@]})${NC}"
-    exit 1
-fi
+# Verify the archive is READABLE before dropping anything. pg_restore -l parses
+# the table of contents, so this catches a truncated file that `test -s` passes.
+TABLES=$("$PG_RESTORE" -l "$DUMP" 2>/dev/null | grep -c 'TABLE DATA')
+[ "${TABLES:-0}" -ge 10 ] || die "$DUMP lists only ${TABLES:-0} tables with data (expected >=10) -- refusing"
+log "dump: $DUMP ($(du -h "$DUMP" | cut -f1), $TABLES tables with data)"
 
-# Get selected backup
-selected_backup="${valid_backups[$((selection-1))]}"
-backup_name=$(basename "$selected_backup")
+# ---- confirm ------------------------------------------------------------------
+if [ "$INTO_LIVE" -eq 1 ]; then
+    TARGET="$PGDATABASE"
+    LIVE_ROWS=$("$PSQL" -tAc "SELECT COALESCE(sum(n_live_tup),0) FROM pg_stat_user_tables" -d "$PGDATABASE" 2>/dev/null || echo "?")
+    cat <<EOF
 
-# Additional validation: ensure selected file still exists and is a regular file
-if [ ! -f "$selected_backup" ]; then
-    echo -e "${RED}Error: Selected backup no longer exists${NC}"
-    exit 1
-fi
+${RED}This OVERWRITES the live trading database.${NC}
+  host      : ${PGHOST}:${PGPORT}
+  database  : ${PGDATABASE}   (~${LIVE_ROWS} rows right now)
+  from      : ${DUMP}
 
-echo ""
-echo -e "${YELLOW}Selected: $backup_name${NC}"
+Everything written since that dump is lost. There is no undo.
+${YELLOW}If you only need to look at old data, cancel and re-run without --into-live --
+that restores side by side and leaves production alone.${NC}
 
-# Confirm before proceeding
-if [ -f "$DB_FILE" ]; then
-    echo ""
-    echo -e "${RED}${BOLD}WARNING:${NC} This will replace your current database!"
-    echo ""
-    read -r -p "Create safety backup before restore? (Y/n): " create_safety
-
-    # Sanitize response
-    create_safety=$(echo "$create_safety" | tr -cd '[:alpha:]')
-
-    if [ "$create_safety" != "n" ] && [ "$create_safety" != "N" ]; then
-        # Use UTC timestamp for safety backup
-        safety_backup="${DB_FILE}.pre-restore-$(TZ=UTC date +%Y%m%d_%H%M%S_UTC)"
-        echo "Creating safety backup: $safety_backup"
-
-        if cp "$DB_FILE" "$safety_backup"; then
-            echo -e "${GREEN}✓ Safety backup created${NC}"
-        else
-            echo -e "${RED}Error: Failed to create safety backup${NC}"
-            exit 1
-        fi
-    fi
-
-    echo ""
-    read -r -p "Continue with restore? (y/N): " confirm
-
-    # Sanitize response
-    confirm=$(echo "$confirm" | tr -cd '[:alpha:]')
-
-    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-        echo "Restore cancelled."
-        exit 0
-    fi
-fi
-
-# Perform restore with atomic operation
-echo ""
-echo "Restoring database..."
-
-# Create data directory if it doesn't exist
-mkdir -p "$(dirname "$DB_FILE")"
-
-# Use temporary file for atomic restore
-temp_restore="${DB_FILE}.tmp.$$"
-trap 'rm -f "$temp_restore" 2>/dev/null' EXIT ERR
-
-# Copy to temporary location first
-if ! cp "$selected_backup" "$temp_restore"; then
-    echo -e "${RED}Error: Failed to copy backup file${NC}"
-    exit 1
-fi
-
-# Verify temporary file integrity before committing
-echo "Verifying backup integrity..."
-if ! sqlite3 "$temp_restore" "PRAGMA integrity_check;" 2>/dev/null | grep -q "ok"; then
-    echo -e "${RED}Error: Backup file is corrupted${NC}"
-    echo "Consider selecting a different backup."
-    rm -f "$temp_restore"
-    exit 1
-fi
-
-# Verify file sizes match
-if stat -f%z "$selected_backup" >/dev/null 2>&1; then
-    # macOS
-    orig_size=$(stat -f%z "$selected_backup")
-    temp_size=$(stat -f%z "$temp_restore")
-else
-    # Linux
-    orig_size=$(stat -c%s "$selected_backup")
-    temp_size=$(stat -c%s "$temp_restore")
-fi
-
-if [ "$orig_size" != "$temp_size" ]; then
-    echo -e "${RED}Error: File size mismatch (copy incomplete)${NC}"
-    rm -f "$temp_restore"
-    exit 1
-fi
-
-# Atomic move to final location
-if mv "$temp_restore" "$DB_FILE"; then
-    echo -e "${GREEN}✓ Database file restored${NC}"
-    trap - EXIT ERR
-else
-    echo -e "${RED}Error: Failed to restore database${NC}"
-    exit 1
-fi
-
-# Final integrity check
-echo "Verifying database integrity..."
-if sqlite3 "$DB_FILE" "PRAGMA integrity_check;" 2>/dev/null | grep -q "ok"; then
-    echo -e "${GREEN}✓ Database integrity check passed${NC}"
-else
-    echo -e "${RED}⚠️  Database integrity check failed${NC}"
-    echo "Database may be corrupted. Consider restoring a different backup."
-    exit 1
-fi
-
-# Show restored database info
-echo ""
-echo -e "${BLUE}${BOLD}Restore Complete${NC}"
-echo ""
-echo "Database restored from: $backup_name"
-echo ""
-
-# Show table counts
-echo -e "${GREEN}Database contents:${NC}"
-sqlite3 "$DB_FILE" <<EOF
-.mode column
-.headers on
-SELECT
-    'historical_moves' as table_name,
-    COUNT(*) as rows
-FROM historical_moves
-UNION ALL
-SELECT
-    'earnings_calendar' as table_name,
-    COUNT(*) as rows
-FROM earnings_calendar;
 EOF
+    printf "Type 'overwrite production' to proceed: "
+    read -r reply
+    [ "$reply" = "overwrite production" ] || { echo "Aborted."; exit 1; }
+else
+    log "restoring side by side into '$TARGET' -- production '$PGDATABASE' is untouched"
+fi
 
-echo ""
-echo -e "${GREEN}✓ Restore successful${NC}"
-echo ""
-echo "You can now use ./trade.sh normally."
-echo ""
+# ---- restore -------------------------------------------------------------------
+# ⚠️ Never restore into ivcrush_test or ivcrush_scratch. The pg-marked tests build
+# their per-test schemas in ivcrush_test (since 2026-09-13; before that the
+# fixture used production), and scratch is a working copy people use --
+# clobbering either turns an incident recovery into a failure that looks
+# unrelated. Checked here rather than at parse time so it also covers
+# --into-live, where TARGET comes from PGDATABASE.
+case "$TARGET" in
+    ivcrush_test|ivcrush_scratch)
+        die "refusing to restore into $TARGET (tests and working copies live there)" ;;
+esac
+
+# ⚠️ Run as `trading`, pg_restore reports an error creating pg_stat_statements:
+# only the superuser may create that extension. It is query statistics, not
+# application data, so the restored copy is complete without it. After an
+# --into-live restore, re-create it as the superuser:
+#   docker exec trading-postgres psql -U postgres -d ivcrush -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements'
+# On a cluster rebuilt from scratch, create the roles and grants first.
+
+if [ "$INTO_LIVE" -eq 0 ]; then
+    "$PSQL" -d postgres -q -c "DROP DATABASE IF EXISTS \"$TARGET\";" || die "could not drop $TARGET"
+    "$PSQL" -d postgres -q -c "CREATE DATABASE \"$TARGET\";"         || die "could not create $TARGET"
+    RESTORE_ARGS=(--no-owner --no-privileges -d "$TARGET")
+else
+    # --clean --if-exists drops each object before recreating it, so this works
+    # against a populated database without dropping the database itself (which
+    # would fail anyway while anything holds a connection).
+    RESTORE_ARGS=(--no-owner --no-privileges --clean --if-exists -d "$TARGET")
+fi
+
+if ! "$PG_RESTORE" "${RESTORE_ARGS[@]}" "$DUMP" 2>/tmp/.restore_err; then
+    # pg_restore warns about non-fatal things (missing roles, DROP of an object
+    # that was not there). Show them; judge by the row counts below.
+    printf '%s%s%s\n' "$YELLOW" "pg_restore reported issues:" "$NC"
+    tail -10 /tmp/.restore_err | sed 's/^/    /'
+fi
+
+# ---- report --------------------------------------------------------------------
+echo
+printf '%s%s%s\n' "$GREEN" "Restored into '$TARGET':" "$NC"
+"$PSQL" -d "$TARGET" -c "
+    SELECT c.relname AS table_name,
+           (xpath('/row/c/text()',
+                  query_to_xml(format('SELECT count(*) AS c FROM public.%I', c.relname),
+                               false, true, '')))[1]::text::bigint AS rows
+      FROM pg_class c
+      JOIN pg_namespace ns ON ns.oid = c.relnamespace
+     WHERE ns.nspname = 'public' AND c.relkind = 'r'
+     ORDER BY rows DESC;"
+
+if [ "$INTO_LIVE" -eq 0 ]; then
+    cat <<EOF
+Production was not modified. To query the restored copy:
+
+    PGDATABASE=$TARGET scripts/db -c "SELECT ..."
+
+and to drop it when you are done:
+
+    psql -d postgres -c 'DROP DATABASE "$TARGET";'
+EOF
+fi

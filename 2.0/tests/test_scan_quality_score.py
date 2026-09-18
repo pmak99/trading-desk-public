@@ -1,223 +1,156 @@
 #!/usr/bin/env python3
 """
-Test the composite quality scoring function with real data from 12/1/2025 scan.
+Pin the live scan quality score, scripts/scan/quality_scorer.py.
 
-This test verifies that MRVL (NEUTRAL bias, lower VRP) ranks higher than
-OKTA (STRONG BEARISH, higher VRP) due to risk-adjusted scoring.
+Inputs are the 2025-12-01 whisper-scan rows for MRVL, OKTA, CRWD, ASAN and AEO.
+Every expected figure comes from calling calculate_scan_quality_score itself.
+This file used to carry its own capped, bucketed copy of the formula; the copy
+had drifted from the live scorer and only printed, so nothing noticed.
 
-Updated Dec 2025: Tests now use scoring constants to ensure consistency
-with production code and verify all 10 code review fixes.
+The VRP term is linear and uncapped (vrp / 2.16 * 55), so the score is not
+bounded at 100. A pre-registered study on 5,948 events (2026-09-13) kept it that
+way: capping VRP at 3.0, 3.6 or 4.0, or taking its log, lowered top-20% crush
+(that study ran in intraday units; the shape it supports carries over to the
+close-to-close target).
 """
 
-import sys
-from pathlib import Path
+import doctest
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pytest
 
+import scripts.scan.quality_scorer as quality_scorer_module
 from scripts.scan import (
-    calculate_scan_quality_score,
-    _precalculate_quality_scores,
-    SCORE_VRP_MAX_POINTS,
-    SCORE_VRP_TARGET,
+    LIQUIDITY_PRIORITY_ORDER,
     SCORE_EDGE_MAX_POINTS,
     SCORE_EDGE_TARGET,
-    SCORE_LIQUIDITY_MAX_POINTS,
     SCORE_LIQUIDITY_EXCELLENT_POINTS,
     SCORE_LIQUIDITY_GOOD_POINTS,
-    SCORE_LIQUIDITY_WARNING_POINTS,
+    SCORE_LIQUIDITY_MAX_POINTS,
     SCORE_LIQUIDITY_REJECT_POINTS,
-    SCORE_MOVE_MAX_POINTS,
-    SCORE_MOVE_EASY_THRESHOLD,
-    SCORE_MOVE_MODERATE_THRESHOLD,
-    SCORE_MOVE_MODERATE_POINTS,
-    SCORE_MOVE_CHALLENGING_THRESHOLD,
+    SCORE_LIQUIDITY_WARNING_POINTS,
+    SCORE_MOVE_BASELINE_PCT,
     SCORE_MOVE_CHALLENGING_POINTS,
+    SCORE_MOVE_CHALLENGING_THRESHOLD,
+    SCORE_MOVE_EASY_THRESHOLD,
     SCORE_MOVE_EXTREME_POINTS,
-    LIQUIDITY_PRIORITY_ORDER
+    SCORE_MOVE_MAX_POINTS,
+    SCORE_MOVE_MODERATE_POINTS,
+    SCORE_MOVE_MODERATE_THRESHOLD,
+    SCORE_VRP_MAX_POINTS,
+    SCORE_VRP_TARGET,
+    _precalculate_quality_scores,
+    calculate_scan_quality_score,
 )
 
+# Real rows from the 2025-12-01 whisper-mode scan, vrp_ratio rescaled from
+# intraday to close-to-close by SCORE_VRP_TARGET's own ratio (2.16/4.0 = 0.54)
+# so each ticker keeps its normalized VRP (vrp_ratio / SCORE_VRP_TARGET) and its
+# score. edge_score and directional_bias are kept as scanned; the scorer reads
+# neither.
+MRVL = {'ticker': 'MRVL', 'vrp_ratio': 2.16, 'edge_score': 2.79,
+        'implied_move_pct': '11.69%', 'liquidity_tier': 'WARNING',
+        'directional_bias': 'NEUTRAL'}
+OKTA = {'ticker': 'OKTA', 'vrp_ratio': 4.47, 'edge_score': 4.67,
+        'implied_move_pct': '12.10%', 'liquidity_tier': 'WARNING',
+        'directional_bias': 'STRONG BEARISH'}
+CRWD = {'ticker': 'CRWD', 'vrp_ratio': 2.26, 'edge_score': 3.14,
+        'implied_move_pct': '7.15%', 'liquidity_tier': 'WARNING',
+        'directional_bias': 'STRONG BEARISH'}
+ASAN = {'ticker': 'ASAN', 'vrp_ratio': 2.62, 'edge_score': 2.86,
+        'implied_move_pct': '14.83%', 'liquidity_tier': 'REJECT',
+        'directional_bias': 'STRONG BEARISH'}
+AEO = {'ticker': 'AEO', 'vrp_ratio': 2.44, 'edge_score': 2.52,
+       'implied_move_pct': '13.96%', 'liquidity_tier': 'REJECT',
+       'directional_bias': 'STRONG BEARISH'}
+WHISPER_ROWS = (MRVL, OKTA, CRWD, ASAN, AEO)
 
-def test_mrvl_vs_okta():
-    """Test that MRVL ranks higher than OKTA despite lower VRP."""
 
-    # Real data from 12/1/2025 whisper mode scan
-    mrvl = {
-        'ticker': 'MRVL',
-        'ticker_name': 'Marvell Technology',
-        'vrp_ratio': 4.00,
-        'edge_score': 2.79,
-        'implied_move_pct': '11.69%',  # String format from scan output
-        'liquidity_tier': 'WARNING',
-        'directional_bias': 'NEUTRAL',
-        'earnings_date': '2025-12-02'
-    }
+def breakdown_score(data):
+    """Split a live score into its VRP, liquidity and implied-move points.
 
-    okta = {
-        'ticker': 'OKTA',
-        'ticker_name': 'Okta',
-        'vrp_ratio': 8.27,
-        'edge_score': 4.67,
-        'implied_move_pct': '12.10%',  # String format from scan output
-        'liquidity_tier': 'WARNING',
-        'directional_bias': 'STRONG BEARISH',
-        'earnings_date': '2025-12-02'
-    }
+    Built only from calls to calculate_scan_quality_score: a VRP of zero drops
+    the VRP term, an implied move at SCORE_MOVE_BASELINE_PCT drops the move
+    term, and a row with both dropped scores the liquidity term alone. Each
+    call rounds to 0.1, so a component can carry ~0.1 of rounding.
+    """
+    total = calculate_scan_quality_score(data)
+    no_move = f"{SCORE_MOVE_BASELINE_PCT}%"
+    vrp_pts = total - calculate_scan_quality_score({**data, 'vrp_ratio': 0.0})
+    move_pts = total - calculate_scan_quality_score({**data, 'implied_move_pct': no_move})
+    liq_pts = calculate_scan_quality_score(
+        {**data, 'vrp_ratio': 0.0, 'implied_move_pct': no_move}
+    )
+    return vrp_pts, liq_pts, move_pts
 
-    crwd = {
-        'ticker': 'CRWD',
-        'ticker_name': 'CrowdStrike Holdings',
-        'vrp_ratio': 4.19,
-        'edge_score': 3.14,
-        'implied_move_pct': '7.15%',  # String format from scan output
-        'liquidity_tier': 'WARNING',
-        'directional_bias': 'STRONG BEARISH',
-        'earnings_date': '2025-12-02'
-    }
 
-    asan = {
-        'ticker': 'ASAN',
-        'ticker_name': 'Asana',
-        'vrp_ratio': 4.85,
-        'edge_score': 2.86,
-        'implied_move_pct': '14.83%',  # String format from scan output
-        'liquidity_tier': 'REJECT',
-        'directional_bias': 'STRONG BEARISH',
-        'earnings_date': '2025-12-02'
-    }
+def test_docstring_example_inputs_pin_live_scores():
+    """The two inputs quoted in calculate_scan_quality_score's docstring.
 
-    aeo = {
-        'ticker': 'AEO',
-        'ticker_name': 'American Eagle',
-        'vrp_ratio': 4.52,
-        'edge_score': 2.52,
-        'implied_move_pct': '13.96%',  # String format from scan output
-        'liquidity_tier': 'REJECT',
-        'directional_bias': 'STRONG BEARISH',
-        'earnings_date': '2025-12-02'
-    }
+    The docstring once promised 81.0 and 75.9 for these; the live scorer
+    returns 135.7 and 77.4.
+    """
+    assert calculate_scan_quality_score(OKTA) == 135.7
+    assert calculate_scan_quality_score(MRVL) == 77.4
 
-    # Calculate scores
-    mrvl_score = calculate_scan_quality_score(mrvl)
-    okta_score = calculate_scan_quality_score(okta)
-    crwd_score = calculate_scan_quality_score(crwd)
-    asan_score = calculate_scan_quality_score(asan)
-    aeo_score = calculate_scan_quality_score(aeo)
 
-    # Display results
-    print("\n" + "=" * 80)
-    print("COMPOSITE QUALITY SCORE TEST - 12/1/2025 Whisper Mode Data")
-    print("=" * 80)
-    print("\nScoring Breakdown:")
-    print(f"{'Ticker':<8} {'Score':<7} {'VRP':<7} {'Edge':<7} {'Bias':<18} {'Implied':<10} {'Liquidity':<12}")
-    print(f"{'-'*8} {'-'*7} {'-'*7} {'-'*7} {'-'*18} {'-'*10} {'-'*12}")
+def test_docstring_examples_run_against_live_scorer():
+    """Run the module's doctests, so its examples cannot drift again."""
+    result = doctest.testmod(quality_scorer_module, verbose=False)
+    assert result.attempted >= 2
+    assert result.failed == 0
 
-    results = [
-        ('MRVL', mrvl_score, mrvl),
-        ('OKTA', okta_score, okta),
-        ('CRWD', crwd_score, crwd),
-        ('ASAN', asan_score, asan),
-        ('AEO', aeo_score, aeo)
-    ]
 
-    # Sort by score (descending)
-    results.sort(key=lambda x: -x[1])
+def test_whisper_scan_scores_and_ranking():
+    """Pin all five scores and the ranking they produce.
 
-    for ticker, score, data in results:
-        print(
-            f"{ticker:<8} {score:<7.1f} {data['vrp_ratio']:<7.2f} "
-            f"{data['edge_score']:<7.2f} {data['directional_bias']:<18} "
-            f"{data['implied_move_pct']:<10} {data['liquidity_tier']:<12}"
-        )
+    There is no directional penalty at scan stage: OKTA's STRONG BEARISH bias
+    does not stop its 4.47x (close-to-close) VRP ranking first. Direction is
+    matched at strategy selection.
+    """
+    scores = {d['ticker']: calculate_scan_quality_score(d) for d in WHISPER_ROWS}
+    assert scores == {'OKTA': 135.7, 'CRWD': 85.6, 'MRVL': 77.4,
+                      'ASAN': 77.2, 'AEO': 73.7}
+    ranking = sorted(scores, key=lambda t: -scores[t])
+    assert ranking == ['OKTA', 'CRWD', 'MRVL', 'ASAN', 'AEO']
 
-    print("\n" + "=" * 80)
-    print("EXPECTED RANKING (NO directional penalty - handled at strategy stage):")
-    print("=" * 80)
-    print("1. OKTA  - Highest VRP (8.27x) + highest edge (4.67)")
-    print("2. CRWD  - Low implied move (7.15%) + moderate VRP/edge")
-    print("3. MRVL  - Moderate VRP (4.00x) + moderate edge (2.79)")
-    print("4. ASAN  - REJECT liquidity (major penalty)")
-    print("5. AEO   - REJECT liquidity + highest implied move")
 
-    print("\n" + "=" * 80)
-    print("ACTUAL RANKING (from composite scores):")
-    print("=" * 80)
-    for rank, (ticker, score, data) in enumerate(results, 1):
-        print(f"{rank}. {ticker:<6} - Score: {score:.1f}")
+def test_score_is_not_capped_at_100():
+    """VRP is linear and uncapped, so the total runs past 100."""
+    assert calculate_scan_quality_score(OKTA) > 100
 
-    # Verify scoring works correctly (no specific ranking requirement)
-    print("\n" + "=" * 80)
-    print("TEST RESULTS:")
-    print("=" * 80)
+    base = {'implied_move_pct': '10%', 'liquidity_tier': 'WARNING'}
+    at_1x = calculate_scan_quality_score({**base, 'vrp_ratio': SCORE_VRP_TARGET})
+    at_2x = calculate_scan_quality_score({**base, 'vrp_ratio': 2 * SCORE_VRP_TARGET})
+    at_3x = calculate_scan_quality_score({**base, 'vrp_ratio': 3 * SCORE_VRP_TARGET})
+    # Each further multiple of the VRP target adds the full VRP weight again.
+    assert at_2x - at_1x == pytest.approx(SCORE_VRP_MAX_POINTS)
+    assert at_3x - at_2x == pytest.approx(SCORE_VRP_MAX_POINTS)
 
-    if okta_score > mrvl_score:
-        print(f"✅ PASS: OKTA ({okta_score:.1f}) ranks higher than MRVL ({mrvl_score:.1f})")
-        print(f"   Difference: +{okta_score - mrvl_score:.1f} points")
-        print(f"   Reason: Higher VRP (8.27x vs 4.00x) + higher edge (4.67 vs 2.79)")
-    else:
-        print(f"⚠️  UNEXPECTED: MRVL ({mrvl_score:.1f}) ranks higher than OKTA ({okta_score:.1f})")
-        print(f"   This suggests scoring weights may need adjustment")
+    # The best bounded factors with VRP exactly at target make 100 ...
+    best = {'implied_move_pct': '0%', 'liquidity_tier': 'EXCELLENT'}
+    assert calculate_scan_quality_score({**best, 'vrp_ratio': SCORE_VRP_TARGET}) == 100.0
+    # ... and any VRP above the target goes past it.
+    assert calculate_scan_quality_score({**best, 'vrp_ratio': 5.0}) > 100.0
 
-    print(f"\n✅ Top ranked ticker: {results[0][0]} with score {results[0][1]:.1f}")
-    print(f"   Strategy selection will apply directional alignment at trade.sh stage")
 
-    print("\n" + "=" * 80)
-    print("SCORE COMPONENT BREAKDOWN:")
-    print("=" * 80)
+def test_component_breakdown():
+    """Components taken from the live scorer add up to its total."""
+    for data in WHISPER_ROWS:
+        vrp_pts, liq_pts, move_pts = breakdown_score(data)
+        total = calculate_scan_quality_score(data)
+        assert vrp_pts + liq_pts + move_pts == pytest.approx(total, abs=0.15)
 
-    def breakdown_score(data):
-        """
-        Show detailed breakdown of score components.
+        implied = float(data['implied_move_pct'].rstrip('%'))
+        assert vrp_pts == pytest.approx(
+            data['vrp_ratio'] / SCORE_VRP_TARGET * SCORE_VRP_MAX_POINTS, abs=0.15)
+        assert move_pts == pytest.approx(
+            (1 - implied / SCORE_MOVE_BASELINE_PCT) * SCORE_MOVE_MAX_POINTS, abs=0.15)
 
-        Uses production constants to ensure test matches implementation.
-        """
-        # Use production constants
-        vrp_score = max(0.0, min(data['vrp_ratio'] / SCORE_VRP_TARGET, 1.0)) * SCORE_VRP_MAX_POINTS
-        edge_score = max(0.0, min(data['edge_score'] / SCORE_EDGE_TARGET, 1.0)) * SCORE_EDGE_MAX_POINTS
-
-        if data['liquidity_tier'] == 'EXCELLENT':
-            liq_score = SCORE_LIQUIDITY_EXCELLENT_POINTS
-        elif data['liquidity_tier'] == 'WARNING':
-            liq_score = SCORE_LIQUIDITY_WARNING_POINTS
-        else:
-            liq_score = SCORE_LIQUIDITY_REJECT_POINTS
-
-        implied_pct = float(data['implied_move_pct'].rstrip('%'))
-        if implied_pct <= SCORE_MOVE_EASY_THRESHOLD:
-            move_score = SCORE_MOVE_MAX_POINTS
-        elif implied_pct <= SCORE_MOVE_MODERATE_THRESHOLD:
-            move_score = SCORE_MOVE_MODERATE_POINTS
-        elif implied_pct <= SCORE_MOVE_CHALLENGING_THRESHOLD:
-            move_score = SCORE_MOVE_CHALLENGING_POINTS
-        else:
-            move_score = SCORE_MOVE_EXTREME_POINTS
-
-        return vrp_score, edge_score, liq_score, move_score
-
-    print(f"\n{'Component':<20} {'MRVL':<8} {'OKTA':<8} {'CRWD':<8}")
-    print(f"{'-'*20} {'-'*8} {'-'*8} {'-'*8}")
-
-    mrvl_vrp, mrvl_edge, mrvl_liq, mrvl_move = breakdown_score(mrvl)
-    okta_vrp, okta_edge, okta_liq, okta_move = breakdown_score(okta)
-    crwd_vrp, crwd_edge, crwd_liq, crwd_move = breakdown_score(crwd)
-
-    print(f"{'VRP (' + str(SCORE_VRP_MAX_POINTS) + ' max)':<20} {mrvl_vrp:<8.1f} {okta_vrp:<8.1f} {crwd_vrp:<8.1f}")
-    print(f"{'Edge (' + str(SCORE_EDGE_MAX_POINTS) + ' max)':<20} {mrvl_edge:<8.1f} {okta_edge:<8.1f} {crwd_edge:<8.1f}")
-    print(f"{'Liquidity (' + str(SCORE_LIQUIDITY_EXCELLENT_POINTS) + ' max)':<20} {mrvl_liq:<8.1f} {okta_liq:<8.1f} {crwd_liq:<8.1f}")
-    print(f"{'Implied Move (' + str(SCORE_MOVE_MAX_POINTS) + ' max)':<20} {mrvl_move:<8.1f} {okta_move:<8.1f} {crwd_move:<8.1f}")
-    print(f"{'-'*20} {'-'*8} {'-'*8} {'-'*8}")
-    print(f"{'TOTAL':<20} {mrvl_score:<8.1f} {okta_score:<8.1f} {crwd_score:<8.1f}")
-
-    print("\n" + "=" * 80)
-    print("KEY INSIGHT:")
-    print("=" * 80)
-    print("Directional bias NO LONGER penalized at scan stage")
-    print("OKTA ranks higher due to superior VRP (8.27x) + edge (4.67)")
-    print("Strategy selection (trade.sh) will apply directional alignment:")
-    print("  - OKTA + Bear Call Spread = +8 points (aligned)")
-    print("  - OKTA + Bull Put Spread = -3 points (counter-trend)")
-    print("Result: All opportunities surface, strategy matching happens later")
-    print("=" * 80 + "\n")
+    # OKTA's VRP term alone is past the nominal 55-point weight.
+    okta_vrp, okta_liq, _ = breakdown_score(OKTA)
+    assert okta_vrp > SCORE_VRP_MAX_POINTS
+    assert okta_liq == SCORE_LIQUIDITY_WARNING_POINTS
+    assert breakdown_score(ASAN)[1] == SCORE_LIQUIDITY_REJECT_POINTS
 
 
 def test_helper_function():
@@ -237,7 +170,7 @@ def test_helper_function():
     _precalculate_quality_scores(results)
 
     # Verify _quality_score field was added
-    print(f"\n✓ Checking helper function added '_quality_score' field:")
+    print("\n✓ Checking helper function added '_quality_score' field:")
     for i, r in enumerate(results, 1):
         assert '_quality_score' in r, f"Result {i} missing '_quality_score' field"
         score = r['_quality_score']
@@ -248,10 +181,10 @@ def test_helper_function():
         assert score == direct_score, f"Cached score {score} != direct score {direct_score}"
         print(f"    ✓ Matches direct calculation: {direct_score:.1f}")
 
-    print(f"\n✅ PASS: Helper function works correctly")
-    print(f"  - Adds '_quality_score' field to all results")
-    print(f"  - Cached scores match direct calculation")
-    print(f"  - Performance optimization: O(n) pre-calc vs O(n log n) in sort")
+    print("\n✅ PASS: Helper function works correctly")
+    print("  - Adds '_quality_score' field to all results")
+    print("  - Cached scores match direct calculation")
+    print("  - Performance optimization: O(n) pre-calc vs O(n log n) in sort")
 
 
 def test_liquidity_priority_order():
@@ -275,7 +208,7 @@ def test_liquidity_priority_order():
     assert LIQUIDITY_PRIORITY_ORDER['WARNING'] == 2, "WARNING should be priority 2"
     assert LIQUIDITY_PRIORITY_ORDER['REJECT'] == 3, "REJECT should be priority 3"
     assert LIQUIDITY_PRIORITY_ORDER['UNKNOWN'] == 4, "UNKNOWN should be priority 4"
-    print(f"✓ Priorities correctly ordered: EXCELLENT(0) > GOOD(1) > WARNING(2) > REJECT(3) > UNKNOWN(4)")
+    print("✓ Priorities correctly ordered: EXCELLENT(0) > GOOD(1) > WARNING(2) > REJECT(3) > UNKNOWN(4)")
 
     # Test sorting with priority
     test_data = [
@@ -296,7 +229,7 @@ def test_liquidity_priority_order():
     assert sorted_tickers == expected_order, f"Expected {expected_order}, got {sorted_tickers}"
     print(f"✓ Sorting works correctly: {' > '.join(sorted_tickers)}")
 
-    print(f"\n✅ PASS: LIQUIDITY_PRIORITY_ORDER constant working correctly")
+    print("\n✅ PASS: LIQUIDITY_PRIORITY_ORDER constant working correctly")
 
 
 def test_constants_consistency():
@@ -305,12 +238,14 @@ def test_constants_consistency():
     print("TEST: Scoring Constants Consistency (4-Tier)")
     print("=" * 80)
 
-    # Verify constants sum to 100
+    # The nominal weights sum to 100. That is the score at VRP == target with
+    # the best liquidity and a 0% move -- not a ceiling: VRP is uncapped (see
+    # test_score_is_not_capped_at_100).
     total_max = (SCORE_VRP_MAX_POINTS + SCORE_EDGE_MAX_POINTS +
                  SCORE_LIQUIDITY_EXCELLENT_POINTS + SCORE_MOVE_MAX_POINTS)
-    print(f"\nTotal max points: {total_max}")
-    assert total_max == 100, f"Max points should sum to 100, got {total_max}"
-    print(f"✓ Max points sum to 100: {SCORE_VRP_MAX_POINTS} + {SCORE_EDGE_MAX_POINTS} + {SCORE_LIQUIDITY_EXCELLENT_POINTS} + {SCORE_MOVE_MAX_POINTS} = 100")
+    print(f"\nTotal nominal points: {total_max}")
+    assert total_max == 100, f"Nominal weights should sum to 100, got {total_max}"
+    print(f"✓ Nominal weights sum to 100: {SCORE_VRP_MAX_POINTS} + {SCORE_EDGE_MAX_POINTS} + {SCORE_LIQUIDITY_EXCELLENT_POINTS} + {SCORE_MOVE_MAX_POINTS} = 100")
 
     # Verify targets are positive (prevent division by zero)
     assert SCORE_VRP_TARGET > 0, "VRP target must be > 0"
@@ -329,7 +264,7 @@ def test_constants_consistency():
     assert SCORE_LIQUIDITY_GOOD_POINTS > SCORE_LIQUIDITY_WARNING_POINTS, "GOOD > WARNING"
     assert SCORE_LIQUIDITY_WARNING_POINTS > SCORE_LIQUIDITY_REJECT_POINTS, "WARNING > REJECT"
     assert SCORE_LIQUIDITY_REJECT_POINTS > 0, "REJECT > 0 (some REJECT trades win!)"
-    print(f"✓ Tier ordering correct: EXCELLENT > GOOD > WARNING > REJECT > 0")
+    print("✓ Tier ordering correct: EXCELLENT > GOOD > WARNING > REJECT > 0")
 
     # Verify move thresholds are ordered
     assert SCORE_MOVE_EASY_THRESHOLD < SCORE_MOVE_MODERATE_THRESHOLD, "Easy < Moderate"
@@ -342,21 +277,19 @@ def test_constants_consistency():
     assert SCORE_MOVE_CHALLENGING_POINTS > SCORE_MOVE_EXTREME_POINTS, "Challenging > Extreme"
     print(f"✓ Move scores decrease: {SCORE_MOVE_MAX_POINTS} > {SCORE_MOVE_MODERATE_POINTS} > {SCORE_MOVE_CHALLENGING_POINTS} > {SCORE_MOVE_EXTREME_POINTS}")
 
-    print(f"\n✅ PASS: All constants are consistent and valid")
+    print("\n✅ PASS: All constants are consistent and valid")
 
 
-if __name__ == "__main__":
-    test_mrvl_vs_okta()
-    test_helper_function()
-    test_liquidity_priority_order()
-    test_constants_consistency()
+def test_vrp_target_defaults_to_the_live_target():
+    assert calculate_scan_quality_score(MRVL) == calculate_scan_quality_score(
+        MRVL, vrp_target=SCORE_VRP_TARGET)
 
-    print("\n" + "=" * 80)
-    print("ALL TESTS COMPLETED SUCCESSFULLY")
-    print("=" * 80)
-    print("\nSummary:")
-    print("✅ Quality score calculation (CRWD > OKTA > MRVL)")
-    print("✅ Helper function _precalculate_quality_scores()")
-    print("✅ LIQUIDITY_PRIORITY_ORDER constant")
-    print("✅ All scoring constants valid and consistent")
-    print("=" * 80 + "\n")
+
+def test_vrp_target_reads_vrp_against_another_scale():
+    """Research and calibration score history against a frozen target (D13)."""
+    row = {'vrp_ratio': 2.0, 'implied_move_pct': '8.00%', 'liquidity_tier': 'WARNING'}
+    no_vrp = calculate_scan_quality_score({**row, 'vrp_ratio': 0.0})
+    at_4 = calculate_scan_quality_score(row, vrp_target=4.0)
+    at_2 = calculate_scan_quality_score(row, vrp_target=2.0)
+    assert at_4 - no_vrp == pytest.approx(27.5, abs=0.1)
+    assert at_2 - no_vrp == pytest.approx(55.0, abs=0.1)

@@ -1,41 +1,42 @@
-"""Correlate parsed trades with historical earnings moves from ivcrush.db."""
+"""Correlate parsed trades with historical earnings moves from Postgres."""
 
-import os
-import sqlite3
 from collections import defaultdict
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+from common.db import as_date, connect  # noqa: E402
 from journal.models import Trade
 
 
-def load_historical_moves(db_path: str, min_date: str = '2020-01-01') -> Dict[str, List[Dict]]:
-    """Load historical moves from ivcrush database, grouped by ticker
+def load_historical_moves(min_date: str = '2020-01-01') -> Dict[str, List[Dict]]:
+    """Load historical moves from the database, grouped by ticker
 
     Args:
-        db_path: Path to ivcrush.db
         min_date: Only load earnings after this date (default 2020-01-01)
+
+    ⚠️ This took a `db_path` and returned empty unless that file existed. The
+    default was 2.0/data/ivcrush.db, deleted at the 2026-09-12 cutover, so every
+    import from then until 2026-09-13 matched nothing and wrote NULL
+    earnings_date and actual_move. The target comes from PG* in the environment.
     """
     moves_by_ticker = defaultdict(list)
 
-    if not os.path.exists(db_path):
-        print(f"      Warning: Database not found at {db_path}")
-        return moves_by_ticker
-
-    conn = sqlite3.connect(db_path)
+    conn = connect()
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT ticker, earnings_date, gap_move_pct, intraday_move_pct
         FROM historical_moves
-        WHERE earnings_date >= ?
+        WHERE earnings_date >= %s
         ORDER BY ticker, earnings_date
     """, (min_date,))
 
     for row in cursor.fetchall():
         ticker, earnings_date, gap_move, intraday_move = row
         moves_by_ticker[ticker].append({
-            'earnings_date': earnings_date,
+            # A string, like every other date on Trade: Postgres returns a
+            # `date`, which the parser's JSON export cannot serialise.
+            'earnings_date': as_date(earnings_date).isoformat(),
             'gap_move_pct': gap_move,
             'intraday_move_pct': intraday_move,
             'actual_move': max(abs(gap_move), abs(intraday_move)),
@@ -45,11 +46,20 @@ def load_historical_moves(db_path: str, min_date: str = '2020-01-01') -> Dict[st
     return moves_by_ticker
 
 
+# A position opened more than this many days before a report is not that
+# report's trade.
+MAX_DAYS_OPEN_BEFORE = 7
+
+
 def find_nearest_earnings(trade: Trade, moves_by_ticker: Dict) -> Optional[Dict]:
     """Find the earnings event that this trade straddles (for IV crush strategy)
 
-    For IV crush: position opened BEFORE earnings, closed AFTER earnings.
-    This function validates that the trade window brackets an earnings date.
+    A position carries an event when it opened 0-7 days before the report and
+    closed on or after it, however long after. Opening within a week bounds it to
+    one event; the close has no bound, because a position held past the report is
+    exactly the trade CLAUDE.md §8's exit evidence is about. Until 2026-09-13 the
+    close also had to be within 7 days, which left four such positions undated.
+    Among opens that qualify, the event closest before the close wins.
     """
     ticker = trade.symbol
     if ticker not in moves_by_ticker:
@@ -75,8 +85,11 @@ def find_nearest_earnings(trade: Trade, moves_by_ticker: Dict) -> Optional[Dict]
 
     for move in moves_by_ticker[ticker]:
         try:
-            earnings = datetime.strptime(move['earnings_date'], '%Y-%m-%d')
-        except ValueError:
+            earnings = as_date(move['earnings_date'])
+            if earnings is None:
+                continue
+            earnings = datetime.combine(earnings, datetime.min.time())
+        except (ValueError, TypeError):
             continue
 
         if open_dt:
@@ -84,8 +97,8 @@ def find_nearest_earnings(trade: Trade, moves_by_ticker: Dict) -> Optional[Dict]
             days_before = (earnings - open_dt).days
             days_after = (close_dt - earnings).days
 
-            if 0 <= days_before <= 7 and 0 <= days_after <= 7:
-                diff = abs(days_after)
+            if 0 <= days_before <= MAX_DAYS_OPEN_BEFORE and days_after >= 0:
+                diff = days_after
                 if diff < min_diff:
                     min_diff = diff
                     best_match = move
@@ -100,13 +113,13 @@ def find_nearest_earnings(trade: Trade, moves_by_ticker: Dict) -> Optional[Dict]
     return best_match
 
 
-def correlate_with_vrp(trades: List[Trade], db_path: str) -> Tuple[List[Trade], int]:
+def correlate_with_vrp(trades: List[Trade]) -> Tuple[List[Trade], int]:
     """Add VRP correlation data to trades
 
     Returns:
         Tuple of (trades, matched_count)
     """
-    moves_by_ticker = load_historical_moves(db_path)
+    moves_by_ticker = load_historical_moves()
     matched_count = 0
 
     for trade in trades:

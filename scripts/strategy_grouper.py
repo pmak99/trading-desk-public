@@ -1,178 +1,45 @@
 #!/usr/bin/env python3
 """
-Strategy grouping logic for multi-leg options trades.
+What every writer of a `strategies` row shares: its trade_type at creation and
+how its quantity is counted from the legs. regroup_strategies.py (the /journal
+grouper) and reconcile_journal.py import both.
 
-Groups individual trade legs into strategies (SINGLE, SPREAD, IRON_CONDOR)
-based on matching criteria: symbol, dates, and expiration.
+The leg-grouping code that lived here served only backfill_strategies.py, which
+nothing ran; both were removed 2026-09-14. regroup_strategies.py groups orphan
+legs.
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum
-from typing import List, Optional, Dict, Any, Protocol
 from collections import defaultdict
+from typing import Dict, List, Optional, Tuple
+
+# The trade_type of a position created from imported legs. ROLL and REPAIR are
+# set only with a parent_strategy_id, by hand, when an adjustment is identified;
+# nothing at import can tell an adjustment from a new trade. Until 2026-09-13 no
+# writer set it at all, leaving every IRA option and stock row NULL.
+NEW_POSITION_TRADE_TYPE = "NEW"
 
 
-class Confidence(Enum):
-    """Confidence level for auto-detected groupings."""
-    HIGH = "high"  # All criteria match, standard leg count, valid dates
-    LOW = "low"    # Unknown leg count or invalid dates, needs review
+def quantity_from_legs(strike_quantity_pairs: List[Tuple[Optional[float], float]]) -> float:
+    """The strategy-level quantity for a multi-leg position is per-LEG, not
+    summed across legs -- a spread trades matching quantity on every leg by
+    construction, and CLAUDE.md's contract-count sizing rules (the 100-cap,
+    the 51-100/101-200 buckets) assume this. Sum WITHIN each distinct strike
+    first (combining that leg's own partial fills -- for STOCK, where every
+    leg shares strike=None, this collapses to one group and behaves as a
+    plain sum, which is correct: shares genuinely are additive). Then take
+    the MAX across strikes, which guards against a rare partial
+    exercise/assignment imbalance.
 
+    Root-caused 2026-09-11: regroup_strategies' call sites previously did
+    sum(leg.quantity for leg in legs) with no per-strike grouping, so an
+    800-contract $145/$150 LULU spread (800 on each leg) stored quantity as
+    1600. Affected 156 of 176 SPREAD rows and all 5 IRON_CONDOR rows.
 
-class TradeLeg(Protocol):
-    """Protocol for trade leg objects."""
-    id: int
-    symbol: str
-    acquired_date: str
-    sale_date: str
-    expiration: Optional[str]
-    option_type: Optional[str]
-    strike: Optional[float]
-    gain_loss: float
-
-
-@dataclass
-class StrategyGroup:
-    """A group of legs that form a single strategy."""
-    legs: List[Any]
-    strategy_type: Optional[str]  # SINGLE, SPREAD, IRON_CONDOR, or None if unknown
-    confidence: Confidence
-    needs_review: bool = False
-
-    @property
-    def combined_pnl(self) -> float:
-        """Sum of all leg P&Ls."""
-        return sum(leg.gain_loss for leg in self.legs)
-
-    @property
-    def is_winner(self) -> bool:
-        """Strategy is a winner if combined P&L is positive."""
-        return self.combined_pnl > 0
-
-    @property
-    def symbol(self) -> str:
-        """Symbol from first leg."""
-        return self.legs[0].symbol if self.legs else ""
-
-    @property
-    def acquired_date(self) -> str:
-        """Acquired date from first leg."""
-        return self.legs[0].acquired_date if self.legs else ""
-
-    @property
-    def sale_date(self) -> str:
-        """Sale date from first leg."""
-        return self.legs[0].sale_date if self.legs else ""
-
-    @property
-    def expiration(self) -> Optional[str]:
-        """Expiration from first leg."""
-        return self.legs[0].expiration if self.legs else None
-
-
-def classify_strategy_type(leg_count: int) -> Optional[str]:
+    ⚠️ And the opposite error, until 2026-09-13: the since-deleted
+    backfill_strategies took max(leg.quantity) over raw fills, so a leg filled
+    as 60 + 40 stored 60.
     """
-    Classify strategy type based on number of legs.
-
-    Args:
-        leg_count: Number of legs in the strategy
-
-    Returns:
-        Strategy type string or None if unknown
-    """
-    if leg_count == 1:
-        return "SINGLE"
-    elif leg_count == 2:
-        return "SPREAD"
-    elif leg_count == 4:
-        return "IRON_CONDOR"
-    else:
-        return None  # 3, 5+ legs need manual review
-
-
-def _validate_dates(acquired_date: str, sale_date: str) -> bool:
-    """
-    Validate that acquired_date is before sale_date.
-
-    Args:
-        acquired_date: Date string in YYYY-MM-DD format
-        sale_date: Date string in YYYY-MM-DD format
-
-    Returns:
-        True if dates are valid (acquired < sale), False otherwise
-    """
-    try:
-        acquired = datetime.strptime(acquired_date, "%Y-%m-%d")
-        sale = datetime.strptime(sale_date, "%Y-%m-%d")
-        return acquired < sale
-    except (ValueError, TypeError):
-        # Invalid date format
-        return False
-
-
-def _make_grouping_key(leg: Any) -> tuple:
-    """Create grouping key from leg attributes."""
-    return (
-        leg.symbol,
-        leg.acquired_date,
-        leg.sale_date,
-        leg.expiration,
-    )
-
-
-def group_legs_into_strategies(legs: List[Any]) -> List[StrategyGroup]:
-    """
-    Group trade legs into strategies based on matching criteria.
-
-    Grouping criteria (ALL must match for HIGH confidence):
-    - Same symbol
-    - Same acquired_date
-    - Same sale_date
-    - Same expiration
-
-    Args:
-        legs: List of trade leg objects with required attributes
-
-    Returns:
-        List of StrategyGroup objects
-    """
-    if not legs:
-        return []
-
-    # Group by key
-    groups_by_key: Dict[tuple, List[Any]] = defaultdict(list)
-    for leg in legs:
-        key = _make_grouping_key(leg)
-        groups_by_key[key].append(leg)
-
-    # Convert to StrategyGroup objects
-    result = []
-    for key, group_legs in groups_by_key.items():
-        leg_count = len(group_legs)
-        strategy_type = classify_strategy_type(leg_count)
-
-        # Validate dates
-        first_leg = group_legs[0]
-        dates_valid = _validate_dates(first_leg.acquired_date, first_leg.sale_date)
-
-        if not dates_valid:
-            # Invalid dates (acquired >= sale)
-            confidence = Confidence.LOW
-            needs_review = True
-        elif strategy_type is not None:
-            # Known strategy type with valid dates
-            confidence = Confidence.HIGH
-            needs_review = False
-        else:
-            # Unknown leg count (3, 5+) but valid dates
-            confidence = Confidence.LOW
-            needs_review = True
-
-        result.append(StrategyGroup(
-            legs=group_legs,
-            strategy_type=strategy_type,
-            confidence=confidence,
-            needs_review=needs_review,
-        ))
-
-    return result
+    by_strike: Dict[Optional[float], float] = defaultdict(float)
+    for strike, qty in strike_quantity_pairs:
+        by_strike[strike] += qty or 0
+    return max(by_strike.values()) if by_strike else 0

@@ -8,25 +8,55 @@ from typing import Dict, List, Optional, Tuple
 from tqdm import tqdm
 
 from src.container import Container
+from src.domain.enums import EarningsTiming
+from src.domain.trading_expiration import calculate_expiration_date
 
 from ..constants import LIQUIDITY_PRIORITY_ORDER
-from ..date_utils import calculate_expiration_date
-from ..filters import should_filter_ticker, filter_ticker_concurrent
-from ..quality_scorer import _precalculate_quality_scores
-from ..formatters import parse_liquidity_tier, format_liquidity_display, _display_scan_results
 from ..earnings_fetcher import fetch_earnings_for_ticker
-
-from .vix import _log_vix_context
+from ..filters import filter_ticker_concurrent, should_filter_ticker
+from ..formatters import (
+    _display_scan_results,
+    format_liquidity_display,
+    format_recommendation,
+    log_existing_position_warnings,
+    log_stale_history_warnings,
+    parse_liquidity_tier,
+)
+from ..quality_scorer import _precalculate_quality_scores
 from .ticker_analysis import analyze_ticker, analyze_ticker_concurrent
+from .vix import _log_vix_context
 
 logger = logging.getLogger(__name__)
+
+
+def _earnings_event(
+    container: Container,
+    ticker: str,
+    earnings_date: Optional[date],
+) -> Optional[Tuple[date, EarningsTiming]]:
+    """The event a ticker is analysed for.
+
+    Without a date, the ticker's next calendar date (fetch_earnings_for_ticker).
+    With one (`trade.sh list TICKERS DATE`), that date and its stored timing, as
+    analyze.py reads it for `trade.sh TICKER DATE`: UNKNOWN when the calendar has
+    no row, which prices the implied move at the next day's expiration. Until
+    2026-09-14 list mode could not receive its date at all.
+    """
+    if earnings_date is None:
+        return fetch_earnings_for_ticker(container, ticker)
+    timing_result = container.earnings_repository.get_timing(ticker, earnings_date)
+    if timing_result.is_err:
+        logger.info(f"{ticker}: earnings timing unknown ({timing_result.error})")
+        return earnings_date, EarningsTiming.UNKNOWN
+    return earnings_date, timing_result.value
 
 
 def ticker_mode_parallel(
     container: Container,
     tickers: List[str],
     expiration_offset: Optional[int] = None,
-    skip_weekly_filter: bool = False
+    skip_weekly_filter: bool = False,
+    earnings_date: Optional[date] = None,
 ) -> int:
     """
     Parallel ticker mode: Analyze tickers using ConcurrentScanner.
@@ -46,7 +76,7 @@ def ticker_mode_parallel(
 
     logger.info("Fetching earnings dates...")
     for ticker in tickers:
-        earnings_info = fetch_earnings_for_ticker(container, ticker)
+        earnings_info = _earnings_event(container, ticker, earnings_date)
         if earnings_info:
             earnings_date, timing = earnings_info
             earnings_lookup[ticker] = (earnings_date, timing.value)
@@ -69,14 +99,18 @@ def ticker_mode_parallel(
 
     # Run concurrent scan
     # Bind skip_weekly_filter to analyze function for weekly options filter
-    analyze_func = functools.partial(analyze_ticker_concurrent, skip_weekly_filter=skip_weekly_filter)
+    analyze_func = functools.partial(
+        analyze_ticker_concurrent,
+        skip_weekly_filter=skip_weekly_filter,
+        source="ticker",
+    )
     scanner = container.concurrent_scanner
     batch_result = scanner.scan_tickers(
         tickers=list(earnings_lookup.keys()),
         earnings_lookup=earnings_lookup,
         analyze_func=analyze_func,
         filter_func=filter_func,
-        expiration_offset=expiration_offset or 0,
+        expiration_offset=expiration_offset,
         progress_callback=progress_callback,
     )
 
@@ -87,7 +121,7 @@ def ticker_mode_parallel(
             results.append(scan_result.data)
 
     # Log statistics
-    logger.info(f"\n\U0001f4ca Parallel Analysis Complete:")
+    logger.info("\n\U0001f4ca Parallel Analysis Complete:")
     logger.info(f"   Total time: {batch_result.total_duration_ms:.0f}ms")
     logger.info(f"   Avg per ticker: {batch_result.avg_duration_ms:.0f}ms")
     logger.info(f"   Success: {batch_result.success_count}")
@@ -112,7 +146,8 @@ def ticker_mode(
     tickers: List[str],
     expiration_offset: Optional[int] = None,
     parallel: bool = False,
-    skip_weekly_filter: bool = False
+    skip_weekly_filter: bool = False,
+    earnings_date: Optional[date] = None,
 ) -> int:
     """
     Ticker mode: Analyze specific tickers from command line.
@@ -123,12 +158,16 @@ def ticker_mode(
         expiration_offset: Custom expiration offset in days
         parallel: If True, use parallel processing (5x speedup)
         skip_weekly_filter: If True, skip weekly options filter
+        earnings_date: Analyse every ticker for this date (see _earnings_event);
+            None for each ticker's next calendar date
 
     Returns exit code (0 for success, 1 for error)
     """
     # Use parallel mode if requested and we have multiple tickers
     if parallel and len(tickers) > 1:
-        return ticker_mode_parallel(container, tickers, expiration_offset, skip_weekly_filter)
+        return ticker_mode_parallel(
+            container, tickers, expiration_offset, skip_weekly_filter, earnings_date
+        )
 
     logger.info("=" * 80)
     logger.info("TICKER MODE: Command Line Tickers")
@@ -161,8 +200,8 @@ def ticker_mode(
         pbar.set_postfix_str(f"Current: {ticker}")
         sys.stderr.flush()  # Force flush after each update
 
-        # Fetch earnings date for ticker (DB first, API fallback)
-        earnings_info = fetch_earnings_for_ticker(container, ticker)
+        # The given date, or the ticker's next one (DB first, API fallback)
+        earnings_info = _earnings_event(container, ticker, earnings_date)
 
         if not earnings_info:
             skip_count += 1
@@ -204,6 +243,7 @@ def ticker_mode(
             auto_backfill=True,
             skip_weekly_filter=skip_weekly_filter,
             earnings_timing=timing,
+            source="ticker",
         )
 
         if result:
@@ -225,11 +265,11 @@ def ticker_mode(
     logger.info("\n" + "=" * 80)
     logger.info("LIST MODE - SUMMARY")
     logger.info("=" * 80)
-    logger.info(f"\n\U0001f4cb Ticker List Analysis:")
-    logger.info(f"   Mode: Multiple Ticker Analysis")
+    logger.info("\n\U0001f4cb Ticker List Analysis:")
+    logger.info("   Mode: Multiple Ticker Analysis")
     logger.info(f"   Tickers Requested: {len(tickers)}")
     logger.info(f"   Tickers Analyzed: {', '.join(tickers)}")
-    logger.info(f"\n\U0001f4ca Analysis Results:")
+    logger.info("\n\U0001f4ca Analysis Results:")
     logger.info(f"   \U0001f50d Filtered (Market Cap Only): {filtered_count}")
     logger.info(f"   ✓ Successfully Analyzed: {success_count}")
     logger.info(f"   ⏭️  Skipped (No Earnings/Data): {skip_count}")
@@ -241,10 +281,10 @@ def ticker_mode(
         # Pre-calculate quality scores once (avoids ~82% duplicate calculations)
         _precalculate_quality_scores(tradeable)
 
-        logger.info(f"\n" + "=" * 80)
+        logger.info("\n" + "=" * 80)
         logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
         logger.info("=" * 80)
-        logger.info(f"\n\U0001f3af Sorted by Earnings Date, Quality Score (Risk-Adjusted):")
+        logger.info("\n\U0001f3af Sorted by Earnings Date, Quality Score (Risk-Adjusted):")
 
         # Table header (UPDATED Dec 2025 - Added Quality Score for risk-adjusted ranking)
         logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'Score':<7} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<15} {'Earnings':<12} {'Liquidity':<12}")
@@ -277,7 +317,7 @@ def ticker_mode(
             vrp = f"{r['vrp_ratio']:.2f}x"
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
-            rec = r['recommendation'].upper()
+            rec = format_recommendation(r)
             bias = r.get('directional_bias', 'NEUTRAL')  # NEW: Display directional bias
             earnings = r['earnings_date']
 
@@ -291,18 +331,23 @@ def ticker_mode(
 
         # Add footer note if market closed (OI-only scoring)
         if has_oi_only:
-            logger.info(f"\n   * Liquidity based on OI only (market closed, volume unavailable)")
+            logger.info("\n   * Liquidity based on OI only (market closed, volume unavailable)")
 
-        logger.info(f"\n\U0001f4a1 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
+        # One position per event (closed, journaled trades only)
+        log_existing_position_warnings(tradeable)
+        # A quarter missing from historical_moves entirely
+        log_stale_history_warnings(tradeable)
+
+        logger.info("\n\U0001f4a1 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:
-        logger.info(f"\n" + "=" * 80)
+        logger.info("\n" + "=" * 80)
         logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
         logger.info("=" * 80)
         logger.info(f"\n❌ No opportunities found among {len(tickers)} ticker(s)")
         if skip_count > 0:
             logger.info(f"   Note: {skip_count} ticker(s) had no upcoming earnings or insufficient data")
-        logger.info(f"\n\U0001f4dd Recommendation:")
-        logger.info(f"   Try different tickers or use whisper mode for most anticipated earnings")
+        logger.info("\n\U0001f4dd Recommendation:")
+        logger.info("   Try different tickers or use whisper mode for most anticipated earnings")
 
     # Return 0 if we successfully completed the scan (even if some tickers had errors)
     # Only return 1 for fatal errors (calendar fetch failure, etc.)

@@ -6,12 +6,6 @@
       "args": [],
       "env": {}
     },
-    "memory": {
-      "type": "stdio",
-      "command": "./scripts/mcp/memory-server.sh",
-      "args": [],
-      "env": {}
-    },
     "finnhub": {
       "type": "stdio",
       "command": "./scripts/mcp/finnhub-server.sh",

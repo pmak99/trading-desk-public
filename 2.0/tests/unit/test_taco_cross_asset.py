@@ -1,12 +1,8 @@
 """Unit tests for scripts/taco/cross_asset.py — confirmation logic."""
 
-import sys
 from datetime import date
-from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from scripts.taco.constants import EventType
 from scripts.taco.cross_asset import evaluate_cross_asset
@@ -144,40 +140,54 @@ class TestDegradation:
         assert tlt.confirmed
 
 
+class _FakeResp:
+    """What fetch_twelvedata reads of a requests.Response (through the shared
+    Twelve Data client, src/infrastructure/api/twelve_data.py)."""
+
+    status_code = 200
+    headers: dict = {}
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def json(self):
+        return self.payload
+
+    def raise_for_status(self):
+        pass
+
+
 class TestFetch:
     def test_twelvedata_parses_and_sorts_ascending(self, monkeypatch):
         from scripts.taco import cross_asset
+        from src.infrastructure.api import twelve_data
 
         # Twelve Data returns values NEWEST first — must sort ascending.
         payload = {"status": "ok", "values": [
             {"datetime": "2026-07-22", "close": "83.42000"},
             {"datetime": "2026-07-21", "close": "83.66000"},
         ]}
-
-        class FakeResp:
-            def json(self):
-                return payload
-        monkeypatch.setattr(cross_asset.requests, "get",
-                            lambda *a, **k: FakeResp())
+        monkeypatch.setattr(twelve_data.requests, "get",
+                            lambda *a, **k: _FakeResp(payload))
         series = cross_asset.fetch_twelvedata("TLT", "dummy-key")
         assert series == [(date(2026, 7, 21), 83.66), (date(2026, 7, 22), 83.42)]
 
     def test_twelvedata_error_payload_returns_empty(self, monkeypatch):
         from scripts.taco import cross_asset
+        from src.infrastructure.api import twelve_data
 
-        class FakeResp:
-            def json(self):
-                return {"code": 404, "status": "error", "message": "nope"}
-        monkeypatch.setattr(cross_asset.requests, "get",
-                            lambda *a, **k: FakeResp())
+        monkeypatch.setattr(
+            twelve_data.requests, "get",
+            lambda *a, **k: _FakeResp({"code": 404, "status": "error", "message": "nope"}))
         assert cross_asset.fetch_twelvedata("TLT", "dummy-key") == []
 
     def test_twelvedata_network_error_returns_empty(self, monkeypatch):
         from scripts.taco import cross_asset
+        from src.infrastructure.api import twelve_data
 
         def boom(*a, **k):
             raise OSError("connection refused")
-        monkeypatch.setattr(cross_asset.requests, "get", boom)
+        monkeypatch.setattr(twelve_data.requests, "get", boom)
         assert cross_asset.fetch_twelvedata("TLT", "dummy-key") == []
 
     def test_fetch_asset_series_prefers_yfinance(self, monkeypatch):

@@ -1,0 +1,957 @@
+{
+  "uid": "ivcrush-signal",
+  "title": "IV Crush \u2014 Signal",
+  "tags": [
+    "ivcrush",
+    "signal"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Data freshness",
+      "type": "stat",
+      "description": "Age of the newest analysis_log row. Red past 48h \u2014 a stale dashboard read as current is the failure mode this panel exists to prevent.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- substr, not strftime, to shorten the display: strftime re-parses the string\n-- as a timestamp and, when SQLite treats a value as UTC-relative, can shift\n-- the displayed wall-clock time -- verified this actually happens on\n-- job_status.updated_at (see ops_last_run_per_job below), where strftime\n-- silently turned 08:00 ET into 12:00. substr just truncates the string, so\n-- whatever wall-clock value was written is exactly what displays.\nSELECT to_char(MAX(timestamp) AT TIME ZONE 'America/New_York',\n               'YYYY-MM-DD HH24:MI') AS last_analysis,\n       CAST(EXTRACT(EPOCH FROM (now() - MAX(timestamp))) / 3600 AS INT) AS hours_stale\nFROM analysis_log;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "hours_stale"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "h"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 48
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "last_analysis"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Newest analysis"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "hours_stale"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Stale"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "fields": "/.*/"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Sample sizes",
+      "type": "table",
+      "description": "Every count this dashboard reports, in one table \u2014 it replaced four stat panels that between them spent 18 of 24 columns on counts. The A/B row is APPROXIMATE: /ab-status remains authoritative, and this says when it is worth re-running that script, never what its verdict is.",
+      "gridPos": {
+        "h": 5,
+        "w": 16,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Replaces four separate stat panels (analyses_30d, ab_sample_accrual,\n-- term_slope_sample, implied_vs_actual_sample), which between them spent 18 of\n-- 24 grid columns reporting counts. Same numbers, one table.\n-- APPROXIMATE for the A/B row: /ab-status (ab_evaluate_live.py) remains\n-- authoritative -- it grades the FIRST analysis taken before the reaction-day\n-- open, one row per issuer reaction, where this counts distinct matched events.\n-- This panel says when it is worth re-running that script, never what its\n-- verdict is.\n-- `ord` sorts but is not selected: Postgres allows ORDER BY on a subquery\n-- column absent from the outer list, which keeps a sort key out of the table\n-- without depending on a Grafana column-hiding property.\nSELECT metric, value, gate FROM (\n  SELECT 1 AS ord, 'Analyses (30 days)' AS metric,\n         (SELECT COUNT(*) FROM analysis_log\n           WHERE timestamp >= now() - interval '30 days') AS value,\n         NULL::bigint AS gate\n  UNION ALL SELECT 2, 'A/B events with known outcome',\n    (SELECT COUNT(*) FROM (\n       SELECT DISTINCT a.ticker, a.earnings_date\n       FROM analysis_log a\n       JOIN historical_moves h ON h.ticker = a.ticker\n        AND ABS(h.earnings_date - a.earnings_date) <= 30\n       WHERE h.close_move_pct IS NOT NULL AND a.vrp_intraday_ratio IS NOT NULL) y), 300\n  UNION ALL SELECT 3, 'Rows carrying term slope',\n    (SELECT COUNT(term_slope_ratio) FROM analysis_log), NULL\n) x ORDER BY ord;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "metric"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Metric"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Value"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "gate"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Gate"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 3,
+      "title": "Crush rate by VRP tier",
+      "type": "table",
+      "description": "Does the tier predict? Crushed = the implied straddle exceeded the absolute close move (research/events.py's definition verbatim). Split by the convention that graded each row and never pooled \u2014 close-VRP is mechanically smaller, so a shared threshold would compare units, not tiers. Close-to-close deployed 2026-09-16, so that row reads thin or absent for months by design.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Does the tier predict anything? The dashboard previously showed the tier\n-- DISTRIBUTION twice (an all-time piechart and a 90-day barchart) and its\n-- OUTCOME never -- which is the premise the whole system rests on.\n-- \"Crushed\" is research/events.py's definition verbatim (line 134: the implied\n-- straddle exceeded the absolute close move). No new definition is invented\n-- here, and no VRP ladder is rebuilt: the tier is read from the row's own\n-- graded `recommendation`, exactly as signal_vrp_tier_over_time does.\n-- GROUPED BY vrp_convention deliberately, never pooled. Every row before the\n-- migration (2026-09-16 19:20 ET) is 'intraday'; close-to-close rows accrue\n-- from there. CLAUDE.md: never compare the two conventions at a shared numeric\n-- threshold -- close-VRP is mechanically smaller, so pooling would compare\n-- units, not tiers. The close row reads thin or absent for months. That is the\n-- honest rendering of a one-day-old convention, not a broken panel.\n-- Latest analysis per (ticker, earnings_date), matching the sibling panels on\n-- this dashboard; ab_evaluate_live.py uses the first pre-open analysis instead\n-- and remains authoritative for the A/B verdict.\nWITH latest AS (\n  SELECT ticker, earnings_date, recommendation, vrp_convention, implied_move_pct,\n         ROW_NUMBER() OVER (PARTITION BY ticker, earnings_date\n                            ORDER BY timestamp DESC) AS rn\n  FROM analysis_log\n  WHERE recommendation IS NOT NULL\n),\njoined AS (\n  SELECT l.recommendation, l.vrp_convention,\n         COALESCE(h.pre_earnings_straddle_pct, l.implied_move_pct) AS implied,\n         ABS(h.close_move_pct) AS actual,\n         RANK() OVER (PARTITION BY l.ticker, l.earnings_date\n                      ORDER BY ABS(h.earnings_date - l.earnings_date)) AS nearness\n  FROM latest l\n  JOIN historical_moves h\n    ON h.ticker = l.ticker AND ABS(h.earnings_date - l.earnings_date) <= 30\n  WHERE l.rn = 1 AND h.close_move_pct IS NOT NULL\n)\nSELECT vrp_convention AS graded_on, recommendation AS tier, COUNT(*) AS events,\n       ROUND((100.0 * COUNT(*) FILTER (WHERE implied > actual) / COUNT(*))::numeric, 1)\n         AS crush_rate\nFROM joined\nWHERE nearness = 1 AND implied IS NOT NULL AND actual > 0\nGROUP BY graded_on, tier\nORDER BY graded_on, tier;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "crush_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "graded_on"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Graded on"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tier"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Tier"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "events"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Events"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "crush_rate"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Crush rate"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 4,
+      "title": "VRP tier mix over time",
+      "type": "barchart",
+      "description": "Regime drift in what the scanner surfaces.",
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 5
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Pivoted to wide format (one numeric column per tier). Grafana's native\n-- barchart panel takes the FIRST field as the x-axis category and every\n-- remaining NUMERIC field as its own bar series -- it does not split a\n-- long-format categorical column (the previous `tier` text column) into\n-- series. The long-format version rendered duplicate week labels on the\n-- x-axis with a single unlabeled \"n\" series, silently dropping the tier\n-- dimension entirely.\n-- Rolling 90-day window (~13 weeks). analysis_log grows forever, and an\n-- unbounded x-axis crowds unreadable within a year regardless of label\n-- rotation. Set to 90 days per explicit request 2026-09-09 -- this DOES trim\n-- currently-visible history (the earliest 2 of 16 weeks, ~180 analyses), it\n-- is not a no-op safety margin like the earlier 120-day version was. Matches\n-- the panel's own \"regime drift\" framing: recent trend, not full history.\n-- Labeled by the week's Monday date, not strftime('%Y-%W', ...): a week\n-- NUMBER (\"2026-32\") requires doing calendar math to know what it means; the\n-- Monday date (\"2026-08-10\") is immediately readable. Verified identical\n-- bucket count (16) against the old week-number grouping before switching.\n-- to_char, never a raw `date` column: Grafana's Postgres datasource returns a\n-- date as UTC midnight and the dashboard renders in `timezone: browser`, so in\n-- ET every raw date displayed as the PREVIOUS day at 20:00 (journal freshness\n-- read \"2026-09-10 20:00:00\" for a real max of 2026-09-11). Text has no\n-- timezone to reinterpret. Same reasoning as ops_last_run_per_job's to_char.\nSELECT to_char(date_trunc('week', timestamp), 'YYYY-MM-DD') AS week,\n       SUM(CASE WHEN recommendation = 'excellent' THEN 1 ELSE 0 END) AS EXCELLENT,\n       SUM(CASE WHEN recommendation = 'good' THEN 1 ELSE 0 END) AS GOOD,\n       SUM(CASE WHEN recommendation = 'marginal' THEN 1 ELSE 0 END) AS MARGINAL,\n       SUM(CASE WHEN recommendation = 'skip' THEN 1 ELSE 0 END) AS SKIP\nFROM analysis_log\nWHERE timestamp >= now() - interval '90 days'\nGROUP BY week\nORDER BY week;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "EXCELLENT"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "GOOD"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "light-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MARGINAL"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "SKIP"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xTickLabelRotation": -45
+      }
+    },
+    {
+      "id": 5,
+      "title": "Implied vs actual move",
+      "type": "piechart",
+      "description": "Was the market's implied move bigger or smaller than what actually happened (ranges: UNDERPRICED <1.0x, FAIR 1.0-1.5x, OVERPRICED 1.5-3.0x, HEAVILY_OVERPRICED 3.0x+). Bucketed, not averaged: the raw ratio is extremely right-skewed (a near-zero actual move blows up the denominator) -- a mean or histogram would be dominated by outliers. UNDERPRICED is the dangerous tier for a premium seller: the market's move estimate was too small.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 13
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Bucketed, never averaged: the raw ratio is extremely right-skewed (live\n-- data 2026-09: mean 6.8x, median far lower, max 996x -- a handful of events\n-- where the actual move landed near zero blow up the denominator). A mean or\n-- a printf-bucketed histogram (the term_slope_histogram pattern) would render\n-- as one dominant bar plus ~190 singleton outlier bars. Discrete tiers, like\n-- the VRP tiers above, are the readable version of the same question: how\n-- often does the market's implied move overstate what actually happens (the\n-- premise IV crush sells into) vs understate it (the dangerous case for a\n-- premium seller). Verified non-degenerate on live data: 2104 / 1403 / 2123 /\n-- 3083 across the four tiers (n=8,713).\n-- Wide format, single row -- same reason as signal_vrp_tier_distribution:\n-- PieChart doesn't honor value-mapping slice colors, only byName field\n-- overrides (\"multiple fields\" mode). Short bare names (no \"(1.5-3.0x)\"\n-- suffix): those need to be valid column identifiers now; the numeric ranges\n-- live in this panel's description instead.\nSELECT\n  SUM(CASE WHEN overpricing_ratio < 1.0 THEN 1 ELSE 0 END) AS UNDERPRICED,\n  SUM(CASE WHEN overpricing_ratio >= 1.0 AND overpricing_ratio < 1.5 THEN 1 ELSE 0 END) AS FAIR,\n  SUM(CASE WHEN overpricing_ratio >= 1.5 AND overpricing_ratio < 3.0 THEN 1 ELSE 0 END) AS OVERPRICED,\n  SUM(CASE WHEN overpricing_ratio >= 3.0 THEN 1 ELSE 0 END) AS HEAVILY_OVERPRICED\nFROM (\n  SELECT COALESCE(h.pre_earnings_straddle_pct, a.implied_move_pct)\n             / NULLIF(ABS(h.close_move_pct), 0) AS overpricing_ratio\n  FROM historical_moves h\n  LEFT JOIN (\n      SELECT hm.id, ev.implied_move_pct,\n             RANK() OVER (PARTITION BY hm.id\n                          ORDER BY ABS(ev.earnings_date - hm.earnings_date)) AS nearness\n      FROM (\n          SELECT ticker, earnings_date, implied_move_pct,\n                 ROW_NUMBER() OVER (PARTITION BY ticker, earnings_date ORDER BY timestamp DESC) AS rn\n          FROM analysis_log\n      ) ev\n      JOIN historical_moves hm\n        ON hm.ticker = ev.ticker AND ABS(ev.earnings_date - hm.earnings_date) <= 30\n      WHERE ev.rn = 1\n  ) a ON a.id = h.id AND a.nearness = 1\n  WHERE COALESCE(h.pre_earnings_straddle_pct, a.implied_move_pct) IS NOT NULL\n    AND h.close_move_pct IS NOT NULL\n)\nWHERE overpricing_ratio IS NOT NULL;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "HEAVILY_OVERPRICED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OVERPRICED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "light-green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "FAIR"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "UNDERPRICED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "pieType": "pie",
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "values": []
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Term-slope distribution",
+      "type": "barchart",
+      "description": "Observed range runs ~1.04-2.48. Makes the retired 1.10 cutoff visibly beneath the distribution floor. If the term-structure hypothesis ever passes, the deployed cutoff derives from THESE terciles (~1.38 / 1.56 on 218 rows, 2026-09-17), never from 1.10. Observational, not a gate: at n=58 the live split reads -4.2 pts, CI [-30.2, +24.6].",
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 13
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- printf, not ROUND: ROUND() returns SQLite type REAL, and Grafana's native\n-- barchart panel rejects a numeric x-axis outright (\"Bar charts require a\n-- string or time field\") -- it doesn't auto-stringify. printf produces TEXT\n-- with the same one-decimal formatting.\nSELECT to_char(term_slope_ratio, 'FM990.0') AS slope_bucket, COUNT(*) AS n\nFROM analysis_log\nWHERE term_slope_ratio IS NOT NULL\nGROUP BY slope_bucket\nORDER BY slope_bucket;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "slope_bucket"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Slope"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "n"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Events"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xTickLabelRotation": -45
+      }
+    },
+    {
+      "id": 7,
+      "title": "Implied vs actual (recent)",
+      "type": "table",
+      "description": "Per-event detail behind the tier chart above. Newest 50.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Per-event detail behind the tier chart above -- identical join, unaggregated.\n-- Ticker breaks same-day ties: ordered by date alone, which rows of one day\n-- appeared, and which made the 50, depended on the plan.\n-- to_char, never a raw `date` column: Grafana's Postgres datasource returns a\n-- date as UTC midnight and the dashboard renders in `timezone: browser`, so in\n-- ET every raw date displayed as the PREVIOUS day at 20:00 (journal freshness\n-- read \"2026-09-10 20:00:00\" for a real max of 2026-09-11). Text has no\n-- timezone to reinterpret. Same reasoning as ops_last_run_per_job's to_char.\nSELECT to_char(h.earnings_date, 'YYYY-MM-DD') AS earnings_date, h.ticker,\n       ROUND((COALESCE(h.pre_earnings_straddle_pct, a.implied_move_pct))::numeric, 2) AS implied_move_pct,\n       ROUND((h.close_move_pct)::numeric, 2) AS actual_move_pct,\n       ROUND((COALESCE(h.pre_earnings_straddle_pct, a.implied_move_pct)\n             / NULLIF(ABS(h.close_move_pct), 0))::numeric, 2) AS overpricing_ratio\nFROM historical_moves h\nLEFT JOIN (\n    SELECT hm.id, ev.implied_move_pct,\n           RANK() OVER (PARTITION BY hm.id\n                        ORDER BY ABS(ev.earnings_date - hm.earnings_date)) AS nearness\n    FROM (\n        SELECT ticker, earnings_date, implied_move_pct,\n               ROW_NUMBER() OVER (PARTITION BY ticker, earnings_date ORDER BY timestamp DESC) AS rn\n        FROM analysis_log\n    ) ev\n    JOIN historical_moves hm\n      ON hm.ticker = ev.ticker AND ABS(ev.earnings_date - hm.earnings_date) <= 30\n    WHERE ev.rn = 1\n) a ON a.id = h.id AND a.nearness = 1\nWHERE COALESCE(h.pre_earnings_straddle_pct, a.implied_move_pct) IS NOT NULL\n  AND h.close_move_pct IS NOT NULL\nORDER BY h.earnings_date DESC, h.ticker\nLIMIT 50;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "earnings_date"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Earnings"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ticker"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Ticker"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "implied_move_pct"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Implied move"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "actual_move_pct"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Actual move"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "overpricing_ratio"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Implied / actual"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "earnings_date"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ticker"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "implied_move_pct"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "actual_move_pct"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "overpricing_ratio"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 8,
+      "title": "Recent analyses",
+      "type": "table",
+      "description": "Newest 50. graded_on names the VRP convention that set the tier.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT to_char(timestamp AT TIME ZONE 'America/New_York',\n               'YYYY-MM-DD HH24:MI') AS timestamp, ticker,\n       to_char(earnings_date, 'YYYY-MM-DD') AS earnings_date,\n       ROUND((vrp_close_ratio)::numeric, 2) AS vrp_close,\n       ROUND((vrp_intraday_ratio)::numeric, 2) AS vrp_intraday,\n       vrp_convention AS graded_on,\n       recommendation,\n       ROUND((term_slope_ratio)::numeric, 2) AS term_slope,\n       COALESCE(source, 'unknown') AS source\nFROM analysis_log\nORDER BY timestamp DESC\nLIMIT 50;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "timestamp"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Logged"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ticker"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Ticker"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "earnings_date"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Earnings"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vrp_close"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "VRP (close)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vrp_intraday"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "VRP (intraday)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "graded_on"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Graded on"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "recommendation"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Tier"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "term_slope"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Term slope"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "source"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Source"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "timestamp"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ticker"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "earnings_date"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vrp_close"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vrp_intraday"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "graded_on"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "term_slope"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "source"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    }
+  ]
+}

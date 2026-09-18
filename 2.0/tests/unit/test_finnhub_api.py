@@ -3,17 +3,15 @@ Tests for 2.0 FinnhubAPI (sync earnings calendar client).
 
 TDD: tests written before implementation.
 """
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-import pytest
 from datetime import date, timedelta
+from itertools import pairwise
 from unittest.mock import MagicMock, patch
 
-from src.domain.errors import ErrorCode
+import pytest
+
 from src.domain.enums import EarningsTiming
+from src.domain.errors import ErrorCode
 
 
 @pytest.fixture
@@ -115,6 +113,7 @@ def test_get_earnings_calendar_horizon_chunks_cover_full_range(client):
     """Bulk fetches must be chunked (Finnhub caps responses at 1,500 entries,
     keeping the LATEST dates): contiguous windows from today to ~90 days out,
     each no wider than the chunk size."""
+    from common.timezone import now_et
     from src.infrastructure.api.finnhub import BULK_CHUNK_DAYS
 
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -130,11 +129,12 @@ def test_get_earnings_calendar_horizon_chunks_cover_full_range(client):
         params = call[1].get("params") or call[0][1]
         windows.append((date.fromisoformat(params["from"]), date.fromisoformat(params["to"])))
 
-    assert windows[0][0] == date.today()
-    assert 85 <= (windows[-1][1] - date.today()).days <= 95
+    today = now_et().date()   # the client's own trading day, not the host's
+    assert windows[0][0] == today
+    assert 85 <= (windows[-1][1] - today).days <= 95
     for from_d, to_d in windows:
         assert (to_d - from_d).days < BULK_CHUNK_DAYS
-    for (_, prev_to), (next_from, _) in zip(windows, windows[1:]):
+    for (_, prev_to), (next_from, _) in pairwise(windows):
         assert next_from == prev_to + timedelta(days=1)
 
 
@@ -156,9 +156,7 @@ def test_get_earnings_calendar_splits_chunk_at_bulk_cap(client):
     must split the window and refetch so near-term entries are not lost."""
     from src.infrastructure.api.finnhub import FINNHUB_BULK_CAP
 
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
-
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(url, params=None, headers=None, timeout=None):
         from_d = date.fromisoformat(params["from"])
         to_d = date.fromisoformat(params["to"])
         if (to_d - from_d).days >= 1:

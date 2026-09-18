@@ -2,40 +2,48 @@
 Base repository with common database patterns.
 
 Provides:
-- Connection pooling support with fallback
+- Pooled Postgres connections
 - Standardized error handling
-- Common query helpers
+- A DELETE helper (`_execute_delete`, EarningsRepository's)
 
-All SQLite repositories should inherit from BaseRepository to ensure
-consistent connection handling and error management.
+All repositories inherit from BaseRepository to ensure consistent connection
+handling and error management.
+
+Two things changed at the Postgres cutover and both are load-bearing:
+
+- **There is no direct-connection fallback any more.** The SQLite version fell
+  back to `sqlite3.connect(self.db_path)` when no pool was passed, which was
+  only safe because a missing SQLite file is a valid thing to create. There is
+  no equivalent that fails safely here, and there is no path to fall back to:
+  repositories take a pool, and default to the process-wide one.
+- **`except psycopg.Error` is not cosmetic.** `psycopg.Error` does not inherit
+  `sqlite3.Error`, so leaving the old handlers in place would have stopped them
+  catching anything and turned every `Result`/`Err(AppError)` return into a raw
+  exception escaping the repository.
 """
 
-import sqlite3
 import logging
-from abc import ABC
 from contextlib import contextmanager
-from pathlib import Path
-from typing import Optional, List, Any
+from typing import TYPE_CHECKING, Optional
 
-from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
+import psycopg
 
-# TYPE_CHECKING import to avoid circular dependency
-from typing import TYPE_CHECKING
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
+from src.infrastructure.database.pg_pool import get_pool
+
 if TYPE_CHECKING:
-    from src.infrastructure.database.connection_pool import ConnectionPool
+    from psycopg_pool import ConnectionPool
 
 logger = logging.getLogger(__name__)
 
-# Default connection timeout for all database operations (30 seconds)
-DEFAULT_CONNECTION_TIMEOUT = 30
 
-
-class BaseRepository(ABC):
+class BaseRepository:
     """
-    Abstract base class for SQLite repositories.
+    Base class for Postgres repositories. Not abstract: it declares no method a
+    subclass must supply (until 2026-09-14 it was an ABC with no abstract methods).
 
     Provides common functionality:
-    - Connection management (pooled or direct)
+    - Pooled connection management
     - Context manager for safe connection handling
     - Standardized error wrapping
 
@@ -45,67 +53,53 @@ class BaseRepository(ABC):
                 try:
                     with self._get_connection() as conn:
                         cursor = conn.cursor()
-                        cursor.execute("SELECT * FROM items WHERE id = ?", (id,))
+                        cursor.execute("SELECT id, name FROM items WHERE id = %s", (id,))
                         row = cursor.fetchone()
                         if not row:
                             return Err(AppError(ErrorCode.NODATA, "Item not found"))
                         return Ok(Item.from_row(row))
-                except sqlite3.Error as e:
+                except psycopg.Error as e:
                     return self._db_error(e, "get item")
     """
 
-    def __init__(
-        self,
-        db_path: str | Path,
-        pool: Optional['ConnectionPool'] = None,
-        timeout: int = DEFAULT_CONNECTION_TIMEOUT,
-    ):
+    def __init__(self, pool: Optional['ConnectionPool'] = None):
         """
         Initialize repository.
 
         Args:
-            db_path: Path to SQLite database
-            pool: Optional connection pool (uses direct connections if None)
-            timeout: Connection timeout in seconds (default: 30)
+            pool: Connection pool to use. Defaults to the process-wide pool,
+                resolved lazily so constructing a repository never connects.
         """
-        self.db_path = str(db_path)
-        self.pool = pool
-        self.timeout = timeout
+        self._pool = pool
+
+    @property
+    def pool(self) -> 'ConnectionPool':
+        if self._pool is None:
+            self._pool = get_pool()
+        return self._pool
 
     @contextmanager
     def _get_connection(self):
         """
-        Get database connection from pool or create direct connection.
+        Check a connection out of the pool.
 
-        Prefers connection pool if available, falls back to direct
-        connection for testing or simple deployments.
+        The pool's own context manager commits on clean exit and rolls back on
+        exception, so an uncommitted write is committed rather than discarded —
+        the opposite of the SQLite pool's behaviour. Every writer below still
+        commits explicitly; do not rely on the implicit commit.
 
         Yields:
-            sqlite3.Connection: Database connection
-
-        Usage:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(...)
+            psycopg.Connection
         """
-        if self.pool:
-            # Use connection pool (preferred for production)
-            with self.pool.get_connection() as conn:
-                yield conn
-        else:
-            # Fallback to direct connection (testing/development)
-            conn = sqlite3.connect(self.db_path, timeout=self.timeout)
-            try:
-                yield conn
-            finally:
-                conn.close()
+        with self.pool.connection() as conn:
+            yield conn
 
-    def _db_error(self, error: sqlite3.Error, operation: str) -> Err:
+    def _db_error(self, error: Exception, operation: str) -> Err:
         """
         Create standardized database error result.
 
         Args:
-            error: Original SQLite error
+            error: Original database error
             operation: Description of the failed operation
 
         Returns:
@@ -115,149 +109,9 @@ class BaseRepository(ABC):
         logger.error(message)
         return Err(AppError(ErrorCode.DBERROR, str(error)))
 
-    def _no_data_error(self, message: str) -> Err:
-        """
-        Create standardized no-data error result.
-
-        Args:
-            message: Error message describing what data is missing
-
-        Returns:
-            Err result with AppError containing NODATA error code
-        """
-        return Err(AppError(ErrorCode.NODATA, message))
-
-    def _execute_query(
-        self,
-        query: str,
-        params: tuple = (),
-        fetch_one: bool = False,
-        fetch_all: bool = False,
-    ) -> Result[Any, AppError]:
-        """
-        Execute a query with standardized error handling.
-
-        Args:
-            query: SQL query string
-            params: Query parameters
-            fetch_one: If True, return single row
-            fetch_all: If True, return all rows
-
-        Returns:
-            Result with query result or AppError
-        """
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(query, params)
-
-                if fetch_one:
-                    return Ok(cursor.fetchone())
-                elif fetch_all:
-                    return Ok(cursor.fetchall())
-                else:
-                    conn.commit()
-                    return Ok(cursor.rowcount)
-
-        except sqlite3.Error as e:
-            return self._db_error(e, "query execution")
-
-    def _execute_insert(
-        self,
-        query: str,
-        params: tuple,
-        operation: str = "insert",
-    ) -> Result[None, AppError]:
-        """
-        Execute an INSERT or UPDATE with standardized error handling.
-
-        Args:
-            query: SQL INSERT/UPDATE query
-            params: Query parameters
-            operation: Description for error messages
-
-        Returns:
-            Result with None on success or AppError on failure
-        """
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(query, params)
-                conn.commit()
-            return Ok(None)
-
-        except sqlite3.Error as e:
-            return self._db_error(e, operation)
-
-    def _execute_batch(
-        self,
-        query: str,
-        params_list: List[tuple],
-        operation: str = "batch insert",
-    ) -> Result[int, AppError]:
-        """
-        Execute batch INSERT with executemany.
-
-        Args:
-            query: SQL INSERT query
-            params_list: List of parameter tuples
-            operation: Description for error messages
-
-        Returns:
-            Result with count of affected rows or AppError
-        """
-        if not params_list:
-            return Ok(0)
-
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.executemany(query, params_list)
-                conn.commit()
-
-            logger.info(f"Batch {operation}: {len(params_list)} rows")
-            return Ok(len(params_list))
-
-        except sqlite3.Error as e:
-            return self._db_error(e, operation)
-
-    def _execute_batch_insert(
-        self,
-        queries_and_params: List[tuple[str, tuple]],
-        operation: str = "batch insert",
-    ) -> Result[int, AppError]:
-        """
-        Execute multiple INSERT statements in a single transaction.
-
-        All inserts succeed or all are rolled back together.
-
-        Args:
-            queries_and_params: List of (query, params) tuples
-            operation: Description for error messages
-
-        Returns:
-            Result with count of executed statements or AppError
-        """
-        if not queries_and_params:
-            return Ok(0)
-
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                try:
-                    cursor.execute("BEGIN")
-                    for query, params in queries_and_params:
-                        cursor.execute(query, params)
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-                    raise
-
-            logger.info(f"Batch {operation}: {len(queries_and_params)} statements in single transaction")
-            return Ok(len(queries_and_params))
-
-        except sqlite3.Error as e:
-            return self._db_error(e, operation)
+    # `_no_data_error`, `_execute_query`, `_execute_insert`, `_execute_batch` and
+    # `_execute_batch_insert` were removed 2026-09-14: no repository called them,
+    # only their own tests. Repositories write through `_get_connection()`.
 
     def _execute_delete(
         self,
@@ -286,7 +140,7 @@ class BaseRepository(ABC):
             logger.info(f"Deleted {deleted_count} rows ({operation})")
             return Ok(deleted_count)
 
-        except sqlite3.Error as e:
+        except psycopg.Error as e:
             return self._db_error(e, operation)
 
 
@@ -305,7 +159,6 @@ class ResilientRepository(BaseRepository):
 
     def __init__(
         self,
-        db_path: str | Path,
         pool: Optional['ConnectionPool'] = None,
         max_failures: int = 10,
     ):
@@ -313,11 +166,10 @@ class ResilientRepository(BaseRepository):
         Initialize resilient repository.
 
         Args:
-            db_path: Path to SQLite database
-            pool: Optional connection pool
+            pool: Connection pool (defaults to the process-wide pool)
             max_failures: Consecutive failures before critical alert
         """
-        super().__init__(db_path, pool)
+        super().__init__(pool)
         self.failure_count = 0
         self.max_failures = max_failures
 

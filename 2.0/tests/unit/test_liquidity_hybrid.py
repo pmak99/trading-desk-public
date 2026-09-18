@@ -1,17 +1,16 @@
 """Tests for liquidity.hybrid module functions."""
-import pytest
-from decimal import Decimal
 from datetime import date
 
 from src.application.metrics.liquidity.hybrid import (
     calculate_dynamic_thresholds,
-    find_strike_outside_move,
-    find_delta_strike,
     classify_hybrid_tier,
     classify_hybrid_tier_market_aware,
+    find_delta_strike,
+    find_strike_outside_move,
 )
 from src.application.metrics.liquidity.score import LiquidityThresholds
-from src.domain.types import Money, Percentage, Strike, OptionQuote, OptionChain
+from src.config.config import StrategyConfig
+from src.domain.types import Money, OptionChain, OptionQuote, Percentage, Strike
 
 
 def make_option(bid=2.00, ask=2.10, oi=500, volume=100, delta=None) -> OptionQuote:
@@ -45,42 +44,42 @@ def make_chain() -> OptionChain:
 
 class TestCalculateDynamicThresholds:
     def test_low_price(self):
-        result = calculate_dynamic_thresholds(15.0)
+        result = calculate_dynamic_thresholds(15.0, StrategyConfig())
         assert result['spread_width'] == 2.50
         assert result['price_tier'] == "<$20"
 
     def test_mid_price_20_to_100(self):
-        result = calculate_dynamic_thresholds(50.0)
+        result = calculate_dynamic_thresholds(50.0, StrategyConfig())
         assert result['spread_width'] == 5.0
         assert result['price_tier'] == "$20-100"
 
     def test_price_100_to_200(self):
-        result = calculate_dynamic_thresholds(150.0)
+        result = calculate_dynamic_thresholds(150.0, StrategyConfig())
         assert result['spread_width'] == 10.0
         assert result['price_tier'] == "$100-200"
 
     def test_price_200_to_500(self):
-        result = calculate_dynamic_thresholds(300.0)
+        result = calculate_dynamic_thresholds(300.0, StrategyConfig())
         assert result['spread_width'] == 20.0
         assert result['price_tier'] == "$200-500"
 
     def test_price_500_to_1000(self):
-        result = calculate_dynamic_thresholds(700.0)
+        result = calculate_dynamic_thresholds(700.0, StrategyConfig())
         assert result['spread_width'] == 50.0
         assert result['price_tier'] == "$500-1000"
 
     def test_price_1000_plus(self):
-        result = calculate_dynamic_thresholds(1500.0)
+        result = calculate_dynamic_thresholds(1500.0, StrategyConfig())
         assert result['spread_width'] == 100.0
         assert result['price_tier'] == "$1000+"
 
     def test_returns_required_keys(self):
-        result = calculate_dynamic_thresholds(100.0)
+        result = calculate_dynamic_thresholds(100.0, StrategyConfig())
         for key in ('spread_width', 'contracts', 'min_oi', 'warning_oi', 'good_oi', 'price_tier'):
             assert key in result
 
     def test_threshold_ordering(self):
-        result = calculate_dynamic_thresholds(100.0)
+        result = calculate_dynamic_thresholds(100.0, StrategyConfig())
         assert result['min_oi'] < result['warning_oi'] < result['good_oi']
 
 
@@ -151,7 +150,7 @@ class TestClassifyHybridTier:
     def test_market_aware_returns_four_tuple(self):
         chain = make_chain()
         t = LiquidityThresholds()
-        result = classify_hybrid_tier_market_aware(chain, 5.0, t)
+        result = classify_hybrid_tier_market_aware(chain, 5.0, t, strategy_config=StrategyConfig())
         assert len(result) == 4
         tier, is_open, reason, details = result
         assert tier in ("EXCELLENT", "GOOD", "WARNING", "REJECT")

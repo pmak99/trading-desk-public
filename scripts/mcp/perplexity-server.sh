@@ -3,14 +3,20 @@
 #
 # The API key is read from 2.0/.env at launch — the same file the trading
 # scripts source, so the key has exactly one source of truth. Do NOT paste the
-# key into .mcp.json (git-tracked) or .claude/settings.json; rotating it should
-# mean editing 2.0/.env and 5.0/.env only.
+# key into .mcp.json (git-tracked) or .claude/settings.json; rotating it means
+# editing 2.0/.env only (5.0/.env went away with 5.0, Sep 12 2026).
 #
 # stdout is the MCP transport — nothing may be printed there. Diagnostics go to
 # stderr, which Claude Code surfaces in `claude mcp list` / --mcp-debug.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/mcp/repo-root.sh
+source "$SCRIPT_DIR/repo-root.sh"
+
+# The main checkout's root, not this script's — 2.0/.env is gitignored and so
+# exists nowhere else. See repo-root.sh.
+REPO_ROOT="$(mcp_main_checkout_root "$(cd "$SCRIPT_DIR/../.." && pwd)")"
 ENV_FILE="$REPO_ROOT/2.0/.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then

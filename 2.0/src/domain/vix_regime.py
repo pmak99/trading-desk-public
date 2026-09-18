@@ -2,7 +2,8 @@
 VIX Regime Classification Utility.
 
 Provides consistent VIX regime classification across the application.
-Used by MarketConditionsAnalyzer and AdaptiveThresholdCalculator.
+Used by MarketConditionsAnalyzer (display and analysis_log) and the
+analysis_log vix_regime CHECK constraint. No regime moves a VRP tier or a size.
 
 Regime Definitions:
 - very_low: VIX < 12 (complacency)
@@ -25,19 +26,20 @@ class VixRegime:
     name: str
     lower_bound: float  # inclusive
     upper_bound: float  # exclusive (except for extreme)
-    description: str
 
 
-# Ordered list of VIX regimes with thresholds
+# Ordered list of VIX regimes with thresholds. Until 2026-09-14 each also carried
+# an unread `description` ("High fear - reduce exposure", "avoid new positions")
+# that read as advice no path applies.
 VIX_REGIMES: Tuple[VixRegime, ...] = (
-    VixRegime("very_low", 0, 12, "Complacency - markets extremely calm"),
-    VixRegime("low", 12, 15, "Low volatility - calm markets"),
-    VixRegime("normal", 15, 20, "Normal conditions - typical volatility"),
-    VixRegime("normal_high", 20, 25, "Slightly elevated - some uncertainty"),
-    VixRegime("elevated", 25, 30, "Elevated - heightened uncertainty"),
-    VixRegime("elevated_high", 30, 35, "Significant fear - caution advised"),
-    VixRegime("high", 35, 40, "High fear - reduce exposure"),
-    VixRegime("extreme", 40, float('inf'), "Panic/crisis - avoid new positions"),
+    VixRegime("very_low", 0, 12),
+    VixRegime("low", 12, 15),
+    VixRegime("normal", 15, 20),
+    VixRegime("normal_high", 20, 25),
+    VixRegime("elevated", 25, 30),
+    VixRegime("elevated_high", 30, 35),
+    VixRegime("high", 35, 40),
+    VixRegime("extreme", 40, float('inf')),
 )
 
 
@@ -75,37 +77,3 @@ def classify_vix_regime(vix_level: float) -> str:
     # Should never reach here, but return extreme as fallback
     return "extreme"
 
-
-def get_regime_info(regime_name: str) -> VixRegime:
-    """
-    Get full regime information by name.
-
-    Args:
-        regime_name: Name of the regime
-
-    Returns:
-        VixRegime with full details
-
-    Raises:
-        ValueError: If regime_name is not recognized
-    """
-    for regime in VIX_REGIMES:
-        if regime.name == regime_name:
-            return regime
-    raise ValueError(f"Unknown VIX regime: {regime_name}")
-
-
-def is_trading_recommended(vix_level: float) -> bool:
-    """
-    Check if trading is recommended at current VIX level.
-
-    Trading is NOT recommended in extreme volatility (VIX >= 40).
-
-    Args:
-        vix_level: Current VIX level
-
-    Returns:
-        True if trading recommended, False otherwise
-    """
-    regime = classify_vix_regime(vix_level)
-    return regime != "extreme"

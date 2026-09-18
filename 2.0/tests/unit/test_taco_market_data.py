@@ -1,15 +1,11 @@
 """Unit tests for scripts/taco/market_data.py — frozen refs + entry signals."""
 
-import sys
+import dataclasses
 from datetime import date, timedelta
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from scripts.taco.market_data import (
-    EntryRefs,
     compute_refs,
     default_event_date,
     drawdown_from_event,
@@ -56,7 +52,7 @@ class TestRefs:
 
     def test_refs_are_immutable(self):
         refs = compute_refs("CALL", SPX_PANIC, VIX_PANIC, EVENT, ENTRY)
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             refs.panic_low = 1.0
 
     def test_insufficient_history_raises(self):

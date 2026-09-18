@@ -2,27 +2,28 @@
 import logging
 import subprocess
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
+from common.filters.weekly_options import has_weekly_options
+from common.timezone import now_et, today_et
+from src.application.metrics.implied_move_expiration import implied_move_expiration
+from src.application.metrics.vrp import logged_vrp_columns
+from src.application.services.existing_position import existing_position_warning
+from src.application.services.stale_history import stale_history_warning
 from src.container import Container
 from src.domain.enums import EarningsTiming
 from src.domain.types import TickerAnalysis
-from src.application.metrics.vrp import compute_close_baseline_vrp
-from src.application.filters.weekly_options import has_weekly_options
 
 from ..constants import (
     BACKFILL_TIMEOUT_SECONDS,
     BACKFILL_YEARS,
 )
-from ..date_utils import (
-    calculate_implied_move_expiration,
-    validate_expiration_date,
-)
+from ..date_utils import validate_expiration_date
 from ..market_data import (
-    get_ticker_name,
     check_liquidity_hybrid,
+    get_ticker_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,11 +34,15 @@ def _compute_term_slope_ratio(container, ticker, front_expiration):
     The scan/whisper path logs analysis_log separately from
     TickerAnalyzer.analyze(), and used to omit term_slope_ratio entirely — so
     every batch-written row had it NULL while single-ticker /analyze runs
-    populated it. That silently biased the term-structure A/B: the Sep 1 2026
-    evaluation found 39 events with outcomes and ZERO below slope 1.10, because
-    the only rows carrying the column came from /analyze runs the user tends to
-    fire at names that already look like good candidates. No FLAT observations
-    meant the hypothesis under test could not be evaluated at all.
+    populated it. That silently biased the term-structure A/B: the Sep 2026
+    evaluation found ZERO observations below slope 1.10 among qualifying
+    events, because the only rows carrying the column came from runs aimed at
+    names that already looked like good candidates. No FLAT observations meant
+    the hypothesis under test could not be evaluated at all.
+
+    Called for every scanned ticker since Sep 4 2026 — including ones the VRP
+    gate rejects. Restricting it to tradeable names was a second, subtler form
+    of the same selection bias.
 
     Uses the same shared metrics as the analyzer so the two paths cannot
     diverge. Best-effort: any failure returns None rather than disturbing the
@@ -46,8 +51,8 @@ def _compute_term_slope_ratio(container, ticker, front_expiration):
     """
     try:
         from src.application.metrics.term_structure import (
-            select_back_expiration,
             analyze_term_structure,
+            select_back_expiration,
         )
 
         provider = container.cached_options_provider
@@ -74,6 +79,79 @@ def _compute_term_slope_ratio(container, ticker, front_expiration):
         return None
 
 
+def _log_analysis_row(container, ticker, earnings_date, earnings_timing,
+                      expiration_date, implied_move, vrp, historical_moves, source):
+    """Write this analysis to analysis_log. Never raises; a failure is a WARNING.
+
+    ⚠️ This row is the whole dataset /ab-status evaluates (vrp_intraday_ratio,
+    vrp_close_ratio, term_slope_ratio). Until 2026-09-13 the write sat in
+    `except Exception: pass`, so a broken write would have starved both A/Bs
+    with no log line at all. It must still not fail the scan, hence a warning
+    with the traceback.
+    """
+    try:
+        log_entry = TickerAnalysis(
+            ticker=ticker,
+            earnings_date=earnings_date,
+            earnings_timing=earnings_timing,
+            entry_time=now_et(),
+            expiration=expiration_date,
+            implied_move=implied_move,
+            vrp=vrp,
+            recommendation=vrp.recommendation,
+            **logged_vrp_columns(vrp, historical_moves),
+        )
+        # Computed for EVERY scanned ticker, tradeable or not. This was
+        # gated on is_tradeable until Sep 4 2026; that gate is exactly what
+        # made the term-structure A/B unevaluable, since it logged the
+        # variable only for names that had already passed the VRP screen.
+        # Marginal cost is one back-chain fetch per rejected ticker — the
+        # expirations list (1h TTL) and front chain (60s TTL) are already
+        # warm from this ticker's own analysis.
+        term_slope = _compute_term_slope_ratio(container, ticker, expiration_date)
+        container.analysis_repository.log_analysis(
+            log_entry,
+            term_slope_ratio=term_slope,
+            source=source,
+        )
+    except Exception:
+        logger.warning(
+            f"{ticker}: analysis_log write failed — this event is missing from the "
+            f"A/B evidence (/ab-status)",
+            exc_info=True,
+        )
+
+
+def _record_bias_prediction(container, ticker, earnings_date,
+                            requested_expiration, expiration_date, skew_result):
+    """Write this event's bias_predictions row. Never raises; a failure is a WARNING.
+
+    Every analysis reaching analysis_log hands its skew reading to the one
+    writer, scripts/store_bias_prediction.analyze_and_store, which keeps the
+    event's first pre-open prediction and nothing the compound-risk
+    recalibration cannot grade. Until 2026-09-14 only `./trade.sh TICKER` wrote
+    one: 3.4 gradable rows a week, while scan, whisper, the bot and the digest
+    computed the same reading and dropped it.
+
+    The reading is reused when this analysis asked for the prediction's trading
+    expiration (every path but a custom --expiration-offset), so the prediction reads
+    no chain of its own. Imported here, not at module top: store_bias_prediction
+    imports scripts.scan, whose package imports this module.
+    """
+    try:
+        from scripts.store_bias_prediction import ScannedSkew, analyze_and_store
+
+        scanned = (ScannedSkew(requested_expiration, expiration_date, skew_result)
+                   if skew_result is not None else None)
+        analyze_and_store(container, ticker, earnings_date, scanned=scanned)
+    except Exception:
+        logger.warning(
+            f"{ticker}: bias prediction failed — {earnings_date} is missing from the "
+            f"compound-risk recalibration",
+            exc_info=True,
+        )
+
+
 def analyze_ticker(
     container: Container,
     ticker: str,
@@ -82,6 +160,7 @@ def analyze_ticker(
     auto_backfill: bool = False,
     skip_weekly_filter: bool = False,
     earnings_timing: EarningsTiming = EarningsTiming.UNKNOWN,
+    source: str = "scan",
 ) -> Optional[dict]:
     """
     Analyze a single ticker for IV Crush opportunity.
@@ -131,19 +210,17 @@ def analyze_ticker(
             logger.error(f"\u2717 Invalid expiration date: {validation_error}")
             return None
 
-        # Calculate the implied move expiration (first post-earnings day)
-        # This is different from trading expiration to capture pure IV crush
-        implied_move_exp = calculate_implied_move_expiration(earnings_date)
-
-        # Find nearest available expiration for implied move calculation (cached)
-        nearest_im_exp_result = container.cached_options_provider.find_nearest_expiration(ticker, implied_move_exp)
+        # Implied move expiration: the first listed expiration containing the
+        # reaction, chosen by the same function /analyze uses (audit 3.1)
+        nearest_im_exp_result = implied_move_expiration(
+            container.cached_options_provider, ticker, earnings_date, earnings_timing
+        )
         if nearest_im_exp_result.is_err:
             logger.warning(f"\u2717 Failed to find implied move expiration for {ticker}: {nearest_im_exp_result.error}")
             return None
 
         actual_im_expiration = nearest_im_exp_result.value
-        if actual_im_expiration != implied_move_exp:
-            logger.info(f"  Implied move expiration: {implied_move_exp} \u2192 {actual_im_expiration}")
+        logger.info(f"  Implied move expiration: {actual_im_expiration} ({earnings_timing.value})")
 
         # Find nearest available expiration for trading/liquidity (cached)
         nearest_exp_result = container.cached_options_provider.find_nearest_expiration(ticker, expiration_date)
@@ -152,6 +229,7 @@ def analyze_ticker(
             return None
 
         actual_expiration = nearest_exp_result.value
+        requested_expiration = expiration_date  # the bias prediction compares its own
         if actual_expiration != expiration_date:
             logger.info(f"  Trading expiration: {expiration_date} \u2192 {actual_expiration}")
             expiration_date = actual_expiration
@@ -187,8 +265,8 @@ def analyze_ticker(
                 logger.info(f"\U0001f4ca Auto-backfilling historical earnings data for {ticker}...")
 
                 # Calculate start date (3 years ago)
-                start_date = (date.today() - timedelta(days=BACKFILL_YEARS*365)).isoformat()
-                end_date = (date.today() - timedelta(days=1)).isoformat()
+                start_date = (today_et() - timedelta(days=BACKFILL_YEARS*365)).isoformat()
+                end_date = (today_et() - timedelta(days=1)).isoformat()
 
                 try:
                     # Call backfill script
@@ -197,6 +275,7 @@ def analyze_ticker(
                             sys.executable,
                             "scripts/backfill_historical.py",
                             ticker,
+                            "--execute",  # the script is report-only without it
                             "--start-date", start_date,
                             "--end-date", end_date
                         ],
@@ -264,7 +343,7 @@ def analyze_ticker(
                     }
             else:
                 # No auto-backfill - suggest manual backfill
-                logger.info("   Run: python scripts/backfill_historical.py " + ticker)
+                logger.info("   Run: python scripts/backfill_historical.py " + ticker + " --execute")
                 return {
                     'ticker': ticker,
                     'ticker_name': company_name,
@@ -307,7 +386,6 @@ def analyze_ticker(
             expiration=expiration_date,
             implied_move_pct=implied_move_pct,
             container=container,
-            max_loss_budget=20000.0,
             use_dynamic_thresholds=True,
         )
 
@@ -332,7 +410,10 @@ def analyze_ticker(
         else:
             logger.info(f"  Liquidity Tier: {liquidity_tier}")
 
-        # 4-Tier Warning Messages
+        # 4-Tier Warning Messages. OI bands are multiples of the engine-sized
+        # position; spread bands come from config (these lines said 8-12% / >12%
+        # / >15% while the check used 12 / 18 / 25 until 2026-09-14).
+        th = container.config.thresholds
         tier_clean = liquidity_tier.replace('*', '')
         if tier_clean == "GOOD":
             logger.info(f"\n\u2713 GOOD liquidity for {ticker}")
@@ -343,7 +424,8 @@ def analyze_ticker(
                 logger.info(f"   OI/Position ratio {oi_ratio:.1f}x (2-5x) - adequate for full size")
             if spread_tier == "GOOD":
                 max_spread = max(hybrid_details.get('call_spread_pct', 0), hybrid_details.get('put_spread_pct', 0))
-                logger.info(f"   Bid/ask spread {max_spread:.0f}% (8-12%) - acceptable slippage")
+                logger.info(f"   Bid/ask spread {max_spread:.0f}% ({th.liquidity_good_max_spread_pct:g}-"
+                            f"{th.liquidity_warning_max_spread_pct:g}%) - acceptable slippage")
         elif tier_clean == "WARNING":
             logger.warning(f"\n\u26a0\ufe0f  WARNING: Low liquidity detected for {ticker}")
             oi_tier = hybrid_details.get('oi_tier', 'N/A')
@@ -353,7 +435,8 @@ def analyze_ticker(
                 logger.warning(f"   OI/Position ratio {oi_ratio:.1f}x (1-2x) - consider reducing size")
             if spread_tier == "WARNING":
                 max_spread = max(hybrid_details.get('call_spread_pct', 0), hybrid_details.get('put_spread_pct', 0))
-                logger.warning(f"   Bid/ask spread {max_spread:.0f}% (>12%) - expect slippage")
+                logger.warning(f"   Bid/ask spread {max_spread:.0f}% ({th.liquidity_warning_max_spread_pct:g}-"
+                               f"{th.liquidity_reject_max_spread_pct:g}%) - expect slippage")
         elif tier_clean == "REJECT":
             logger.warning(f"\n\u274c CRITICAL: Very low liquidity for {ticker}")
             oi_tier = hybrid_details.get('oi_tier', 'N/A')
@@ -363,7 +446,8 @@ def analyze_ticker(
                 logger.warning(f"   OI/Position ratio {oi_ratio:.1f}x (<1x) - DO NOT TRADE at full size")
             if spread_tier == "REJECT":
                 max_spread = max(hybrid_details.get('call_spread_pct', 0), hybrid_details.get('put_spread_pct', 0))
-                logger.warning(f"   Bid/ask spread {max_spread:.0f}% (>15%) - DO NOT TRADE")
+                logger.warning(f"   Bid/ask spread {max_spread:.0f}% "
+                               f"(>{th.liquidity_reject_max_spread_pct:g}%) - DO NOT TRADE")
 
         if vrp.is_tradeable:
             logger.info("\n\u2705 TRADEABLE OPPORTUNITY")
@@ -372,6 +456,7 @@ def analyze_ticker(
 
         # Get directional bias from skew analysis
         directional_bias = "NEUTRAL"  # Default if skew analysis unavailable
+        skew_result = None
         skew_analyzer = container.skew_analyzer
         if skew_analyzer:
             skew_result = skew_analyzer.analyze_skew_curve(ticker, expiration_date)
@@ -385,36 +470,11 @@ def analyze_ticker(
         if hybrid_details and hybrid_details.get('oi_ratio'):
             oi_ratio = hybrid_details['oi_ratio']
 
-        # Persist to analysis_log — fire-and-forget (vix_level NULL for this path)
-        try:
-            _log_entry = TickerAnalysis(
-                ticker=ticker,
-                earnings_date=earnings_date,
-                earnings_timing=earnings_timing,
-                entry_time=datetime.now(),
-                expiration=expiration_date,
-                implied_move=implied_move,
-                vrp=vrp,
-                recommendation=vrp.recommendation,
-            )
-            _close_mean, _vrp_close = compute_close_baseline_vrp(
-                float(implied_move.implied_move_pct.value), historical_moves
-            )
-            # Gated on is_tradeable to match TickerAnalyzer.analyze()'s own
-            # guard, which also bounds the extra chain fetches to the handful
-            # of tickers a scan actually surfaces rather than the full universe.
-            _term_slope = (
-                _compute_term_slope_ratio(container, ticker, expiration_date)
-                if vrp.is_tradeable else None
-            )
-            container.analysis_repository.log_analysis(
-                _log_entry,
-                historical_close_mean_pct=_close_mean,
-                vrp_close_ratio=_vrp_close,
-                term_slope_ratio=_term_slope,
-            )
-        except Exception:
-            pass
+        # Persist to analysis_log (vix_level NULL for this path)
+        _log_analysis_row(container, ticker, earnings_date, earnings_timing,
+                          expiration_date, implied_move, vrp, historical_moves, source)
+        _record_bias_prediction(container, ticker, earnings_date,
+                                requested_expiration, expiration_date, skew_result)
 
         return {
             'ticker': ticker,
@@ -427,10 +487,23 @@ def analyze_ticker(
             'vrp_ratio': float(vrp.vrp_ratio),
             'edge_score': float(vrp.edge_score),
             'recommendation': vrp.recommendation.value,
+            'historical_quarters': vrp.historical_quarters,  # quarters behind the tier
             'is_tradeable': vrp.is_tradeable,
             'liquidity_tier': liquidity_tier,  # CRITICAL ADDITION
             'liquidity_oi_ratio': oi_ratio,  # NEW: OI/Position ratio from hybrid check
             'directional_bias': directional_bias,  # NEW: Directional bias from skew
+            # One position per event: the check /analyze runs, shown by every
+            # table and Telegram line (closed, journaled trades only)
+            'existing_position_warning': existing_position_warning(
+                container.db_pool, ticker, earnings_date
+            ),
+            # A quarter missing from historical_moves entirely -- vrp_ratio above
+            # is computed on a stale window. Live per-ticker version of
+            # integrity_report.py's weekly quarter_missing_from_calendar_and_moves
+            # check, added 2026-09-16 after LEN's gap sat unnoticed for six months.
+            'stale_history_warning': stale_history_warning(
+                ticker, historical_moves, earnings_date
+            ),
             'status': 'SUCCESS'
         }
 
@@ -446,6 +519,7 @@ def analyze_ticker_concurrent(
     expiration_date: date,
     skip_weekly_filter: bool = False,
     earnings_timing: EarningsTiming = EarningsTiming.UNKNOWN,
+    source: str = "scan",
 ) -> Optional[dict]:
     """
     Wrapper for analyze_ticker() compatible with ConcurrentScanner.
@@ -472,6 +546,10 @@ def analyze_ticker_concurrent(
         auto_backfill=False,  # Disable backfill in concurrent mode
         skip_weekly_filter=skip_weekly_filter,
         earnings_timing=earnings_timing,
+        # Was accepted and dropped, so every concurrent whisper/ticker run was
+        # logged to analysis_log as the default 'scan' -- wrong provenance on
+        # the rows the live A/B evaluates.
+        source=source,
     )
 
 

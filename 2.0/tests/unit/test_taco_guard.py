@@ -1,12 +1,8 @@
 """Unit tests for scripts/taco/guard.py — IPO wind-down gate."""
 
-import sys
 from datetime import date
-from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from scripts.taco.guard import WinddownPhase, entries_allowed, winddown_phase
 

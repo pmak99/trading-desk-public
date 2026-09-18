@@ -1,8 +1,9 @@
 """Option scoring and tier classification — module-level functions taking LiquidityThresholds."""
 from typing import Optional, Tuple
+
 from src.application.metrics.liquidity.score import LiquidityScore, LiquidityThresholds
-from src.domain.types import OptionQuote, Money
-from src.utils.market_hours import get_market_status
+from src.domain.market_calendar import get_market_status
+from src.domain.types import Money, OptionQuote
 
 
 def calculate_spread_pct(option: OptionQuote) -> float:

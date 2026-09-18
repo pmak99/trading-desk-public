@@ -11,11 +11,12 @@ Tests boundary conditions in _calculate_contracts_kelly:
 """
 
 import pytest
-from src.domain.types import Money
-from src.config.config import StrategyConfig, ScoringWeights
-from src.application.services.strategy import StrategyGenerator
-from src.application.metrics.liquidity_scorer import LiquidityScorer
 
+from src.application.metrics.liquidity_scorer import LiquidityScorer
+from src.application.services.strategy import StrategyGenerator
+from src.config.config import StrategyConfig
+from src.domain.scoring.weights import ScoringWeights
+from src.domain.types import Money
 
 # ============================================================================
 # Fixtures
@@ -28,7 +29,6 @@ def config():
     return StrategyConfig(
         use_kelly_sizing=True,
         kelly_fraction=0.25,
-        kelly_min_edge=0.05,
         kelly_min_contracts=1,
         risk_budget_per_trade=20000.0,
         max_contracts=100,
@@ -257,7 +257,6 @@ class TestHalfKellyFraction:
         config_quarter = StrategyConfig(
             use_kelly_sizing=True,
             kelly_fraction=0.25,
-            kelly_min_edge=0.05,
             kelly_min_contracts=1,
             risk_budget_per_trade=20000.0,
             max_contracts=100,
@@ -266,7 +265,6 @@ class TestHalfKellyFraction:
         config_full = StrategyConfig(
             use_kelly_sizing=True,
             kelly_fraction=1.0,  # Full Kelly
-            kelly_min_edge=0.05,
             kelly_min_contracts=1,
             risk_budget_per_trade=20000.0,
             max_contracts=100,
@@ -291,7 +289,6 @@ class TestHalfKellyFraction:
         config_zero = StrategyConfig(
             use_kelly_sizing=True,
             kelly_fraction=0.0,
-            kelly_min_edge=0.05,
             kelly_min_contracts=1,
             risk_budget_per_trade=20000.0,
             max_contracts=100,
@@ -321,7 +318,6 @@ class TestMaxContractsCap:
         config = StrategyConfig(
             use_kelly_sizing=True,
             kelly_fraction=0.25,
-            kelly_min_edge=0.05,
             kelly_min_contracts=1,
             risk_budget_per_trade=100000.0,  # Large budget
             max_contracts=10,  # But small max
@@ -341,7 +337,6 @@ class TestMaxContractsCap:
         config = StrategyConfig(
             use_kelly_sizing=True,
             kelly_fraction=0.25,
-            kelly_min_edge=0.05,
             kelly_min_contracts=5,  # Higher minimum
             risk_budget_per_trade=20000.0,
             max_contracts=100,

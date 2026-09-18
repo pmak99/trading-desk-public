@@ -6,6 +6,8 @@ Provides the argparse setup for scan.py entry point.
 
 import argparse
 
+from .date_utils import parse_date
+
 
 def parse_args(args=None):
     """
@@ -25,8 +27,11 @@ Examples:
     # Scanning mode - scan earnings for a specific date
     python scripts/scan.py --scan-date 2025-01-31
 
-    # Ticker mode - analyze specific tickers
+    # Ticker mode - analyze specific tickers (each ticker's next calendar date)
     python scripts/scan.py --tickers AAPL,MSFT,GOOGL
+
+    # Ticker mode for one earnings date (what ./trade.sh list TICKERS DATE runs)
+    python scripts/scan.py --tickers AAPL,MSFT --earnings-date 2025-01-30
 
     # Whisper mode - analyze most anticipated earnings (current week)
     python scripts/scan.py --whisper-week
@@ -34,20 +39,27 @@ Examples:
     # Whisper mode - specific week (Monday)
     python scripts/scan.py --whisper-week 2025-11-10
 
-    # Ticker mode with custom expiration offset
-    python scripts/scan.py --tickers AAPL --expiration-offset 1
+    # Ticker mode with a custom expiration offset (days after the earnings date)
+    python scripts/scan.py --tickers AAPL --expiration-offset 7
 
-Expiration Date Calculation:
-    - BMO (before market open): Same day if Friday, otherwise next Friday
-    - AMC (after market close): Next day if Thursday, otherwise next Friday
-    - UNKNOWN: Next Friday (conservative)
-    - Custom offset: earnings_date + offset_days
+Expiration dates:
+    - Trading expiration (liquidity, skew, strategies): calculate_expiration_date() in
+      src/domain/trading_expiration.py picks it from the report's weekday, never under the
+      minimum DTE (CLAUDE.md §5); the scan uses the first listed expiration on or after it.
+    - --expiration-offset N: the earnings date + N days instead, raised to the minimum
+      DTE when N is below it and moved to the next trading day.
+    - Implied move and VRP: implied_move_expiration() in
+      src/application/metrics/implied_move_expiration.py, the first listed expiration
+      containing the reaction. The offset does not change it.
 
 Notes:
     - Requires TRADIER_API_KEY and FINNHUB_API_KEY in .env
-    - Whisper mode auto-backfills historical data (like ticker mode)
-    - Historical data is backfilled automatically for VRP calculation
-    - Run: python scripts/backfill.py <TICKER> to manually backfill data
+    - A ticker with no historical moves is backfilled automatically only when tickers
+      are analyzed one at a time: --tickers with one ticker, or --tickers and
+      --whisper-week with --sequential. Parallel runs and --scan-date report it as
+      NO_HISTORICAL_DATA instead.
+    - Manual backfill, for a ticker new to the system:
+      python scripts/backfill_historical.py <TICKER> --execute
         """,
     )
 
@@ -73,14 +85,22 @@ Notes:
     mode_group.add_argument(
         "--harvest",
         action="store_true",
-        help="30-45 DTE non-earnings premium harvest candidates (from position_limits ORATS snapshot)"
+        help="30-45 DTE non-earnings premium harvest candidates (live IV/HV, index IVR > 25, no earnings within 5 days)"
     )
 
     # Options
     parser.add_argument(
+        "--earnings-date",
+        type=parse_date,
+        help="With --tickers: analyze every ticker for earnings on this date (YYYY-MM-DD), "
+             "with its stored BMO/AMC timing (UNKNOWN when the calendar has none), instead "
+             "of each ticker's next calendar date"
+    )
+    parser.add_argument(
         "--expiration-offset",
         type=int,
-        help="Custom expiration offset in days from earnings date (overrides auto-calculation)"
+        help="Trading expiration N days after the earnings date instead of the weekday rule "
+             "(raised to the minimum DTE when lower)"
     )
     parser.add_argument(
         "--sequential",
@@ -100,4 +120,7 @@ Notes:
         help="Skip weekly options filter (include tickers with only monthly options)"
     )
 
-    return parser.parse_args(args)
+    parsed = parser.parse_args(args)
+    if parsed.earnings_date is not None and parsed.tickers is None:
+        parser.error("--earnings-date applies to --tickers only")
+    return parsed

@@ -1,19 +1,26 @@
 """Unit tests for _fuse_skew_signals and analyzer position limits loading."""
 
-import pytest
-import sys
-from pathlib import Path
+from collections import namedtuple
 from unittest.mock import Mock
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+import pytest
 
 from src.domain.enums import DirectionalBias
-from src.domain.types import SizingContext, PositionLimitsSnapshot
+from src.domain.types import PositionLimitsSnapshot
 
 
-def _make_analyzer():
+def _make_analyzer(strategy_config=None):
+    """Container mock carrying a REAL StrategyConfig.
+
+    _build_sizing_context reads sizing tiers off container.config.strategy
+    (tunable since Sep 2026). A bare Mock returns Mock attributes there, which
+    silently poisons every cap assertion instead of failing loudly.
+    """
     from src.application.services.analyzer import TickerAnalyzer
-    return TickerAnalyzer(Mock())
+    from src.config.config import StrategyConfig
+    container = Mock()
+    container.config.strategy = strategy_config or StrategyConfig()
+    return TickerAnalyzer(container)
 
 
 def _make_skew(bias: DirectionalBias, bias_confidence: float, slope_atm: float = 0.0):
@@ -27,35 +34,29 @@ def _make_skew(bias: DirectionalBias, bias_confidence: float, slope_atm: float =
 class TestFuseSkewSignals:
     """Confidence-weighted signal fusion."""
 
-    def test_no_orats_uses_tradier_proxy(self):
-        # When r_slp_30 is None, the Tradier slope_atm proxy is used at 0.3
-        # confidence. Negative slope_atm = put skew = bearish (same convention
-        # as the polynomial classifier; empirically corr(slope_atm, r_slp_30)
-        # = +0.45 on 42 ORATS-era tickers).
-        # tradier: BEARISH (-2), conf=0.6; proxy(-150) ≈ WEAK_BEARISH (-1)
-        # fused = (-2*0.6 + -1*0.3) / 0.9 = -1.67 → round(-2) → BEARISH
+    # Without ORATS there is no second source. slope_atm comes from the same
+    # fit that produced the Tradier bias, so it cannot vote again: the Tradier
+    # bias passes through whatever the slope says.
+
+    def test_no_orats_returns_tradier_bias(self):
         analyzer = _make_analyzer()
         skew = _make_skew(DirectionalBias.BEARISH, 0.6, slope_atm=-150.0)
         result = analyzer._fuse_skew_signals(skew, r_slp_30=None)
-        assert result in (DirectionalBias.BEARISH, DirectionalBias.STRONG_BEARISH)
+        assert result == DirectionalBias.BEARISH
 
-    def test_no_orats_bullish_slope_moderates_bearish_tradier(self):
-        # Bullish slope (+150) pulls a bearish Tradier bias toward neutral —
-        # proxy(+150) ≈ WEAK_BULLISH (+1).
-        # fused = (-2*0.6 + 1*0.3) / 0.9 = -1.0 → WEAK_BEARISH
+    def test_no_orats_contrary_slope_does_not_moderate_tradier(self):
+        # A slope from the same fit cannot disagree with that fit's own
+        # reading; it is not evidence against it.
         analyzer = _make_analyzer()
         skew = _make_skew(DirectionalBias.BEARISH, 0.6, slope_atm=150.0)
         result = analyzer._fuse_skew_signals(skew, r_slp_30=None)
-        assert result == DirectionalBias.WEAK_BEARISH
+        assert result == DirectionalBias.BEARISH
 
-    def test_no_orats_neutral_slope_stays_bearish(self):
-        # slope_atm=0 → proxy=RSLP30_MEAN → NEUTRAL (0).
-        # tradier: BEARISH (-2), conf=0.6; proxy: NEUTRAL (0), conf=0.3
-        # fused = -1.2/0.9 ≈ -1.33 → WEAK_BEARISH
+    def test_no_orats_flat_slope_does_not_dilute_tradier(self):
         analyzer = _make_analyzer()
         skew = _make_skew(DirectionalBias.BEARISH, 0.6, slope_atm=0.0)
         result = analyzer._fuse_skew_signals(skew, r_slp_30=None)
-        assert result in (DirectionalBias.WEAK_BEARISH, DirectionalBias.BEARISH)
+        assert result == DirectionalBias.BEARISH
 
     def test_orats_strong_bearish_pulls_neutral_tradier(self):
         analyzer = _make_analyzer()
@@ -89,62 +90,113 @@ class TestFuseSkewSignals:
         assert result == DirectionalBias.STRONG_BEARISH
 
 
-class TestTradierRslp30Proxy:
-    """compute_tradier_r_slp30_proxy sign and calibration.
-
-    Convention (matches the polynomial classifier and 5.0/src/domain/skew.py):
-    negative slope_atm = put skew = bearish → LOW r_slp_30.
-    Calibration: OLS of ORATS-era bias_predictions (n=42 tickers,
-    corr +0.45): Δr_slp_30 ≈ 0.0027 per slope_atm unit.
+class TestSameFitIsNotASecondSource:
+    """Defect 3: the post-ORATS path fused the Tradier bias with a linear map
+    of slope_atm (compute_tradier_r_slp30_proxy) — the slope of the very fit
+    that produced the bias. One measurement counted twice cannot add
+    confidence, and must not be able to move the reading.
     """
 
-    def _proxy(self, slope):
-        from src.application.metrics.skew_enhanced import (
-            compute_tradier_r_slp30_proxy,
+    @staticmethod
+    def _fuse(bias, conf, slope_atm, r_slp_30=None):
+        from src.application.metrics.skew_enhanced import fuse_skew_bias
+        return fuse_skew_bias(
+            tradier_bias=bias, tradier_conf=conf,
+            slope_atm=slope_atm, r_slp_30=r_slp_30,
         )
-        return compute_tradier_r_slp30_proxy(slope)
 
-    def test_zero_slope_maps_to_mean(self):
-        from common.constants import RSLP30_MEAN
-        assert self._proxy(0.0) == pytest.approx(RSLP30_MEAN)
+    def test_same_fit_slope_does_not_flip_a_neutral(self):
+        # A steep slope used to drag a NEUTRAL reading to WEAK_BEARISH.
+        assert self._fuse(DirectionalBias.NEUTRAL, 0.6, -600.0) == DirectionalBias.NEUTRAL
 
-    def test_positive_slope_is_bullish_side(self):
-        from common.constants import RSLP30_MEAN
-        assert self._proxy(150.0) > RSLP30_MEAN
+    def test_same_fit_slope_does_not_promote_into_the_compound_risk_leg(self):
+        # WEAK_BEARISH at the noise gate's floor plus the same fit's slope
+        # used to fuse to exactly -1.5 → BEARISH, arming the compound-risk
+        # cap on one source.
+        assert self._fuse(DirectionalBias.WEAK_BEARISH, 0.3, -600.0) == DirectionalBias.WEAK_BEARISH
 
-    def test_negative_slope_is_bearish_side(self):
-        from common.constants import RSLP30_MEAN
-        assert self._proxy(-150.0) < RSLP30_MEAN
+    @pytest.mark.parametrize("conf", [0.0, 0.3, 0.6, 1.0])
+    @pytest.mark.parametrize("slope", [-5000.0, -600.0, -150.0, -1.0, 0.0, 1.0, 150.0, 600.0, 5000.0])
+    def test_without_orats_every_reading_passes_through(self, conf, slope):
+        for bias in DirectionalBias:
+            assert self._fuse(bias, conf, slope) == bias
 
-    def test_calibrated_scale_not_overdriven(self):
-        # ±150 slope is ~0.3σ of r_slp_30, NOT ±2σ — a strong Tradier slope
-        # alone must not map to a STRONG_* r_slp_30 bucket.
-        from src.application.metrics.skew_enhanced import r_slp_30_to_numeric
-        assert r_slp_30_to_numeric(self._proxy(150.0)) == +1   # WEAK_BULLISH
-        assert r_slp_30_to_numeric(self._proxy(-150.0)) == -1  # WEAK_BEARISH
+    def test_no_fit_and_no_orats_is_still_none(self):
+        assert self._fuse(DirectionalBias.BEARISH, 0.6, None) is None
 
-    def test_extreme_slope_clamps_at_two_sigma(self):
-        from common.constants import RSLP30_MEAN, RSLP30_STD
-        assert self._proxy(5000.0) == pytest.approx(RSLP30_MEAN + 2 * RSLP30_STD)
-        assert self._proxy(-5000.0) == pytest.approx(RSLP30_MEAN - 2 * RSLP30_STD)
+    def test_orats_still_fuses(self):
+        # ORATS r_slp_30 is its own surface — an independent source.
+        # NEUTRAL at 0.5 + STRONG_BEARISH (-3) at 0.5 → -1.5 → BEARISH.
+        assert self._fuse(DirectionalBias.NEUTRAL, 0.5, 0.0, r_slp_30=-2.0) == DirectionalBias.BEARISH
 
-    def test_monotonic_increasing(self):
-        vals = [self._proxy(s) for s in (-600, -150, 0, 150, 600)]
-        assert vals == sorted(vals)
+
+class TestExplicitRounding:
+    """Defect 4: round() is banker's rounding — round(0.5) = 0, round(2.5) = 2.
+
+    The fused level rounds half away from zero: symmetric under a sign flip
+    and monotone in magnitude.
+    """
+
+    @pytest.mark.parametrize("value, expected", [
+        (0.5, 1), (1.5, 2), (2.5, 3),
+        (-0.5, -1), (-1.5, -2), (-2.5, -3),
+        (0.0, 0), (0.49, 0), (-0.49, 0), (0.51, 1), (1.49, 1), (2.51, 3),
+        (1.4999999999999998, 2),   # a tie that floating point lands short
+        (-1.4999999999999998, -2),
+    ])
+    def test_half_away_from_zero(self, value, expected):
+        from src.application.metrics.skew_enhanced import round_half_away_from_zero
+        result = round_half_away_from_zero(value)
+        assert result == expected
+        assert isinstance(result, int)
+
+    def test_fused_half_rounds_up_in_magnitude(self):
+        # NEUTRAL (0) at 0.5 + ORATS WEAK_BEARISH (-1, r_slp_30=0.5) at 0.5
+        # = -0.5 → WEAK_BEARISH. Banker's rounding gave NEUTRAL.
+        from src.application.metrics.skew_enhanced import fuse_skew_bias
+        fused = fuse_skew_bias(DirectionalBias.NEUTRAL, 0.5, 0.0, r_slp_30=0.5)
+        assert fused == DirectionalBias.WEAK_BEARISH
+
+    def test_fused_two_and_a_half_reaches_strong(self):
+        # STRONG_BEARISH (-3) at 0.5 + ORATS BEARISH (-2, r_slp_30=0.0) at 0.5
+        # = -2.5 → STRONG_BEARISH. Banker's rounding gave BEARISH.
+        from src.application.metrics.skew_enhanced import fuse_skew_bias
+        fused = fuse_skew_bias(DirectionalBias.STRONG_BEARISH, 0.5, 0.0, r_slp_30=0.0)
+        assert fused == DirectionalBias.STRONG_BEARISH
+
+    def test_rounding_is_symmetric(self):
+        from src.application.metrics.skew_enhanced import fuse_skew_bias
+        bullish = fuse_skew_bias(DirectionalBias.STRONG_BULLISH, 0.5, 0.0, r_slp_30=2.5)
+        assert bullish == DirectionalBias.STRONG_BULLISH  # +3 and +2 → +2.5 → +3
+
+
+def _pg_row(fields: dict):
+    """Build a row shaped like the pool actually returns one.
+
+    psycopg's namedtuple_row yields namedtuples, so the code under test uses
+    attribute access. A dict here would pass while the real thing raised
+    TypeError -- the mock has to have the same shape as the driver, not the
+    shape the old sqlite3.Row had.
+    """
+    if fields is None:
+        return None
+    return namedtuple("Row", fields.keys())(**fields)
 
 
 def _make_db_pool_mock(row):
-    """Return a mock db_pool whose get_connection() context manager yields a conn returning row."""
+    """Mock db_pool whose connection() context manager yields a conn returning row."""
     cursor_mock = Mock()
-    cursor_mock.fetchone = Mock(return_value=row)
+    cursor_mock.fetchone = Mock(return_value=_pg_row(row))
     conn_mock = Mock()
     conn_mock.execute = Mock(return_value=cursor_mock)
     from contextlib import contextmanager
+
     @contextmanager
-    def _get_connection():
+    def _connection():
         yield conn_mock
+
     pool_mock = Mock()
-    pool_mock.get_connection = _get_connection
+    pool_mock.connection = _connection
     return pool_mock
 
 
@@ -259,7 +311,7 @@ class TestBuildSizingContext:
         ctx = analyzer._build_sizing_context(snapshot, None)
         assert ctx.trr_level is None
         assert ctx.fcst_ern_iv_effect is None
-        assert ctx.effective_max_contracts == 100
+        assert ctx.effective_max_contracts == 50  # CLAUDE.md rule 4: no-flag default 50 (was 100 until 2026-09-13)
 
     def test_passes_fused_bias_for_compound_risk_cap(self):
         # Fused bearish skew + TRR HIGH -> compound risk -> engine cap 25

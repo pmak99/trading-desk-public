@@ -2,15 +2,24 @@
 Smoke tests for build_vertical_spread — confirms it returns correct types.
 Deep logic is covered by the unit tests for its dependencies.
 """
-import pytest
-from decimal import Decimal
 from datetime import date
+from decimal import Decimal
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.application.services.strategy.spread_builder import build_vertical_spread
 from src.config.config import StrategyConfig
-from src.domain.types import Money, Strike, OptionQuote, OptionChain, VRPResult, Percentage, Strategy
-from src.domain.enums import OptionType, StrategyType, DirectionalBias, Recommendation
+from src.domain.enums import OptionType, Recommendation, StrategyType
+from src.domain.types import (
+    Money,
+    OptionChain,
+    OptionQuote,
+    Percentage,
+    Strategy,
+    Strike,
+    VRPResult,
+)
 
 
 def make_strike(price: float) -> Strike:
@@ -97,7 +106,7 @@ class TestBuildVerticalSpread:
         result = build_vertical_spread(
             config, liquidity_scorer, "TEST", chain, vrp,
             OptionType.PUT, StrategyType.BULL_PUT_SPREAD,
-            below=True, bias=DirectionalBias.NEUTRAL,
+            below=True,
         )
         assert result is not None
         assert isinstance(result, Strategy)
@@ -111,7 +120,7 @@ class TestBuildVerticalSpread:
         result = build_vertical_spread(
             config, liquidity_scorer, "TEST", chain, vrp,
             OptionType.CALL, StrategyType.BEAR_CALL_SPREAD,
-            below=False, bias=DirectionalBias.NEUTRAL,
+            below=False,
         )
         assert result is not None
         assert isinstance(result, Strategy)
@@ -125,7 +134,7 @@ class TestBuildVerticalSpread:
         result = build_vertical_spread(
             config, liquidity_scorer, "TEST", empty_chain, make_vrp(),
             OptionType.PUT, StrategyType.BULL_PUT_SPREAD,
-            below=True, bias=DirectionalBias.NEUTRAL,
+            below=True,
         )
         assert result is None
 
@@ -135,7 +144,7 @@ class TestBuildVerticalSpread:
         result = build_vertical_spread(
             config, liquidity_scorer, "TEST", chain, vrp,
             OptionType.PUT, StrategyType.BULL_PUT_SPREAD,
-            below=True, bias=DirectionalBias.NEUTRAL,
+            below=True,
         )
         assert result is not None
         assert float(result.net_credit.amount) >= config.min_credit_per_spread
@@ -145,11 +154,11 @@ class TestBuildVerticalSpread:
         result = build_vertical_spread(
             config, liquidity_scorer, "TEST", chain, make_vrp(),
             OptionType.PUT, StrategyType.BULL_PUT_SPREAD,
-            below=True, bias=DirectionalBias.NEUTRAL,
+            below=True,
         )
         assert result is not None
         assert len(result.legs) == 2
-        sell_legs = [l for l in result.legs if l.action == "SELL"]
-        buy_legs = [l for l in result.legs if l.action == "BUY"]
+        sell_legs = [leg for leg in result.legs if leg.action == "SELL"]
+        buy_legs = [leg for leg in result.legs if leg.action == "BUY"]
         assert len(sell_legs) == 1
         assert len(buy_legs) == 1

@@ -82,5 +82,5 @@ class Strategy:
 
     @property
     def close_date(self) -> Optional[str]:
-        dates = [l.close_date for l in self.legs if l.close_date]
+        dates = [leg.close_date for leg in self.legs if leg.close_date]
         return max(dates) if dates else None

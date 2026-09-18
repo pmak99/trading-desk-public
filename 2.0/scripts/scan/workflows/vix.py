@@ -2,25 +2,33 @@
 import logging
 
 from src.container import Container
+from src.infrastructure.api.yahoo import yahoo_call
 
 logger = logging.getLogger(__name__)
 
 
 def _log_vix_context(container: Container) -> None:
-    """Fetch VIX once at scan start and log regime. Warning if elevated."""
+    """Fetch VIX once and log the regime, with a warning if elevated.
+
+    Shared by scan and /analyze. A failed fetch is a WARNING with its
+    traceback: it was `except Exception: pass`, which silently dropped the
+    elevated-VIX warning when it was needed.
+    """
     try:
         result = container.market_conditions_analyzer.get_current_conditions()
         if result.is_ok:
             mc = result.value
             vix_val = mc.vix_level.value
-            logger.info(f"VIX: {vix_val:.1f} ({mc.regime})  |  position sizing: {mc.position_size_multiplier:.0%}")
+            logger.info(f"VIX: {vix_val:.1f} ({mc.regime})")
             if mc.regime in ('elevated_high', 'high', 'extreme'):
                 logger.warning(
-                    f"⚠  VIX {vix_val:.1f} ({mc.regime}) — "
-                    f"thresholds raised, size reduced to {mc.position_size_multiplier:.0%}"
+                    f"⚠  VIX {vix_val:.1f} ({mc.regime}) — VRP tiers and sizing do not "
+                    f"adjust for VIX; the size call is yours"
                 )
+        else:
+            logger.warning(f"VIX regime unavailable: {result.error}")
     except Exception:
-        pass
+        logger.warning("VIX regime check failed — no regime warning this run", exc_info=True)
 
 
 def _check_vix_term_structure() -> tuple:
@@ -35,8 +43,12 @@ def _check_vix_term_structure() -> tuple:
     """
     try:
         import math
+
         import yfinance as yf
-        data = yf.download(["^VIX", "^VIX3M"], period="2d", progress=False, auto_adjust=False)
+        # Under the Yahoo limit. download() swallows a symbol's rate limit into
+        # a NaN leg (handled below), so this call is limited but never retried.
+        data = yahoo_call(lambda: yf.download(["^VIX", "^VIX3M"], period="2d",
+                                              progress=False, auto_adjust=False))
         closes = data["Close"].iloc[-1]
         vix = float(closes["^VIX"])
         vix3m = float(closes["^VIX3M"])

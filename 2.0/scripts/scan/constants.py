@@ -19,39 +19,31 @@ CACHE_MAX_L1_SIZE = 100          # Max items in L1 memory cache
 BACKFILL_TIMEOUT_SECONDS = 120   # 2 minutes timeout for backfill subprocess
 BACKFILL_YEARS = 3               # Years of historical data to backfill
 
-# Trading day adjustment
-MAX_TRADING_DAY_ITERATIONS = 10  # Max iterations to find next trading day (handles holiday clusters)
-
-# API rate limiting
-API_CALL_DELAY = 0.2             # Delay between API calls to respect rate limits
-
-# Composite quality scoring constants (Dec 2025)
-# OPTIMIZED via A/B testing with Monte Carlo simulation (100 iterations)
-# Key findings:
-#   - Edge score REMOVED: 80-95% correlated with VRP (redundant)
-#   - Continuous scoring: Eliminates cliff effects, improves correlation
-#   - Higher VRP target (4.0): More selective for quality trades
-#   - VRP dominates: Primary edge signal should outweigh secondary factors
+# Composite quality scoring constants, read by quality_scorer.calculate_scan_quality_score.
+# score = VRP (55 at VRP 2.16, linear, NO cap) + liquidity (4-20) + implied move (0-25).
+# Nominal weights sum to 100, but the VRP term has no ceiling, so neither does the score.
 #
-# Weight Rationale (Dec 6 revision):
-#   - VRP is THE edge signal - a 3.87x VRP should beat 2.54x VRP
-#   - Move is secondary risk factor, not primary edge
-#   - Original 45/35 split let move penalty offset VRP advantage too much
+# Provenance: the 55/20/25 split was set by hand on 2025-12-06 (from 45/20/35) so that a
+# 3.87x VRP (ORCL) would outrank a 2.54x VRP (COST). The "Monte Carlo A/B" once cited here
+# (scoring_ab_test.py, since deleted) generated its VRP, liquidity and implied-move inputs
+# from each trade's win/loss outcome, so its reported gains are not evidence for any weight.
 #
-# A/B Test Results (vs old config):
-#   - Score separation: +38% (17.4 -> 24.0)
-#   - Score-PnL correlation: +12% (0.196 -> 0.22)
-#   - Win rate delta: +5% (52% -> 57%)
+# Tested since: a pre-registered study on 5,948 historical events (2026-09-13) kept the VRP
+# term linear and uncapped -- capping it at 3.0, 3.6 or 4.0, or using log(VRP), each
+# lowered the top-20% crush rate (that study ran in intraday units; SCORE_VRP_TARGET is now
+# close-to-close, but the linear-uncapped shape it supports carries over).
 
-# VRP Factor (55 points) - PRIMARY edge signal
-SCORE_VRP_MAX_POINTS = 55                   # Dominant weight - VRP is the core edge metric
-SCORE_VRP_TARGET = 4.0                      # Higher bar for full points - more selective
-SCORE_VRP_USE_LINEAR = True                 # Continuous scaling, no hard cap at target
+# VRP Factor: points = vrp_ratio / SCORE_VRP_TARGET * SCORE_VRP_MAX_POINTS, no ceiling
+SCORE_VRP_MAX_POINTS = 55                   # Points AT the target, not a maximum (VRP 4.32 = 110)
+# close-to-close VRP earning SCORE_VRP_MAX_POINTS; matched to intraday 4.0's score>=55 share
+# on live events (2026-09); not a cap
+SCORE_VRP_TARGET = 2.16
+SCORE_VRP_USE_LINEAR = True                 # Linear and uncapped (False = legacy cap at target)
 
-# Edge Factor (DISABLED) - Removed due to redundancy with VRP
-# edge_score = vrp_ratio / (1 + consistency), so ~85% correlated with VRP
-# Having both double-counts the same signal, hurting performance
-SCORE_EDGE_MAX_POINTS = 0                   # DISABLED - redundant with VRP
+# Edge Factor (not scored)
+# edge_score = vrp_ratio / (1 + consistency) (src/application/metrics/vrp.py), a rescaled
+# VRP, so scoring it as well would count VRP twice.
+SCORE_EDGE_MAX_POINTS = 0                   # Not scored; quality_scorer hardcodes 0 edge points
 SCORE_EDGE_TARGET = 1.0                     # N/A (disabled)
 
 # Liquidity Factor (20 points) - Moderate penalty for illiquidity
@@ -92,13 +84,16 @@ LIQUIDITY_PRIORITY_ORDER = {
 
 # Harvest scoring constants (30-45 DTE non-earnings premium scan)
 # Scoring: IV Rank (40) + IV/HV ratio (25) + Skew (15) + Liquidity proxy (20) = 100 max
-HARVEST_IV_RANK_MIN = 60.0          # Hard gate — top 40% of 52-week IV range required
-HARVEST_IV_RANK_MAX_POINTS = 40.0   # Linear: rank=60→0pts, rank=100→40pts
+# CLAUDE.md 45 DTE sleeve: "IVR > 25 — hard, not a preference" and "Never within 5 days of a
+# name's earnings". Until 2026-09-13 these were 60 and 30, stricter than the rules with nothing
+# saying so; tests/unit/test_harvest_live.py pins them to the documented values.
+HARVEST_IV_RANK_MIN = 25.0          # Hard gate: index IVR must EXCEED this
+HARVEST_IV_RANK_MAX_POINTS = 40.0   # Linear: rank=25→0pts, rank=100→40pts
 HARVEST_IV_HV_MAX_POINTS = 25.0     # Linear: ratio=1.0→0pts, ratio=2.0+→25pts (capped)
 HARVEST_IV_HV_CAP = 2.0             # No extra credit above 2.0x IV/HV ratio
 HARVEST_SKEW_MAX_POINTS = 15.0
 HARVEST_LIQUIDITY_MAX_POINTS = 20.0
-HARVEST_EARNINGS_EXCLUSION_DAYS = 30  # Exclude tickers with earnings within this window
+HARVEST_EARNINGS_EXCLUSION_DAYS = 5   # Exclude tickers reporting within this many days (inclusive)
 HARVEST_TOP_N = 20                    # Default maximum candidates to display
 
 # Harvest universe (45 DTE non-earnings sleeve) — fixed per sleeve rules.

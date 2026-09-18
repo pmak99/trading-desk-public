@@ -2,13 +2,23 @@
 Tests for interpolated implied move calculator (Phase 4).
 """
 
-import pytest
 from datetime import date, timedelta
 from unittest.mock import Mock
 
-from src.application.metrics.implied_move_interpolated import ImpliedMoveCalculatorInterpolated
-from src.domain.types import Money, Percentage, Strike, OptionChain, OptionQuote, ImpliedMove
+import pytest
+
+from src.application.metrics.implied_move_interpolated import (
+    ImpliedMoveCalculatorInterpolated,
+)
 from src.domain.errors import ErrorCode
+from src.domain.types import (
+    ImpliedMove,
+    Money,
+    OptionChain,
+    OptionQuote,
+    Percentage,
+    Strike,
+)
 
 # Relative future date so these fixtures never go stale (calculator rejects past expirations)
 FUTURE_EXPIRATION = date.today() + timedelta(days=45)
@@ -31,7 +41,7 @@ class TestImpliedMoveCalculatorInterpolated:
         self,
         ticker="TEST",
         stock_price=150.50,  # Between strikes
-        strikes=[145.0, 150.0, 155.0, 160.0]
+        strikes=(145.0, 150.0, 155.0, 160.0),
     ):
         """
         Create option chain with stock price between strikes.
@@ -39,7 +49,7 @@ class TestImpliedMoveCalculatorInterpolated:
         Args:
             ticker: Stock ticker
             stock_price: Stock price (should be between two strikes)
-            strikes: List of strike prices
+            strikes: Strike prices
 
         Returns:
             OptionChain
@@ -81,7 +91,7 @@ class TestImpliedMoveCalculatorInterpolated:
         self,
         ticker="TEST",
         stock_price=150.0,  # Exactly at strike
-        strikes=[145.0, 150.0, 155.0, 160.0]
+        strikes=(145.0, 150.0, 155.0, 160.0),
     ):
         """Create chain with stock exactly at a strike."""
         return self.create_chain_between_strikes(ticker, stock_price, strikes)
@@ -227,7 +237,7 @@ class TestImpliedMoveCalculatorInterpolated:
 
     def test_provider_error_propagation(self, calculator, provider):
         """Test that provider errors are propagated."""
-        from src.domain.errors import Err, AppError
+        from src.domain.errors import AppError, Err
 
         provider.get_option_chain.return_value = Err(
             AppError(ErrorCode.EXTERNAL, "API error")

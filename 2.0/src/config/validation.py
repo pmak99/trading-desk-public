@@ -6,7 +6,7 @@ Validates all configuration at startup to fail fast on misconfiguration.
 
 import logging
 import os
-from pathlib import Path
+
 from src.config.config import Config
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,6 @@ def validate_configuration(config: Config) -> None:
     errors = config.validate()
 
     # Additional detailed checks
-    _validate_database_access(config, errors)
     _validate_logging_setup(config, errors)
     _validate_cache_config(config, errors)
 
@@ -48,15 +47,12 @@ def validate_configuration(config: Config) -> None:
     logger.info("✓ Configuration validated successfully")
 
 
-def _validate_database_access(config: Config, errors: list) -> None:
-    """Validate database directory is writable."""
-    db_path = config.database.path
-    db_parent = db_path.parent
-
-    if not db_parent.exists():
-        errors.append(f"Database directory does not exist: {db_parent}")
-    elif not os.access(db_parent, os.W_OK):
-        errors.append(f"Database directory is not writable: {db_parent}")
+# `_validate_database_access` was removed at the tail of the Postgres migration.
+# It checked that the directory holding the SQLite database existed and was
+# writable. There is no such directory: the target is a DSN from PG*, and an
+# unreachable server raises on connect rather than needing a pre-flight check
+# against a path. Keeping it would have validated a directory whose contents
+# nothing reads.
 
 
 def _validate_logging_setup(config: Config, errors: list) -> None:

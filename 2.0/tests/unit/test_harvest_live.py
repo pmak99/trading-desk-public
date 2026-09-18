@@ -10,14 +10,14 @@ Replaces the frozen position_limits snapshot ranking with live data:
 """
 
 import math
-import sys
 from datetime import date
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
+from scripts.scan.constants import (
+    HARVEST_EARNINGS_EXCLUSION_DAYS,
+    HARVEST_IV_RANK_MIN,
+)
 from scripts.scan.harvest_live import (
     build_live_candidates,
     classify_trr,
@@ -70,18 +70,19 @@ class TestClassifyTrr:
         assert classify_trr([2.0, 2.0, 2.0, 2.5]) == "LOW"
 
     def test_normal(self):
-        # max 10 / avg 4.67 = 2.14
-        assert classify_trr([2.0, 2.0, 10.0]) == "NORMAL"
+        # max 10 / avg 4.0 = 2.5 -> NORMAL (HIGH is strictly above)
+        assert classify_trr([2.0, 2.0, 2.0, 10.0]) == "NORMAL"
 
     def test_high(self):
-        # max 20 / avg 7.33 = 2.73
-        assert classify_trr([1.0, 1.0, 20.0]) == "HIGH"
+        # max 20 / avg 5.75 = 3.48
+        assert classify_trr([1.0, 1.0, 1.0, 20.0]) == "HIGH"
 
     def test_signed_moves_use_abs(self):
-        assert classify_trr([-1.0, 1.0, -20.0]) == "HIGH"
+        assert classify_trr([-1.0, 1.0, -1.0, -20.0]) == "HIGH"
 
     def test_insufficient_moves_returns_none(self):
         assert classify_trr([5.0]) is None
+        assert classify_trr([1.0, 1.0, 20.0]) is None   # 3 quarters: below the floor
 
 
 def _raw(ticker="AAPL", is_index=False, iv30d=30.0, hv20d=20.0, ivr=None,
@@ -109,21 +110,21 @@ class TestBuildLiveCandidates:
 
     def test_stock_trr_high_filtered(self):
         cands, skipped = build_live_candidates(
-            [_raw(gap_moves=[1.0, 1.0, 20.0])], today=self.TODAY)
+            [_raw(gap_moves=[1.0, 1.0, 1.0, 20.0])], today=self.TODAY)
         assert cands == []
         assert "TRR" in skipped[0][1]
 
     def test_stock_earnings_within_window_filtered(self):
         cands, skipped = build_live_candidates(
-            [_raw(next_earnings="2026-07-20")], today=self.TODAY)
+            [_raw(next_earnings=date(2026, 7, 8))], today=self.TODAY)
         assert cands == []
         assert "earnings" in skipped[0][1].lower()
 
     def test_stock_earnings_beyond_window_passes(self):
         cands, _ = build_live_candidates(
-            [_raw(next_earnings="2026-08-20")], today=self.TODAY)
+            [_raw(next_earnings=date(2026, 8, 20))], today=self.TODAY)
         assert len(cands) == 1
-        assert cands[0]["next_earnings"] == "2026-08-20"
+        assert cands[0]["next_earnings"] == date(2026, 8, 20)
 
     def test_index_without_vol_index_degrades_to_flagged_pass(self):
         # ^RVX is discontinued on Yahoo — an index with no vol-index history
@@ -138,15 +139,13 @@ class TestBuildLiveCandidates:
 
     def test_index_below_ivr_gate_filtered(self):
         cands, skipped = build_live_candidates(
-            [_raw(ticker="SPY", is_index=True, ivr=40.0)],
-            iv_rank_min=60.0, today=self.TODAY)
+            [_raw(ticker="SPY", is_index=True, ivr=20.0)], today=self.TODAY)
         assert cands == []
         assert "IVR" in skipped[0][1]
 
     def test_index_above_ivr_gate_passes(self):
         cands, _ = build_live_candidates(
-            [_raw(ticker="SPY", is_index=True, ivr=75.0)],
-            iv_rank_min=60.0, today=self.TODAY)
+            [_raw(ticker="SPY", is_index=True, ivr=75.0)], today=self.TODAY)
         assert len(cands) == 1
         assert cands[0]["iv_rank_1y"] == 75.0
         assert cands[0]["ivr_source"] == "vol-index"
@@ -175,3 +174,36 @@ class TestBuildLiveCandidates:
             [_raw(iv30d=None), _raw(ticker="MSFT", hv20d=None)], today=self.TODAY)
         assert cands == []
         assert len(skipped) == 2
+
+
+class TestGatesMatchClaudeMd:
+    """CLAUDE.md's 45 DTE sleeve: "IVR > 25 — hard, not a preference" and "Never within 5
+    days of a name's earnings". Until 2026-09-13 the code gated at IVR 60 and 30 days,
+    so the scan excluded trades the rules allow and nothing said so."""
+
+    TODAY = date(2026, 7, 3)
+
+    def test_constants_are_the_documented_rules(self):
+        assert HARVEST_IV_RANK_MIN == 25.0
+        assert HARVEST_EARNINGS_EXCLUSION_DAYS == 5
+
+    @pytest.mark.parametrize("ivr, passes", [(20.0, False), (25.0, False), (25.1, True), (40.0, True)])
+    def test_index_ivr_must_exceed_25(self, ivr, passes):
+        cands, skipped = build_live_candidates(
+            [_raw(ticker="SPY", is_index=True, ivr=ivr)], today=self.TODAY)
+        assert (len(cands) == 1) is passes, skipped
+
+    @pytest.mark.parametrize("days_out, passes", [(0, False), (5, False), (6, True), (20, True)])
+    def test_earnings_within_5_days_excluded(self, days_out, passes):
+        earnings = date.fromordinal(self.TODAY.toordinal() + days_out)
+        cands, skipped = build_live_candidates(
+            [_raw(next_earnings=earnings)], today=self.TODAY)
+        assert (len(cands) == 1) is passes, skipped
+
+    def test_harvest_mode_defaults_to_the_same_gates(self):
+        import inspect
+
+        from scripts.scan.workflows.harvest_mode import harvest_mode
+        params = inspect.signature(harvest_mode).parameters
+        assert params["iv_rank_min"].default == HARVEST_IV_RANK_MIN
+        assert params["earnings_exclusion_days"].default == HARVEST_EARNINGS_EXCLUSION_DAYS

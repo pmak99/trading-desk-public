@@ -1,30 +1,72 @@
 """
-Enhanced Skew Analyzer - Phase 4 Algorithmic Optimization
+Skew classifier: the 25-delta risk reversal read off a fitted smile.
 
-Polynomial-fitted volatility skew analysis using multiple OTM points.
-Provides superior edge detection compared to single-point skew.
+What is measured
+----------------
+Skew is the price of downside protection relative to upside: out-of-the-money
+puts against out-of-the-money calls, each at its own delta. The standard
+reading is the 25-delta risk reversal,
+
+    RR25 = (IV of the 25Δ put − IV of the 25Δ call) / ATM IV
+
+normalised by ATM IV so it compares across tickers and survives pre-earnings
+IV inflation, which lifts every strike together. Positive RR25 = puts richer =
+hedge demand = the bearish side of DirectionalBias.
+
+Until Sep 2026 skew was put IV − call IV at the SAME strike. Put-call parity
+makes those two IVs equal up to quote noise (rates, dividends, early exercise,
+stale marks), so that difference measured noise, not the smile: a chain with a
+steep, perfectly parity-consistent put skew read NEUTRAL.
+
+How it is read
+--------------
+1. Take every liquid OTM quote with an IV and a delta: puts below spot, calls
+   above, MIN_ABS_DELTA <= |Δ| < MAX_ABS_DELTA. ITM quotes never enter.
+2. Place each on one axis, v = signed distance from 50Δ: v = |Δ| − 0.5 for a
+   put (−0.40 … 0), v = 0.5 − Δ for a call (0 … +0.40). The 25Δ put sits at
+   v = −0.25, the 25Δ call at +0.25, ATM at 0.
+3. Fit IV(v) = a·v² + b·v + c by least squares and read IV at −0.25, 0, +0.25.
+4. Refuse to read what the chain does not contain: at least MIN_POINTS quotes,
+   MIN_POINTS_PER_WING on each side, and a quote at or beyond 25Δ on each side,
+   so both 25Δ vols are interpolated, never extrapolated.
+
+A 3-parameter fit through 3 points is exact interpolation (R² = 1 whatever the
+quotes say), and with few spare degrees of freedom raw R² stays inflated — its
+expectation under pure noise is 2/(n−1), 0.5 at n = 5. Fit quality is therefore
+ADJUSTED R², which is 0 in expectation under noise at every n.
+
+Thresholds are provisional
+--------------------------
+THRESHOLD_* were set from option structure, not fitted to outcomes (no stored
+chains existed to fit them on). A symmetric event jump adds roughly the same
+variance at every strike near the money, so pre-earnings RR25 is compressed
+relative to a normal month: by that variance-additive estimate (not a
+measurement), an ordinary name whose 30-day RR25 is ~12% of ATM reads ~3-7% the
+week of earnings, depending on how far the event lifts ATM IV. NEUTRAL <= 5% keeps that ordinary tilt out of
+the directional levels, and BEARISH (> 10%, the compound-risk leg) requires put
+demand around twice the ordinary level. Recalibrate on logged skew_atm values
+against outcomes before trusting the level boundaries.
 """
 
 import logging
-from datetime import date
-from typing import List, Tuple, Optional
+import math
 from dataclasses import dataclass
+from datetime import date
+from typing import List, Optional, Tuple
 
 import numpy as np
 
-from src.domain.types import Money, Percentage, Strike, OptionChain
-from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
-from src.domain.protocols import OptionsDataProvider
-from src.domain.enums import DirectionalBias
-
-import sys as _sys
-from pathlib import Path as _Path
-
-_root = str(_Path(__file__).resolve().parent.parent.parent.parent.parent)
-if _root not in _sys.path:
-    _sys.path.insert(0, _root)
-
 from common.constants import RSLP30_THRESHOLDS  # noqa: E402
+from src.domain.enums import DirectionalBias
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
+from src.domain.protocols import OptionsDataProvider
+from src.domain.types import (
+    MAX_PERCENTAGE,
+    MIN_PERCENTAGE,
+    Money,
+    OptionChain,
+    Percentage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +82,9 @@ _BIAS_NUMERIC = {
 }
 _NUMERIC_BIAS = {v: k for k, v in _BIAS_NUMERIC.items()}
 
+# A tie that floating point lands a hair short of .5 is still a tie.
+_ROUNDING_TOLERANCE = 1e-9
+
 
 def bias_to_numeric(bias: DirectionalBias) -> int:
     return _BIAS_NUMERIC[bias]
@@ -48,6 +93,23 @@ def bias_to_numeric(bias: DirectionalBias) -> int:
 def numeric_to_bias(n: int) -> DirectionalBias:
     clamped = max(-3, min(3, n))
     return _NUMERIC_BIAS[clamped]
+
+
+def round_half_away_from_zero(x: float) -> int:
+    """
+    Round to the nearest integer; an exact half goes away from zero.
+
+    0.5 → 1, 1.5 → 2, 2.5 → 3, and the negatives mirror them. Python's round()
+    is banker's rounding (0.5 → 0, 2.5 → 2), so a tie's outcome depended on
+    whether the neighbouring level was even — not on the signal. This rule is
+    symmetric under a sign flip (a bearish reading and its mirror-image bullish
+    reading land on the same strength) and monotone in magnitude.
+
+    On the one tie the compound-risk leg can see, ±1.5, it agrees with banker's
+    rounding (→ ±2): the change is confined to the ±0.5 and ±2.5 ties.
+    """
+    magnitude = math.floor(abs(x) + 0.5 + _ROUNDING_TOLERANCE)
+    return int(math.copysign(magnitude, x)) if magnitude else 0
 
 
 def r_slp_30_to_numeric(r_slp_30: float) -> int:
@@ -64,81 +126,72 @@ def fuse_skew_bias(
     r_slp_30,
 ):
     """
-    Confidence-weighted fusion of Tradier polynomial bias with a slope signal.
+    Combine the Tradier skew bias with an INDEPENDENT second skew source.
 
-    Single source of truth for the fusion formula — used by both
-    analyzer._fuse_skew_signals (live /analyze display) and
+    Single source of truth for the formula — used by both
+    analyzer._fuse_skew_signals (live /analyze and sizing) and
     store_bias_prediction (persisted predictions) so the two cannot drift.
 
-    Slope signal priority: ORATS r_slp_30 at ORATS_SKEW_CONFIDENCE when
-    available; otherwise the Tradier slope_atm proxy at
-    TRADIER_PROXY_SKEW_CONFIDENCE (post-ORATS continuity path).
+    The only independent source is ORATS r_slp_30, read from ORATS' own smoothed
+    surface. With it, the two readings are confidence-weighted,
 
-    Returns None when neither slope signal is available (fusion impossible).
+        fused = (tradier × tradier_conf + orats × ORATS_SKEW_CONFIDENCE)
+                / (tradier_conf + ORATS_SKEW_CONFIDENCE)
+
+    rounded half away from zero (round_half_away_from_zero) and clamped to ±3.
+
+    Without it there is nothing to fuse and the Tradier bias is returned as is.
+    Until Sep 2026 this branch fused the bias with
+    compute_tradier_r_slp30_proxy(slope_atm): a linear map of the slope of the
+    same fit that produced tradier_bias. That is one measurement counted twice.
+    It could not add information, only move the reading — it turned a NEUTRAL
+    into WEAK_BEARISH, and a WEAK_BEARISH at the noise gate into BEARISH, arming
+    the compound-risk leg on a single source. The proxy was deleted with it; its
+    calibration (Δr_slp_30 per slope unit) belonged to the old same-strike slope
+    and means nothing for the risk-reversal fit.
+
+    slope_atm is kept so neither caller changes: it now only says whether a
+    Tradier fit exists.
+
+    Returns None when there is neither an ORATS reading nor a Tradier fit.
     """
-    from common.constants import (  # noqa: PLC0415
-        ORATS_SKEW_CONFIDENCE, TRADIER_PROXY_SKEW_CONFIDENCE,
-    )
     if r_slp_30 is not None:
-        slope_numeric = r_slp_30_to_numeric(r_slp_30)
-        slope_conf = ORATS_SKEW_CONFIDENCE
-    elif slope_atm is not None:
-        proxy = compute_tradier_r_slp30_proxy(slope_atm)
-        slope_numeric = r_slp_30_to_numeric(proxy)
-        slope_conf = TRADIER_PROXY_SKEW_CONFIDENCE
-    else:
+        from common.constants import ORATS_SKEW_CONFIDENCE  # noqa: PLC0415
+        orats_numeric = r_slp_30_to_numeric(r_slp_30)
+        tradier_numeric = bias_to_numeric(tradier_bias)
+        fused = (tradier_numeric * tradier_conf + orats_numeric * ORATS_SKEW_CONFIDENCE) \
+            / (tradier_conf + ORATS_SKEW_CONFIDENCE)
+        return numeric_to_bias(round_half_away_from_zero(fused))
+    if slope_atm is None:
         return None
-
-    tradier_numeric = bias_to_numeric(tradier_bias)
-    fused = (tradier_numeric * tradier_conf + slope_numeric * slope_conf) \
-            / (tradier_conf + slope_conf)
-    return numeric_to_bias(round(fused))
-
-
-def compute_tradier_r_slp30_proxy(slope_atm: float) -> float:
-    """
-    Approximate ORATS r_slp_30 from the Tradier polynomial skew slope_atm.
-
-    Sign convention matches the polynomial classifier (and 5.0 skew.py):
-    negative slope_atm = put skew = bearish → LOW r_slp_30; positive =
-    call skew = bullish → HIGH r_slp_30. Confirmed empirically Jul 2026:
-    corr(slope_atm, r_slp_30) = +0.45 across 42 ORATS-era tickers in
-    bias_predictions (+0.29 excluding the financials cluster).
-
-    Scale from the same OLS fit: Δr_slp_30 ≈ 0.0027 per slope_atm unit,
-    so ±150 slope ≈ ±0.3σ (WEAK_* bucket), NOT ±2σ — a Tradier slope
-    alone never reaches a STRONG_* bucket. Clamped at MEAN ± 2σ.
-
-    (Pre-Jul-2026 version had the sign inverted and a 6x-hot ±150 → ±2σ
-    scale — every proxy-path fusion pulled the wrong direction.)
-
-    Accuracy caveat: noisy single-expiry snapshot vs ORATS' 30-day
-    smoothing. Use at TRADIER_PROXY_SKEW_CONFIDENCE (0.3) in fusion, not 0.5.
-    """
-    from common.constants import RSLP30_MEAN, RSLP30_STD  # noqa: PLC0415
-    _RSLP30_PER_SLOPE_UNIT = 0.0027  # OLS slope, Jul 2026 calibration
-    raw = RSLP30_MEAN + slope_atm * _RSLP30_PER_SLOPE_UNIT
-    lo, hi = RSLP30_MEAN - 2.0 * RSLP30_STD, RSLP30_MEAN + 2.0 * RSLP30_STD
-    return max(lo, min(hi, raw))
+    return tradier_bias
 
 
 @dataclass
 class SkewAnalysis:
     """
-    Polynomial skew analysis results.
+    Skew classification for one ticker and expiration.
+
+    Field names predate the risk-reversal measure and are kept for callers.
+    Every shape measure is scale-free (normalised by the fitted ATM IV).
 
     Attributes:
         ticker: Stock symbol
         expiration: Option expiration date
         stock_price: Current stock price
-        skew_atm: Skew at ATM (positive = puts expensive)
-        curvature: Second derivative (smile vs smirk)
-        strength: Classification (smile, smirk, flat)
-        directional_bias: Directional bias enum (7-level scale)
-        confidence: Fit quality (R-squared)
-        num_points: Number of data points used in fit
-        slope_atm: First derivative at ATM (for bias strength)
-        bias_confidence: Bias prediction confidence (0-1, R² adjusted by slope strength)
+        skew_atm: 25Δ risk reversal as a percent of ATM IV,
+            100 × (IV_25Δput − IV_25Δcall) / IV_ATM. Positive = puts richer.
+        curvature: 25Δ butterfly as a fraction of ATM IV,
+            ((IV_25Δput + IV_25Δcall) / 2 − IV_ATM) / IV_ATM.
+        strength: "smile" (curvature > SMILE_THRESHOLD), "inverse_smile"
+            (< −SMILE_THRESHOLD), otherwise "smirk"
+        directional_bias: 7-level bias from skew_atm; NEUTRAL when the fit
+            fails the noise gate
+        confidence: Fit quality — adjusted R², clipped to [0, 1]
+        num_points: OTM quotes in the fit
+        slope_atm: Fitted dIV/dv at ATM over ATM IV (v in delta units, puts
+            negative). Negative = put skew. Equals −skew_atm / 50.
+        bias_confidence: Weight of this reading in fusion; equals confidence
     """
     ticker: str
     expiration: date
@@ -155,43 +208,38 @@ class SkewAnalysis:
 
 class SkewAnalyzerEnhanced:
     """
-    Enhanced volatility skew analyzer using polynomial fitting.
+    Classify an expiration's skew from its 25-delta risk reversal.
 
-    Traditional skew analysis uses a single ATM put/call IV comparison.
-    This enhanced version:
-    1. Samples 5+ OTM points across the strike range
-    2. Fits a 2nd-degree polynomial (parabola)
-    3. Extracts ATM skew, curvature, and directional bias
-    4. Classifies skew shape (smile vs smirk)
-
-    Benefits:
-    - More robust to bad data points
-    - Detects directional bias
-    - Quantifies smile/smirk strength
-    - Better edge detection for rare setups
+    See the module docstring for the measure, the fit, and why each
+    requirement exists.
     """
 
-    # Configuration
-    MIN_POINTS = 3  # Minimum points for reliable fit (5 was over-rejecting sparse chains)
-    MAX_DISTANCE_PCT = 0.15  # Sample strikes within ±15% of stock price
-    MIN_DISTANCE_PCT = 0.02  # Skip strikes within ±2% (ATM)
+    # --- What the chain must contain --------------------------------------
+    # A degree-2 fit has 3 parameters. Through 3 points it is exact (R² = 1
+    # whatever the quotes are); 5 leave 2 residual degrees of freedom, so fit
+    # quality rests on more than a single leftover point.
+    MIN_POINTS = 5
+    MIN_POINTS_PER_WING = 2
+    # 10Δ is the conventional far pillar of a vol surface. Further out, quotes sit
+    # near the minimum tick and their IVs scatter; a least-squares fit is pulled
+    # by them — on a test chain whose local 25Δ vols were 52.8 / 53.5, fitting
+    # from 5Δ read RR +29.5% (STRONG_BEARISH), from 10Δ −4.5% (NEUTRAL).
+    MIN_ABS_DELTA = 0.10
+    MAX_ABS_DELTA = 0.50  # OTM side of 50Δ only
+    RR_DELTA = 0.25       # the risk reversal is read at 25Δ
 
-    # Curvature threshold for smile classification (in IV%/moneyness² units)
-    # Positive curvature > 1.0 indicates volatility smile (U-shaped, both OTM expensive)
-    # Empirically derived from typical equity skew patterns
-    SMILE_THRESHOLD = 1.0
+    # --- Fit quality gate --------------------------------------------------
+    # Adjusted R² below this → NEUTRAL, whatever the tilt.
+    MIN_FIT_QUALITY = 0.30
 
-    # Directional bias thresholds (7-level scale, in IV%/moneyness units)
-    # Based on typical single-stock skew slopes of 5-15% IV across 10% moneyness
-    # NOTE: Slope units are "percentage points per decimal moneyness"
-    # Example: slope=100 means 1% OTM strike has 1% higher IV (100 * 0.01 = 1%)
-    THRESHOLD_NEUTRAL = 30.0   # |slope| <= 30 → NEUTRAL (< 0.3% IV change per 1% moneyness)
-    THRESHOLD_WEAK = 80.0      # 30 < |slope| <= 80 → WEAK bias (0.3-0.8% IV change per 1% moneyness)
-    THRESHOLD_STRONG = 150.0   # |slope| > 150 → STRONG bias (> 1.5% IV change per 1% moneyness)
+    # --- Shape ------------------------------------------------------------
+    # |25Δ butterfly| / ATM IV above this is a smile (or inverse smile).
+    SMILE_THRESHOLD = 0.02
 
-    # Bias confidence thresholds
-    MIN_CONFIDENCE = 0.15     # Minimum confidence to trust bias signal (R² × slope_strength)
-    MAX_TYPICAL_SLOPE = 150.0 # Maximum typical slope for normalization (matches THRESHOLD_STRONG)
+    # --- Directional levels, on RR25 / ATM IV (provisional; module doc) ---
+    THRESHOLD_NEUTRAL = 0.05   # |RR| <= 5%            → NEUTRAL
+    THRESHOLD_WEAK = 0.10      # 5% < |RR| <= 10%      → WEAK_*
+    THRESHOLD_STRONG = 0.20    # 10% < |RR| <= 20%     → BEARISH / BULLISH; above → STRONG_*
 
     def __init__(self, provider: OptionsDataProvider):
         self.provider = provider
@@ -202,18 +250,14 @@ class SkewAnalyzerEnhanced:
         expiration: date
     ) -> Result[SkewAnalysis, AppError]:
         """
-        Analyze volatility skew using polynomial fitting.
-
-        Args:
-            ticker: Stock symbol
-            expiration: Option expiration date
+        Classify skew for one expiration.
 
         Returns:
-            Result with SkewAnalysis or AppError
+            Ok(SkewAnalysis), Err(NODATA) when the chain cannot support a
+            25Δ reading, Err(CALCULATION) when the fit itself fails.
         """
         logger.info(f"Analyzing skew curve: {ticker} exp {expiration}")
 
-        # Get option chain
         chain_result = self.provider.get_option_chain(ticker, expiration)
         if chain_result.is_err:
             return Err(chain_result.error)
@@ -221,36 +265,24 @@ class SkewAnalyzerEnhanced:
         chain = chain_result.value
         stock_price = float(chain.stock_price.amount)
 
-        # Collect skew points (distance from ATM, skew value)
-        skew_points = self._collect_skew_points(chain, stock_price)
+        points = self._collect_skew_points(chain, stock_price)
 
-        if len(skew_points) < self.MIN_POINTS:
+        problem = self._coverage_problem(points)
+        if problem is not None:
             return Err(
                 AppError(
                     ErrorCode.NODATA,
-                    f"Insufficient data points for skew fit: "
-                    f"{len(skew_points)} < {self.MIN_POINTS}"
+                    f"Insufficient data points for skew fit: {problem}"
                 )
             )
 
-        # Fit polynomial and analyze
         try:
             analysis = self._fit_and_analyze(
                 ticker,
                 expiration,
                 chain.stock_price,
-                skew_points
+                points
             )
-
-            logger.info(
-                f"{ticker}: Skew ATM={analysis.skew_atm.value:.2f}%, "
-                f"Strength={analysis.strength}, "
-                f"Bias={analysis.directional_bias}, "
-                f"Points={analysis.num_points}"
-            )
-
-            return Ok(analysis)
-
         except Exception as e:
             logger.error(f"Skew fit failed: {e}")
             return Err(
@@ -260,62 +292,79 @@ class SkewAnalyzerEnhanced:
                 )
             )
 
+        logger.info(
+            f"{ticker}: RR25={analysis.skew_atm.value:.2f}% of ATM IV, "
+            f"Strength={analysis.strength}, "
+            f"Bias={analysis.directional_bias}, "
+            f"Fit={analysis.confidence:.2f}, "
+            f"Points={analysis.num_points}"
+        )
+        return Ok(analysis)
+
     def _collect_skew_points(
         self,
         chain: OptionChain,
         stock_price: float
     ) -> List[Tuple[float, float]]:
         """
-        Collect (moneyness, skew) points for fitting.
+        Collect (v, IV%) for every usable OTM quote.
 
-        Moneyness = (strike - stock) / stock
-        Skew = put_iv - call_iv
-
-        Returns:
-            List of (moneyness, skew) tuples
+        v is the signed distance from 50Δ in delta units: |Δ| − 0.5 for a put
+        (negative), 0.5 − Δ for a call (positive). Each wing contributes its own
+        OTM options; the put and the call at one strike are never differenced.
         """
         points = []
-        ticker = chain.ticker  # Extract ticker for logging
+        ticker = chain.ticker
 
         for strike in chain.strikes:
             strike_price = float(strike.price)
+            if strike_price < stock_price:
+                quote, is_call = chain.puts.get(strike), False
+            elif strike_price > stock_price:
+                quote, is_call = chain.calls.get(strike), True
+            else:
+                continue  # exactly at spot: neither wing
 
-            # Calculate moneyness (distance from ATM as %)
-            moneyness = (strike_price - stock_price) / stock_price
-
-            # Skip if too close to ATM (avoid ATM strike)
-            if abs(moneyness) < self.MIN_DISTANCE_PCT:
+            if quote is None or not quote.implied_volatility or quote.delta is None:
+                continue
+            if not quote.is_liquid:
                 continue
 
-            # Skip if too far OTM
-            if abs(moneyness) > self.MAX_DISTANCE_PCT:
-                continue
-
-            # Get IVs
-            call = chain.calls.get(strike)
-            put = chain.puts.get(strike)
-
-            if not call or not put:
+            delta = quote.delta
+            if (delta > 0) != is_call:
                 logger.debug(
-                    f"{ticker}: Strike {strike_price:.2f} missing "
-                    f"{'call' if not call else 'put'} - skipping from skew fit"
+                    f"{ticker}: {'call' if is_call else 'put'} {strike_price:.2f} "
+                    f"has delta {delta:+.3f} of the wrong sign - skipping"
                 )
                 continue
 
-            if not call.implied_volatility or not put.implied_volatility:
+            abs_delta = abs(delta)
+            if not (self.MIN_ABS_DELTA <= abs_delta < self.MAX_ABS_DELTA):
                 continue
 
-            # Skip illiquid options
-            if not call.is_liquid or not put.is_liquid:
-                continue
-
-            put_iv = put.implied_volatility.value
-            call_iv = call.implied_volatility.value
-            skew = put_iv - call_iv
-
-            points.append((moneyness, skew))
+            v = (0.5 - abs_delta) if is_call else (abs_delta - 0.5)
+            points.append((v, quote.implied_volatility.value))
 
         return points
+
+    def _coverage_problem(self, points: List[Tuple[float, float]]) -> Optional[str]:
+        """Why these points cannot support a 25Δ reading, or None if they can."""
+        if len(points) < self.MIN_POINTS:
+            return f"{len(points)} OTM points < {self.MIN_POINTS}"
+
+        rr_v = 0.5 - self.RR_DELTA
+        puts = [v for v, _ in points if v < 0]
+        calls = [v for v, _ in points if v > 0]
+        if len(puts) < self.MIN_POINTS_PER_WING or len(calls) < self.MIN_POINTS_PER_WING:
+            return (
+                f"{len(puts)} OTM puts and {len(calls)} OTM calls "
+                f"(each wing needs {self.MIN_POINTS_PER_WING})"
+            )
+        if min(puts) > -rr_v:
+            return f"no OTM put at or beyond {self.RR_DELTA * 100:.0f}Δ (the 25Δ put would be extrapolated)"
+        if max(calls) < rr_v:
+            return f"no OTM call at or beyond {self.RR_DELTA * 100:.0f}Δ (the 25Δ call would be extrapolated)"
+        return None
 
     def _fit_and_analyze(
         self,
@@ -325,90 +374,90 @@ class SkewAnalyzerEnhanced:
         points: List[Tuple[float, float]]
     ) -> SkewAnalysis:
         """
-        Fit polynomial and extract skew characteristics.
+        Fit IV(v) = a·v² + b·v + c and read the risk reversal and butterfly.
 
-        Polynomial: skew(x) = a*x^2 + b*x + c
-        where x = moneyness = (strike - stock) / stock
-
-        ATM skew = c (value at x=0)
-        Curvature = 2*a (second derivative)
-        Directional bias = sign(b) (first derivative at ATM)
+        IV_25Δput = IV(−0.25), IV_25Δcall = IV(+0.25), IV_ATM = c, so
+        RR25 / ATM = −b / (2c) and BF25 / ATM = a / (16c).
         """
-        # Separate x and y values
-        moneyness_vals, skew_vals = zip(*points)
-        x = np.array(moneyness_vals)
-        y = np.array(skew_vals)
+        vs, ivs = zip(*points, strict=True)
+        x = np.array(vs, dtype=float)
+        y = np.array(ivs, dtype=float)
+        n = len(points)
 
-        # Fit 2nd degree polynomial: y = ax^2 + bx + c
         coeffs = np.polyfit(x, y, deg=2)
-        a, b, c = coeffs
+        fitted = np.polyval(coeffs, x)
+        ss_res = float(np.sum((y - fitted) ** 2))
+        ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+        r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+        # Adjusted for the 2 fitted terms beyond the intercept.
+        adjusted = 1.0 - (1.0 - r_squared) * (n - 1) / (n - 3)
+        confidence = min(1.0, max(0.0, adjusted))
 
-        # Calculate R-squared for fit quality
-        y_pred = np.polyval(coeffs, x)
-        ss_res = np.sum((y - y_pred) ** 2)
-        ss_tot = np.sum((y - np.mean(y)) ** 2)
-        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+        rr_v = 0.5 - self.RR_DELTA
+        iv_put = float(np.polyval(coeffs, -rr_v))
+        iv_call = float(np.polyval(coeffs, rr_v))
+        iv_atm = float(np.polyval(coeffs, 0.0))
+        if min(iv_put, iv_call, iv_atm) <= 0:
+            raise ValueError(
+                f"fitted smile is non-positive (25Δ put {iv_put:.2f}, "
+                f"ATM {iv_atm:.2f}, 25Δ call {iv_call:.2f})"
+            )
 
-        # Extract characteristics
-        skew_atm = Percentage(c)  # Value at x=0
-        curvature = 2 * a  # Second derivative
-        slope_atm = b  # First derivative at x=0
+        risk_reversal = (iv_put - iv_call) / iv_atm
+        butterfly = ((iv_put + iv_call) / 2.0 - iv_atm) / iv_atm
+        slope_atm = float(coeffs[1]) / iv_atm
 
-        # Classify skew shape
-        if curvature > self.SMILE_THRESHOLD:
-            strength = "smile"  # Both puts and calls expensive
-        elif curvature < -self.SMILE_THRESHOLD:
-            strength = "inverse_smile"  # Both puts and calls cheap
+        if butterfly > self.SMILE_THRESHOLD:
+            strength = "smile"
+        elif butterfly < -self.SMILE_THRESHOLD:
+            strength = "inverse_smile"
         else:
-            strength = "smirk"  # Normal asymmetric skew
+            strength = "smirk"
 
-        # Determine directional bias with 7-level strength scale
-        # NOTE: In typical equity skew, OTM puts have higher IV than OTM calls
-        # - Negative slope (skew decreases as strikes increase) = bearish protection demand
-        # - Positive slope (skew increases as strikes increase) = bullish call demand
-        abs_slope = abs(slope_atm)
-
-        if abs_slope <= self.THRESHOLD_NEUTRAL:
-            directional_bias = DirectionalBias.NEUTRAL
-        elif slope_atm < 0:  # Negative slope = put skew (bearish protection)
-            if abs_slope > self.THRESHOLD_STRONG:
-                directional_bias = DirectionalBias.STRONG_BEARISH
-            elif abs_slope > self.THRESHOLD_WEAK:
-                directional_bias = DirectionalBias.BEARISH
-            else:  # THRESHOLD_NEUTRAL < abs_slope <= THRESHOLD_WEAK
-                directional_bias = DirectionalBias.WEAK_BEARISH
-        else:  # Positive slope = call skew (bullish speculation)
-            if abs_slope > self.THRESHOLD_STRONG:
-                directional_bias = DirectionalBias.STRONG_BULLISH
-            elif abs_slope > self.THRESHOLD_WEAK:
-                directional_bias = DirectionalBias.BULLISH
-            else:  # THRESHOLD_NEUTRAL < abs_slope <= THRESHOLD_WEAK
-                directional_bias = DirectionalBias.WEAK_BULLISH
-
-        # bias_confidence = R² only (slope strength belongs in level, not confidence)
-        # Previous formula (R² × slope_strength) returned ~0.0002 for all tickers
-        # because slopes are tiny in absolute IV units — permanently forcing NEUTRAL.
-        bias_confidence = r_squared
-
-        # Reject noisy fits: R²<0.30 → NEUTRAL regardless of slope
-        # Calibrated for earnings-time analysis (chains more pronounced at earnings)
-        if r_squared < 0.30 and directional_bias != DirectionalBias.NEUTRAL:
+        directional_bias = self._classify(risk_reversal)
+        if confidence < self.MIN_FIT_QUALITY and directional_bias != DirectionalBias.NEUTRAL:
             logger.debug(
-                f"{ticker}: Low R² {r_squared:.3f} < 0.30, "
-                f"forcing NEUTRAL (was {directional_bias.value})"
+                f"{ticker}: fit quality {confidence:.3f} (adjusted R², n={n}) "
+                f"< {self.MIN_FIT_QUALITY}, forcing NEUTRAL "
+                f"(was {directional_bias.value})"
             )
             directional_bias = DirectionalBias.NEUTRAL
+
+        rr_pct = 100.0 * risk_reversal
+        if not (MIN_PERCENTAGE <= rr_pct <= MAX_PERCENTAGE):
+            logger.warning(
+                f"{ticker}: RR25 {rr_pct:.1f}% of ATM IV is outside the storable "
+                f"range; skew_atm is clamped, the bias is not"
+            )
+            rr_pct = max(MIN_PERCENTAGE, min(MAX_PERCENTAGE, rr_pct))
 
         return SkewAnalysis(
             ticker=ticker,
             expiration=expiration,
             stock_price=stock_price,
-            skew_atm=skew_atm,
-            curvature=curvature,
+            skew_atm=Percentage(rr_pct),
+            curvature=butterfly,
             strength=strength,
             directional_bias=directional_bias,
-            confidence=r_squared,
-            num_points=len(points),
+            confidence=confidence,
+            num_points=n,
             slope_atm=slope_atm,
-            bias_confidence=bias_confidence,
+            bias_confidence=confidence,
         )
+
+    def _classify(self, risk_reversal: float) -> DirectionalBias:
+        """7-level bias from RR25 / ATM IV. Positive (puts richer) is bearish."""
+        magnitude = abs(risk_reversal)
+        if magnitude <= self.THRESHOLD_NEUTRAL:
+            return DirectionalBias.NEUTRAL
+        if risk_reversal > 0:
+            if magnitude > self.THRESHOLD_STRONG:
+                return DirectionalBias.STRONG_BEARISH
+            if magnitude > self.THRESHOLD_WEAK:
+                return DirectionalBias.BEARISH
+            return DirectionalBias.WEAK_BEARISH
+        if magnitude > self.THRESHOLD_STRONG:
+            return DirectionalBias.STRONG_BULLISH
+        if magnitude > self.THRESHOLD_WEAK:
+            return DirectionalBias.BULLISH
+        return DirectionalBias.WEAK_BULLISH

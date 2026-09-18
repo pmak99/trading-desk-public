@@ -43,8 +43,11 @@ venv.bak/
 *~
 .DS_Store
 
-# Git worktrees
+# Git worktrees. .claude/worktrees/ is where `remote-control --spawn=worktree`
+# puts them, so without it every session leaves the main checkout's git status
+# dirty with its own worktree.
 .worktrees/
+.claude/worktrees/
 
 # Testing
 .pytest_cache/
@@ -75,9 +78,16 @@ src/data/cache/
 2.0/profiling/results/*.txt
 2.0/benchmarks/results/*.json
 
+# /export-report output (scripts/export_scan_results.py and the command's CSV
+# exports): 2.0/docs/scan_exports/, or docs/scan_exports/ when run from the root
+scan_exports/
+
 # Data directories in version directories (test databases, etc.)
+# No trailing slash on 2.0/data: in a worktree it is a SYMLINK to the main
+# checkout's directory (the worktree bootstrap script), and a trailing
+# slash matches directories only -- the symlink showed up as untracked.
 1.0/data/
-2.0/data/
+2.0/data
 4.0/data/
 5.0/data/
 *.db
@@ -90,10 +100,12 @@ src/data/cache/
 # Jupyter
 .ipynb_checkpoints
 
-# mypy
+# mypy, ruff, import-linter
+.import_linter_cache/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+.ruff_cache/
 3.0/.env
 
 # Backup files

@@ -1,13 +1,12 @@
 """Unit tests for SizingContext and PositionLimitsSnapshot."""
 
-import pytest
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+import dataclasses
+
+import pytest
 
 from src.domain.enums import DirectionalBias
-from src.domain.types import SizingContext, PositionLimitsSnapshot
+from src.domain.types import PositionLimitsSnapshot, SizingContext
 
 
 class TestPositionLimitsSnapshot:
@@ -19,7 +18,7 @@ class TestPositionLimitsSnapshot:
 
     def test_frozen(self):
         s = PositionLimitsSnapshot(fcst_ern_iv_effect=1.5)
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             s.fcst_ern_iv_effect = 2.0  # type: ignore
 
 
@@ -28,17 +27,17 @@ class TestSizingContextTRRCap:
         ctx = SizingContext(trr_level='HIGH')
         assert ctx.trr_cap == 50
 
-    def test_normal_trr_cap_100(self):
+    def test_normal_trr_cap_default_50(self):
         ctx = SizingContext(trr_level='NORMAL')
-        assert ctx.trr_cap == 100
+        assert ctx.trr_cap == 50
 
-    def test_low_trr_cap_100(self):
+    def test_low_trr_cap_default_50(self):
         ctx = SizingContext(trr_level='LOW')
-        assert ctx.trr_cap == 100
+        assert ctx.trr_cap == 50
 
-    def test_none_trr_cap_100(self):
+    def test_none_trr_cap_default_50(self):
         ctx = SizingContext()
-        assert ctx.trr_cap == 100
+        assert ctx.trr_cap == 50
 
 
 class TestSizingContextIVEffectReduction:
@@ -80,17 +79,17 @@ class TestSizingContextIVEffectReduction:
 
 
 class TestSizingContextEffectiveMaxContracts:
-    def test_no_signals_100_contracts(self):
+    def test_no_signals_default_50_contracts(self):
         ctx = SizingContext()
-        assert ctx.effective_max_contracts == 100
+        assert ctx.effective_max_contracts == 50
 
     def test_high_trr_50_contracts(self):
         ctx = SizingContext(trr_level='HIGH')
         assert ctx.effective_max_contracts == 50
 
-    def test_high_fcst_halves_base(self):
+    def test_high_fcst_halves_default(self):
         ctx = SizingContext(fcst_ern_iv_effect=2.5)
-        assert ctx.effective_max_contracts == 50
+        assert ctx.effective_max_contracts == 25
 
     def test_trr_high_plus_high_fcst_combines(self):
         # TRR cap=50, then halved → 25
@@ -122,7 +121,7 @@ class TestSizingContextCompoundRisk:
     def test_bearish_fused_alone_no_cap(self):
         ctx = SizingContext(fused_bias=DirectionalBias.BEARISH)
         assert ctx.compound_risk_active is False
-        assert ctx.effective_max_contracts == 100
+        assert ctx.effective_max_contracts == 50
 
     def test_trr_high_plus_weak_bearish_not_compound(self):
         # WEAK_BEARISH is not a compound signal (threshold is BEARISH/STRONG_BEARISH)
@@ -219,22 +218,22 @@ class TestSizingContextVRPLiquidityReduction:
     def test_vrp_marginal_alone_halves_base(self):
         ctx = SizingContext(vrp_marginal=True)
         assert ctx.vrp_or_liquidity_reduction is True
-        assert ctx.effective_max_contracts == 50
+        assert ctx.effective_max_contracts == 25
 
     def test_liquidity_warning_alone_halves_base(self):
         ctx = SizingContext(liquidity_warning=True)
         assert ctx.vrp_or_liquidity_reduction is True
-        assert ctx.effective_max_contracts == 50
+        assert ctx.effective_max_contracts == 25
 
     def test_neither_flag_no_reduction(self):
         ctx = SizingContext()
         assert ctx.vrp_or_liquidity_reduction is False
-        assert ctx.effective_max_contracts == 100
+        assert ctx.effective_max_contracts == 50
 
     def test_both_flags_single_reduction_not_stacked(self):
-        # "50% size reduction", singular -- not 25% from double-halving.
+        # "50% size reduction", singular -- not double-halving to 12.
         ctx = SizingContext(vrp_marginal=True, liquidity_warning=True)
-        assert ctx.effective_max_contracts == 50
+        assert ctx.effective_max_contracts == 25
 
     def test_vrp_marginal_plus_trr_high_compounds_to_25(self):
         # TRR HIGH caps at 50 first, VRP_MARGINAL then halves that -> 25.
@@ -292,3 +291,28 @@ class TestSizingContextVRPLiquidityReduction:
     def test_firing_signal_below_threshold_fcst_gives_vrp_marginal_only(self):
         ctx = SizingContext(fcst_ern_iv_effect=1.9, vrp_marginal=True)
         assert ctx.firing_signal == 'VRP_MARGINAL'
+
+
+class TestRule4DefaultCap:
+    """CLAUDE.md sizing rule 4: with no flag firing, the cap is 50; rule 5's
+    100 is only the ceiling. Until 2026-09-13 the no-flag cap was the ceiling
+    itself (100), contradicting the rule as written."""
+
+    def test_no_flag_default_is_50(self):
+        assert SizingContext().effective_max_contracts == 50
+        assert SizingContext(trr_level="NORMAL").effective_max_contracts == 50
+        assert SizingContext(trr_level="LOW").effective_max_contracts == 50
+
+    def test_marginal_halves_the_default(self):
+        assert SizingContext(vrp_marginal=True).effective_max_contracts == 25
+
+    def test_default_never_exceeds_the_base_ceiling(self):
+        assert SizingContext(default_cap=200).effective_max_contracts == 100
+        assert SizingContext(default_cap=80, base_cap=60).effective_max_contracts == 60
+
+    def test_default_cap_is_tunable_from_config(self, monkeypatch):
+        from src.config.config import Config
+        monkeypatch.setenv("SIZING_DEFAULT_CAP", "70")
+        cfg = Config.from_env().strategy
+        assert cfg.sizing_default_cap == 70
+        assert SizingContext.from_strategy_config(cfg).effective_max_contracts == 70

@@ -4,27 +4,32 @@ Analysis Repository - Track all analysis runs for meta-analysis.
 Logs every ticker analysis to database with:
 - Timestamp
 - Ticker symbol
-- VRP metrics
+- VRP metrics (both conventions, graded one from the VRPResult (vrp_convention))
 - Recommendation
-- Strategy selected
 - Market conditions
+- Term structure and recent-move context
 
-Enables later meta-analysis:
-- Strategy performance tracking
-- Pattern detection
-- Parameter optimization
-- Success rate by regime
+⚠️ There is no strategy here, and no reader. The five strategy_* / contracts
+columns and `confidence` were 100% NULL across 1,304 rows (May-Sep 2026): no
+caller ever passed a selected strategy, and TickerAnalysis.confidence is never
+set. Migration 2 (2026-09-13) dropped them, along with the three read methods
+(recent analyses, regime statistics, strategy distribution), which had no
+callers -- the regime one also still counted only EXCELLENT/GOOD as
+tradeable, the MARGINAL-dropping bug CLAUDE.md warns about. Reads of this
+table are SQL: Grafana panels and the A/B evaluator.
 """
 
 import logging
-import sqlite3
-from datetime import datetime
-from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import TYPE_CHECKING, Optional
 
-from src.domain.types import TickerAnalysis, Strategy, StrategyRecommendation
-from src.application.metrics.market_conditions import MarketConditions
+from common.timezone import now_et
+from src.domain.enums import VRPConvention
+from src.domain.market_conditions import MarketConditions
+from src.domain.types import TickerAnalysis
 from src.infrastructure.database.repositories.base_repository import ResilientRepository
+
+if TYPE_CHECKING:
+    from psycopg_pool import ConnectionPool
 
 logger = logging.getLogger(__name__)
 
@@ -37,27 +42,24 @@ class AnalysisRepository(ResilientRepository):
     Stores complete analysis metadata for later review and optimization.
     """
 
-    def __init__(self, db_path: str | Path, pool=None, max_failures: int = 10):
+    def __init__(self, pool: Optional['ConnectionPool'] = None, max_failures: int = 10):
         """
-        Initialize repository with database path.
+        Initialize repository.
 
         Args:
-            db_path: Path to SQLite database
-            pool: Optional connection pool (uses direct connections if None)
+            pool: Connection pool (defaults to the process-wide pool)
             max_failures: Maximum consecutive failures before critical alert
         """
-        super().__init__(db_path, pool=pool, max_failures=max_failures)
+        super().__init__(pool=pool, max_failures=max_failures)
 
     def log_analysis(
         self,
         analysis: TickerAnalysis,
         market_conditions: Optional[MarketConditions] = None,
-        selected_strategy: Optional[Strategy] = None,
-        historical_close_mean_pct: Optional[float] = None,
-        vrp_close_ratio: Optional[float] = None,
         term_slope_ratio: Optional[float] = None,
         recent_move_up_count: Optional[int] = None,
         recent_move_qtrs: Optional[int] = None,
+        source: Optional[str] = None,
     ) -> None:
         """
         Log analysis run to database.
@@ -65,14 +67,14 @@ class AnalysisRepository(ResilientRepository):
         Args:
             analysis: Complete ticker analysis
             market_conditions: Market conditions at time of analysis (optional)
-            selected_strategy: Strategy selected for execution (optional)
-            historical_close_mean_pct: Mean |close_move_pct| baseline (gap-inclusive)
-            vrp_close_ratio: Implied move / close baseline — live A/B vs intraday VRP
             term_slope_ratio: Front ATM IV / ~30d-out ATM IV (>1 = backwardation)
             recent_move_up_count: Up-quarters out of the last (up to 4) prior
                 quarters' close_move_pct — observational only, no predictive
                 power found in a Sep 2026 OOS backtest
             recent_move_qtrs: How many prior quarters were actually available
+            source: which command produced this row — 'analyze', 'scan',
+                'whisper' or 'ticker'. NULL on rows written before
+                migration 021.
         """
         try:
             with self._get_connection() as conn:
@@ -80,9 +82,15 @@ class AnalysisRepository(ResilientRepository):
                     cursor = conn.cursor()
 
                     # Extract key metrics
-                    vrp_ratio = analysis.vrp.vrp_ratio
                     implied_move = float(analysis.implied_move.implied_move_pct.value)
-                    historical_mean = float(analysis.vrp.historical_mean_move_pct.value)
+                    vrp = analysis.vrp
+                    convention = VRPConvention(vrp.move_metric).value   # ValueError on e.g. "gap"
+                    columns = {
+                        "intraday": [analysis.historical_intraday_mean_pct, analysis.vrp_intraday_ratio],
+                        "close": [analysis.historical_close_mean_pct, analysis.vrp_close_ratio],
+                    }
+                    # The graded convention's pair is the VRPResult's own, whatever the caller set.
+                    columns[convention] = [float(vrp.historical_mean_move_pct.value), vrp.vrp_ratio]
 
                     # Market conditions
                     vix_level = None
@@ -90,19 +98,6 @@ class AnalysisRepository(ResilientRepository):
                     if market_conditions:
                         vix_level = float(market_conditions.vix_level.value)
                         vix_regime = market_conditions.regime
-
-                    # Strategy info
-                    strategy_type = None
-                    strategy_score = None
-                    strategy_pop = None
-                    strategy_rr = None
-                    contracts = None
-                    if selected_strategy:
-                        strategy_type = selected_strategy.strategy_type.value
-                        strategy_score = selected_strategy.overall_score
-                        strategy_pop = selected_strategy.probability_of_profit
-                        strategy_rr = selected_strategy.reward_risk_ratio
-                        contracts = selected_strategy.contracts
 
                     # Consistency metrics
                     consistency_score = None
@@ -119,10 +114,9 @@ class AnalysisRepository(ResilientRepository):
 
                             -- Core metrics
                             implied_move_pct,
-                            historical_mean_pct,
-                            vrp_ratio,
+                            historical_intraday_mean_pct,
+                            vrp_intraday_ratio,
                             recommendation,
-                            confidence,
 
                             -- Consistency
                             consistency_score,
@@ -131,14 +125,8 @@ class AnalysisRepository(ResilientRepository):
                             vix_level,
                             vix_regime,
 
-                            -- Strategy selected
-                            strategy_type,
-                            strategy_score,
-                            strategy_pop,
-                            strategy_rr,
-                            contracts,
-
-                            -- Gap-inclusive VRP (live A/B vs intraday baseline)
+                            -- Close-to-close VRP pair (the intraday pair is above;
+                            -- vrp_convention names which one graded recommendation)
                             historical_close_mean_pct,
                             vrp_close_ratio,
 
@@ -150,34 +138,45 @@ class AnalysisRepository(ResilientRepository):
                             recent_move_qtrs,
 
                             -- Additional context
-                            raw_analysis
+                            raw_analysis,
+
+                            -- Provenance (migration 021)
+                            source,
+
+                            -- Which convention graded recommendation (migration 6)
+                            vrp_convention
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
-                            datetime.now().isoformat(),
+                            # ⚠️ Was datetime.now().isoformat() -- a NAIVE ET
+                            # wall clock. Against a timestamptz column that is
+                            # parsed in the session TimeZone (UTC in the
+                            # image), which would land every new row 4 hours
+                            # early while still looking right in the CSV. This
+                            # is the same trap the one-time loader guards
+                            # against; now_et() is tz-aware, so psycopg sends
+                            # the offset and the instant is unambiguous.
+                            now_et(),
                             analysis.ticker,
-                            analysis.earnings_date.isoformat(),
-                            analysis.expiration.isoformat(),
+                            analysis.earnings_date,
+                            analysis.expiration,
                             implied_move,
-                            historical_mean,
-                            vrp_ratio,
+                            columns["intraday"][0],
+                            columns["intraday"][1],
                             analysis.recommendation.value,
-                            analysis.confidence,
                             consistency_score,
                             vix_level,
                             vix_regime,
-                            strategy_type,
-                            strategy_score,
-                            strategy_pop,
-                            strategy_rr,
-                            contracts,
-                            historical_close_mean_pct,
-                            vrp_close_ratio,
+                            columns["close"][0],
+                            columns["close"][1],
                             term_slope_ratio,
                             recent_move_up_count,
                             recent_move_qtrs,
                             self._serialize_analysis(analysis),
+                            source,
+                            convention,
                         ),
                     )
 
@@ -196,129 +195,6 @@ class AnalysisRepository(ResilientRepository):
             # Record failure using inherited method
             self._record_failure(e, f"log analysis for {analysis.ticker}")
             # Don't raise - logging failure shouldn't break analysis
-
-    def get_recent_analyses(
-        self,
-        limit: int = 100,
-        min_vrp: Optional[float] = None,
-        recommendation: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Retrieve recent analyses from database.
-
-        Args:
-            limit: Maximum number of records to return
-            min_vrp: Filter by minimum VRP ratio
-            recommendation: Filter by recommendation type
-
-        Returns:
-            List of analysis records as dictionaries
-        """
-        try:
-            with self._get_connection() as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-
-                query = """SELECT timestamp, ticker, earnings_date, expiration,
-                           implied_move_pct, historical_mean_pct, vrp_ratio,
-                           recommendation, confidence, consistency_score,
-                           vix_level, vix_regime,
-                           strategy_type, strategy_score, strategy_pop,
-                           strategy_rr, contracts
-                    FROM analysis_log WHERE 1=1"""
-                params = []
-
-                if min_vrp is not None:
-                    query += " AND vrp_ratio >= ?"
-                    params.append(min_vrp)
-
-                if recommendation is not None:
-                    query += " AND recommendation = ?"
-                    params.append(recommendation)
-
-                query += " ORDER BY timestamp DESC LIMIT ?"
-                params.append(limit)
-
-                cursor.execute(query, params)
-
-                rows = cursor.fetchall()
-                return [dict(row) for row in rows]
-
-        except Exception as e:
-            logger.error(f"Failed to retrieve analyses: {e}")
-            return []
-
-    def get_statistics_by_regime(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Get analysis statistics grouped by VIX regime.
-
-        Returns:
-            Dict mapping regime name to statistics
-        """
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-
-                cursor.execute(
-                    """
-                    SELECT
-                        vix_regime,
-                        COUNT(*) as count,
-                        AVG(vrp_ratio) as avg_vrp,
-                        AVG(strategy_score) as avg_score,
-                        AVG(strategy_pop) as avg_pop,
-                        COUNT(CASE WHEN recommendation IN ('excellent', 'good') THEN 1 END) as tradeable_count
-                    FROM analysis_log
-                    WHERE vix_regime IS NOT NULL
-                    GROUP BY vix_regime
-                    ORDER BY count DESC
-                    """
-                )
-
-                results = {}
-                for row in cursor.fetchall():
-                    regime = row[0]
-                    results[regime] = {
-                        'count': row[1],
-                        'avg_vrp': row[2],
-                        'avg_score': row[3],
-                        'avg_pop': row[4],
-                        'tradeable_count': row[5],
-                        'tradeable_pct': (row[5] / row[1] * 100) if row[1] > 0 else 0,
-                    }
-
-                return results
-
-        except Exception as e:
-            logger.error(f"Failed to get regime statistics: {e}")
-            return {}
-
-    def get_strategy_distribution(self) -> Dict[str, int]:
-        """
-        Get distribution of strategies selected.
-
-        Returns:
-            Dict mapping strategy type to count
-        """
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-
-                cursor.execute(
-                    """
-                    SELECT strategy_type, COUNT(*) as count
-                    FROM analysis_log
-                    WHERE strategy_type IS NOT NULL
-                    GROUP BY strategy_type
-                    ORDER BY count DESC
-                    """
-                )
-
-                return {row[0]: row[1] for row in cursor.fetchall()}
-
-        except Exception as e:
-            logger.error(f"Failed to get strategy distribution: {e}")
-            return {}
 
     def _serialize_analysis(self, analysis: TickerAnalysis) -> str:
         """

@@ -21,8 +21,8 @@ import logging
 from datetime import date, timedelta
 from typing import List, Optional
 
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
 from src.domain.types import OptionChain, Percentage, TermStructureResult
-from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 
 logger = logging.getLogger(__name__)
 

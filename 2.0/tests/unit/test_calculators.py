@@ -2,22 +2,24 @@
 Unit tests for calculator modules.
 """
 
-import pytest
 from datetime import date, timedelta
 
-FUTURE_EXPIRATION = date.today() + timedelta(days=45)
+import pytest
+
 from src.application.metrics.implied_move import ImpliedMoveCalculator
 from src.application.metrics.vrp import VRPCalculator
-from src.domain.types import (
-    Money,
-    Percentage,
-    Strike,
-    OptionQuote,
-    OptionChain,
-    HistoricalMove,
-)
 from src.domain.enums import Recommendation
 from src.domain.errors import ErrorCode
+from src.domain.types import (
+    HistoricalMove,
+    Money,
+    OptionChain,
+    OptionQuote,
+    Percentage,
+    Strike,
+)
+
+FUTURE_EXPIRATION = date.today() + timedelta(days=45)
 
 
 class TestImpliedMoveCalculator:
@@ -177,32 +179,29 @@ class TestVRPCalculator:
         assert result.is_ok
         vrp = result.value
 
-        # VRP ratio = 10% / 5% = 2.0x (marginal since excellent threshold is 7.0x)
+        # VRP ratio = 10% / 5% = 2.0x; defaults are CLAUDE.md §1 (EXCELLENT from 0.99x)
         assert vrp.vrp_ratio == pytest.approx(2.0, abs=0.01)
-        # Note: Default thresholds are excellent=7.0x, good=4.0x, marginal=1.5x
-        # 2.0x falls in MARGINAL category (>= 1.5x but < 4.0x)
-        assert vrp.recommendation == Recommendation.MARGINAL
-        # MARGINAL is tradeable (at 50% reduced size) per CLAUDE.md's VRP
-        # tier table -- only SKIP (<1.2x) means don't trade.
+        assert vrp.recommendation == Recommendation.EXCELLENT
         assert vrp.is_tradeable
 
     def test_calculate_good_vrp(self):
-        """Test VRP with good opportunity (4.0x-7.0x threshold)."""
+        """Test VRP with good opportunity (GOOD_FROM-EXCELLENT_FROM)."""
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
         expiration = FUTURE_EXPIRATION
 
-        # Implied move: 7.5%
+        # Implied move: 4.25% (a close-scale literal between the GOOD and
+        # EXCELLENT cutoffs against a 5% historical mean)
         implied_move = ImpliedMove(
             ticker=ticker,
             expiration=expiration,
             stock_price=Money(100.0),
             atm_strike=Strike(100.0),
-            straddle_cost=Money(7.5),
-            implied_move_pct=Percentage(7.5),
-            upper_bound=Money(107.5),
-            lower_bound=Money(92.5),
+            straddle_cost=Money(4.25),
+            implied_move_pct=Percentage(4.25),
+            upper_bound=Money(104.25),
+            lower_bound=Money(95.75),
         )
 
         # Historical moves: 5% average (close_move_pct is the default metric)
@@ -230,32 +229,28 @@ class TestVRPCalculator:
         assert result.is_ok
         vrp = result.value
 
-        # VRP ratio = 7.5% / 5% = 1.5x (marginal - exactly at threshold)
-        assert vrp.vrp_ratio == pytest.approx(1.5, abs=0.01)
-        # Default thresholds: excellent=7.0x, good=4.0x, marginal=1.5x
-        # 1.5x is exactly at MARGINAL threshold
-        assert vrp.recommendation == Recommendation.MARGINAL
-        # MARGINAL is tradeable (at 50% reduced size) per CLAUDE.md's VRP
-        # tier table -- only SKIP (<1.2x) means don't trade.
+        # VRP ratio = 4.25% / 5% = 0.85x: GOOD (between GOOD_FROM and EXCELLENT_FROM)
+        assert vrp.vrp_ratio == pytest.approx(0.85, abs=0.01)
+        assert vrp.recommendation == Recommendation.GOOD
         assert vrp.is_tradeable
 
     def test_calculate_skip_vrp(self):
-        """Test VRP with insufficient edge (<1.5x)."""
+        """Test VRP with insufficient edge (below VRP_MARGINAL_FROM)."""
         from src.domain.types import ImpliedMove
 
         ticker = "TEST"
         expiration = FUTURE_EXPIRATION
 
-        # Implied move: 5%
+        # Implied move: 2.5%
         implied_move = ImpliedMove(
             ticker=ticker,
             expiration=expiration,
             stock_price=Money(100.0),
             atm_strike=Strike(100.0),
-            straddle_cost=Money(5.0),
-            implied_move_pct=Percentage(5.0),
-            upper_bound=Money(105.0),
-            lower_bound=Money(95.0),
+            straddle_cost=Money(2.5),
+            implied_move_pct=Percentage(2.5),
+            upper_bound=Money(102.5),
+            lower_bound=Money(97.5),
         )
 
         # Historical moves: 5% average (no edge) - using close_move_pct
@@ -283,8 +278,8 @@ class TestVRPCalculator:
         assert result.is_ok
         vrp = result.value
 
-        # VRP ratio = 5% / 5% = 1.0x (skip - below marginal threshold of 1.5x)
-        assert vrp.vrp_ratio == pytest.approx(1.0, abs=0.01)
+        # VRP ratio = 2.5% / 5% = 0.5x (skip - below the marginal threshold)
+        assert vrp.vrp_ratio == pytest.approx(0.5, abs=0.01)
         assert vrp.recommendation == Recommendation.SKIP
         assert not vrp.is_tradeable
 

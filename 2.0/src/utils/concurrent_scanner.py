@@ -16,18 +16,20 @@ Usage:
     results = scanner.scan_tickers(
         tickers=['AAPL', 'MSFT', 'GOOGL'],
         earnings_lookup=earnings_dict,
-        expiration_offset=0,
+        expiration_offset=None,
     )
 """
 
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import date
-from typing import List, Dict, Optional, Callable, Any, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.domain.enums import EarningsTiming
+from src.domain.trading_expiration import calculate_expiration_date
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +71,7 @@ class ConcurrentScanner:
     HTTP call sites (accurate per-request, not per-ticker).
 
     Note: Uses threading (not asyncio) to work with existing
-    synchronous Tradier/Alpha Vantage API clients.
+    synchronous Tradier/Finnhub API clients.
     """
 
     def __init__(
@@ -172,7 +174,7 @@ class ConcurrentScanner:
         earnings_lookup: Dict[str, Tuple[date, str]],
         analyze_func: Callable,
         filter_func: Optional[Callable] = None,
-        expiration_offset: int = 0,
+        expiration_offset: Optional[int] = None,
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
     ) -> BatchScanResult:
         """
@@ -183,7 +185,10 @@ class ConcurrentScanner:
             earnings_lookup: Dict mapping ticker -> (earnings_date, timing)
             analyze_func: Function to analyze each ticker
             filter_func: Optional filter function
-            expiration_offset: Days to add to base expiration
+            expiration_offset: Trading expiration this many days after the
+                earnings date instead of the weekday rule; None for the rule.
+                Passed to calculate_expiration_date as the sequential loops pass
+                it, with the configured MIN_DTE.
             progress_callback: Optional callback(ticker, completed, total)
 
         Returns:
@@ -194,19 +199,18 @@ class ConcurrentScanner:
 
         logger.info(f"Starting concurrent scan of {total_count} tickers with {self.max_workers} workers")
 
-        # Pre-warm the stock-price cache via the batch quote endpoint:
-        # one rate-limit token per 100 tickers instead of one per ticker.
-        # Failure is non-fatal — individual fetches take over.
-        if total_count > 3:
-            try:
-                self.container.cached_options_provider.warm_stock_prices(tickers)
-            except Exception as e:
-                logger.warning(f"Price pre-warm failed (continuing): {e}")
+        # Keep the stock-price cache warm via the batch quote endpoint for the
+        # whole scan: one rate-limit token per 100 tickers each time their
+        # quotes expire, instead of one per ticker. A failed batch call is
+        # non-fatal; individual fetches take over.
+        warm = (self.container.cached_options_provider.keep_stock_prices_warm(tickers)
+                if total_count > 3 else nullcontext(0))
 
         results: List[ScanResult] = []
         completed = 0
+        min_dte = self.container.config.thresholds.min_dte
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        with warm, ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # Submit all tasks
             future_to_ticker = {}
 
@@ -225,13 +229,13 @@ class ConcurrentScanner:
                     continue
 
                 earnings_date, timing = earnings_info
-                expiration_date = self._calculate_expiration(
-                    earnings_date, timing, expiration_offset
-                )
                 try:
                     timing_enum = EarningsTiming(timing)
                 except ValueError:
                     timing_enum = EarningsTiming.UNKNOWN
+                expiration_date = calculate_expiration_date(
+                    earnings_date, timing_enum, expiration_offset, min_dte=min_dte
+                )
 
                 future = executor.submit(
                     self.scan_ticker,
@@ -287,29 +291,4 @@ class ConcurrentScanner:
             filtered_count=filtered_count,
             total_duration_ms=total_duration,
             avg_duration_ms=avg_duration
-        )
-
-    def _calculate_expiration(
-        self,
-        earnings_date: date,
-        timing: str,
-        offset: int
-    ) -> date:
-        """Calculate expiration date from earnings date and timing.
-
-        Delegates to the canonical calculate_expiration_date from date_utils
-        to ensure consistent DTE floor enforcement across all scan modes.
-        """
-        from scripts.scan.date_utils import calculate_expiration_date
-
-        # Convert string timing to EarningsTiming enum
-        try:
-            timing_enum = EarningsTiming(timing)
-        except ValueError:
-            timing_enum = EarningsTiming.UNKNOWN
-
-        return calculate_expiration_date(
-            earnings_date,
-            timing_enum,
-            offset_days=offset if offset else None
         )

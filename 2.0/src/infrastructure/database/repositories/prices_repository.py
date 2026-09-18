@@ -1,25 +1,108 @@
 """
 Prices repository for persisting historical price movements.
 
-Supports both connection pooling (for production) and direct connections (for testing).
+Postgres via the shared pool.
+
+⚠️ **The upsert here is a deliberate behaviour change, and it is a fix.**
+SQLite's `INSERT OR REPLACE` deleted the conflicting row and re-inserted it, so
+every column absent from the 12-column insert list reverted to its default.
+Two of those columns are `pre_earnings_straddle_pct` and `ern_iv_effect` — the
+frozen ORATS backfill, 8,452 rows of it, unrecoverable since the subscription
+ended. Re-saving a move wiped them, and reassigned `id`. `ON CONFLICT ... DO
+UPDATE` names the columns it touches and leaves the rest alone.
+
+The insert statement and the row mapping are each defined once. They were
+duplicated across two and three methods respectively, which is how the
+omission above stayed identical in both copies.
 """
 
-import sqlite3
 import logging
 from datetime import date
-from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
-from src.domain.types import Money, Percentage, HistoricalMove
-from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
+import psycopg
+
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
+from src.domain.types import HistoricalMove, Money, Percentage
 from src.infrastructure.database.repositories.base_repository import BaseRepository
 
-# TYPE_CHECKING import to avoid circular dependency
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from src.infrastructure.database.connection_pool import ConnectionPool
+    from psycopg_pool import ConnectionPool
 
 logger = logging.getLogger(__name__)
+
+# Columns read back into a HistoricalMove.
+_MOVE_COLUMNS = (
+    "ticker", "earnings_date", "prev_close", "earnings_open",
+    "earnings_high", "earnings_low", "earnings_close",
+    "intraday_move_pct", "gap_move_pct", "close_move_pct",
+    "volume_before", "volume_earnings",
+)
+_MOVE_SELECT = ", ".join(_MOVE_COLUMNS)
+
+# Columns WRITTEN by a move save: the same list minus the three percentages.
+# ⚠️ Those are GENERATED columns since migration 2 (2026-09-13), computed by
+# Postgres from the row's own prices, and an INSERT that names them fails. That
+# is the point: the stored-vs-prices invariant CLAUDE.md asks you to audit can
+# no longer be broken by a writer, which is how 1,757 values came to be stored
+# as abs() in Nov-Dec 2025 while the prices beside them said otherwise.
+_MOVE_WRITE_COLUMNS = tuple(c for c in _MOVE_COLUMNS if not c.endswith("_move_pct"))
+
+# Everything except the (ticker, earnings_date) conflict key. Deliberately does
+# NOT include pre_earnings_straddle_pct, ern_iv_effect, created_at or id —
+# see the module docstring.
+_MOVE_UPDATE_SET = ",\n                ".join(
+    f"{c} = EXCLUDED.{c}" for c in _MOVE_WRITE_COLUMNS[2:]
+)
+
+UPSERT_MOVE_SQL = f"""
+    INSERT INTO historical_moves ({", ".join(_MOVE_WRITE_COLUMNS)})
+    VALUES ({", ".join(["%s"] * len(_MOVE_WRITE_COLUMNS))})
+    ON CONFLICT (ticker, earnings_date) DO UPDATE SET
+                {_MOVE_UPDATE_SET}
+"""
+
+
+def _move_params(move: HistoricalMove) -> tuple:
+    """Bind a HistoricalMove to UPSERT_MOVE_SQL's parameters.
+
+    The move's own percentages are not sent: the database derives them from
+    the prices, so a HistoricalMove whose percentages disagree with its prices
+    is stored with the values the prices imply.
+    """
+    return (
+        move.ticker,
+        move.earnings_date,
+        float(move.prev_close.amount),
+        float(move.earnings_open.amount),
+        float(move.earnings_high.amount),
+        float(move.earnings_low.amount),
+        float(move.earnings_close.amount),
+        move.volume_before,
+        move.volume_earnings,
+    )
+
+
+def _row_to_move(row) -> HistoricalMove:
+    """Build a HistoricalMove from a _MOVE_SELECT row.
+
+    `earnings_date` is a real `date` column now, so it arrives as a
+    `datetime.date` and the old `date.fromisoformat(row[1])` reparse is gone.
+    """
+    return HistoricalMove(
+        ticker=row[0],
+        earnings_date=row[1],
+        prev_close=Money(row[2]),
+        earnings_open=Money(row[3]),
+        earnings_high=Money(row[4]),
+        earnings_low=Money(row[5]),
+        earnings_close=Money(row[6]),
+        intraday_move_pct=Percentage(row[7]),
+        gap_move_pct=Percentage(row[8]),
+        close_move_pct=Percentage(row[9]),
+        volume_before=row[10],
+        volume_earnings=row[11],
+    )
 
 
 class PricesRepository(BaseRepository):
@@ -27,18 +110,16 @@ class PricesRepository(BaseRepository):
     Repository for historical price movements.
 
     Inherits connection management from BaseRepository.
-    Supports connection pooling for better concurrent performance.
     """
 
-    def __init__(self, db_path: str | Path, pool: Optional['ConnectionPool'] = None):
+    def __init__(self, pool: Optional['ConnectionPool'] = None):
         """
         Initialize repository.
 
         Args:
-            db_path: Path to SQLite database
-            pool: Optional connection pool (uses direct connections if None)
+            pool: Connection pool (defaults to the process-wide pool)
         """
-        super().__init__(db_path, pool)
+        super().__init__(pool)
 
     def save_historical_move(
         self, move: HistoricalMove
@@ -55,30 +136,7 @@ class PricesRepository(BaseRepository):
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    '''
-                    INSERT OR REPLACE INTO historical_moves
-                    (ticker, earnings_date, prev_close, earnings_open,
-                     earnings_high, earnings_low, earnings_close,
-                     intraday_move_pct, gap_move_pct, close_move_pct,
-                     volume_before, volume_earnings)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''',
-                    (
-                        move.ticker,
-                        move.earnings_date.isoformat(),
-                        float(move.prev_close.amount),
-                        float(move.earnings_open.amount),
-                        float(move.earnings_high.amount),
-                        float(move.earnings_low.amount),
-                        float(move.earnings_close.amount),
-                        float(move.intraday_move_pct.value),
-                        float(move.gap_move_pct.value),
-                        float(move.close_move_pct.value),
-                        move.volume_before,
-                        move.volume_earnings,
-                    ),
-                )
+                cursor.execute(UPSERT_MOVE_SQL, _move_params(move))
                 conn.commit()
 
             logger.debug(
@@ -87,7 +145,7 @@ class PricesRepository(BaseRepository):
             )
             return Ok(None)
 
-        except sqlite3.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Failed to save historical move: {e}")
             return Err(AppError(ErrorCode.DBERROR, str(e)))
 
@@ -109,42 +167,15 @@ class PricesRepository(BaseRepository):
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-
-                data = [
-                    (
-                        move.ticker,
-                        move.earnings_date.isoformat(),
-                        float(move.prev_close.amount),
-                        float(move.earnings_open.amount),
-                        float(move.earnings_high.amount),
-                        float(move.earnings_low.amount),
-                        float(move.earnings_close.amount),
-                        float(move.intraday_move_pct.value),
-                        float(move.gap_move_pct.value),
-                        float(move.close_move_pct.value),
-                        move.volume_before,
-                        move.volume_earnings,
-                    )
-                    for move in moves
-                ]
-
                 cursor.executemany(
-                    '''
-                    INSERT OR REPLACE INTO historical_moves
-                    (ticker, earnings_date, prev_close, earnings_open,
-                     earnings_high, earnings_low, earnings_close,
-                     intraday_move_pct, gap_move_pct, close_move_pct,
-                     volume_before, volume_earnings)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''',
-                    data,
+                    UPSERT_MOVE_SQL, [_move_params(m) for m in moves]
                 )
                 conn.commit()
 
             logger.info(f"Saved {len(moves)} historical moves")
             return Ok(len(moves))
 
-        except sqlite3.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Failed to save historical moves: {e}")
             return Err(AppError(ErrorCode.DBERROR, str(e)))
 
@@ -165,15 +196,12 @@ class PricesRepository(BaseRepository):
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    '''
-                    SELECT ticker, earnings_date, prev_close, earnings_open,
-                           earnings_high, earnings_low, earnings_close,
-                           intraday_move_pct, gap_move_pct, close_move_pct,
-                           volume_before, volume_earnings
+                    f'''
+                    SELECT {_MOVE_SELECT}
                     FROM historical_moves
-                    WHERE ticker = ?
+                    WHERE ticker = %s
                     ORDER BY earnings_date DESC
-                    LIMIT ?
+                    LIMIT %s
                     ''',
                     (ticker, limit),
                 )
@@ -187,28 +215,12 @@ class PricesRepository(BaseRepository):
                     )
                 )
 
-            moves = []
-            for row in rows:
-                move = HistoricalMove(
-                    ticker=row[0],
-                    earnings_date=date.fromisoformat(row[1]),
-                    prev_close=Money(row[2]),
-                    earnings_open=Money(row[3]),
-                    earnings_high=Money(row[4]),
-                    earnings_low=Money(row[5]),
-                    earnings_close=Money(row[6]),
-                    intraday_move_pct=Percentage(row[7]),
-                    gap_move_pct=Percentage(row[8]),
-                    close_move_pct=Percentage(row[9]),
-                    volume_before=row[10],
-                    volume_earnings=row[11],
-                )
-                moves.append(move)
+            moves = [_row_to_move(row) for row in rows]
 
             logger.debug(f"Retrieved {len(moves)} moves for {ticker}")
             return Ok(moves)
 
-        except sqlite3.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Failed to get historical moves: {e}")
             return Err(AppError(ErrorCode.DBERROR, str(e)))
 
@@ -229,15 +241,12 @@ class PricesRepository(BaseRepository):
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    '''
-                    SELECT ticker, earnings_date, prev_close, earnings_open,
-                           earnings_high, earnings_low, earnings_close,
-                           intraday_move_pct, gap_move_pct, close_move_pct,
-                           volume_before, volume_earnings
+                    f'''
+                    SELECT {_MOVE_SELECT}
                     FROM historical_moves
-                    WHERE ticker = ? AND earnings_date = ?
+                    WHERE ticker = %s AND earnings_date = %s
                     ''',
-                    (ticker, earnings_date.isoformat()),
+                    (ticker, earnings_date),
                 )
                 row = cursor.fetchone()
 
@@ -249,24 +258,9 @@ class PricesRepository(BaseRepository):
                     )
                 )
 
-            move = HistoricalMove(
-                ticker=row[0],
-                earnings_date=date.fromisoformat(row[1]),
-                prev_close=Money(row[2]),
-                earnings_open=Money(row[3]),
-                earnings_high=Money(row[4]),
-                earnings_low=Money(row[5]),
-                earnings_close=Money(row[6]),
-                intraday_move_pct=Percentage(row[7]),
-                gap_move_pct=Percentage(row[8]),
-                close_move_pct=Percentage(row[9]),
-                volume_before=row[10],
-                volume_earnings=row[11],
-            )
+            return Ok(_row_to_move(row))
 
-            return Ok(move)
-
-        except sqlite3.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Failed to get move by date: {e}")
             return Err(AppError(ErrorCode.DBERROR, str(e)))
 
@@ -284,14 +278,14 @@ class PricesRepository(BaseRepository):
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'SELECT COUNT(*) FROM historical_moves WHERE ticker = ?',
+                    'SELECT COUNT(*) FROM historical_moves WHERE ticker = %s',
                     (ticker,),
                 )
                 count = cursor.fetchone()[0]
 
             return Ok(count)
 
-        except sqlite3.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Failed to count moves: {e}")
             return Err(AppError(ErrorCode.DBERROR, str(e)))
 
@@ -315,55 +309,33 @@ class PricesRepository(BaseRepository):
             return Ok({})
 
         try:
+            upper_tickers = [t.upper() for t in tickers]
+
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-
-                # Build parameterized IN clause
-                placeholders = ",".join("?" for _ in tickers)
-                upper_tickers = [t.upper() for t in tickers]
-
                 cursor.execute(
                     f'''
                     WITH ranked AS (
-                        SELECT ticker, earnings_date, prev_close, earnings_open,
-                               earnings_high, earnings_low, earnings_close,
-                               intraday_move_pct, gap_move_pct, close_move_pct,
-                               volume_before, volume_earnings,
+                        SELECT {_MOVE_SELECT},
                                ROW_NUMBER() OVER (
                                    PARTITION BY ticker ORDER BY earnings_date DESC
                                ) as rn
                         FROM historical_moves
-                        WHERE ticker IN ({placeholders})
+                        WHERE ticker = ANY(%s)
                     )
-                    SELECT ticker, earnings_date, prev_close, earnings_open,
-                           earnings_high, earnings_low, earnings_close,
-                           intraday_move_pct, gap_move_pct, close_move_pct,
-                           volume_before, volume_earnings
+                    SELECT {_MOVE_SELECT}
                     FROM ranked
-                    WHERE rn <= ?
+                    WHERE rn <= %s
                     ORDER BY ticker, earnings_date DESC
                     ''',
-                    (*upper_tickers, limit),
+                    (upper_tickers, limit),
                 )
                 rows = cursor.fetchall()
 
             # Group results by ticker
             result: dict[str, List[HistoricalMove]] = {t: [] for t in upper_tickers}
             for row in rows:
-                move = HistoricalMove(
-                    ticker=row[0],
-                    earnings_date=date.fromisoformat(row[1]),
-                    prev_close=Money(row[2]),
-                    earnings_open=Money(row[3]),
-                    earnings_high=Money(row[4]),
-                    earnings_low=Money(row[5]),
-                    earnings_close=Money(row[6]),
-                    intraday_move_pct=Percentage(row[7]),
-                    gap_move_pct=Percentage(row[8]),
-                    close_move_pct=Percentage(row[9]),
-                    volume_before=row[10],
-                    volume_earnings=row[11],
-                )
+                move = _row_to_move(row)
                 if move.ticker in result:
                     result[move.ticker].append(move)
 
@@ -373,7 +345,7 @@ class PricesRepository(BaseRepository):
             )
             return Ok(result)
 
-        except sqlite3.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Failed to get batch historical moves: {e}")
             return Err(AppError(ErrorCode.DBERROR, str(e)))
 
@@ -395,7 +367,8 @@ class PricesRepository(BaseRepository):
                 cursor.execute(
                     '''
                     DELETE FROM historical_moves
-                    WHERE earnings_date < date('now', '-' || ? || ' days')
+                    WHERE earnings_date
+                          < (CURRENT_DATE - (%s || ' days')::interval)::date
                     ''',
                     (days_old,),
                 )
@@ -405,6 +378,6 @@ class PricesRepository(BaseRepository):
             logger.info(f"Deleted {deleted_count} old historical moves")
             return Ok(deleted_count)
 
-        except sqlite3.Error as e:
+        except psycopg.Error as e:
             logger.error(f"Failed to delete old moves: {e}")
             return Err(AppError(ErrorCode.DBERROR, str(e)))

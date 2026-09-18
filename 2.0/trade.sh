@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./trade.sh TSLA 2025-11-25                    # Single ticker
-#   ./trade.sh list TSLA,NVDA,META 2025-11-27       # Multiple tickers
+#   ./trade.sh list TSLA,NVDA,META 2025-11-27       # Multiple tickers, one earnings date
 #   ./trade.sh scan 2025-11-25                     # Scan all earnings for date
 #   ./trade.sh whisper [YYYY-MM-DD]                # Most anticipated earnings (current or specific week)
 #   ./trade.sh sync [--dry-run]                    # Sync earnings calendar (discover new dates)
@@ -39,6 +39,23 @@ fi
 
 source venv/bin/activate
 
+# Load .env so every subcommand reaches Postgres.
+#
+# Without this, anything touching the database (trr, scan, whisper, health,
+# analyze) falls back to libpq defaults and dies with
+#   connection to server on socket "/tmp/.s.PGSQL.5432" failed
+# because PGHOST is unset. That made correctness depend on whether the caller
+# happened to have sourced .env first -- most slash commands did not.
+#
+# `set -a` is what exports; a plain `source` leaves the vars unexported and the
+# Python children see nothing. Callers that already source .env are unaffected.
+if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+fi
+
 # Utility functions
 validate_ticker() {
     local ticker=$1
@@ -66,14 +83,17 @@ calculate_expiration() {
 
     # Route through the Python DTE-floor logic (same path as scan/whisper):
     # Mon/Tue -> same-week Friday, Wed -> next Friday, Thu/Fri -> next week's
-    # Friday. Enforces min 3 DTE (backtesting showed materially worse loss severity below it). The old
+    # Friday. Enforces MIN_DTE (default 3, CLAUDE.md §5), read as `list` reads it;
+    # until 2026-09-14 this call left it at the default. The old
     # shell version did earnings+1 day, which put Thu/Fri reporters on a
     # 0-1 DTE chain.
     expiration=$(python -c "
 import sys, datetime
-from scripts.scan.date_utils import calculate_expiration_date
+from src.config.config import Config
+from src.domain.trading_expiration import calculate_expiration_date
 from src.domain.enums import EarningsTiming
-print(calculate_expiration_date(datetime.date.fromisoformat(sys.argv[1]), EarningsTiming.UNKNOWN))
+print(calculate_expiration_date(datetime.date.fromisoformat(sys.argv[1]), EarningsTiming.UNKNOWN,
+                                min_dte=Config.from_env().thresholds.min_dte))
 " "$earnings_date" 2>/dev/null)
 
     # Error handling if date calculation fails
@@ -99,221 +119,13 @@ health_check() {
     echo ""
 }
 
-backup_database() {
-    # NOTE: currently UNREFERENCED - nothing in this script calls it (only the
-    # shell tests mention it by name). The live backup path is
-    # scripts/sync_databases.py::backup_to_gdrive, invoked by sync-cloud. Kept
-    # and maintained so it is correct if ever wired up again; do not assume a
-    # Drive backup happened because this function exists.
-    #
-    # Auto-backup database to local folder (synced by Google Drive)
-    # Only backup if last backup is >6 hours old to avoid spam
-    #
-    # Security improvements:
-    # - Atomic file locking to prevent race conditions
-    # - Absolute paths to prevent directory traversal
-    # - UTC timestamps to avoid DST issues
-    # - WAL checkpoint with retry logic
-    # - Backup verification before committing
-    # - Validated retention_days parameter
-
-    # Get absolute script directory
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-    # Use absolute paths
-    local backup_dir="${script_dir}/backups"
-    local db_file="${script_dir}/data/ivcrush.db"
-    local retention_days=30
-    local backup_interval_hours=6
-
-    # Validate retention_days (prevent accidental deletion of all backups)
-    if ! [[ "$retention_days" =~ ^[0-9]+$ ]] || [ "$retention_days" -lt 7 ]; then
-        retention_days=30  # Failsafe default
-    fi
-
-    # Check if database exists
-    if [ ! -f "$db_file" ]; then
-        return 0  # Silently skip if no database yet
-    fi
-
-    # Ensure backup directory is not a symlink (security)
-    if [ -L "$backup_dir" ]; then
-        echo -e "${YELLOW}⚠️  Backup directory is a symlink (security risk)${NC}" >&2
-        return 0
-    fi
-
-    # Create backup directory if it doesn't exist
-    mkdir -p "$backup_dir"
-
-    # File-based locking using flock to prevent race conditions
-    local lock_file="${backup_dir}/.backup.lock"
-
-    # Open lock file on file descriptor 9
-    exec 9>"$lock_file"
-
-    # Try to acquire exclusive lock (non-blocking)
-    if ! flock -n 9; then
-        # Another backup is in progress, skip silently
-        exec 9>&-
-        return 0
-    fi
-
-    # Ensure lock fd is closed on exit/error (releases flock automatically)
-    trap 'exec 9>&-' RETURN
-
-    # Check if we need to backup (skip if last backup <6 hours old)
-    local backup_interval_days
-    backup_interval_days=$(echo "scale=4; $backup_interval_hours / 24" | bc)
-
-    local last_backup
-    last_backup=$(find "$backup_dir" -maxdepth 1 -name "ivcrush_*.db" -type f -mtime "-${backup_interval_days}" -print -quit 2>/dev/null)
-
-    if [ -n "$last_backup" ]; then
-        exec 9>&-
-        trap - RETURN
-        return 0  # Recent backup exists, skip
-    fi
-
-    # Create UTC timestamp to avoid DST issues
-    local timestamp
-    timestamp=$(TZ=UTC date +%Y%m%d_%H%M%S_UTC)
-    local backup_file="${backup_dir}/ivcrush_${timestamp}.db"
-    local temp_backup="${backup_file}.tmp.$$"
-
-    # Ensure temp file is cleaned up on error and lock fd is closed
-    trap 'rm -f "$temp_backup" 2>/dev/null; exec 9>&-' RETURN
-
-    # Perform WAL checkpoint with retry logic
-    local checkpoint_success=false
-    local retries=3
-    local delay=1
-
-    for ((i=1; i<=retries; i++)); do
-        if sqlite3 "$db_file" "PRAGMA wal_checkpoint(FULL);" 2>/dev/null; then
-            checkpoint_success=true
-            break
-        fi
-
-        if [ $i -lt $retries ]; then
-            sleep $delay
-            delay=$((delay * 2))
-        fi
-    done
-
-    # Warn if checkpoint failed in WAL mode
-    if [ "$checkpoint_success" = false ]; then
-        local journal_mode
-        journal_mode=$(sqlite3 "$db_file" "PRAGMA journal_mode;" 2>/dev/null || echo "unknown")
-
-        if [ "$journal_mode" = "wal" ]; then
-            echo -e "${YELLOW}⚠️  WAL checkpoint failed - backup may be inconsistent${NC}" >&2
-        fi
-    fi
-
-    # Copy to temporary file first (atomic operation)
-    if ! cp "$db_file" "$temp_backup" 2>/dev/null; then
-        echo -e "${YELLOW}⚠️  Backup copy failed${NC}" >&2
-        rm -f "$temp_backup" 2>/dev/null
-        exec 9>&-
-        trap - RETURN
-        return 1
-    fi
-
-    # Verify backup before committing
-    # 1. Check file sizes match
-    local orig_size temp_size
-    if stat -f%z "$db_file" >/dev/null 2>&1; then
-        # macOS
-        orig_size=$(stat -f%z "$db_file")
-        temp_size=$(stat -f%z "$temp_backup")
-    else
-        # Linux
-        orig_size=$(stat -c%s "$db_file")
-        temp_size=$(stat -c%s "$temp_backup")
-    fi
-
-    if [ "$orig_size" != "$temp_size" ]; then
-        echo -e "${YELLOW}⚠️  Backup size mismatch (original: ${orig_size}, backup: ${temp_size})${NC}" >&2
-        rm -f "$temp_backup"
-        exec 9>&-
-        trap - RETURN
-        return 1
-    fi
-
-    # 2. Verify database can be opened
-    if ! sqlite3 "$temp_backup" "SELECT 1;" >/dev/null 2>&1; then
-        echo -e "${YELLOW}⚠️  Backup verification failed (database corrupted)${NC}" >&2
-        rm -f "$temp_backup"
-        exec 9>&-
-        trap - RETURN
-        return 1
-    fi
-
-    # Atomic rename to commit backup
-    if ! mv "$temp_backup" "$backup_file" 2>/dev/null; then
-        echo -e "${YELLOW}⚠️  Backup rename failed${NC}" >&2
-        rm -f "$temp_backup"
-        exec 9>&-
-        trap - RETURN
-        return 1
-    fi
-
-    # Back up to Google Drive. Two supported mechanisms, in priority order:
-    #
-    #   1. GDRIVE_BACKUP_PATH - a locally mounted Drive folder (the macOS
-    #      Google Drive client, or any synced dir). Plain cp.
-    #   2. rclone remote (GDRIVE_RCLONE_REMOTE, default gdrive:Backups/trading-desk).
-    #
-    # This used to default GDRIVE_BACKUP_PATH to a hardcoded macOS path
-    # ($HOME/Library/CloudStorage/GoogleDrive/...) guarded by [ -d ]. After the
-    # move to Linux that directory never existed, so every Drive backup was
-    # skipped silently - no error, no warning - while local snapshots kept
-    # accumulating. Found 2026-09-01 with local backups 5 days ahead of Drive.
-    # There is deliberately no hardcoded default path now, and the "nothing
-    # configured" case warns instead of passing quietly.
-    local gdrive_backup_dir="${GDRIVE_BACKUP_PATH:-}"
-    local gdrive_remote="${GDRIVE_RCLONE_REMOTE:-gdrive:Backups/trading-desk}"
-    local gdrive_done=0
-
-    if [ -n "$gdrive_backup_dir" ] && [ -d "$gdrive_backup_dir" ]; then
-        local gdrive_dest="$gdrive_backup_dir/$(basename "$backup_file")"
-        if cp "$backup_file" "$gdrive_backup_dir/" 2>/dev/null && [ -s "$gdrive_dest" ]; then
-            gdrive_done=1
-        else
-            echo -e "${YELLOW}Warning: Google Drive copy to $gdrive_backup_dir failed${NC}" >&2
-        fi
-    elif command -v rclone >/dev/null 2>&1; then
-        if rclone copyto "$backup_file" "$gdrive_remote/$(basename "$backup_file")" 2>/dev/null; then
-            # Verify it actually landed rather than trusting the exit code
-            if [ -n "$(rclone lsf "$gdrive_remote/$(basename "$backup_file")" 2>/dev/null)" ]; then
-                gdrive_done=1
-            else
-                echo -e "${YELLOW}Warning: rclone reported success but $gdrive_remote has no such file${NC}" >&2
-            fi
-        else
-            echo -e "${YELLOW}Warning: rclone copy to $gdrive_remote failed (remote configured?)${NC}" >&2
-        fi
-    else
-        echo -e "${YELLOW}Warning: no Google Drive backup configured - set GDRIVE_BACKUP_PATH or install/configure rclone. Local backup kept at $backup_file${NC}" >&2
-    fi
-
-    [ "$gdrive_done" -eq 1 ] && echo -e "${GREEN}✓ Backed up to Google Drive${NC}"
-
-    # Cleanup old backups (keep last N days)
-    find "$backup_dir" -maxdepth 1 -name "ivcrush_*.db" -type f -mtime "+${retention_days}" -delete 2>/dev/null || true
-
-    # Cleanup old Google Drive backups (same retention as local)
-    if [ -n "$gdrive_backup_dir" ] && [ -d "$gdrive_backup_dir" ]; then
-        find "$gdrive_backup_dir" -maxdepth 1 -name "ivcrush_*.db" -type f -mtime "+${retention_days}" -delete 2>/dev/null || true
-    elif [ "$gdrive_done" -eq 1 ]; then
-        rclone delete "$gdrive_remote" --include "ivcrush_*.db" --min-age "${retention_days}d" 2>/dev/null || true
-    fi
-
-    # Release lock and clear trap
-    exec 9>&-
-    trap - RETURN
-}
+# backup_database() was removed at the Postgres cutover (2026-09-12).
+# It was 217 lines that backed up 2.0/data/ivcrush.db -- a file that no
+# longer exists -- and nothing in this script ever called it. Its only
+# coverage was a shell test grepping for its own definition.
+# Backups now: a host-side pg-backup script (outside this repo), deployed to
+# /home/trading/scripts/pg-backup.sh and run nightly by
+# trading-pg-backup.timer -- pg_dump -Fc to local disk, the backup host and Drive.
 
 sync_earnings_calendar() {
     # Sync earnings calendar with latest data from Finnhub (chunked bulk fetch)
@@ -326,15 +138,18 @@ sync_earnings_calendar() {
     #   --check-staleness  Report stale dates and exit
     #   --all              Sync all tickers (not just traded ones)
     #   --threshold N      Staleness threshold in days
+    #
+    # The Python script is report-only unless told --execute (2026-09-13), so
+    # this wrapper passes it by default and --dry-run is what withholds it.
 
-    local dry_run_flag=""
+    local mode_flag="--execute"
     local extra_args=""
 
     # Parse arguments
     for arg in "$@"; do
         case "$arg" in
             --dry-run|-n)
-                dry_run_flag="--dry-run"
+                mode_flag=""
                 ;;
             --check-staleness|-s)
                 extra_args="$extra_args --check-staleness"
@@ -352,20 +167,42 @@ sync_earnings_calendar() {
     echo -e "${BLUE}${BOLD}  Earnings Calendar Sync${NC}"
     echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
 
-    if [ -n "$dry_run_flag" ]; then
+    if [ -z "$mode_flag" ]; then
         echo -e "${YELLOW}Mode: DRY RUN (preview only)${NC}"
     fi
 
-    python scripts/sync_earnings_calendar.py $dry_run_flag $extra_args
-    local exit_code=$?
+    # The full output goes to a file; the terminal gets what decides the run: every
+    # warning and error line, then the summary. A focused sync logs ~800 lines, and
+    # the unattended /maintenance run on 2026-09-15 saw a tool output truncated
+    # before the summary -- it reported one date conflict of four and read exit 1
+    # as harmless. weekly-maintenance.sh prunes these logs after 12 weeks.
+    local log_dir="${TRADING_LOG_DIR:-$HOME/logs}"
+    mkdir -p "$log_dir"
+    local log_file
+    log_file="$log_dir/sync-calendar-$(TZ=America/New_York date +%Y%m%d-%H%M%S).log"
+
+    local exit_code=0
+    python scripts/sync_earnings_calendar.py $mode_flag $extra_args > "$log_file" 2>&1 || exit_code=$?
+
+    local prefix='s/^[0-9]\{4\}-[0-9-]* [0-9:]* - \[[^]]*\] - [^ ]* - //'
+    if grep -q "SYNC SUMMARY" "$log_file"; then
+        echo "Warnings and errors:"
+        grep -E " - (WARNING|ERROR|CRITICAL) - " "$log_file" | sed "$prefix" || echo "  (none)"
+        sed -n '/SYNC SUMMARY/,$p' "$log_file" | sed "$prefix"
+    elif [[ "$extra_args" == *--check-staleness* ]]; then
+        sed "$prefix" "$log_file"
+    else
+        echo -e "${RED}No SYNC SUMMARY: the sync did not finish. Last 60 lines:${NC}"
+        tail -n 60 "$log_file"
+    fi
+    echo "Full output ($(wc -l < "$log_file" | tr -d ' ') lines): $log_file"
 
     if [ $exit_code -eq 0 ]; then
         echo -e "${GREEN}✓ Earnings calendar synced${NC}\n"
+    elif [[ "$extra_args" == *--check-staleness* ]]; then
+        echo -e "${RED}✗ Stale data detected${NC}\n"
     else
-        echo -e "${RED}✗ Sync failed or stale data detected${NC}\n"
-        if [ "$extra_args" != *"--check-staleness"* ]; then
-            return $exit_code
-        fi
+        echo -e "${RED}✗ Exit ${exit_code}: see Errors above (need review vs failed)${NC}\n"
     fi
 
     return $exit_code
@@ -377,11 +214,14 @@ ${BLUE}${BOLD}IV Crush 2.0 - Earnings IV Crush Trading${NC}
 
 ${BOLD}USAGE${NC}
     $0 TICKER YYYY-MM-DD             Single ticker analysis
-    $0 list TICKERS YYYY-MM-DD       Multiple tickers (comma-separated)
+    $0 list TICKERS YYYY-MM-DD [N]   Multiple tickers (comma-separated) reporting on the date;
+                                     N: expiration N days out instead of the weekday rule
     $0 scan YYYY-MM-DD               Scan all earnings for date
     $0 whisper [YYYY-MM-DD]          Most anticipated earnings
+    $0 trr TICKER [TICKER ...]       Live tail-risk ratio (never read position_limits)
+    $0 harvest                       45 DTE non-earnings premium candidates
+    $0 taco ARGS...                  TACO index macro-event engine (see taco_cli.py)
     $0 sync [--dry-run]              Sync earnings calendar
-    $0 sync-cloud                    Sync DB with cloud + backup to GDrive
     $0 health                        System health check
 
 ${BOLD}EXAMPLES${NC}
@@ -389,6 +229,8 @@ ${BOLD}EXAMPLES${NC}
     $0 list TSLA,NVDA,META 2025-11-27
     $0 scan 2025-11-25
     $0 whisper
+    $0 trr NVDA AMD MU
+    $0 harvest
 
 ${BOLD}REQUIREMENTS${NC}
     TRADIER_API_KEY, FINNHUB_API_KEY in .env
@@ -418,9 +260,12 @@ analyze_single() {
         expiration=$(calculate_expiration "$earnings_date")
     fi
 
-    # Store bias prediction for later validation (silent, non-blocking)
-    # This builds our accuracy tracking dataset over time
-    python scripts/store_bias_prediction.py "$ticker" >/dev/null 2>&1 || true
+    # Store bias prediction for later validation (silent, non-blocking).
+    # analyze.py does not run the scan path, where scan/whisper/list/the bot
+    # write theirs; the script keeps the event's first pre-open prediction,
+    # so a repeat run writes nothing. The date is the one analysed: until
+    # 2026-09-14 the script took the ticker's next calendar date instead.
+    python scripts/store_bias_prediction.py "$ticker" --earnings-date "$earnings_date" >/dev/null 2>&1 || true
 
     # Run analysis with strategy generation
     # Capture full output to check for missing data error
@@ -454,7 +299,7 @@ analyze_single() {
 
         python scripts/backfill_historical.py "$ticker" \
             --start-date "$start_date" \
-            --end-date "$end_date" 2>&1 | \
+            --end-date "$end_date" --execute 2>&1 | \
             grep -E "Processing|Backfilled|saved|✓|Total moves" || {
             echo -e "${RED}Backfill failed${NC}"
             return 1
@@ -498,7 +343,7 @@ analyze_single() {
 analyze_list() {
     local tickers=$1
     local earnings_date=$2
-    local offset_days=${3:-1}
+    local offset_days=${3:-}
 
     # Validate date
     validate_date "$earnings_date" || return 1
@@ -509,17 +354,53 @@ analyze_list() {
         validate_ticker "$ticker" || return 1
     done
 
+    if [ -n "$offset_days" ] && [[ ! "$offset_days" =~ ^[0-9]+$ ]]; then
+        echo -e "${RED}Error: Invalid offset '$offset_days'${NC}"
+        echo "Offset must be a whole number of days (e.g., 3)"
+        return 1
+    fi
+
+    # The expiration the scan applies, not the one given. Without an offset it is
+    # the weekday rule; an offset below MIN_DTE is raised to it (CLAUDE.md §5).
+    # Until 2026-09-14 the offset defaulted to 1, so the weekday rule never
+    # applied, and this header printed "+1 days" while every ticker used +3.
+    local floor expiration offset_used min_dte
+    floor=$(python -c "
+import sys
+from datetime import date
+from src.config.config import Config
+from src.domain.enums import EarningsTiming
+from src.domain.trading_expiration import calculate_expiration_date, floored_offset_days
+min_dte = Config.from_env().thresholds.min_dte
+offset = int(sys.argv[2]) if sys.argv[2] else None
+expiration = calculate_expiration_date(
+    date.fromisoformat(sys.argv[1]), EarningsTiming.UNKNOWN, offset, min_dte=min_dte)
+print(expiration, floored_offset_days(offset, min_dte) if offset is not None else '-', min_dte)
+" "$earnings_date" "$offset_days") || {
+        echo -e "${RED}Error: Could not compute the expiration for $earnings_date${NC}"
+        return 1
+    }
+    read -r expiration offset_used min_dte <<< "$floor"
+
     echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
     echo -e "${BLUE}${BOLD}    Analyzing Multiple Tickers${NC}"
     echo -e "${BLUE}${BOLD}═══════════════════════════════════════${NC}"
     echo -e "${YELLOW}Tickers:${NC} $tickers"
     echo -e "${YELLOW}Earnings Date:${NC} $earnings_date"
-    echo -e "${YELLOW}Expiration Offset:${NC} +${offset_days} days"
+    if [ -z "$offset_days" ]; then
+        echo -e "${YELLOW}Expiration:${NC} ${expiration} (weekday rule, at least ${min_dte} DTE)"
+    elif [ "$offset_used" != "$offset_days" ]; then
+        echo -e "${YELLOW}Expiration Offset:${NC} +${offset_used} days (+${offset_days} raised to the ${min_dte}-day minimum)"
+    else
+        echo -e "${YELLOW}Expiration Offset:${NC} +${offset_used} days"
+    fi
     echo ""
 
+    # Every ticker is analysed for $earnings_date (with its stored BMO/AMC tag);
+    # the offset reaches the scan only when one was given.
     # Run list analysis with real-time output (unbuffered Python + direct piping)
     # Optimized: Single sed with multiple expressions (3-4x faster than chained sed)
-    if ! python -u scripts/scan.py --tickers "$tickers" --expiration-offset "$offset_days" 2>&1 | \
+    if ! python -u scripts/scan.py --tickers "$tickers" --earnings-date "$earnings_date" ${offset_days:+--expiration-offset "$offset_days"} 2>&1 | \
         sed -u -e 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - INFO - //' \
                 -e 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - ERROR - /⚠️  /' \
                 -e 's/^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] - \[.*\] - [^ ]* - WARNING - /⚠️  /' | \
@@ -604,8 +485,8 @@ show_summary() {
 
 # Validate past bias predictions (silent, non-blocking)
 # Run once per session to check if any predictions need validation
-if [[ "${1:-}" != "help" && "${1:-}" != "--help" && "${1:-}" != "-h" && "${1:-}" != "health" ]]; then
-    python scripts/validate_bias_predictions.py >/dev/null 2>&1 || true
+if [[ -n "${1:-}" && "${1:-}" != "help" && "${1:-}" != "--help" && "${1:-}" != "-h" && "${1:-}" != "health" ]]; then
+    python scripts/validate_bias_predictions.py --execute >/dev/null 2>&1 || true
 fi
 
 # Main logic
@@ -625,11 +506,6 @@ case "${1:-}" in
         sync_earnings_calendar "$@"
         ;;
 
-    sync-cloud)
-        # Sync local DB with 5.0 cloud (GCS) and backup to Google Drive
-        echo -e "${BLUE}${BOLD}Syncing with cloud database...${NC}"
-        python3 "../scripts/sync_databases.py"
-        ;;
 
     scan)
         if [ -z "${2:-}" ]; then
@@ -691,7 +567,7 @@ case "${1:-}" in
             exit 1
         fi
         health_check
-        analyze_list "$2" "$3" "${4:-1}"
+        analyze_list "$2" "$3" "${4:-}"
         show_summary
         ;;
 

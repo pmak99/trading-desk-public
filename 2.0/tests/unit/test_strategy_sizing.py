@@ -2,12 +2,13 @@
 Tests for strategy/sizing.py — Kelly fraction and contract sizing.
 """
 import pytest
+
 from src.application.services.strategy.sizing import (
-    calculate_kelly_fraction,
-    effective_cap,
     apply_kelly_caps,
     calculate_contracts,
     calculate_contracts_kelly,
+    calculate_kelly_fraction,
+    effective_cap,
 )
 from src.config.config import StrategyConfig
 from src.domain.types import Money, SizingContext
@@ -69,14 +70,14 @@ class TestEffectiveCap:
         ctx = SizingContext(trr_level='HIGH')
         assert effective_cap(config, ctx) == 50
 
-    def test_sizing_context_normal_trr_returns_100(self, config):
+    def test_sizing_context_normal_trr_returns_default_50(self, config):
         ctx = SizingContext(trr_level='NORMAL')
-        assert effective_cap(config, ctx) == 100
+        assert effective_cap(config, ctx) == 50  # CLAUDE.md rule 4: no-flag default 50 (was 100 until 2026-09-13)
 
     def test_sizing_context_iv_effect_reduction_halves_cap(self, config):
         ctx = SizingContext(trr_level='NORMAL', fcst_ern_iv_effect=2.5)
-        # 100 // 2 = 50
-        assert effective_cap(config, ctx) == 50
+        # default 50, halved
+        assert effective_cap(config, ctx) == 25
 
 
 class TestApplyKellyCaps:
@@ -95,13 +96,14 @@ class TestApplyKellyCaps:
 
 
 class TestCalculateContracts:
-    def test_basic_sizing(self, config):
+    def test_basic_sizing(self):
         # $20,000 risk budget / $400 max loss = 50 contracts
+        config = StrategyConfig(risk_budget_per_trade=20000.0)
         result = calculate_contracts(config, Money(400.0))
         assert result == 50
 
     def test_too_large_capped(self, config):
-        # $20,000 / $10 = 2000 → capped at max_contracts (100)
+        # $250,000 / $10 = 25,000 → capped at max_contracts (100)
         result = calculate_contracts(config, Money(10.0))
         assert result == config.max_contracts
 
@@ -137,3 +139,21 @@ class TestCalculateContractsKelly:
             probability_of_profit=0.10
         )
         assert result == config.kelly_min_contracts
+
+
+class TestSizingIsNotKelly:
+    """Audit 4.1 (2026-09-13): the sizing formula is a fixed dollar-risk rule,
+    RISK_BUDGET_PER_TRADE / max_loss x KELLY_FRACTION x POP/EV quality, not Kelly.
+    KELLY_MIN_EDGE was parsed but never read, and the -2% EV floor was a literal
+    written twice whose .env comment claimed the opposite sign."""
+
+    def test_min_edge_setting_is_gone(self):
+        from src.config.config import StrategyConfig
+        assert not hasattr(StrategyConfig(), "kelly_min_edge")
+
+    def test_ev_floor_is_one_named_constant(self):
+        import inspect
+
+        from src.application.services.strategy import sizing
+        assert sizing.MIN_EV_PCT == -0.02
+        assert "-0.02" not in inspect.getsource(sizing).replace("MIN_EV_PCT = -0.02", "")

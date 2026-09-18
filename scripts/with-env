@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Run one command with 2.0/.env exported. The one place that rule lives:
+# scripts/db runs psql through it, and /maintenance runs its Python steps
+# through it.
+#
+# Why a command rather than `set -a && source 2.0/.env && set +a && cmd`:
+#
+#   1. ⚠️ A caller's PG* wins over .env. `set -a; . .env` alone would clobber
+#      `PGDATABASE=ivcrush_scratch <cmd>` back to `ivcrush` and run against
+#      PRODUCTION while the caller believed otherwise -- silent, and the worst
+#      failure this could have. The caller's values are re-applied last.
+#   2. Claude Code's permission checker refuses `source` inside a compound
+#      command and refuses subshells outright (tested 2026-09-14 on 2.1.270,
+#      `--permission-mode dontAsk`: `set -a && source 2.0/.env && set +a`
+#      denied, each part alone allowed; `( allowed-cmd )` denied). The weekly
+#      unattended /maintenance run allows an explicit tool list, so its steps
+#      have to be single commands a rule can match: `scripts/with-env <cmd>`.
+#
+# Usage:
+#   scripts/with-env 2.0/venv/bin/python scripts/integrity_report.py
+#   cd 2.0 && ../scripts/with-env ./venv/bin/python -m scripts.jobs.record_moves
+#   PGDATABASE=ivcrush_scratch scripts/with-env <cmd>    # scratch stays scratch
+set -euo pipefail
+
+if [ $# -eq 0 ]; then
+    echo "usage: scripts/with-env <command> [args...]" >&2
+    exit 2
+fi
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Snapshot whatever the caller set, so .env fills gaps rather than overriding.
+_caller_pg="$(env | grep '^PG[A-Z]*=' || true)"
+
+if [ -f "$ROOT/2.0/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$ROOT/2.0/.env"
+    set +a
+fi
+
+# Re-apply the caller's values last. This is the line that keeps
+# `PGDATABASE=ivcrush_scratch` from silently becoming production.
+if [ -n "$_caller_pg" ]; then
+    while IFS= read -r kv; do
+        [ -n "$kv" ] && export "${kv?}"
+    done <<< "$_caller_pg"
+fi
+
+exec "$@"

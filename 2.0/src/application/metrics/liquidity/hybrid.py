@@ -1,16 +1,25 @@
 """Hybrid C-then-B liquidity tier classification and dynamic threshold calculation."""
-from typing import Optional, Tuple, Dict, Any
+from typing import Any, Dict, Optional, Tuple
+
 from src.application.metrics.liquidity.score import LiquidityThresholds
 from src.application.metrics.liquidity.scoring import calculate_spread_pct
-from src.domain.types import OptionChain, Strike, OptionQuote
-from src.utils.market_hours import get_market_status
+from src.config.config import StrategyConfig
+from src.domain.market_calendar import get_market_status
+from src.domain.types import OptionChain, OptionQuote, Strike, full_size_contracts
 
 
 def calculate_dynamic_thresholds(
     stock_price: float,
-    max_loss_budget: float = 20000.0,
+    strategy_config: StrategyConfig,
     credit_ratio: float = 0.30,
 ) -> Dict[str, Any]:
+    """Open interest a position needs, sized as the engine would size it.
+
+    Contracts are full_size_contracts(): RISK_BUDGET_PER_TRADE x KELLY_FRACTION
+    over this price tier's estimated max loss per spread, capped at
+    SIZING_DEFAULT_CAP. REJECT below 1x contracts, WARNING below 2x, GOOD
+    below 5x. Until 2026-09-14 the position came from a hardcoded $20,000 budget.
+    """
     if stock_price >= 1000:
         spread_width = 100.0
         price_tier = "$1000+"
@@ -32,7 +41,7 @@ def calculate_dynamic_thresholds(
 
     credit_estimate = spread_width * credit_ratio
     max_loss_per_spread = (spread_width - credit_estimate) * 100
-    contracts = int(max_loss_budget / max_loss_per_spread)
+    contracts = full_size_contracts(strategy_config, max_loss_per_spread)
     min_oi = contracts * 1
     warning_oi = contracts * 2
     good_oi = contracts * 5
@@ -43,7 +52,7 @@ def calculate_dynamic_thresholds(
         'min_oi': min_oi,
         'warning_oi': warning_oi,
         'good_oi': good_oi,
-        'max_loss_budget': max_loss_budget,
+        'max_loss_per_spread': max_loss_per_spread,
         'price_tier': price_tier,
     }
 
@@ -100,14 +109,18 @@ def classify_hybrid_tier(
     implied_move_pct: float,
     t: LiquidityThresholds,
     stock_price: Optional[float] = None,
-    max_loss_budget: float = 20000.0,
+    strategy_config: Optional[StrategyConfig] = None,
     use_dynamic_thresholds: bool = True,
 ) -> Tuple[str, Dict[str, Any]]:
     if stock_price is None:
         stock_price = float(chain.stock_price.amount)
 
     if use_dynamic_thresholds:
-        thresholds = calculate_dynamic_thresholds(stock_price, max_loss_budget)
+        if strategy_config is None:
+            raise ValueError(
+                "dynamic liquidity thresholds size the position from StrategyConfig; pass strategy_config"
+            )
+        thresholds = calculate_dynamic_thresholds(stock_price, strategy_config)
         min_oi = thresholds['min_oi']
         warning_oi = thresholds['warning_oi']
         good_oi = thresholds['good_oi']
@@ -130,13 +143,11 @@ def classify_hybrid_tier(
     call_c = find_strike_outside_move(chain, implied_move_pct, is_call=True)
     put_c = find_strike_outside_move(chain, implied_move_pct, is_call=False)
 
-    c_valid = (
+    if (
         call_c is not None and put_c is not None and
         (call_c[1].open_interest or 0) > 0 and
         (put_c[1].open_interest or 0) > 0
-    )
-
-    if c_valid:
+    ):
         call_strike, call_option = call_c
         put_strike, put_option = put_c
         details['method'] = 'C (outside implied move)'
@@ -203,12 +214,12 @@ def classify_hybrid_tier_market_aware(
     implied_move_pct: float,
     t: LiquidityThresholds,
     stock_price: Optional[float] = None,
-    max_loss_budget: float = 20000.0,
+    strategy_config: Optional[StrategyConfig] = None,
     use_dynamic_thresholds: bool = True,
 ) -> Tuple[str, bool, str, Dict[str, Any]]:
     tier, details = classify_hybrid_tier(
         chain=chain, implied_move_pct=implied_move_pct, t=t,
-        stock_price=stock_price, max_loss_budget=max_loss_budget,
+        stock_price=stock_price, strategy_config=strategy_config,
         use_dynamic_thresholds=use_dynamic_thresholds,
     )
     return (tier, details['market_open'], details['market_reason'], details)

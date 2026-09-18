@@ -6,31 +6,25 @@ and prevent accidental mutations.
 """
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal, getcontext
-from datetime import date, datetime, timezone
-from zoneinfo import ZoneInfo
-from typing import Dict, Optional, List
-from src.domain.enums import (
-    EarningsTiming,
-    OptionType,
-    Recommendation,
-    ExpirationCycle,
-    SettlementType,
-    StrategyType,
-    DirectionalBias
-)
-
-import sys as _sys
-from pathlib import Path as _Path
-
-_root = str(_Path(__file__).resolve().parent.parent.parent.parent)
-if _root not in _sys.path:
-    _sys.path.insert(0, _root)
+from typing import Dict, List, Optional
 
 from common.constants import (  # noqa: E402
     FCST_ERN_IV_THRESHOLD,
     IEE_DIVERGENCE_RATIO,
     ORATS_SNAPSHOT_MAX_AGE_DAYS,
+)
+from common.timezone import (  # noqa: F401  (MARKET_TZ re-exported: the one New York zone)
+    MARKET_TZ,
+    now_et,
+)
+from src.domain.enums import (
+    DirectionalBias,
+    EarningsTiming,
+    OptionType,
+    Recommendation,
+    StrategyType,
 )
 
 # Set Decimal precision for financial calculations
@@ -66,9 +60,12 @@ def snapshot_is_stale(
 
     Resubscription safety (Jul 2026): ORATS_ENABLED gates *whether* the
     snapshot is read, not its freshness — without this guard, flipping the
-    flag back on without re-running refresh_orats_snapshots.py would feed
-    the frozen 2026-06-24 data into sizing Rules A/B and compound-risk
-    detection as if live. Unknown/unparseable age fails closed (stale).
+    flag back on would feed the frozen 2026-06-24 data into sizing Rules A/B
+    and compound-risk detection as if live. Unknown/unparseable age fails
+    closed (stale). The refresh script that would have unfrozen it was
+    deleted at the Postgres port (tag pre-postgres-script-removal), so this
+    guard is now the only thing standing between a flag flip and stale
+    sizing input — it matters more, not less.
     """
     if not last_updated:
         return True
@@ -76,7 +73,21 @@ def snapshot_is_stale(
         updated = date.fromisoformat(str(last_updated)[:10])
     except ValueError:
         return True
-    return (date.today() - updated).days > max_age_days
+    return (now_et().date() - updated).days > max_age_days
+
+
+# Sizing tier defaults. These reproduce the values that were hardcoded inside
+# SizingContext before Sep 2026; they are the fallback when a context is built
+# without config (tests, ad-hoc callers). Live sizing overrides them from
+# StrategyConfig via SizingContext.from_strategy_config().
+DEFAULT_SIZING_BASE_CAP = 100           # CLAUDE.md sizing rule 5: max ever, a ceiling only
+DEFAULT_SIZING_DEFAULT_CAP = 50         # rule 4: the cap when no flag fires
+DEFAULT_SIZING_TRR_HIGH_CAP = 50        # rule 3: HIGH TRR hard cap
+DEFAULT_SIZING_COMPOUND_RISK_CAP = 25   # rules 1-2 (calibrated May 2026, N=15)
+DEFAULT_SIZING_REDUCTION_FACTOR = 0.5   # rules 4 and 8: 50% reduction each
+# MAX_LOSS_WARN_THRESHOLD: the most worst-case max loss the engine sizes a
+# position at (max_loss_capped_contracts), and the /analyze warning line.
+DEFAULT_MAX_LOSS_WARN_THRESHOLD = 50000.0
 
 
 @dataclass(frozen=True)
@@ -99,12 +110,52 @@ class SizingContext:
     vrp_marginal: bool = False
     liquidity_warning: bool = False
 
-    # Compound tail risk hard cap (calibrated May 2026, N=15 outcomes)
-    COMPOUND_RISK_MAX_CONTRACTS = 25
+    # --- Sizing tiers (tunable since Sep 2026) -------------------------------
+    # These were hardcoded, which made 2.0/.env's MAX_CONTRACTS a no-op: the
+    # live path builds a SizingContext, and effective_max_contracts never
+    # consulted config at all (config.max_contracts binds only on
+    # effective_cap()'s no-context fallback). Defaults reproduce the previous
+    # constants exactly, so behaviour is unchanged unless deliberately tuned.
+    # Populate from config via SizingContext.from_strategy_config().
+    base_cap: int = DEFAULT_SIZING_BASE_CAP                  # CLAUDE.md rule 5: ceiling
+    # Rule 4. Until 2026-09-13 the no-flag cap was base_cap itself (100), while
+    # CLAUDE.md said "Default -> 50"; the default is now its own tier.
+    default_cap: int = DEFAULT_SIZING_DEFAULT_CAP
+    trr_high_cap: int = DEFAULT_SIZING_TRR_HIGH_CAP          # rule 3
+    compound_risk_cap: int = DEFAULT_SIZING_COMPOUND_RISK_CAP  # rules 1-2
+    # Rules 4 and 8 each apply one reduction (0.5 = the documented 50% cut).
+    reduction_factor: float = DEFAULT_SIZING_REDUCTION_FACTOR
+    # Dollar ceiling on the position's worst-case max loss (cap_to_max_loss).
+    # Since 2026-09-16: RISK_BUDGET_PER_TRADE x KELLY_FRACTION targets $62,500,
+    # so the engine could size a spread its own $50,000 warning flagged.
+    max_loss_warn_threshold: float = DEFAULT_MAX_LOSS_WARN_THRESHOLD
+
+    # Back-compat alias for the old class constant.
+    COMPOUND_RISK_MAX_CONTRACTS = DEFAULT_SIZING_COMPOUND_RISK_CAP
+
+    @classmethod
+    def from_strategy_config(cls, config, **kwargs) -> 'SizingContext':
+        """
+        Build a context with tiers taken from StrategyConfig.
+
+        `config` is duck-typed on purpose: src.domain must not import
+        src.config (circular import), so this reads attributes rather than
+        naming the type.
+        """
+        return cls(
+            base_cap=config.sizing_base_cap,
+            default_cap=config.sizing_default_cap,
+            trr_high_cap=config.sizing_trr_high_cap,
+            compound_risk_cap=config.sizing_compound_risk_cap,
+            reduction_factor=config.sizing_reduction_factor,
+            max_loss_warn_threshold=config.max_loss_warn_threshold,
+            **kwargs,
+        )
 
     @property
     def trr_cap(self) -> int:
-        return 50 if self.trr_level == 'HIGH' else 100
+        cap = self.trr_high_cap if self.trr_level == 'HIGH' else self.default_cap
+        return min(cap, self.base_cap)
 
     @property
     def bearish_fused_skew(self) -> bool:
@@ -141,7 +192,7 @@ class SizingContext:
                 parts.append('TRR_HIGH')
             if iv_signal:
                 parts.append(iv_signal)
-            if self.bearish_fused_skew:
+            if self.bearish_fused_skew and self.fused_bias is not None:
                 parts.append(f'{self.fused_bias.value.upper()}_SKEW')
             return f"COMPOUND_RISK({' + '.join(parts)})"
         vr_signal = None
@@ -183,16 +234,90 @@ class SizingContext:
         (not stacked if both fire)."""
         return self.vrp_marginal or self.liquidity_warning
 
+    def apply_vrp_or_liquidity_reduction(self, contracts: int) -> int:
+        """`contracts` after the vrp_or_liquidity_reduction cut, when it fires.
+
+        One rule for every structure: a vertical's cap takes it here, and the
+        calendar pilot's 10-contract cap takes it in calendar_spread.py.
+        """
+        # int() floors, matching the previous `// 2` at the default factor of
+        # 0.5 for both even and odd counts (51 -> 25 either way).
+        if self.vrp_or_liquidity_reduction:
+            return int(contracts * self.reduction_factor)
+        return contracts
+
     @property
     def effective_max_contracts(self) -> int:
         if self.compound_risk_active:
-            return self.COMPOUND_RISK_MAX_CONTRACTS
+            return self.compound_risk_cap
         contracts = self.trr_cap
         if self.iv_effect_reduction:
-            contracts = contracts // 2
-        if self.vrp_or_liquidity_reduction:
-            contracts = contracts // 2
-        return max(1, contracts)
+            contracts = int(contracts * self.reduction_factor)
+        return max(1, self.apply_vrp_or_liquidity_reduction(contracts))
+
+    def cap_to_max_loss(self, contracts: int, max_loss_per_spread: float) -> int:
+        """`contracts`, cut so the position's max loss stays within
+        max_loss_warn_threshold (max_loss_capped_contracts)."""
+        return max_loss_capped_contracts(
+            contracts, max_loss_per_spread, self.max_loss_warn_threshold
+        )
+
+
+def max_loss_capped_contracts(
+    contracts: int, max_loss_per_spread: float, threshold: float
+) -> int:
+    """At most as many contracts as keep contracts x max_loss_per_spread within
+    `threshold` (MAX_LOSS_WARN_THRESHOLD), never fewer than one.
+
+    A contract cap is not a risk cap: 50 contracts is $25k of risk on a $5-wide
+    spread and $350k on a $100-wide one. Every structure the engine sizes (the
+    verticals, the calendar pilot, the scan's full-size position) passes through
+    here with its worst-case max loss per spread, so no engine size trips the
+    warning line. The one exception is a single spread whose max loss is over the
+    threshold on its own: it stays at one contract and the warning fires. A
+    threshold of 0 or less turns the cap off, as it does the warning.
+    """
+    if threshold <= 0 or max_loss_per_spread <= 0:
+        return contracts
+    within = int(threshold // max_loss_per_spread)
+    # Float floor division can land one above the true quotient at an exact
+    # multiple; the product is the check the warning makes.
+    while within > 0 and within * max_loss_per_spread > threshold:
+        within -= 1
+    return max(1, min(contracts, within))
+
+
+def dollar_risk_contracts(risk_budget: float, max_loss_per_spread: float, fraction: float) -> int:
+    """RISK_BUDGET_PER_TRADE / max loss per spread x fraction, floored: the
+    engine's contract count before any cap.
+
+    One formula for two callers. The strategy sizer passes KELLY_FRACTION x
+    POP/EV quality (sizing.calculate_contracts_kelly); the scan's liquidity
+    check passes KELLY_FRACTION alone (full_size_contracts). The expression
+    order is the sizer's, so int() floors at the same boundaries.
+    """
+    return int((risk_budget / max_loss_per_spread) * fraction)
+
+
+def full_size_contracts(config, max_loss_per_spread: float) -> int:
+    """Contracts the engine sizes a spread with this max loss at when nothing
+    reduces it: full POP/EV quality and no sizing flag, so capped at
+    SIZING_DEFAULT_CAP (itself bounded by SIZING_BASE_CAP) and at
+    MAX_LOSS_WARN_THRESHOLD of max loss.
+
+    The scan's hybrid liquidity check requires open interest in multiples of
+    this. It used a hardcoded $20,000 budget until 2026-09-14, which sized a
+    $5-wide spread at 57 contracts and a $20-wide one at 14 while the engine
+    sizes them at 50 (the cap) and 35 (44 until the max-loss cap, 2026-09-16).
+    `config` is a StrategyConfig, duck-typed for the same reason as
+    from_strategy_config.
+    """
+    raw = dollar_risk_contracts(
+        config.risk_budget_per_trade, max_loss_per_spread, config.kelly_fraction
+    )
+    context = SizingContext.from_strategy_config(config)
+    contracts = min(max(config.kelly_min_contracts, raw), context.effective_max_contracts)
+    return context.cap_to_max_loss(contracts, max_loss_per_spread)
 
 
 # ============================================================================
@@ -486,6 +611,12 @@ class VRPResult:
     vrp_ratio: float  # implied / historical
     edge_score: float  # risk-adjusted edge (Sharpe-like)
     recommendation: Recommendation
+    # Quarters of history behind the ratio. A tier from 4 quarters and one from
+    # 12 read the same, so a display prints the count beside the tier.
+    historical_quarters: Optional[int] = None
+    # The historical move the ratio divides by: "intraday" or "close" (analysis_log
+    # .vrp_convention), "gap" in research. VRPCalculator always sets it.
+    move_metric: str = "close"  # (live since the 2026-09 migration)
 
     @property
     def is_tradeable(self) -> bool:
@@ -493,7 +624,7 @@ class VRPResult:
 
         Includes MARGINAL: per CLAUDE.md's VRP tier table, MARGINAL is a
         tradeable tier (50% size reduction), not a skip condition -- only
-        SKIP (<1.2x) means don't trade. Fixed 2026-07-27: this previously
+        SKIP (below VRP_MARGINAL_FROM) means don't trade. Fixed 2026-07-27: this previously
         excluded MARGINAL, which meant strategy generation, sizing-context
         construction, and /whisper's tradeable-results list silently
         dropped every MARGINAL-VRP ticker outright, not just failing to
@@ -591,8 +722,12 @@ class TickerAnalysis:
     # IV backwardation; alternative to skipping the event entirely.
     calendar_candidate: Optional['Strategy'] = None
 
-    # Gap-inclusive close-to-close VRP (A/B vs intraday baseline, Jun 2026).
-    # None when fewer than 4 quarters of close_move_pct data are available.
+    # Both conventions' VRP on the same implied move, for analysis_log. The one
+    # vrp.move_metric names repeats vrp itself; the other is recomputed
+    # (metrics/vrp.py logged_vrp_columns). None when fewer than 4 quarters of that
+    # move are available.
+    vrp_intraday_ratio: Optional[float] = None
+    historical_intraday_mean_pct: Optional[float] = None
     vrp_close_ratio: Optional[float] = None
     historical_close_mean_pct: Optional[float] = None
 
@@ -606,12 +741,21 @@ class TickerAnalysis:
     # a best-effort check against journaled history (via /journal), not a
     # live open-position tracker -- the main earnings system has no such
     # tracker (unlike TACO's taco_positions). It cannot catch a same-day
-    # repeat entered before /journal has been run. Added 2026-07-27.
+    # repeat entered before /journal has been run. Added 2026-07-27; one
+    # shared check (services/existing_position.py) on every path since 2026-09-14.
     existing_position_warning: Optional[str] = None
+
+    # Set when the most recent stored historical_moves quarter is more than
+    # QUARTER_GAP_DAYS before earnings_date -- a quarter missing from both
+    # earnings_calendar and historical_moves, the same defect
+    # integrity_report.py's weekly quarter_missing_from_calendar_and_moves check
+    # looks for, but live and not scoped to traded tickers (added 2026-09-16
+    # after LEN's Mar/Jun 2026 quarters sat missing for six months).
+    stale_history_warning: Optional[str] = None
 
     @property
     def is_excellent(self) -> bool:
-        """Excellent opportunity (VRP >= 2.0x)."""
+        """Excellent opportunity (VRP >= VRP_EXCELLENT_FROM)."""
         return self.recommendation == Recommendation.EXCELLENT
 
     @property
@@ -666,7 +810,8 @@ class Strategy:
     """
     Complete options strategy with all legs and calculated metrics.
 
-    Supports vertical spreads (bull put, bear call) and iron condors.
+    Vertical credit spreads (bull put, bear call) and the calendar pilot. Iron
+    condors and butterflies are banned and have no StrategyType (CLAUDE.md).
 
     Note: Not frozen to allow score updates during strategy ranking.
     """
@@ -675,7 +820,7 @@ class Strategy:
     strategy_type: StrategyType
     expiration: date
     legs: List[StrategyLeg]
-    stock_price: Money  # Current stock price (for profit zone calculations)
+    stock_price: Money  # Current stock price
 
     # Calculated metrics
     net_credit: Money  # Positive for credit spreads
@@ -714,6 +859,27 @@ class Strategy:
     max_spread_pct: Optional[float] = None  # Maximum bid-ask spread % across all legs
     min_volume: Optional[int] = None  # Minimum volume across all legs
 
+    # The package at its natural price -- every sold leg at its bid, every bought
+    # leg at its ask -- beside the mid figures above (since 2026-09-16). A mid
+    # credit is a price the market may not give; the natural one it does.
+    natural_credit: Optional[Money] = None    # per spread; negative is a debit
+    natural_max_loss: Optional[Money] = None  # whole position, like max_loss
+
+    @property
+    def worst_case_max_loss(self) -> Money:
+        """Max loss at the natural price when quoted, else at mid. The engine
+        sizes on it and /analyze warns on it."""
+        if self.natural_max_loss is not None and self.natural_max_loss > self.max_loss:
+            return self.natural_max_loss
+        return self.max_loss
+
+    @property
+    def liquidity_rejected(self) -> bool:
+        """REJECT liquidity: CLAUDE.md §2 does not trade it as a spread. The ATM
+        single at the broker decides (bid >= $1.50 and OI >= 200: a single at
+        half size), else skip."""
+        return (self.liquidity_tier or "").upper() == "REJECT"
+
     @property
     def strike_description(self) -> str:
         """Human-readable strike description."""
@@ -726,22 +892,6 @@ class Strategy:
             short = next(leg for leg in self.legs if leg.is_short and leg.option_type == OptionType.CALL)
             long = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.CALL)
             return f"Short {short.strike}C / Long {long.strike}C"
-
-        elif self.strategy_type == StrategyType.IRON_CONDOR:
-            put_short = next(leg for leg in self.legs if leg.is_short and leg.option_type == OptionType.PUT)
-            put_long = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.PUT)
-            call_short = next(leg for leg in self.legs if leg.is_short and leg.option_type == OptionType.CALL)
-            call_long = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.CALL)
-            return f"Put: {put_short.strike}/{put_long.strike} | Call: {call_short.strike}/{call_long.strike}"
-
-        elif self.strategy_type == StrategyType.IRON_BUTTERFLY:
-            # Get ATM strikes (short positions)
-            atm_call = next(leg for leg in self.legs if leg.is_short and leg.option_type == OptionType.CALL)
-            atm_put = next(leg for leg in self.legs if leg.is_short and leg.option_type == OptionType.PUT)
-            # Get wing strikes (long positions)
-            wing_call = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.CALL)
-            wing_put = next(leg for leg in self.legs if leg.is_long and leg.option_type == OptionType.PUT)
-            return f"ATM: {atm_call.strike}C/{atm_put.strike}P | Wings: {wing_put.strike}P/{wing_call.strike}C"
 
         elif self.strategy_type == StrategyType.CALENDAR_SPREAD:
             short = next(leg for leg in self.legs if leg.is_short)
@@ -792,25 +942,3 @@ class StrategyRecommendation:
     def has_multiple_options(self) -> bool:
         """Whether multiple strategy options were generated."""
         return len(self.strategies) > 1
-
-
-# ============================================================================
-# Timezone Helpers (Phase 2)
-# ============================================================================
-
-MARKET_TZ = ZoneInfo("America/New_York")
-
-
-def market_now() -> datetime:
-    """Get current time in market timezone."""
-    return datetime.now(tz=MARKET_TZ)
-
-
-def to_market_time(dt: datetime) -> datetime:
-    """Convert any datetime to market timezone."""
-    return dt.astimezone(MARKET_TZ)
-
-
-def utc_now() -> datetime:
-    """Get current time in UTC."""
-    return datetime.now(tz=timezone.utc)

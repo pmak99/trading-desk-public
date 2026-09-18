@@ -2,19 +2,21 @@
 Tests for enhanced consistency analyzer (Phase 4).
 """
 
-import pytest
+import statistics
 from datetime import date, timedelta
 
+import pytest
+
 from src.application.metrics.consistency_enhanced import (
+    ConsistencyAnalysis,
     ConsistencyAnalyzerEnhanced,
-    ConsistencyAnalysis
 )
-from src.domain.types import Money, Percentage, HistoricalMove
 from src.domain.errors import ErrorCode
+from src.domain.types import HistoricalMove, Money, Percentage
 
 
 class TestConsistencyAnalyzerEnhanced:
-    """Test exponential-weighted consistency analysis."""
+    """Test consistency analysis: one equal-weighted convention, trend, trust."""
 
     @pytest.fixture
     def analyzer(self):
@@ -145,52 +147,75 @@ class TestConsistencyAnalyzerEnhanced:
         assert result.is_err
         assert result.error.code == ErrorCode.NODATA
 
-    def test_exponential_weighting(self, analyzer):
-        """Test that recent quarters are weighted more heavily."""
-        # Create moves where recent quarters are higher
-        moves = []
+    def moves_from(self, pcts):
+        """HistoricalMoves, newest first, whose close_move_pct is each value."""
         base_date = date(2026, 3, 16)
-
-        # Recent quarters: 8% moves (close_move_pct is the default metric)
-        for i in range(4):
-            move = HistoricalMove(
+        return [
+            HistoricalMove(
                 ticker="TEST",
                 earnings_date=base_date - timedelta(days=90 * i),
                 prev_close=Money(100.0),
-                earnings_open=Money(102.0),
-                earnings_high=Money(108.0),
-                earnings_low=Money(92.0),
-                earnings_close=Money(108.0),  # 8% move
-                intraday_move_pct=Percentage(8.0),
-                gap_move_pct=Percentage(2.0),
-                close_move_pct=Percentage(8.0)  # 8% - default metric
+                earnings_open=Money(100.0),
+                earnings_high=Money(100.0 + abs(pct)),
+                earnings_low=Money(100.0 - abs(pct)),
+                earnings_close=Money(100.0 + pct),
+                intraday_move_pct=Percentage(pct),
+                gap_move_pct=Percentage(0.0),
+                close_move_pct=Percentage(pct),
             )
-            moves.append(move)
+            for i, pct in enumerate(pcts)
+        ]
 
-        # Older quarters: 4% moves
-        for i in range(4, 8):
-            move = HistoricalMove(
-                ticker="TEST",
-                earnings_date=base_date - timedelta(days=90 * i),
-                prev_close=Money(100.0),
-                earnings_open=Money(102.0),
-                earnings_high=Money(104.0),
-                earnings_low=Money(96.0),
-                earnings_close=Money(104.0),  # 4% move
-                intraday_move_pct=Percentage(4.0),
-                gap_move_pct=Percentage(2.0),
-                close_move_pct=Percentage(4.0)  # 4% - default metric
-            )
-            moves.append(move)
+    def test_hand_computed_example(self, analyzer):
+        """Moves 2, 4, 6, 8 (newest first), worked by hand.
 
-        result = analyzer.analyze_consistency("TEST", moves)
+        mean      = 20 / 4 = 5.0
+        sample SD = sqrt(((-3)^2 + (-1)^2 + 1^2 + 3^2) / 3) = sqrt(20/3) = 2.581989
+        score     = 100 * (1 - 2.581989 / 5) = 48.360222
+        trust     = 0.48360222 * 4/(4+4) * 1.0 (slope -2 a quarter, decreasing) = 0.241801
+        recent bias: the recent four are all four moves, so 0
+
+        The old convention -- mean weighted 0.85^i, SD unweighted about that
+        weighted mean -- scored the same moves 42.92 on a mean of 4.5967.
+        """
+        result = analyzer.analyze_consistency("TEST", self.moves_from([2.0, 4.0, 6.0, 8.0]))
 
         assert result.is_ok
-        analysis = result.value
+        a = result.value
+        assert a.mean_move.value == pytest.approx(5.0)
+        assert a.std_dev.value == pytest.approx(2.581989, abs=1e-6)
+        assert a.consistency_score == pytest.approx(48.360222, abs=1e-6)
+        assert a.trend == "decreasing"
+        assert a.trustworthiness == pytest.approx(0.241801, abs=1e-6)
+        assert a.recent_bias == pytest.approx(0.0)
 
-        # Weighted mean should be closer to 8% (recent) than 6% (simple average)
-        assert analysis.mean_move.value > 6.0
-        assert analysis.mean_move.value < 8.0
+    def test_one_weighting_convention(self, analyzer):
+        """Mean and SD are both equal-weighted, as the VRP denominator is.
+
+        Four recent 8% moves over four older 4% moves: the mean is 6.0 -- what
+        VRPCalculator divides by for the same history -- and the SD is the plain
+        sample SD about it, sqrt(8 * 2^2 / 7) = 2.138090. The recency-weighted mean
+        this replaced read 6.63 here, and the SD taken about it counted the
+        distance between the two means as dispersion.
+        """
+        pcts = [8.0] * 4 + [4.0] * 4
+        result = analyzer.analyze_consistency("TEST", self.moves_from(pcts))
+
+        assert result.is_ok
+        a = result.value
+        assert a.mean_move.value == pytest.approx(statistics.mean(pcts))
+        assert a.std_dev.value == pytest.approx(statistics.stdev(pcts))
+        assert a.consistency_score == pytest.approx(100 * (1 - statistics.stdev(pcts) / 6.0))
+        # the recent four average 8.0, against the same 6.0 mean
+        assert a.recent_bias == pytest.approx((8.0 - 6.0) / 6.0 * 100)
+
+    def test_signed_moves_count_by_magnitude(self, analyzer):
+        """-2, 4, -6, 8 is the 2, 4, 6, 8 example: direction is not dispersion."""
+        signed = analyzer.analyze_consistency("TEST", self.moves_from([-2.0, 4.0, -6.0, 8.0]))
+
+        assert signed.is_ok
+        assert signed.value.mean_move.value == pytest.approx(5.0)
+        assert signed.value.consistency_score == pytest.approx(48.360222, abs=1e-6)
 
     def test_recent_bias_calculation(self, analyzer):
         """Test recent bias detection."""

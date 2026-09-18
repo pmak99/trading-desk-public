@@ -11,6 +11,8 @@ from datetime import date
 from statistics import mean, pstdev
 from typing import List, Optional, Tuple
 
+from src.infrastructure.api.yahoo import yahoo_call
+
 logger = logging.getLogger(__name__)
 
 Series = List[Tuple[date, float]]  # ascending by date
@@ -24,11 +26,12 @@ VIX_BASELINE_SESSIONS = 10
 
 
 def fetch_series(symbol: str, period: str = "1y") -> Series:
-    """Daily closes via yfinance; [] on any failure (same pattern as harvest_live)."""
+    """Daily closes via yfinance, under the Yahoo limit; [] on any failure
+    (same pattern as harvest_live)."""
     try:
         import yfinance as yf  # noqa: PLC0415
-        hist = yf.Ticker(symbol).history(period=period, interval="1d",
-                                         auto_adjust=False)
+        hist = yahoo_call(lambda: yf.Ticker(symbol).history(
+            period=period, interval="1d", auto_adjust=False))
         return [(d.date(), float(c))
                 for d, c in zip(hist.index, hist["Close"], strict=False)
                 if c and c > 0]
@@ -57,7 +60,7 @@ def fetch_intraday_quote(symbol: str) -> Optional[float]:
     returns None for the snake_case name."""
     try:
         import yfinance as yf  # noqa: PLC0415
-        price = yf.Ticker(symbol).fast_info.last_price
+        price = yahoo_call(lambda: yf.Ticker(symbol).fast_info.last_price)
         return float(price) if price else None
     except Exception as e:
         logger.warning(f"{symbol}: yfinance fast_info failed — {e}")

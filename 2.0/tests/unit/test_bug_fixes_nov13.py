@@ -8,12 +8,12 @@ These tests ensure the bugs don't regress:
 4. SkewAnalysis directional_bias attribute support
 """
 
-import pytest
 from datetime import date, datetime
+
+import pytest
+
 from src.application.metrics.consistency_enhanced import ConsistencyAnalyzerEnhanced
-from src.domain.enums import EarningsTiming, DirectionalBias
-from src.container import Container
-from src.config.config import Config
+from src.domain.enums import DirectionalBias, EarningsTiming
 
 
 class TestBugFix1ConsistencyAnalyzer:
@@ -29,7 +29,7 @@ class TestBugFix1ConsistencyAnalyzer:
         """Verify the analyzer has the analyze_consistency method."""
         analyzer = ConsistencyAnalyzerEnhanced()
         assert hasattr(analyzer, 'analyze_consistency')
-        assert callable(getattr(analyzer, 'analyze_consistency'))
+        assert callable(analyzer.analyze_consistency)
 
 
 class TestBugFix2EarningsTimingEnum:
@@ -96,15 +96,15 @@ class TestBugFix4SkewAnalysisDirectionalBias:
 
     def test_strategy_generator_determine_bias_method_exists(self):
         """Verify StrategyGenerator has _determine_bias method."""
+        from src.application.metrics.liquidity_scorer import LiquidityScorer
         from src.application.services.strategy import StrategyGenerator
         from src.config.config import StrategyConfig
-        from src.application.metrics.liquidity_scorer import LiquidityScorer
         # StrategyGenerator now requires config and liquidity_scorer
         config = StrategyConfig()
         liquidity_scorer = LiquidityScorer()
         generator = StrategyGenerator(config, liquidity_scorer)
         assert hasattr(generator, '_determine_bias')
-        assert callable(getattr(generator, '_determine_bias'))
+        assert callable(generator._determine_bias)
 
     def test_skew_analysis_has_directional_bias_attribute(self):
         """Verify SkewAnalysis dataclass has directional_bias field."""
@@ -176,9 +176,15 @@ class TestBugFixesIntegration:
 
     def test_ticker_analysis_enum_usage(self):
         """Verify TickerAnalysis can be created with correct EarningsTiming enum."""
-        from src.domain.types import TickerAnalysis, ImpliedMove, VRPResult, Money, Percentage, Strike
         from src.domain.enums import Recommendation
-        from datetime import datetime
+        from src.domain.types import (
+            ImpliedMove,
+            Money,
+            Percentage,
+            Strike,
+            TickerAnalysis,
+            VRPResult,
+        )
 
         # Create a sample analysis with AMC timing
         analysis = TickerAnalysis(

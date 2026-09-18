@@ -1,0 +1,515 @@
+{
+  "uid": "ivcrush-operations",
+  "title": "IV Crush \u2014 Operations",
+  "tags": [
+    "ivcrush",
+    "ops"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Last run per job",
+      "type": "table",
+      "description": "Red on error; amber on a 'running' row older than 1h (runner.py's own stale-claim threshold). Colored via the health column, not a numeric threshold on status/days_ago directly -- staleness depends on both fields jointly, which a single-field threshold cannot express.",
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- health mirrors runner.py's own claim logic (STALE_RUNNING_AFTER_SEC=3600):\n-- a 'running' row is only suspect past that age, matching what runner.py\n-- itself treats as a dead claim it will reclaim. Computed here, not left to\n-- Grafana threshold config, because \"stale\" depends on TWO fields jointly\n-- (status AND age) -- a single-field numeric threshold can't express that,\n-- but a single categorical column can be colored by value mapping.\n-- updated_at is displayed via substr, never strftime: job_status.updated_at\n-- carries a timezone offset (e.g. -04:00), and strftime re-parses that as\n-- UTC-relative, silently shifting the displayed time (verified: 08:00 ET\n-- rendered as 12:00). substr truncates the string without reinterpreting it,\n-- so the original ET wall-clock value displays correctly. The health CASE\n-- below still reads the RAW updated_at, not the truncated display column --\n-- only the shown value is shortened, the staleness math needs full precision.\nSELECT job_name, status,\n       to_char(updated_at AT TIME ZONE 'America/New_York',\n               'YYYY-MM-DD HH24:MI') AS updated_at,\n       (CURRENT_DATE - date) AS days_ago,\n       CASE WHEN status = 'error' THEN 'ERROR'\n            WHEN status = 'running'\n             AND now() - updated_at > interval '1 hour'\n            THEN 'STALE'\n            ELSE 'OK' END AS health\nFROM job_status\nWHERE (job_name, date) IN (SELECT job_name, MAX(date) FROM job_status GROUP BY job_name)\nORDER BY job_name;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "health"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "ERROR": {
+                        "color": "red",
+                        "index": 0
+                      },
+                      "STALE": {
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "OK": {
+                        "color": "green",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Job"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Status"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "updated_at"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Updated"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "days_ago"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Days ago"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "health"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Health"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job_name"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "updated_at"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "days_ago"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "health"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 2,
+      "title": "Days since last success",
+      "type": "stat",
+      "description": "Per job. A silently missed day shows here first.",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT job_name,\n       (CURRENT_DATE - MAX(date)) AS days_since_success\nFROM job_status\nWHERE status = 'success'\nGROUP BY job_name;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Job"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "days_since_success"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Days"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "values": true,
+          "calcs": [],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Job failures",
+      "type": "stat",
+      "description": "Total 'error' rows in job_status.",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Scoped to 30 days. Unbounded this read 0 on 2026-09-17, so it was not red --\n-- but it had no date scope at all, meaning the FIRST error ever recorded would\n-- have turned it red permanently with no path back to green. That is the \"a\n-- monitor that is always red is decoration\" failure mode, latent rather than\n-- live. A window makes it an alert again.\nSELECT COUNT(*) AS failures\nFROM job_status\nWHERE status = 'error'\n  AND date >= CURRENT_DATE - 30;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failures"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Failures (30d)"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 4,
+      "title": "Run history",
+      "type": "table",
+      "description": "Day x job. Job DURATION is deliberately absent: job_status has no duration column and the started_at schema change is deferred (spec prerequisite 7).",
+      "gridPos": {
+        "h": 9,
+        "w": 14,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- to_char, never a raw `date` column: Grafana's Postgres datasource returns a\n-- date as UTC midnight and the dashboard renders in `timezone: browser`, so in\n-- ET every raw date displayed as the PREVIOUS day at 20:00 (journal freshness\n-- read \"2026-09-10 20:00:00\" for a real max of 2026-09-11). Text has no\n-- timezone to reinterpret. Same reasoning as ops_last_run_per_job's to_char.\nSELECT to_char(date, 'YYYY-MM-DD') AS date, job_name, status\nFROM job_status\nORDER BY date DESC, job_name\nLIMIT 90;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "date"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Date"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Job"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Status"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "date"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job_name"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "title": "Move-history coverage",
+      "type": "table",
+      "description": "Tickers by the age of their newest recorded earnings move \u2014 the history every VRP and TRR runs on. A distribution, not a threshold: the staleness rule lives in common/constants.py, and restating it here would duplicate it. 2026-09-17: 898 / 113 / 341 across the first three bands.",
+      "gridPos": {
+        "h": 9,
+        "w": 10,
+        "x": 14,
+        "y": 5
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Replaces a row count of three of sixteen tables, which answered a question\n-- Kuma monitors 44/45 (can a client reach the database) and ops_last_run_per_job\n-- (did the job run) already answer better.\n-- This answers one nothing else on any dashboard does: how stale is the move\n-- history that every VRP and TRR is computed from. On 2026-09-16, 488 of 984\n-- tickers with >=4 quarters were stale.\n-- A DISTRIBUTION, not a threshold: QUARTER_GAP_DAYS lives in\n-- common/constants.py, and restating 150 here would be the same duplication as\n-- a VRP or TRR ladder in SQL. The reader sees the shape and judges.\n-- The numeric prefix is the sort key -- plain text ordering put '181-365d'\n-- before '91-180d'.\nSELECT CASE WHEN age <= 90 THEN '1. 0-90d'\n            WHEN age <= 180 THEN '2. 91-180d'\n            WHEN age <= 365 THEN '3. 181-365d'\n            ELSE '4. over 365d' END AS newest_move_age,\n       COUNT(*) AS tickers\nFROM (\n  SELECT ticker, CURRENT_DATE - MAX(earnings_date) AS age\n  FROM historical_moves\n  GROUP BY ticker\n) x\nGROUP BY newest_move_age\nORDER BY newest_move_age;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "newest_move_age"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Newest move"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tickers"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Tickers"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    }
+  ]
+}

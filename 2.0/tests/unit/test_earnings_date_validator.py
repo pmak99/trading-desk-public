@@ -5,18 +5,17 @@ Tests the cross-reference system that validates earnings dates from
 multiple sources (Yahoo Finance, Alpha Vantage).
 """
 
-import pytest
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from unittest.mock import Mock, patch
+
+import pytest
 
 from src.application.services.earnings_date_validator import (
     EarningsDateValidator,
-    EarningsDateInfo,
-    ValidationResult,
     EarningsSource,
 )
+from src.domain.errors import AppError, Err, ErrorCode, Ok
 from src.domain.types import EarningsTiming
-from src.domain.errors import Result, AppError, ErrorCode
 
 
 class TestEarningsDateValidator:
@@ -52,10 +51,10 @@ class TestEarningsDateValidator:
         timing = EarningsTiming.AMC
 
         # Mock both sources returning same date
-        mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
+        mock_yahoo_finance.get_next_earnings_date.return_value = Ok(
             (earnings_date, timing)
         )
-        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Ok(
             [(ticker, earnings_date, timing)]
         )
 
@@ -76,10 +75,10 @@ class TestEarningsDateValidator:
         timing = EarningsTiming.AMC
 
         # Mock sources with different dates
-        mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
+        mock_yahoo_finance.get_next_earnings_date.return_value = Ok(
             (yf_date, timing)
         )
-        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Ok(
             [(ticker, av_date, timing)]
         )
 
@@ -100,10 +99,10 @@ class TestEarningsDateValidator:
         timing = EarningsTiming.AMC
 
         # Mock sources with different dates
-        mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
+        mock_yahoo_finance.get_next_earnings_date.return_value = Ok(
             (yf_date, timing)
         )
-        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Ok(
             [(ticker, av_date, timing)]
         )
 
@@ -114,6 +113,36 @@ class TestEarningsDateValidator:
         # Yahoo Finance should win due to higher confidence (1.0 vs 0.7)
         assert validation.consensus_date == yf_date
 
+    def test_yahoo_unknown_timing_falls_back_to_finnhub(
+        self, validator, mock_yahoo_finance, mock_finnhub
+    ):
+        """Regression for 2026-09-10: Yahoo's date still wins (higher
+        confidence), but when Yahoo's own timing detection comes back
+        UNKNOWN, a definite timing from Finnhub must not be discarded.
+        Before this fix, Yahoo's timing was taken unconditionally — a bug
+        in get_next_earnings_date() meant Yahoo's timing was *always*
+        UNKNOWN in practice (silently, via a swallowed exception), so every
+        BMO-reporting ticker's correct Finnhub timing got overwritten with
+        a wrong default on every sync (DAL/DDOG/DOCN/FISV/MNDY/SHOP/SOFI/
+        SPOT/UBER, one run)."""
+        ticker = "FISV"
+        yf_date = date(2026, 10, 28)
+        finnhub_date = date(2026, 10, 28)
+
+        mock_yahoo_finance.get_next_earnings_date.return_value = Ok(
+            (yf_date, EarningsTiming.UNKNOWN)
+        )
+        mock_finnhub.get_earnings_calendar.return_value = Ok(
+            [(ticker, finnhub_date, EarningsTiming.BMO)]
+        )
+
+        result = validator.validate_earnings_date(ticker)
+
+        assert result.is_ok
+        validation = result.value
+        assert validation.consensus_date == yf_date  # Yahoo's date still wins
+        assert validation.consensus_timing == EarningsTiming.BMO  # but not its UNKNOWN timing
+
     def test_only_yahoo_finance_available(self, validator, mock_yahoo_finance, mock_finnhub):
         """Test when only Yahoo Finance data is available."""
         ticker = "CRM"
@@ -121,11 +150,11 @@ class TestEarningsDateValidator:
         timing = EarningsTiming.BMO
 
         # Yahoo Finance succeeds
-        mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
+        mock_yahoo_finance.get_next_earnings_date.return_value = Ok(
             (earnings_date, timing)
         )
         # Alpha Vantage fails
-        mock_finnhub.get_earnings_calendar.return_value = Result.Err(
+        mock_finnhub.get_earnings_calendar.return_value = Err(
             AppError(ErrorCode.NODATA, "No data")
         )
 
@@ -150,7 +179,7 @@ class TestEarningsDateValidator:
         fh_date = date(2025, 12, 8)
         timing = EarningsTiming.AMC
 
-        mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
+        mock_yahoo_finance.get_next_earnings_date.return_value = Ok(
             (yf_date, timing)
         )
 
@@ -176,10 +205,10 @@ class TestEarningsDateValidator:
         earnings_date = date(2025, 12, 8)
         timing = EarningsTiming.AMC
 
-        mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
+        mock_yahoo_finance.get_next_earnings_date.return_value = Ok(
             (earnings_date, timing)
         )
-        mock_finnhub.get_earnings_calendar.return_value = Result.Err(
+        mock_finnhub.get_earnings_calendar.return_value = Err(
             AppError(ErrorCode.RATELIMIT, "Finnhub rate limit exceeded")
         )
 
@@ -196,10 +225,10 @@ class TestEarningsDateValidator:
         ticker = "INVALID"
 
         # Both sources fail
-        mock_yahoo_finance.get_next_earnings_date.return_value = Result.Err(
+        mock_yahoo_finance.get_next_earnings_date.return_value = Err(
             AppError(ErrorCode.NODATA, "No data")
         )
-        mock_finnhub.get_earnings_calendar.return_value = Result.Err(
+        mock_finnhub.get_earnings_calendar.return_value = Err(
             AppError(ErrorCode.NODATA, "No data")
         )
 
@@ -216,10 +245,10 @@ class TestEarningsDateValidator:
         av_timing = EarningsTiming.AMC
 
         # Mock sources with same date but different timing
-        mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
+        mock_yahoo_finance.get_next_earnings_date.return_value = Ok(
             (earnings_date, yf_timing)
         )
-        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Ok(
             [(ticker, earnings_date, av_timing)]
         )
 
@@ -239,7 +268,7 @@ class TestEarningsDateValidator:
         with patch("src.infrastructure.data_sources.yahoo_finance_earnings.yf") as mock_yf:
             # Setup mock yfinance
             mock_ticker = Mock()
-            mock_ticker.calendar = {"Earnings Date": [date(2025, 12, 10)]}
+            mock_ticker.calendar = {"Earnings Date": [date.today() + timedelta(days=30)]}
             mock_ticker.earnings_dates = None
             mock_yf.Ticker.return_value = mock_ticker
 
@@ -267,21 +296,21 @@ class TestEarningsDateValidator:
         with patch("src.infrastructure.data_sources.yahoo_finance_earnings.yf") as mock_yf:
             # Setup mock yfinance
             mock_ticker = Mock()
-            mock_ticker.calendar = {"Earnings Date": [date(2025, 12, 10)]}
+            mock_ticker.calendar = {"Earnings Date": [date.today() + timedelta(days=30)]}
             mock_ticker.earnings_dates = None
             mock_yf.Ticker.return_value = mock_ticker
 
-            # Use 1 second TTL for reliable testing
-            fetcher = YahooFinanceEarnings(cache_ttl_hours=1/3600)  # 1 second
+            fetcher = YahooFinanceEarnings(cache_ttl_hours=1)
 
             # First call
             result1 = fetcher.get_next_earnings_date("AAPL")
             assert result1.is_ok
             assert mock_yf.Ticker.call_count == 1
 
-            # Wait for cache to expire (1.5 seconds to be safe)
-            import time
-            time.sleep(1.5)
+            # Age the entry past the TTL instead of sleeping through it
+            cached_date, cached_timing, cached_at = fetcher._cache["AAPL"]
+            fetcher._cache["AAPL"] = (cached_date, cached_timing,
+                                      cached_at - timedelta(hours=1, seconds=1))
 
             # Second call - cache expired, should hit API again
             result2 = fetcher.get_next_earnings_date("AAPL")
@@ -302,10 +331,10 @@ class TestEarningsDateValidator:
         av_date = date(2025, 12, 10)  # 9 days difference, > 7 day threshold
         timing = EarningsTiming.AMC
 
-        mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
+        mock_yahoo_finance.get_next_earnings_date.return_value = Ok(
             (yf_date, timing)
         )
-        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Ok(
             [(ticker, av_date, timing)]
         )
 
@@ -325,10 +354,10 @@ class TestEarningsDateValidator:
         av_date = date(2025, 12, 3)  # 2 days difference, < 7 day threshold
         timing = EarningsTiming.AMC
 
-        mock_yahoo_finance.get_next_earnings_date.return_value = Result.Ok(
+        mock_yahoo_finance.get_next_earnings_date.return_value = Ok(
             (yf_date, timing)
         )
-        mock_finnhub.get_earnings_calendar.return_value = Result.Ok(
+        mock_finnhub.get_earnings_calendar.return_value = Ok(
             [(ticker, av_date, timing)]
         )
 

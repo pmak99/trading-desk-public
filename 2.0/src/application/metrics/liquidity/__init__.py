@@ -1,10 +1,9 @@
 """LiquidityScorer — thin coordinator delegating to focused liquidity modules."""
 import logging
-from typing import Optional, Tuple, Dict, Any
+from typing import Any, Dict, Optional, Tuple
 
+from src.application.metrics.liquidity import hybrid, scoring
 from src.application.metrics.liquidity.score import LiquidityScore, LiquidityThresholds
-from src.application.metrics.liquidity import scoring, hybrid
-from src.config.config import ThresholdsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -58,22 +57,6 @@ class LiquidityScorer:
             good_spread_pct=good_spread_pct, excellent_spread_pct=excellent_spread_pct,
         )
 
-    @classmethod
-    def from_config(cls, config: ThresholdsConfig) -> 'LiquidityScorer':
-        return cls(
-            min_oi=config.liquidity_reject_min_oi,
-            warning_oi=config.liquidity_warning_min_oi,
-            good_oi=config.liquidity_good_min_oi,
-            excellent_oi=config.liquidity_excellent_min_oi,
-            min_volume=config.liquidity_reject_min_volume,
-            good_volume=config.liquidity_reject_min_volume,
-            excellent_volume=config.liquidity_excellent_min_volume,
-            max_spread_pct=config.liquidity_reject_max_spread_pct,
-            warning_spread_pct=config.liquidity_warning_max_spread_pct,
-            good_spread_pct=config.liquidity_good_max_spread_pct,
-            excellent_spread_pct=config.liquidity_excellent_max_spread_pct,
-        )
-
     # --- Public API ---
 
     def calculate_spread_pct(self, option):
@@ -97,19 +80,19 @@ class LiquidityScorer:
     def classify_straddle_tier_market_aware(self, call, put):
         return scoring.classify_straddle_tier_market_aware(call, put, self._t)
 
-    def calculate_dynamic_thresholds(self, stock_price, max_loss_budget=20000.0, credit_ratio=0.30):
-        return hybrid.calculate_dynamic_thresholds(stock_price, max_loss_budget, credit_ratio)
+    def calculate_dynamic_thresholds(self, stock_price, strategy_config, credit_ratio=0.30):
+        return hybrid.calculate_dynamic_thresholds(stock_price, strategy_config, credit_ratio)
 
     def classify_hybrid_tier(self, chain, implied_move_pct, stock_price=None,
-                             max_loss_budget=20000.0, use_dynamic_thresholds=True):
+                             strategy_config=None, use_dynamic_thresholds=True):
         return hybrid.classify_hybrid_tier(
-            chain, implied_move_pct, self._t, stock_price, max_loss_budget, use_dynamic_thresholds
+            chain, implied_move_pct, self._t, stock_price, strategy_config, use_dynamic_thresholds
         )
 
     def classify_hybrid_tier_market_aware(self, chain, implied_move_pct, stock_price=None,
-                                          max_loss_budget=20000.0, use_dynamic_thresholds=True):
+                                          strategy_config=None, use_dynamic_thresholds=True):
         return hybrid.classify_hybrid_tier_market_aware(
-            chain, implied_move_pct, self._t, stock_price, max_loss_budget, use_dynamic_thresholds
+            chain, implied_move_pct, self._t, stock_price, strategy_config, use_dynamic_thresholds
         )
 
     # --- Backward-compat shims (private methods called directly by existing tests) ---

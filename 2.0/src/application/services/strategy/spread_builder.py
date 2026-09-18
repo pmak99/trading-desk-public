@@ -1,16 +1,30 @@
 """Vertical spread construction — assembles strikes, metrics, sizing, and Greeks into a Strategy."""
 import logging
+from datetime import datetime
 from typing import Optional
 
-from src.domain.types import (
-    Money, OptionChain, VRPResult, Strategy, StrategyLeg, SizingContext
-)
-from src.domain.enums import OptionType, StrategyType, DirectionalBias
-from src.config.config import StrategyConfig
+from common.timezone import now_et
 from src.application.metrics.liquidity_scorer import LiquidityScorer
+from src.application.services.strategy.metrics import (
+    calculate_position_greeks,
+    calculate_spread_metrics,
+    years_to_expiration,
+)
+from src.application.services.strategy.sizing import (
+    calculate_contracts,
+    calculate_contracts_kelly,
+)
 from src.application.services.strategy.strike_selection import select_strikes_for_spread
-from src.application.services.strategy.metrics import calculate_spread_metrics, calculate_position_greeks
-from src.application.services.strategy.sizing import calculate_contracts_kelly, calculate_contracts
+from src.config.config import StrategyConfig
+from src.domain.enums import OptionType, StrategyType
+from src.domain.types import (
+    Money,
+    OptionChain,
+    SizingContext,
+    Strategy,
+    StrategyLeg,
+    VRPResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +38,11 @@ def build_vertical_spread(
     option_type: OptionType,
     strategy_type: StrategyType,
     below: bool,
-    bias: DirectionalBias,
     sizing_context: Optional[SizingContext] = None,
+    as_of: Optional[datetime] = None,
 ) -> Optional[Strategy]:
     """
-    Build a vertical credit spread with asymmetric strike placement based on bias.
+    Build a vertical credit spread at the configured deltas.
 
     Args:
         config: Strategy configuration
@@ -39,14 +53,15 @@ def build_vertical_spread(
         option_type: PUT or CALL
         strategy_type: BULL_PUT_SPREAD or BEAR_CALL_SPREAD
         below: True for put spread (below price), False for call spread (above)
-        bias: Directional bias for asymmetric positioning
         sizing_context: Optional contract cap signals
+        as_of: When the chain was quoted, for time to expiry in POP
+               (default: now, Eastern)
 
     Returns:
         Strategy or None if construction fails
     """
     strikes = select_strikes_for_spread(
-        config, ticker, option_chain, vrp, option_type, bias, below
+        config, ticker, option_chain, vrp, option_type, below
     )
 
     if not strikes:
@@ -75,8 +90,15 @@ def build_vertical_spread(
     # rather than binary accept/reject. The tier is attached to the strategy and can be
     # used for filtering or displaying warnings.
 
-    # Calculate metrics
-    metrics = calculate_spread_metrics(short_quote, long_quote, short_strike, long_strike)
+    # Calculate metrics. POP needs the underlying price and the time left, which
+    # live on the chain, not on the quotes.
+    metrics = calculate_spread_metrics(
+        short_quote, long_quote, short_strike, long_strike,
+        stock_price=option_chain.stock_price,
+        years_to_expiry=years_to_expiration(
+            option_chain.expiration, as_of if as_of is not None else now_et()
+        ),
+    )
 
     if metrics['net_credit'].amount < config.min_credit_per_spread:
         logger.warning(f"{ticker}: Credit too low for {strategy_type.value}")
@@ -100,7 +122,9 @@ def build_vertical_spread(
         ),
     ]
 
-    # Position sizing - use Kelly Criterion if enabled, else fixed risk budget
+    # Position sizing - use Kelly Criterion if enabled, else fixed risk budget.
+    # Either way the count is held to MAX_LOSS_WARN_THRESHOLD of the natural
+    # price's max loss, the worst case a fill can reach.
     if config.use_kelly_sizing:
         contracts = calculate_contracts_kelly(
             config,
@@ -108,9 +132,13 @@ def build_vertical_spread(
             max_loss=metrics['max_loss'],
             probability_of_profit=metrics['pop'],
             sizing_context=sizing_context,
+            worst_case_max_loss=metrics['natural_max_loss'],
         )
     else:
-        contracts = calculate_contracts(config, metrics['max_loss'], sizing_context)
+        contracts = calculate_contracts(
+            config, metrics['max_loss'], sizing_context,
+            worst_case_max_loss=metrics['natural_max_loss'],
+        )
 
     # Calculate position Greeks
     position_greeks = calculate_position_greeks(
@@ -150,4 +178,6 @@ def build_vertical_spread(
         position_gamma=position_greeks['gamma'],
         position_theta=position_greeks['theta'],
         position_vega=position_greeks['vega'],
+        natural_credit=metrics['natural_credit'],
+        natural_max_loss=metrics['natural_max_loss'] * contracts,
     )

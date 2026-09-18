@@ -1,11 +1,6 @@
 """Tests for SizingContext-driven contract caps in strategy_generator."""
 
-import pytest
-import sys
-from pathlib import Path
 from unittest.mock import Mock
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.domain.types import SizingContext
 
@@ -36,11 +31,11 @@ class TestStrategyGeneratorSizingContext:
         cap = gen._effective_cap(sizing_context=ctx)
         assert cap == 50
 
-    def test_high_fcst_halves_default_100(self):
+    def test_high_fcst_halves_default_50(self):
         gen = self._make_generator(max_contracts=100)
         ctx = SizingContext(fcst_ern_iv_effect=2.5)
         cap = gen._effective_cap(sizing_context=ctx)
-        assert cap == 50
+        assert cap == 25
 
     def test_trr_high_plus_high_fcst_gives_25(self):
         gen = self._make_generator(max_contracts=100)
@@ -48,8 +43,8 @@ class TestStrategyGeneratorSizingContext:
         cap = gen._effective_cap(sizing_context=ctx)
         assert cap == 25
 
-    def test_no_signals_gives_100(self):
+    def test_no_signals_gives_default_50(self):
         gen = self._make_generator(max_contracts=100)
         ctx = SizingContext()
         cap = gen._effective_cap(sizing_context=ctx)
-        assert cap == 100
+        assert cap == 50  # CLAUDE.md rule 4: no-flag default 50 (was 100 until 2026-09-13)

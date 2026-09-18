@@ -9,12 +9,12 @@ to market-observable assets only.
 """
 
 import logging
-import os
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
-import requests
+from src.config.config import APIConfig
+from src.infrastructure.api.twelve_data import time_series
 
 from .constants import CROSS_ASSET_SYMBOLS, CROSS_ASSET_THRESHOLDS, EventType
 from .market_data import Series, fetch_series, up_to
@@ -94,20 +94,18 @@ def evaluate_cross_asset(direction: str, event_type: EventType,
         reads=reads, unavailable=unavailable)
 
 
-TWELVEDATA_URL = "https://api.twelvedata.com/time_series"
-
-
 def fetch_twelvedata(symbol: str, api_key: str,
                      outputsize: int = 400) -> Series:
     """Daily closes from Twelve Data, ascending; [] on any failure.
     Free tier serves US-listed ETFs (TLT/UUP/USO verified 2026-07-22).
     Closes are unadjusted — acceptable because both baseline and last
-    close come from the same source (same-source-per-symbol invariant)."""
+    close come from the same source (same-source-per-symbol invariant).
+    Through the shared Twelve Data client: its per-minute limit and retries
+    (src/infrastructure/api/twelve_data.py), key in a header."""
     try:
-        resp = requests.get(TWELVEDATA_URL, params={
-            "symbol": symbol, "interval": "1day",
-            "outputsize": outputsize, "apikey": api_key}, timeout=15)
-        data = resp.json()
+        data = time_series(
+            {"symbol": symbol, "interval": "1day", "outputsize": outputsize},
+            api_key, timeout=15)
         if data.get("status") != "ok":
             logger.warning(f"{symbol}: twelvedata error — "
                            f"{data.get('message', 'unknown')}")
@@ -127,7 +125,7 @@ def fetch_asset_series(symbol: str) -> Tuple[Series, str]:
     series = fetch_series(symbol, period="1y")
     if series:
         return series, "yfinance"
-    key = os.getenv("TWELVE_DATA_KEY", "")
+    key = APIConfig.from_env().twelve_data_key
     if key:
         series = fetch_twelvedata(symbol, key)
         if series:

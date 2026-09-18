@@ -4,7 +4,6 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional
 
-
 # Flexible column name mappings (Fidelity uses different names across exports)
 COLUMN_MAPPINGS = {
     'symbol': ['Symbol', 'Symbol(CUSIP)', 'Security', 'Ticker', 'SYMBOL'],
@@ -160,11 +159,12 @@ def parse_option_description(description: str) -> Dict:
 
     desc_upper = description.upper().strip()
 
-    # Detect option type
-    if 'PUT' in desc_upper:
-        result['option_type'] = 'PUT'
-    elif 'CALL' in desc_upper:
-        result['option_type'] = 'CALL'
+    # Detect option type from the leading word. ⚠️ Not a substring test: that
+    # read "CALL (SMCI) SUPER MICRO COMPUTER INC" as a PUT -- "COMPUTER"
+    # contains PUT -- and imported every SMCI call as a put.
+    lead = re.match(r'^(PUT|CALL)\b', desc_upper)
+    if lead:
+        result['option_type'] = lead.group(1)
     else:
         # Try compact format: "NVDA 02/07/2026 150.00 C" or "NVDA 02/07/2026 150.00 P"
         compact_match = re.match(
@@ -193,10 +193,10 @@ def parse_option_description(description: str) -> Dict:
         if match:
             result['underlying'] = match.group(1)
 
-    # Extract strike price
-    match = re.search(r'\$(\d+(?:\.\d+)?)', description)
+    # Extract strike price (tolerating a thousands separator: "$1,145")
+    match = re.search(r'\$(\d[\d,]*(?:\.\d+)?)', description)
     if match:
-        result['strike'] = float(match.group(1))
+        result['strike'] = float(match.group(1).replace(',', ''))
 
     # Extract expiration date
     month_map = {

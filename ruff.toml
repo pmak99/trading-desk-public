@@ -1,0 +1,9 @@
+# One rule set for the whole repository. The rules live in 2.0/pyproject.toml.
+#
+# Ruff reads the nearest config above each file, and common/, scripts/ and
+# tests/ have none of their own. Without this file they fell back to ruff's
+# built-in default, which since 0.16 is several hundred rules (UP, FURB, DTZ,
+# RUF...) against the six families 2.0 selects -- so `ruff check .` from the root
+# reported 1,089 findings under two different rule sets, and a `--fix` there
+# would have rewritten annotations in common/ that it leaves alone in 2.0/.
+extend = "2.0/pyproject.toml"

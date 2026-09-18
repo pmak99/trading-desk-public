@@ -2,17 +2,18 @@
 Yahoo Finance earnings date fetcher.
 
 Fetches upcoming earnings dates from Yahoo Finance as a cross-reference
-to Alpha Vantage data, which can sometimes be incorrect.
+to Finnhub's calendar, which can sometimes be incorrect.
 """
 
 import logging
-from datetime import date, datetime, timedelta
-from typing import Optional, Tuple, Dict, List
-from enum import Enum
 from collections import OrderedDict
+from datetime import date, datetime, timedelta
+from typing import List, Tuple
 
-from src.domain.errors import Result, AppError, ErrorCode
+from common.timezone import now_et
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
 from src.domain.types import EarningsTiming
+from src.infrastructure.api.yahoo import yahoo_call
 
 try:
     import yfinance as yf
@@ -20,6 +21,72 @@ except ImportError:
     yf = None
 
 logger = logging.getLogger(__name__)
+
+# Yahoo's own AMC boundary, shared by both classification sites below so they
+# cannot drift apart.
+_AMC_HOUR = 16
+
+
+def timing_from_hour(ts) -> EarningsTiming:
+    """Classify a timestamp's wall clock into BMO / DMH / AMC."""
+    if ts.hour < 9 or (ts.hour == 9 and ts.minute < 30):
+        return EarningsTiming.BMO
+    if ts.hour >= _AMC_HOUR:
+        return EarningsTiming.AMC
+    return EarningsTiming.DMH
+
+
+def correct_placeholder_dmh(earnings_df, timing: EarningsTiming, ticker: str = "") -> EarningsTiming:
+    """Upgrade a spurious DMH to AMC when the ticker's own history says so.
+
+    ⚠️ **A DMH read off an UNCONFIRMED row is usually a Yahoo placeholder.**
+    Yahoo reports an unconfirmed future date at exactly one hour before the
+    ticker's real report time — 15:00 standing in for a confirmed 16:00 AMC —
+    which lands inside the DMH band (09:30–16:00). Verified 2026-09-12: ADBE,
+    ORCL and CRM each show all four of their last CONFIRMED reports at hour 16
+    while the next unconfirmed date reads 15. Not universal (COST reads 16),
+    which is why this only ever fires on DMH.
+
+    Why correct it rather than tolerate it: a wrong timing tag makes
+    historical_moves measure the WRONG reaction-day window — how AXON's data
+    was corrupted (CLAUDE.md, Aug 6 2026) — and it feeds
+    calculate_expiration_date, which enforces the min-3-DTE rule.
+
+    Conservative by construction:
+      * fires only on DMH. A BMO placeholder shifts the same way but stays
+        under the 09:30 threshold, so BMO is never spuriously produced;
+      * requires EVERY one of the last four confirmed reports to be AMC, so a
+        genuine during-market-hours reporter — whose own history shows DMH —
+        is untouched;
+      * needs a 'Reported EPS' column to tell confirmed from unconfirmed. The
+        frame is whatever yfinance returns, and a KeyError would be swallowed
+        by the callers' enclosing `except` and silently degrade timing to
+        UNKNOWN, which is worse than the DMH being corrected.
+
+    The explicit sort is not redundant. yfinance happens to return
+    earnings_dates newest-first (verified `is_monotonic_decreasing`), but that
+    is undocumented; if it ever flipped, an unsorted head would read a
+    ticker's OLDEST quarters — ADBE's go back to a 2020 BMO at 08:00 — and
+    silently answer a different question.
+    """
+    if timing != EarningsTiming.DMH:
+        return timing
+    if earnings_df is None or "Reported EPS" not in earnings_df:
+        return timing
+
+    confirmed = earnings_df[earnings_df["Reported EPS"].notna()]
+    if len(confirmed) == 0:
+        return timing
+
+    recent = confirmed.sort_index(ascending=False).index[:4]
+    hours = list(recent.hour)
+    if hours and all(h >= _AMC_HOUR for h in hours):
+        logger.debug(
+            f"{ticker}: hour looks like a Yahoo placeholder — last "
+            f"{len(hours)} confirmed reports all AMC; DMH -> AMC"
+        )
+        return EarningsTiming.AMC
+    return timing
 
 
 class YahooFinanceEarnings:
@@ -50,14 +117,6 @@ class YahooFinanceEarnings:
         # {ticker: (earnings_date, timing, cached_at)}
         self._cache: OrderedDict[str, Tuple[date, EarningsTiming, datetime]] = OrderedDict()
 
-        # Cache statistics
-        self._stats = {
-            "hits": 0,
-            "misses": 0,
-            "evictions": 0,
-            "expirations": 0,
-        }
-
     def get_next_earnings_date(
         self, ticker: str
     ) -> Result[Tuple[date, EarningsTiming], AppError]:
@@ -75,35 +134,32 @@ class YahooFinanceEarnings:
         # Check cache first
         if ticker in self._cache:
             cached_date, cached_timing, cached_at = self._cache[ticker]
-            age = datetime.now() - cached_at
+            age = now_et() - cached_at
             if age < self.cache_ttl:
                 # Cache hit - move to end (most recently used)
                 self._cache.move_to_end(ticker)
-                self._stats["hits"] += 1
                 logger.debug(
                     f"{ticker}: Using cached Yahoo Finance data (age: {age.seconds//60}min)"
                 )
-                return Result.Ok((cached_date, cached_timing))
+                return Ok((cached_date, cached_timing))
             else:
                 # Cache expired - remove stale entry
                 del self._cache[ticker]
-                self._stats["expirations"] += 1
                 logger.debug(f"{ticker}: Cache expired (age: {age.seconds//3600}hrs)")
-
-        # Cache miss
-        self._stats["misses"] += 1
 
         try:
             logger.debug(f"Fetching earnings date from Yahoo Finance: {ticker}")
 
-            # Fetch ticker data
+            # Fetch ticker data. Each property below is one Yahoo request, made
+            # under the process's Yahoo limit (yahoo_call); both keep nothing on
+            # the Ticker from a refused attempt, so a retry can reuse it.
             stock = yf.Ticker(ticker)
 
             # Get calendar data (includes next earnings date)
-            calendar = stock.calendar
+            calendar = yahoo_call(lambda: stock.calendar)
 
             if not calendar or 'Earnings Date' not in calendar:
-                return Result.Err(
+                return Err(
                     AppError(
                         ErrorCode.NODATA,
                         f"No earnings date found for {ticker} in Yahoo Finance calendar"
@@ -113,38 +169,61 @@ class YahooFinanceEarnings:
             # Yahoo Finance returns a list of possible dates
             earnings_dates = calendar['Earnings Date']
             if not earnings_dates or len(earnings_dates) == 0:
-                return Result.Err(
+                return Err(
                     AppError(
                         ErrorCode.NODATA,
                         f"Empty earnings date list for {ticker}"
                     )
                 )
 
-            # Use the first date (most likely/confirmed)
-            earnings_date = earnings_dates[0]
+            # calendar['Earnings Date'] can lag for days/weeks after a report
+            # before Yahoo rolls it forward to the next quarter's estimate —
+            # found live 2026-09-10 (AI/LULU/OXM/WDAY all still pointing at
+            # their last-reported date, days to weeks in the past). A "next
+            # earnings date" call must never hand back a date that's already
+            # happened, so only a date >= today is eligible; if none qualify,
+            # this is genuinely stale data, not an answer.
+            today = now_et().date()
+            candidate_dates = [
+                d.date() if isinstance(d, datetime) else d for d in earnings_dates
+            ]
+            future_candidates = [d for d in candidate_dates if d >= today]
+            if not future_candidates:
+                return Err(
+                    AppError(
+                        ErrorCode.NODATA,
+                        f"Yahoo Finance calendar for {ticker} only has stale/past "
+                        f"dates: {candidate_dates}"
+                    )
+                )
+            earnings_date = future_candidates[0]
 
-            # Convert to Python date if it's a datetime
-            if isinstance(earnings_date, datetime):
-                earnings_date = earnings_date.date()
-
-            # Try to get timing from earnings_dates DataFrame (has timestamps)
-            timing = EarningsTiming.AMC  # Default to AMC (most common)
+            # Try to get timing from earnings_dates DataFrame (has timestamps).
+            # Default is UNKNOWN, not a guessed AMC — callers with a second,
+            # definite-timing source (e.g. Finnhub) should prefer that over a
+            # blind default rather than have it silently discarded.
+            timing = EarningsTiming.UNKNOWN
             try:
-                earnings_df = stock.earnings_dates
+                earnings_df = yahoo_call(lambda: stock.earnings_dates)
                 if earnings_df is not None and len(earnings_df) > 0:
-                    # Get the most recent future earnings date from DataFrame
-                    future_dates = earnings_df[earnings_df.index >= datetime.now()]
+                    # earnings_df.index is tz-aware (America/New_York); comparing
+                    # it directly against a naive datetime.now() raises
+                    # TypeError on every call — silently swallowed below, which
+                    # meant this block never actually ran and every ticker fell
+                    # through to the hardcoded default (found live 2026-09-10:
+                    # 9 BMO-reporting tickers — DAL/DDOG/DOCN/FISV/MNDY/SHOP/
+                    # SOFI/SPOT/UBER — got silently overwritten to AMC in a
+                    # single sync run). Comparing .date() against date.today()
+                    # sidesteps the tz mismatch entirely.
+                    future_dates = earnings_df[earnings_df.index.date >= today]
                     if len(future_dates) > 0:
                         next_earnings = future_dates.index[0]
                         hour = next_earnings.hour
 
-                        # Determine timing from hour
-                        if hour < 9 or (hour == 9 and next_earnings.minute < 30):
-                            timing = EarningsTiming.BMO
-                        elif hour >= 16:
-                            timing = EarningsTiming.AMC
-                        else:
-                            timing = EarningsTiming.DMH
+                        timing = timing_from_hour(next_earnings)
+                        timing = correct_placeholder_dmh(
+                            earnings_df, timing, ticker
+                        )
 
                         logger.debug(f"{ticker}: Detected timing {timing.value} from hour {hour}")
             except Exception as e:
@@ -157,11 +236,11 @@ class YahooFinanceEarnings:
             # Update cache with LRU eviction
             self._update_cache(ticker, earnings_date, timing)
 
-            return Result.Ok((earnings_date, timing))
+            return Ok((earnings_date, timing))
 
         except Exception as e:
             logger.warning(f"Failed to fetch earnings date from Yahoo Finance for {ticker}: {e}")
-            return Result.Err(
+            return Err(
                 AppError(
                     ErrorCode.EXTERNAL,
                     f"Yahoo Finance error for {ticker}: {str(e)}"
@@ -196,10 +275,10 @@ class YahooFinanceEarnings:
         """
         try:
             stock = yf.Ticker(ticker)
-            earnings_df = stock.earnings_dates
+            earnings_df = yahoo_call(lambda: stock.earnings_dates)
 
             if earnings_df is None or len(earnings_df) == 0:
-                return Result.Err(
+                return Err(
                     AppError(
                         ErrorCode.NODATA,
                         f"No earnings_dates history for {ticker}"
@@ -212,25 +291,25 @@ class YahooFinanceEarnings:
             )
             best_date = best_ts.date()
 
-            timing = EarningsTiming.AMC  # Default to AMC (most common)
-            hour = best_ts.hour
-            if hour < 9 or (hour == 9 and best_ts.minute < 30):
-                timing = EarningsTiming.BMO
-            elif hour >= 16:
-                timing = EarningsTiming.AMC
-            else:
-                timing = EarningsTiming.DMH
+            # Same classification and the same placeholder correction as
+            # get_next_earnings_date. It matters MORE here, not less: this
+            # method searches past AND future by design, so `best_ts` can land
+            # on an unconfirmed future row and read its placeholder hour — and
+            # cleanup_duplicate_earnings() calls this to decide whether a stale
+            # duplicate row may be deleted.
+            timing = timing_from_hour(best_ts)
+            timing = correct_placeholder_dmh(earnings_df, timing, ticker)
 
             logger.info(
                 f"{ticker}: Yahoo Finance earnings history nearest to "
                 f"{reference_dates} = {best_date} ({timing.value})"
             )
 
-            return Result.Ok((best_date, timing))
+            return Ok((best_date, timing))
 
         except Exception as e:
             logger.warning(f"Failed to search earnings_dates history for {ticker}: {e}")
-            return Result.Err(
+            return Err(
                 AppError(
                     ErrorCode.EXTERNAL,
                     f"Yahoo Finance error for {ticker}: {str(e)}"
@@ -257,79 +336,10 @@ class YahooFinanceEarnings:
         if len(self._cache) >= self.max_cache_size:
             # Evict least recently used (first item in OrderedDict)
             evicted_ticker, _ = self._cache.popitem(last=False)
-            self._stats["evictions"] += 1
             logger.debug(
                 f"Cache full ({self.max_cache_size}): Evicted {evicted_ticker} for {ticker}"
             )
 
         # Add/update entry (always added to end as most recently used)
-        self._cache[ticker] = (earnings_date, timing, datetime.now())
+        self._cache[ticker] = (earnings_date, timing, now_et())
         logger.debug(f"{ticker}: Cached Yahoo Finance data (cache size: {len(self._cache)})")
-
-    def get_cache_stats(self) -> Dict[str, int]:
-        """
-        Get cache statistics.
-
-        Returns:
-            Dict with hits, misses, evictions, expirations, size, and hit_rate
-        """
-        total_requests = self._stats["hits"] + self._stats["misses"]
-        hit_rate = (self._stats["hits"] / total_requests * 100) if total_requests > 0 else 0.0
-
-        return {
-            "hits": self._stats["hits"],
-            "misses": self._stats["misses"],
-            "evictions": self._stats["evictions"],
-            "expirations": self._stats["expirations"],
-            "size": len(self._cache),
-            "max_size": self.max_cache_size,
-            "hit_rate": round(hit_rate, 2),
-        }
-
-    def clear_cache(self) -> None:
-        """Clear the cache and reset statistics."""
-        self._cache.clear()
-        self._stats = {
-            "hits": 0,
-            "misses": 0,
-            "evictions": 0,
-            "expirations": 0,
-        }
-        logger.info("Cache cleared and statistics reset")
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
-
-    # Test with small cache size to demonstrate LRU eviction
-    fetcher = YahooFinanceEarnings(max_cache_size=3)
-
-    # Test with known tickers
-    tickers = ['MRVL', 'AEO', 'SNOW', 'CRM', 'AAPL']
-
-    print("=== First pass (cache misses) ===")
-    for ticker in tickers:
-        result = fetcher.get_next_earnings_date(ticker)
-        if result.is_ok:
-            earnings_date, timing = result.value
-            print(f"{ticker}: {earnings_date} ({timing.value})")
-        else:
-            print(f"{ticker}: ERROR - {result.error}")
-
-    print("\n=== Cache Statistics After First Pass ===")
-    stats = fetcher.get_cache_stats()
-    for key, value in stats.items():
-        print(f"{key}: {value}")
-
-    print("\n=== Second pass (testing cache hits) ===")
-    # Test first 3 tickers (should be cache hits if still in cache)
-    for ticker in ['AAPL', 'CRM', 'SNOW']:  # Last 3 added, should be in cache
-        result = fetcher.get_next_earnings_date(ticker)
-        if result.is_ok:
-            earnings_date, timing = result.value
-            print(f"{ticker}: {earnings_date} ({timing.value}) [CACHED]")
-
-    print("\n=== Final Cache Statistics ===")
-    stats = fetcher.get_cache_stats()
-    for key, value in stats.items():
-        print(f"{key}: {value}")

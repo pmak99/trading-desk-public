@@ -1,17 +1,26 @@
 """
 Enhanced Consistency Analyzer - Phase 4 Algorithmic Optimization
 
-Exponential-weighted consistency analysis with trend detection.
-Recent earnings moves are weighted more heavily than older ones.
+Consistency (1 - coefficient of variation), trend and trustworthiness of the
+historical moves VRP divides by.
+
+One weighting convention: the mean and the standard deviation are both
+equal-weighted, because the number this describes is VRPCalculator's
+denominator -- an equal-weighted mean of the same moves -- and because the
+Jun 2026 A/B that found consistency flat-to-anti-predictive
+(scripts/research/scoring_factors.py) computed it equal-weighted. Until
+2026-09-14 the mean was weighted 0.85^i toward recent quarters while the SD was
+an unweighted sample SD taken about that weighted mean, so the distance between
+the two means was counted as dispersion (audit 4.4).
 """
 
 import logging
-from typing import List
+import statistics
 from dataclasses import dataclass
-import math
+from typing import List
 
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
 from src.domain.types import HistoricalMove, Percentage
-from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +33,8 @@ class ConsistencyAnalysis:
     Attributes:
         ticker: Stock symbol
         num_quarters: Number of historical quarters analyzed
-        mean_move: Weighted mean of historical moves
-        std_dev: Standard deviation of moves
+        mean_move: Mean absolute move, equal-weighted (the VRP denominator)
+        std_dev: Sample standard deviation of absolute moves about that mean
         consistency_score: 0-100 score (higher = more consistent)
         trend: Movement trend (increasing, decreasing, stable)
         trend_slope: Rate of change in moves over time
@@ -45,29 +54,21 @@ class ConsistencyAnalysis:
 
 class ConsistencyAnalyzerEnhanced:
     """
-    Enhanced consistency analyzer with exponential weighting.
+    Consistency analyzer over the moves VRP divides by.
 
-    Traditional consistency uses equal weights for all historical quarters.
-    This enhanced version:
-    1. Applies exponential decay to older quarters
-    2. Calculates trend (increasing/decreasing/stable moves)
-    3. Computes trustworthiness score
-    4. Detects recent bias vs long-term mean
-
-    Benefits:
-    - Recent earnings weighted appropriately
-    - Trend detection (increasing volatility = bad signal)
-    - Confidence score for strategy decisions
-    - Better adaptation to changing market conditions
+    1. Consistency score from the coefficient of variation (equal-weighted
+       mean and SD -- see the module docstring for why not recency-weighted)
+    2. Trend (increasing/decreasing/stable moves)
+    3. Trustworthiness score
+    4. Recent bias: the last RECENT_QUARTERS moves vs the overall mean
 
     IMPORTANT: The move_metric parameter should match the VRP calculator's
-    metric to ensure apples-to-apples comparison. Default is "close" to match
-    ATM straddle expectation (close-to-close movement).
+    metric to ensure apples-to-apples comparison. Container passes
+    config.algorithms.vrp_move_metric.
     """
 
     # Configuration
     MIN_QUARTERS = 4  # Minimum quarters for reliable analysis
-    DECAY_FACTOR = 0.85  # Weight decay per quarter (0.85 = 15% decay)
     STABLE_THRESHOLD = 0.5  # Slope threshold for "stable" classification
     HIGH_TRUSTWORTHINESS = 0.7  # Threshold for high trust
     RECENT_QUARTERS = 4  # Number of quarters for "recent" bias
@@ -95,7 +96,7 @@ class ConsistencyAnalyzerEnhanced:
         historical_moves: List[HistoricalMove]
     ) -> Result[ConsistencyAnalysis, AppError]:
         """
-        Analyze consistency of historical moves with exponential weighting.
+        Analyze consistency of historical moves.
 
         Args:
             ticker: Stock symbol
@@ -131,9 +132,10 @@ class ConsistencyAnalyzerEnhanced:
             # Should never happen due to __init__ validation, but be defensive
             moves = [abs(float(hm.close_move_pct.value)) for hm in historical_moves]
 
-        # Calculate exponentially-weighted statistics
-        weighted_mean = self._exponential_weighted_mean(moves)
-        std_dev = self._calculate_std_dev(moves, weighted_mean)
+        # Equal-weighted mean and sample SD (Bessel's n-1) about that same mean.
+        # MIN_QUARTERS >= 2, so stdev always has the two points it needs.
+        mean_move = statistics.mean(moves)
+        std_dev = statistics.stdev(moves)
 
         # Calculate trend
         trend_slope = self._calculate_trend(moves)
@@ -141,7 +143,7 @@ class ConsistencyAnalyzerEnhanced:
 
         # Calculate consistency score (inverse of coefficient of variation)
         # Higher score = more consistent moves
-        cv = std_dev / weighted_mean if weighted_mean > 0 else float('inf')
+        cv = std_dev / mean_move if mean_move > 0 else float('inf')
         consistency_score = max(0, min(100, 100 * (1 - cv)))
 
         # Calculate trustworthiness (combines consistency + sample size)
@@ -152,12 +154,12 @@ class ConsistencyAnalyzerEnhanced:
         )
 
         # Calculate recent bias
-        recent_bias = self._calculate_recent_bias(moves, weighted_mean)
+        recent_bias = self._calculate_recent_bias(moves, mean_move)
 
         analysis = ConsistencyAnalysis(
             ticker=ticker,
             num_quarters=len(historical_moves),
-            mean_move=Percentage(weighted_mean),
+            mean_move=Percentage(mean_move),
             std_dev=Percentage(std_dev),
             consistency_score=consistency_score,
             trend=trend,
@@ -173,58 +175,6 @@ class ConsistencyAnalyzerEnhanced:
         )
 
         return Ok(analysis)
-
-    def _exponential_weighted_mean(self, moves: List[float]) -> float:
-        """
-        Calculate exponentially-weighted mean.
-
-        Recent quarters weighted more heavily than older ones.
-        Weight for quarter i = DECAY_FACTOR ^ i
-
-        Args:
-            moves: List of moves (newest first)
-
-        Returns:
-            Weighted mean
-        """
-        if not moves:
-            return 0.0
-
-        weighted_sum = 0.0
-        weight_total = 0.0
-
-        for i, move in enumerate(moves):
-            weight = self.DECAY_FACTOR ** i
-            weighted_sum += move * weight
-            weight_total += weight
-
-        return weighted_sum / weight_total if weight_total > 0 else 0.0
-
-    def _calculate_std_dev(
-        self,
-        moves: List[float],
-        mean: float
-    ) -> float:
-        """
-        Calculate standard deviation around weighted mean using sample variance.
-
-        Uses Bessel's correction (n-1) for unbiased estimation of population variance
-        from a sample. This is appropriate since historical earnings moves are a sample
-        from the true distribution of possible moves.
-
-        Args:
-            moves: List of moves
-            mean: Weighted mean
-
-        Returns:
-            Standard deviation (sample standard deviation)
-        """
-        if len(moves) < 2:
-            return 0.0
-
-        # Use sample variance (n-1) for unbiased estimation
-        variance = sum((x - mean) ** 2 for x in moves) / (len(moves) - 1)
-        return math.sqrt(variance)
 
     def _calculate_trend(self, moves: List[float]) -> float:
         """
@@ -332,7 +282,7 @@ class ConsistencyAnalyzerEnhanced:
 
         Args:
             moves: List of moves (newest first)
-            overall_mean: Overall weighted mean
+            overall_mean: Overall mean of all moves
 
         Returns:
             Bias percentage

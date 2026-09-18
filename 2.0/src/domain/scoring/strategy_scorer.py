@@ -1,29 +1,25 @@
 """
 Strategy scoring — thin coordinator.
 
-All factor scoring lives in src.domain.scoring.factors, directional
-alignment in src.domain.scoring.alignment, rationale generation in
-src.domain.scoring.rationale.
+All factor scoring lives in src.domain.scoring.factors, rationale generation
+in src.domain.scoring.rationale.
 """
 
 import logging
 from typing import List, Optional
 
-from src.config.config import ScoringWeights
-from src.domain.types import Strategy, VRPResult
-from src.domain.enums import StrategyType, DirectionalBias
-from src.domain.scoring.types import ScoringResult
 from src.domain.scoring.factors import (
     calculate_greeks_score,
-    calculate_liquidity_score,
     calculate_kelly_edge_score,
-    calculate_profit_zone_multiplier,
+    calculate_liquidity_score,
 )
-from src.domain.scoring.alignment import apply_directional_alignment
 from src.domain.scoring.rationale import (
-    generate_strategy_rationale,
     generate_recommendation_rationale,
+    generate_strategy_rationale,
 )
+from src.domain.scoring.types import ScoringResult
+from src.domain.scoring.weights import ScoringWeights
+from src.domain.types import Strategy, VRPResult
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +28,13 @@ class StrategyScorer:
     """
     Scores and ranks trading strategies based on multiple factors.
 
-    Thin coordinator: computation delegates to scoring.factors,
-    scoring.alignment, and scoring.rationale modules.
+    Thin coordinator: computation delegates to scoring.factors and
+    scoring.rationale modules.
 
-    POST-LOSS ANALYSIS UPDATE:
-    After a run of liquidity-driven losses, scoring weights were rebalanced
-    to prioritize liquidity. Trade-outcome analysis showed position sizing
-    was fine but poor liquidity caused expensive exits and amplified losses.
+    POST-LOSS ANALYSIS UPDATE (Nov 2025):
+    After a liquidity-driven loss, scoring weights were rebalanced
+    to prioritize liquidity. TRUE P&L analysis showed position sizing was
+    fine but poor liquidity caused expensive exits and amplified losses.
 
     Scoring factors (when Greeks available):
     - Probability of profit (POP) - default 40% weight (increased Dec 2025)
@@ -46,11 +42,19 @@ class StrategyScorer:
     - VRP edge - default 17% weight (reduced to make room for POP increase)
     - Kelly edge (R/R × POP) - default 13% weight (reduced from 15%)
     - Greeks quality (theta/vega) - default 8% weight (reduced from 10%)
-    - Position sizing - default 0% weight (removed - handled separately)
+
+    The overall score is the sum of those weighted factors, nothing more. Until
+    2026-09-14 it also carried a size term weighted 0 and a profit-zone
+    multiplier that penalised a narrow range between two breakevens; no
+    strategy the engine builds has two since condors were banned, so it was 1.0.
 
     When Greeks are not available, the greeks weight is redistributed
     proportionally to other factors, making liquidity even MORE important
     since we have less visibility into option pricing quality.
+
+    Directional bias scores nothing: skew measures hedge demand, not
+    conviction (CLAUDE.md §6). Until 2026-09-14 the spread on the bias side
+    got +3/+5/+8 (WEAK/MODERATE/STRONG) and the other -3.
     """
 
     def __init__(self, weights: ScoringWeights | None = None):
@@ -60,7 +64,6 @@ class StrategyScorer:
         self,
         strategy: Strategy,
         vrp: VRPResult,
-        directional_bias: DirectionalBias | None = None,
     ) -> ScoringResult:
         """
         Score a single strategy.
@@ -68,7 +71,6 @@ class StrategyScorer:
         Args:
             strategy: Strategy to score
             vrp: VRP analysis for context
-            directional_bias: Optional directional bias for alignment scoring
 
         Returns:
             ScoringResult with overall, profitability, and risk scores
@@ -79,9 +81,6 @@ class StrategyScorer:
             overall, profitability, risk = self._score_with_greeks(strategy, vrp)
         else:
             overall, profitability, risk = self._score_without_greeks(strategy, vrp)
-
-        if directional_bias is not None:
-            overall = apply_directional_alignment(overall, strategy, directional_bias)
 
         rationale_text = generate_strategy_rationale(strategy, vrp, self.weights)
 
@@ -96,7 +95,6 @@ class StrategyScorer:
         self,
         strategies: List[Strategy],
         vrp: VRPResult,
-        directional_bias: DirectionalBias | None = None,
     ) -> None:
         """
         Score and rank strategies in-place.
@@ -107,19 +105,18 @@ class StrategyScorer:
         Args:
             strategies: List of strategies to score
             vrp: VRP analysis for context
-            directional_bias: Optional directional bias for alignment scoring
         """
         for strategy in strategies:
-            result = self.score_strategy(strategy, vrp, directional_bias)
+            result = self.score_strategy(strategy, vrp)
             strategy.overall_score = result.overall_score
             strategy.profitability_score = result.profitability_score
             strategy.risk_score = result.risk_score
             strategy.rationale = result.strategy_rationale
 
     def generate_recommendation_rationale(
-        self, strategy: Strategy, vrp: VRPResult, bias: DirectionalBias
+        self, strategies: List[Strategy], vrp: VRPResult
     ) -> str:
-        return generate_recommendation_rationale(strategy, vrp, bias, self.weights)
+        return generate_recommendation_rationale(strategies, vrp, self.weights)
 
     # --- Private orchestration ---
 
@@ -129,16 +126,13 @@ class StrategyScorer:
         """
         Score strategy with Greeks available.
 
-        POST-LOSS ANALYSIS UPDATE:
+        POST-LOSS ANALYSIS UPDATE (Nov 2025):
         Added liquidity scoring (25% weight) after a liquidity-driven loss.
         New weights: POP 30%, Liquidity 25%, VRP 20%, R/R 15%, Greeks 10%
 
         KELLY EDGE FIX (Dec 2025):
         Replaced R/R scoring with Kelly edge scoring to prevent negative EV trades
         from outscoring positive EV trades.
-
-        PROFIT ZONE FIX (Dec 2025):
-        Added profit zone vs implied move penalty.
 
         Returns:
             Tuple of (overall_score, profitability_score, risk_score)
@@ -166,14 +160,7 @@ class StrategyScorer:
         # Factor 5: Greeks Quality
         greeks_score = calculate_greeks_score(strategy, self.weights)
 
-        # Factor 6: Position Sizing
-        size_score = min(strategy.contracts / 10.0, 1.0) * self.weights.size_weight
-
-        base_score = pop_score + liquidity_score + vrp_score + edge_score + greeks_score + size_score
-
-        # PROFIT ZONE FIX: Apply penalty for narrow profit zones vs implied move
-        profit_zone_multiplier = calculate_profit_zone_multiplier(strategy, vrp)
-        overall = base_score * profit_zone_multiplier
+        overall = pop_score + liquidity_score + vrp_score + edge_score + greeks_score
 
         # Profitability score (include theta benefit)
         base_profitability = min(strategy.reward_risk_ratio / 0.40 * 80, 80)
@@ -247,14 +234,7 @@ class StrategyScorer:
             self.weights.reward_risk_weight_no_greeks,
         )
 
-        # Factor 5: Position Sizing
-        size_score = min(strategy.contracts / 10.0, 1.0) * self.weights.size_weight_no_greeks
-
-        base_score = pop_score + liquidity_score + vrp_score + edge_score + size_score
-
-        # PROFIT ZONE FIX
-        profit_zone_multiplier = calculate_profit_zone_multiplier(strategy, vrp)
-        overall = base_score * profit_zone_multiplier
+        overall = pop_score + liquidity_score + vrp_score + edge_score
 
         # Profitability score (focus on reward/risk)
         profitability = min(strategy.reward_risk_ratio / 0.40 * 100, 100)
@@ -278,14 +258,6 @@ class StrategyScorer:
         if weight is None:
             weight = self.weights.reward_risk_weight
         return calculate_kelly_edge_score(pop, rr, weight)
-
-    def _calculate_profit_zone_multiplier(self, strategy: Strategy, vrp: VRPResult) -> float:
-        return calculate_profit_zone_multiplier(strategy, vrp)
-
-    def _apply_directional_alignment(
-        self, base_score: float, strategy: Strategy, bias: DirectionalBias
-    ) -> float:
-        return apply_directional_alignment(base_score, strategy, bias)
 
     def _generate_strategy_rationale(self, strategy: Strategy, vrp: VRPResult) -> str:
         return generate_strategy_rationale(strategy, vrp, self.weights)

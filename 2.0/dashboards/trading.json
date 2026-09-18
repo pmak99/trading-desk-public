@@ -1,0 +1,1847 @@
+{
+  "uid": "ivcrush-trading",
+  "title": "IV Crush \u2014 Trading & P&L",
+  "tags": [
+    "ivcrush",
+    "trading"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Journal freshness",
+      "type": "stat",
+      "description": "CLOSED TRADES ONLY \u2014 there is no open-position tracker for the earnings system, so this is not current exposure. Advances only when /journal runs, independently of the signal dashboard's clock. Counts trades: one placed in both the IRA and TAXABLE is one.",
+      "gridPos": {
+        "h": 4,
+        "w": 9,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- A SECOND, independent clock: the journal only advances when /journal runs.\n-- Must not share the signal dashboard's freshness stat.\n-- Every trade count, win rate, average and size band on this dashboard reads\n-- positions, one row per trade: strategies holds a row per account, and a\n-- trade placed in both the IRA and TAXABLE is two rows there (migration 5).\n-- Per-account P&L and the per-row recent-trades list stay on strategies.\n-- to_char, never a raw `date` column: Grafana's Postgres datasource returns a\n-- date as UTC midnight and the dashboard renders in `timezone: browser`, so in\n-- ET every raw date displayed as the PREVIOUS day at 20:00 (journal freshness\n-- read \"2026-09-10 20:00:00\" for a real max of 2026-09-11). Text has no\n-- timezone to reinterpret. Same reasoning as ops_last_run_per_job's to_char.\nSELECT to_char(MAX(sale_date), 'YYYY-MM-DD') AS last_closed_trade,\n       COUNT(*) AS total_trades\nFROM positions;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "last_closed_trade"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Last closed"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total_trades"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trades"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "fields": "/.*/"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Banned strategies after ban",
+      "type": "stat",
+      "description": "Date-scoped. STRANGLE and IRON_CONDOR exist historically and always will; only post-ban rows indicate a generator regression. Must read 0.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 9,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Date-scoped: STRANGLE and IRON_CONDOR exist historically and always will\n-- (permanently banned, see CLAUDE.md). An unscoped count would fire forever;\n-- only post-ban rows indicate a generator regression.\nSELECT COUNT(*) AS banned_after_ban\nFROM positions\nWHERE strategy_type IN ('IRON_CONDOR', 'IRON_BUTTERFLY', 'STRANGLE')\n  AND acquired_date > '2026-05-31';",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 3,
+      "title": "Second bets on one event",
+      "type": "stat",
+      "description": "\u00a76: one position per ticker per earnings event \u2014 the rule a repair campaign on record broke. Post-2026-05-31 only: 15 events violate it all-time, 1 since. Each is a SPREAD and a SINGLE on the same event, same day. Should read 0.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 14,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- CLAUDE.md \u00a76: one position per ticker per earnings event. No second bet, no\n-- repair. A repair campaign on record was two positions on one event.\n-- Date-scoped like trading_banned_strategy_tripwire, and for the same reason:\n-- 15 events violate this all-time but only 1 since 2026-05-31 (most recent\n-- 2026-08-03). An unscoped count could never return to zero, and a tripwire\n-- that is permanently red is decoration.\n-- Reads positions, so a trade placed in both the IRA and TAXABLE is one\n-- position, not two. Each real violation is a SPREAD *and* a SINGLE on the\n-- same ticker and event, entered the same day (one case: a 100-lot\n-- single plus a 200-lot spread, both losers).\n-- SELECT COUNT(*), never a bare GROUP BY ... HAVING: the HAVING form returns\n-- ZERO rows when clean, and test_all_queries_return_at_least_one_row has no\n-- exemption list -- a clean tripwire would fail CI.\nSELECT COUNT(*) AS multi_position_events\nFROM (\n  SELECT symbol, earnings_date\n  FROM positions\n  WHERE earnings_date IS NOT NULL\n    AND strategy_type IN ('SPREAD', 'SINGLE')\n    AND acquired_date > '2026-05-31'\n  GROUP BY symbol, earnings_date\n  HAVING COUNT(*) > 1\n) x;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "multi_position_events"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Events"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 4,
+      "title": "Over the 100-contract cap",
+      "type": "stat",
+      "description": "\u00a76 rule 5: never exceed 100 contracts. Post-2026-05-31 only; reads 11 as of 2026-09-17, all single-name. \u26a0\ufe0f A contract cap is not a risk cap \u2014 a high-priced single was 110 contracts at ~$3,090 each. Size on max loss.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- CLAUDE.md \u00a76 rule 5: never exceed 100 contracts, whatever the conviction.\n-- Date-scoped for the same reason as the tripwire above: 69 positions breach\n-- it all-time, 11 since 2026-05-31 (all single-name, no index trade inflating\n-- the count).\n-- STOCK is excluded because its quantity is shares, not contracts.\n-- \u26a0\ufe0f A contract cap is not a risk cap -- a high-priced single was 110 contracts at\n-- ~$3,090 each, ~$340k of risk while reading as compliant. This counts\n-- breaches of the stated rule, not dollars at risk; size on max loss.\nSELECT COUNT(*) AS over_contract_cap\nFROM positions\nWHERE strategy_type <> 'STOCK'\n  AND quantity > 100\n  AND acquired_date > '2026-05-31';",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "over_contract_cap"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Positions"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "title": "Monthly P&L by account",
+      "type": "barchart",
+      "description": "RAW CASH P&L, not wash-sale adjusted \u2014 Fidelity's CSV omits adjusted basis, so this will not tie to their UI. IRA and TAXABLE stay split: different tax treatment. Full-width: 26 months and growing (see the Win rate panel below for why) -- revisit with a rolling window once month count outgrows even this width.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Pivoted to wide format (one numeric column per account): same reason as\n-- signal_vrp_tier_over_time -- Grafana's native barchart needs one column per\n-- series, not a categorical column (the previous `account_type` text column)\n-- identifying which series a row belongs to.\n-- strategies, not positions: a merged position's account is 'IRA+TAXABLE'.\n-- Raw CASH P&L, not wash-sale adjusted. Fidelity's CSV omits adjusted basis,\n-- so this deliberately will not tie to their UI.\nSELECT to_char(sale_date, 'YYYY-MM') AS month,\n       ROUND((SUM(CASE WHEN account_type = 'IRA' THEN gain_loss ELSE 0 END))::numeric, 0) AS IRA,\n       ROUND((SUM(CASE WHEN account_type = 'TAXABLE' THEN gain_loss ELSE 0 END))::numeric, 0) AS TAXABLE\nFROM strategies\nWHERE sale_date IS NOT NULL\nGROUP BY month\nORDER BY month;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "currencyUSD",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "xTickLabelRotation": -45
+      }
+    },
+    {
+      "id": 6,
+      "title": "Win rate by month",
+      "type": "barchart",
+      "description": "Closed trades only; a trade placed in both accounts counts once. Bar chart, not timeseries: 'month' is a text label (strftime %Y-%m), not a temporal field Grafana can plot on a time axis. Full-width, own row -- at half width this squeezed 26 months of labels unreadably. 'trades' is queried but hidden from the plot (visible on hover): it and win_rate share no common scale, so plotting both as bars on one axis would misrepresent one of them.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT to_char(sale_date, 'YYYY-MM') AS month,\n       COUNT(*) AS trades,\n       ROUND((100.0 * COUNT(*) FILTER (WHERE is_winner) / COUNT(*))::numeric, 1) AS win_rate\nFROM positions\nWHERE sale_date IS NOT NULL\nGROUP BY month\nORDER BY month;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trades"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": true,
+                  "tooltip": false
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xTickLabelRotation": -45
+      }
+    },
+    {
+      "id": 7,
+      "title": "Contract-size buckets",
+      "type": "table",
+      "description": "Closed option trades by size, both accounts' contracts together for a trade placed in both (CLAUDE.md \u00a76); STOCK is left out (shares). Every option trade, index and banned structures included -- not \u00a76's earnings-trade table, which rule_evidence.py prints. Read from rule_evidence_snapshot since 2026-09-17, so the band boundaries ARE \u00a76's rather than a second copy in SQL. Size was chosen trade by trade, so a band's P&L is not what size did.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Reads rule_evidence_snapshot, so the band boundaries are \u00a76's by\n-- construction rather than a second copy of them written out here.\n-- cohort 'all' is every option trade with a quantity, STOCK excluded because\n-- its quantity is shares -- exactly the scope this panel had before, verified\n-- 2026-09-17 against the old query at 164 / 42 / 40 / 29 with identical P&L.\n-- A trade placed in both accounts is one position with both accounts'\n-- contracts summed (\u00a76), because rule_evidence loads the positions view.\n-- ORDER BY band_order, never band: lexicographically 1-50 precedes 101-200\n-- precedes 200+ precedes 51-100.\nSELECT band AS bucket, trades, pnl, avg_loss\nFROM rule_evidence_snapshot\nWHERE dimension = 'size' AND cohort = 'all'\nORDER BY band_order;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_loss"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bucket"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Contracts"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trades"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trades"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P&L"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_loss"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Avg loss"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 8,
+      "title": "TRR at entry",
+      "type": "table",
+      "description": "Tail-risk tier as of the entry date, one row per trade. Every trade, not \u00a73's earnings-trade table (rule_evidence.py prints that). \u26a0\ufe0f UNKNOWN is a TIER \u2014 fewer than 4 quarters of history \u2014 not an absence: until 2026-09-17 this panel filtered those 65 of 300 positions away and wrote tail_risk.py's 2.5 / 1.5 ladder out in SQL. Both now arrive through rule_evidence_snapshot, so there is no ladder here to drift.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Reads rule_evidence_snapshot, so NO TRR ladder appears here: the 2.5 / 1.5\n-- boundaries live in src/domain/tail_risk.py and reach this table through\n-- rule_evidence.trr_tier_at_entry. Until 2026-09-17 this query wrote them out\n-- as SQL literals AND filtered `trr_at_entry IS NOT NULL`, which silently\n-- dropped the 65 of 300 positions whose TRR is UNKNOWN -- a named tier in\n-- CLAUDE.md \u00a73, not an absence.\n-- The stored column and the recomputed tier agree: both call\n-- tail_risk.trr_as_of over gap moves before entry (235 of 235 on 2026-09-17).\n-- cohort 'all' preserves what this panel has always shown, every trade rather\n-- than \u00a73's earnings-trade table; cohort 'earnings' holds the latter if a\n-- panel ever wants it.\nSELECT band AS trr_level, trades, pnl\nFROM rule_evidence_snapshot\nWHERE dimension = 'trr' AND cohort = 'all'\nORDER BY band_order;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trr_level"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "TRR"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trades"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trades"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P&L"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 9,
+      "title": "Exit timing",
+      "type": "table",
+      "description": "\u00a78, the largest measured effect in the book: spreads out the next trading day win 90.1% (n=111) against 56.0% held two days or more (n=25). TRADING days, from market_calendar \u2014 positions.days_held is CALENDAR days, and a spread entered Friday and exited Monday would fall in the wrong band. Read from rule_evidence_snapshot for exactly that reason.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 30
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- CLAUDE.md \u00a78, the largest measured effect in the book and, until 2026-09-17,\n-- the only rule with no panel anywhere: spreads out the next trading day win\n-- 90.1% (n=111) against 56.0% held two days or more\n-- (n=25).\n-- Reads the snapshot because \"next trading day\" is is_trading_day()\n-- (src/domain/market_calendar.py), NOT calendar days. positions.days_held is\n-- calendar days: the two agreed on all 136 spreads on 2026-09-17, but a spread\n-- entered Friday and exited Monday is 3 calendar days and 1 trading day and\n-- would land in the opposite band. Reimplementing the NYSE calendar in SQL is\n-- the same duplication as a ladder.\nSELECT cohort AS strategy, band AS exit_timing, trades,\n       ROUND(100.0 * wins / NULLIF(trades, 0), 1) AS win_rate, pnl\nFROM rule_evidence_snapshot\nWHERE dimension = 'held'\nORDER BY cohort, band_order;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "strategy"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Strategy"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "exit_timing"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Held"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trades"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trades"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Win rate"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P&L"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 10,
+      "title": "DTE at entry",
+      "type": "table",
+      "description": "\u00a75's evidence for the MIN_DTE = 3 floor. Win rates MATCH at 0-2 and 3-5 (84.1% both); losses run about 43% larger at 0-2, so the case for the floor is loss severity, not win rate. Earnings trades only, matching \u00a75's table.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 30
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- CLAUDE.md \u00a75, the evidence for the MIN_DTE = 3 floor. Win rates MATCH at 0-2\n-- and 3-5 (84.1% both); losses run about 43% larger at 0-2, so the case for the\n-- floor is loss severity alone, not win rate. Earnings trades only, matching\n-- \u00a75's table.\n-- DTE is plain expiration - acquired_date and would be correct in SQL. It reads\n-- the snapshot so that '0-2' / '3-5' / '6+' have ONE definition\n-- (rule_evidence.DTE_BANDS) rather than a second copy here.\nSELECT band AS dte_at_entry, trades,\n       ROUND(100.0 * wins / NULLIF(trades, 0), 1) AS win_rate, avg_loss, pnl\nFROM rule_evidence_snapshot\nWHERE dimension = 'dte' AND cohort = 'earnings'\nORDER BY band_order;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_loss"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dte_at_entry"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "DTE"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trades"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trades"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Win rate"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_loss"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Avg loss"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P&L"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 11,
+      "title": "Trade type",
+      "type": "table",
+      "description": "One row per trade. REPAIR and ROLL are banned management actions; 'unlabelled' means a writer skipped trade_type.",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Every writer stores trade_type since 2026-09-13, when the 93 NULL rows (every\n-- IRA option position and every stock row) were set to NEW; 'unlabelled' means\n-- a writer skipped the column.\nSELECT COALESCE(trade_type, 'unlabelled') AS trade_type,\n       COUNT(*) AS trades, ROUND((SUM(gain_loss))::numeric, 0) AS pnl\nFROM positions\nGROUP BY trade_type\nORDER BY trades DESC;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trade_type"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Type"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trades"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trades"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P&L"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trade_type"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trades"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 12,
+      "title": "Recent closed trades",
+      "type": "table",
+      "description": "Newest 50 journal rows, one per account: a trade placed in both the IRA and TAXABLE shows twice.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- strategies, one row per account: the list shows each account's row, so a\n-- trade placed in both accounts appears twice. Counts read positions.\n-- to_char, never a raw `date` column: Grafana's Postgres datasource returns a\n-- date as UTC midnight and the dashboard renders in `timezone: browser`, so in\n-- ET every raw date displayed as the PREVIOUS day at 20:00 (journal freshness\n-- read \"2026-09-10 20:00:00\" for a real max of 2026-09-11). Text has no\n-- timezone to reinterpret. Same reasoning as ops_last_run_per_job's to_char.\nSELECT to_char(sale_date, 'YYYY-MM-DD') AS sale_date,\n       symbol, strategy_type, account_type, quantity, days_held,\n       ROUND((gain_loss)::numeric, 0) AS pnl, is_winner\nFROM strategies\nWHERE sale_date IS NOT NULL\nORDER BY sale_date DESC\nLIMIT 50;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sale_date"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Closed"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "symbol"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Ticker"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "strategy_type"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Strategy"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "account_type"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Account"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "quantity"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Size"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "days_held"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Days held"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P&L"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "is_winner"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Won"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sale_date"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "symbol"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "strategy_type"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "account_type"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "quantity"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "days_held"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "is_winner"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 13,
+      "title": "Analysis accuracy: stance",
+      "type": "table",
+      "description": "Bullish = short a PUT, bearish = short a CALL. Short leg identified via the acquired>sale date inversion (Fidelity's sell-to-open convention), not proceeds>cost_basis -- that conflates direction with win/loss.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 55
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Was our implied stance (bullish = short a PUT, bearish = short a CALL) a\n-- winning bet? Short leg identified via the acquired_date > sale_date\n-- inversion -- Fidelity's sell-to-open convention (documented under\n-- Databases > Known data quality issues) -- grouped by (strike, option_type)\n-- FIRST: a raw trade_journal row is one partial FILL, not a leg, and\n-- counting fills as legs was root-caused live against this exact query\n-- 2026-09-11 (see Incident History) before being fixed here, the fourth\n-- occurrence of the same bug pattern this session. proceeds > cost_basis was\n-- tried first and rejected: it conflates direction with win/loss, since a\n-- LOSING short leg can show proceeds < cost_basis and look long -- validated\n-- the date-inversion signal instead against 1,121 legs (87.8% of inverted\n-- legs won vs 84.6% of normal legs lost, the expected split for a real\n-- direction signal). Scoped to SPREAD/SINGLE: IRON_CONDOR/STRANGLE carry two\n-- short legs of opposite type, so there is no single implied stance.\n-- One row per trade: positions.id is the lowest of its strategies ids, and a\n-- merged position's rows share their legs, so its short leg joins on that id\n-- once (joining every strategy_id would count the trade once per account).\nWITH short_legs AS (\n  SELECT strategy_id, strike, option_type,\n         MAX(CASE WHEN acquired_date > sale_date THEN 1 ELSE 0 END) AS is_short\n  FROM trade_journal\n  WHERE option_type IS NOT NULL\n  GROUP BY strategy_id, strike, option_type\n),\nresolved_short AS (\n  SELECT strategy_id, MIN(option_type) AS short_option_type\n  FROM short_legs\n  WHERE is_short = 1\n  GROUP BY strategy_id\n  HAVING COUNT(*) = 1\n)\nSELECT CASE WHEN rs.short_option_type = 'PUT' THEN 'BULLISH' ELSE 'BEARISH' END AS stance,\n       COUNT(*) AS trades,\n       ROUND((100.0 * COUNT(*) FILTER (WHERE s.is_winner) / COUNT(*))::numeric, 1) AS win_rate,\n       ROUND((SUM(s.gain_loss))::numeric, 0) AS pnl\nFROM positions s\nJOIN resolved_short rs ON rs.strategy_id = s.id\nWHERE s.strategy_type IN ('SPREAD', 'SINGLE')\n  AND s.earnings_date IS NOT NULL AND s.sale_date IS NOT NULL\nGROUP BY stance;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "stance"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Stance"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trades"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trades"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Win rate"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P&L"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 14,
+      "title": "Analysis accuracy: direction",
+      "type": "table",
+      "description": "Did the stock actually move the direction the position implied.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 55
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Did the stock actually move the direction the position implied? A short\n-- PUT implies bullish (correct if the close move was >= 0); a short CALL\n-- implies bearish (correct if <= 0). Same short-leg detection as the stance\n-- panel above, joined to the nearest historical move within 30 days -- an\n-- exact-date join silently drops corrected dates (Aug 24 2026 incident).\n-- Ranked by distance in one pass (RANK keeps equally near moves); until\n-- 2026-09-14 a MIN subquery correlated per candidate row (4,203 loops, ~23 ms\n-- median for each of the three panels, ~3-5 ms this way, identical rows).\nWITH short_legs AS (\n  SELECT strategy_id, strike, option_type,\n         MAX(CASE WHEN acquired_date > sale_date THEN 1 ELSE 0 END) AS is_short\n  FROM trade_journal\n  WHERE option_type IS NOT NULL\n  GROUP BY strategy_id, strike, option_type\n),\nresolved_short AS (\n  SELECT strategy_id, MIN(option_type) AS short_option_type\n  FROM short_legs\n  WHERE is_short = 1\n  GROUP BY strategy_id\n  HAVING COUNT(*) = 1\n),\nnearest_hm AS (\n  SELECT strategy_id, close_move_pct\n  FROM (\n    SELECT s.id AS strategy_id, h.close_move_pct,\n           RANK() OVER (PARTITION BY s.id\n                        ORDER BY ABS(h.earnings_date - s.earnings_date)) AS nearness\n    FROM positions s\n    JOIN historical_moves h\n      ON h.ticker = s.symbol AND ABS(h.earnings_date - s.earnings_date) <= 30\n    WHERE s.strategy_type IN ('SPREAD', 'SINGLE') AND s.earnings_date IS NOT NULL\n  ) ranked\n  WHERE nearness = 1\n)\nSELECT CASE\n         WHEN (rs.short_option_type = 'PUT' AND nh.close_move_pct >= 0)\n           OR (rs.short_option_type = 'CALL' AND nh.close_move_pct <= 0)\n         THEN 'DIRECTION_CORRECT' ELSE 'DIRECTION_WRONG' END AS call,\n       COUNT(*) AS trades,\n       ROUND((100.0 * COUNT(*) FILTER (WHERE s.is_winner) / COUNT(*))::numeric, 1) AS win_rate,\n       ROUND((SUM(s.gain_loss))::numeric, 0) AS pnl\nFROM positions s\nJOIN resolved_short rs ON rs.strategy_id = s.id\nJOIN nearest_hm nh ON nh.strategy_id = s.id\nWHERE s.strategy_type IN ('SPREAD', 'SINGLE')\n  AND s.earnings_date IS NOT NULL AND s.sale_date IS NOT NULL\n  AND nh.close_move_pct IS NOT NULL\nGROUP BY call;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "call"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Call"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trades"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trades"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Win rate"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P&L"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 15,
+      "title": "Analysis accuracy: strike selection",
+      "type": "table",
+      "description": "Did price cross the short strike. Excludes ~4 rows (NFLX/CRWD/NOW) with an implausible strike/price ratio -- a likely historical_moves price-scale issue for those tickers, flagged not fixed.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 55
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Did the short strike hold? HELD = a short PUT strike stayed below the\n-- actual close, or a short CALL strike stayed above it -- BREACHED means\n-- price crossed the short strike, i.e. the position was exposed to\n-- assignment/max-loss risk regardless of how it was eventually closed. Same\n-- short-leg detection and nearest-within-30-days join as the panels above.\n-- Excludes rows where short_strike/earnings_close falls outside a plausible\n-- 0.45-2.2x band (~4 rows in production: NFLX/CRWD/NOW) -- flagged\n-- 2026-09-11 as a likely historical_moves price-scale data-quality issue for\n-- those specific tickers, out of scope to fix here. Not applied to the\n-- stance/direction panels above: those compare percentages, which a\n-- proportional price-scaling artifact leaves unaffected; only an absolute\n-- strike-vs-price comparison needs the filter.\nWITH short_legs AS (\n  SELECT strategy_id, strike, option_type,\n         MAX(CASE WHEN acquired_date > sale_date THEN 1 ELSE 0 END) AS is_short\n  FROM trade_journal\n  WHERE option_type IS NOT NULL\n  GROUP BY strategy_id, strike, option_type\n),\nresolved_short AS (\n  SELECT strategy_id, MIN(strike) AS short_strike, MIN(option_type) AS short_option_type\n  FROM short_legs\n  WHERE is_short = 1\n  GROUP BY strategy_id\n  HAVING COUNT(*) = 1\n),\nnearest_hm AS (\n  SELECT strategy_id, earnings_close\n  FROM (\n    SELECT s.id AS strategy_id, h.earnings_close,\n           RANK() OVER (PARTITION BY s.id\n                        ORDER BY ABS(h.earnings_date - s.earnings_date)) AS nearness\n    FROM positions s\n    JOIN historical_moves h\n      ON h.ticker = s.symbol AND ABS(h.earnings_date - s.earnings_date) <= 30\n    WHERE s.strategy_type IN ('SPREAD', 'SINGLE') AND s.earnings_date IS NOT NULL\n  ) ranked\n  WHERE nearness = 1\n)\nSELECT CASE\n         WHEN (rs.short_option_type = 'PUT' AND nh.earnings_close <= rs.short_strike)\n           OR (rs.short_option_type = 'CALL' AND nh.earnings_close >= rs.short_strike)\n         THEN 'BREACHED' ELSE 'HELD' END AS outcome,\n       COUNT(*) AS trades,\n       ROUND((100.0 * COUNT(*) FILTER (WHERE s.is_winner) / COUNT(*))::numeric, 1) AS win_rate,\n       ROUND((SUM(s.gain_loss))::numeric, 0) AS pnl\nFROM positions s\nJOIN resolved_short rs ON rs.strategy_id = s.id\nJOIN nearest_hm nh ON nh.strategy_id = s.id\nWHERE s.strategy_type IN ('SPREAD', 'SINGLE')\n  AND s.earnings_date IS NOT NULL AND s.sale_date IS NOT NULL\n  AND nh.earnings_close IS NOT NULL AND nh.earnings_close > 0\n  AND (rs.short_strike / nh.earnings_close) BETWEEN 0.45 AND 2.2\nGROUP BY outcome;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "outcome"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Outcome"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trades"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trades"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Win rate"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P&L"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 16,
+      "title": "Direction vs. strike: which mattered more",
+      "type": "table",
+      "description": "The synthesis panel. Direction and strike are different questions (sign of the move vs. whether it crossed a specific level) -- their four combinations aren't logically forced, only empirically observed here.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 62
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- The synthesis panel: direction and strike outcome are NOT the same\n-- question (direction is about the SIGN of the move from entry, strike is\n-- about whether price crossed a specific level), so all four combinations\n-- are possible in principle -- whether one is actually empty is a live data\n-- question, not a logical certainty. Same short-leg detection, join, and\n-- plausibility filter as the two panels above.\nWITH short_legs AS (\n  SELECT strategy_id, strike, option_type,\n         MAX(CASE WHEN acquired_date > sale_date THEN 1 ELSE 0 END) AS is_short\n  FROM trade_journal\n  WHERE option_type IS NOT NULL\n  GROUP BY strategy_id, strike, option_type\n),\nresolved_short AS (\n  SELECT strategy_id, MIN(strike) AS short_strike, MIN(option_type) AS short_option_type\n  FROM short_legs\n  WHERE is_short = 1\n  GROUP BY strategy_id\n  HAVING COUNT(*) = 1\n),\nnearest_hm AS (\n  SELECT strategy_id, close_move_pct, earnings_close\n  FROM (\n    SELECT s.id AS strategy_id, h.close_move_pct, h.earnings_close,\n           RANK() OVER (PARTITION BY s.id\n                        ORDER BY ABS(h.earnings_date - s.earnings_date)) AS nearness\n    FROM positions s\n    JOIN historical_moves h\n      ON h.ticker = s.symbol AND ABS(h.earnings_date - s.earnings_date) <= 30\n    WHERE s.strategy_type IN ('SPREAD', 'SINGLE') AND s.earnings_date IS NOT NULL\n  ) ranked\n  WHERE nearness = 1\n)\nSELECT\n  CASE WHEN (rs.short_option_type = 'PUT' AND nh.close_move_pct >= 0)\n         OR (rs.short_option_type = 'CALL' AND nh.close_move_pct <= 0)\n       THEN 'direction right' ELSE 'direction wrong' END\n  || ', strike ' ||\n  CASE WHEN (rs.short_option_type = 'PUT' AND nh.earnings_close <= rs.short_strike)\n         OR (rs.short_option_type = 'CALL' AND nh.earnings_close >= rs.short_strike)\n       THEN 'breached' ELSE 'held' END AS scenario,\n  COUNT(*) AS trades,\n  ROUND((100.0 * COUNT(*) FILTER (WHERE s.is_winner) / COUNT(*))::numeric, 1) AS win_rate,\n  ROUND((SUM(s.gain_loss))::numeric, 0) AS pnl\nFROM positions s\nJOIN resolved_short rs ON rs.strategy_id = s.id\nJOIN nearest_hm nh ON nh.strategy_id = s.id\nWHERE s.strategy_type IN ('SPREAD', 'SINGLE')\n  AND s.earnings_date IS NOT NULL AND s.sale_date IS NOT NULL\n  AND nh.close_move_pct IS NOT NULL AND nh.earnings_close IS NOT NULL\n  AND nh.earnings_close > 0\n  AND (rs.short_strike / nh.earnings_close) BETWEEN 0.45 AND 2.2\nGROUP BY scenario\nORDER BY pnl DESC;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "scenario"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Scenario"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trades"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trades"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Win rate"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pnl"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P&L"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 17,
+      "title": "Sharpe / Sortino (trailing)",
+      "type": "table",
+      "description": "Book as traded, netted per docs/SHARPE_ANALYSIS_2026-09.md \u00a72 -- NOT the raw unnetted P&L every other panel on this page uses (netting can flip the sign of a concentrated-equity position; see that doc's \u00a73). Computed in Python (scripts/refresh_risk_metrics.py), not this query -- the netting rule isn't expressible as a plain SQL aggregate. Point estimates only, no confidence interval -- see docs/SHARPE_BOOTSTRAP_2026-09.md for that. 1- and 3-month windows are too few data points for either ratio to be statistically meaningful; read them as a trend line, not a claim.",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "ivcrush"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "ivcrush"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Computed in Python (scripts/grafana_snapshot.py::add_risk_metrics), not\n-- here: Sharpe/Sortino need net_campaigns()'s netting rule (each option leg\n-- claimed by at most one overlapping single-name stock campaign, per\n-- docs/SHARPE_ANALYSIS_2026-09.md \u00a72), which is not expressible as a plain\n-- SQL aggregate. This is a deliberately trivial read of a precomputed table,\n-- the same pattern this dashboard already uses for A/B verdicts (computed in\n-- ab_evaluate_live.py, never reimplemented in a panel query). 1- and\n-- 3-month windows are too few data points for these ratios to mean much\n-- statistically -- shown anyway, as a directional trend line, not a claim.\nSELECT window_months, ROUND((sharpe)::numeric, 2) AS sharpe, ROUND((sortino)::numeric, 2) AS sortino,\n       n_months\nFROM risk_metrics_snapshot\nORDER BY window_months;",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sharpe"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sortino"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "window_months"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Window (months)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sharpe"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Sharpe"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sortino"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Sortino"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "n_months"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Months"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "window_months"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sharpe"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sortino"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "n_months"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    }
+  ]
+}

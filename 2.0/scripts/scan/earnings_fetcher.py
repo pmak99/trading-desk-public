@@ -5,14 +5,18 @@ Provides earnings calendar fetching, validation, and database sync.
 """
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import List, Optional, Tuple
 
+import psycopg
 from tqdm import tqdm
 
+from common.constants import EARNINGS_SAME_EVENT_DAYS  # noqa: E402
+from common.db import connect  # noqa: E402
+from common.timezone import now_et, today_et  # noqa: E402
+from src.application.services.earnings_date_validator import EarningsDateValidator
 from src.container import Container
 from src.domain.enums import EarningsTiming
-from src.application.services.earnings_date_validator import EarningsDateValidator
 from src.infrastructure.data_sources.yahoo_finance_earnings import YahooFinanceEarnings
 
 logger = logging.getLogger(__name__)
@@ -71,7 +75,7 @@ def fetch_earnings_for_ticker(
 
     Priority:
     1. Database (validated, cross-referenced source of truth)
-    2. Alpha Vantage API (fallback for tickers not in DB)
+    2. Finnhub earnings calendar (fallback for tickers not in DB)
 
     Args:
         container: DI container
@@ -81,16 +85,14 @@ def fetch_earnings_for_ticker(
         (earnings_date, timing) tuple or None if not found
     """
     # PRIORITY 1: Check database first (source of truth, validated data)
-    import sqlite3
-    db_path = container.config.database.path
     try:
-        with sqlite3.connect(db_path, timeout=30) as conn:
+        with connect() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 '''
                 SELECT earnings_date, timing, updated_at, last_validated_at
                 FROM earnings_calendar
-                WHERE ticker = ? AND earnings_date >= date('now')
+                WHERE ticker = %s AND earnings_date >= CURRENT_DATE
                 ORDER BY earnings_date ASC
                 LIMIT 1
                 ''',
@@ -98,19 +100,27 @@ def fetch_earnings_for_ticker(
             )
             row = cursor.fetchone()
             if row:
+                from datetime import datetime, timezone
+
                 from src.domain.enums import EarningsTiming
-                from datetime import datetime
-                earnings_date = date.fromisoformat(row[0])
+                # date / timestamptz columns arrive already typed.
+                earnings_date = row[0]
                 timing = EarningsTiming(row[1])
-                updated_at = datetime.fromisoformat(row[2]) if row[2] else None
-                last_validated_at = datetime.fromisoformat(row[3]) if row[3] else None
+                updated_at = row[2]
+                last_validated_at = row[3]
 
                 # Freshness validation: if earnings within 7 days and not recently validated,
-                # check Alpha Vantage to catch date changes
-                days_until_earnings = (earnings_date - date.today()).days
+                # re-check the calendar to catch date changes
+                days_until_earnings = (earnings_date - today_et()).days
                 # Use last_validated_at if available, otherwise fall back to updated_at
                 last_checked = last_validated_at or updated_at
-                hours_since_check = (datetime.now() - last_checked).total_seconds() / 3600 if last_checked else 999
+                # ⚠️ Aware now(), not datetime.now(). last_checked comes from a
+                # timestamptz and is tz-aware; subtracting a naive datetime
+                # raises TypeError, which would take out every cached-row read.
+                hours_since_check = (
+                    (datetime.now(timezone.utc) - last_checked).total_seconds() / 3600
+                    if last_checked else 999
+                )
 
                 if days_until_earnings <= 7 and hours_since_check > 24:
                     logger.info(f"{ticker}: Validating stale cache ({hours_since_check:.0f}h old, earnings in {days_until_earnings}d)")
@@ -142,8 +152,8 @@ def fetch_earnings_for_ticker(
                                 cursor.execute(
                                     '''
                                     UPDATE earnings_calendar
-                                    SET last_validated_at = datetime('now')
-                                    WHERE ticker = ? AND earnings_date = ?
+                                    SET last_validated_at = now()
+                                    WHERE ticker = %s AND earnings_date = %s
                                     ''',
                                     (ticker, earnings_date.isoformat())
                                 )
@@ -178,8 +188,8 @@ def fetch_earnings_for_ticker(
                                 cursor.execute(
                                     '''
                                     UPDATE earnings_calendar
-                                    SET last_validated_at = datetime('now')
-                                    WHERE ticker = ? AND earnings_date = ?
+                                    SET last_validated_at = now()
+                                    WHERE ticker = %s AND earnings_date = %s
                                     ''',
                                     (ticker, earnings_date.isoformat())
                                 )
@@ -190,19 +200,22 @@ def fetch_earnings_for_ticker(
                             # Delete old entry and insert new one to avoid PRIMARY KEY violation
                             try:
                                 cursor.execute(
-                                    'DELETE FROM earnings_calendar WHERE ticker = ? AND earnings_date = ?',
+                                    'DELETE FROM earnings_calendar WHERE ticker = %s AND earnings_date = %s',
                                     (ticker, earnings_date.isoformat())
                                 )
                                 cursor.execute(
                                     '''
-                                    INSERT OR REPLACE INTO earnings_calendar
+                                    INSERT INTO earnings_calendar
                                     (ticker, earnings_date, timing, updated_at, last_validated_at)
-                                    VALUES (?, ?, ?, datetime('now'), datetime('now'))
+                                    VALUES (%s, %s, %s, now(), now())
+                                    ON CONFLICT (ticker, earnings_date) DO UPDATE
+                                    SET timing = EXCLUDED.timing,
+                                        updated_at = now(), last_validated_at = now()
                                     ''',
                                     (ticker, av_date.isoformat(), av_timing.value)
                                 )
                                 conn.commit()
-                            except sqlite3.IntegrityError as e:
+                            except psycopg.IntegrityError as e:
                                 logger.warning(f"{ticker}: DB update failed ({e}), using API date anyway")
                             logger.info(f"{ticker}: Earnings on {av_date} ({av_timing.value}) [from API - corroborated & corrected]")
                             return (av_date, av_timing)
@@ -211,8 +224,8 @@ def fetch_earnings_for_ticker(
                             cursor.execute(
                                 '''
                                 UPDATE earnings_calendar
-                                SET last_validated_at = datetime('now')
-                                WHERE ticker = ? AND earnings_date = ?
+                                SET last_validated_at = now()
+                                WHERE ticker = %s AND earnings_date = %s
                                 ''',
                                 (ticker, earnings_date.isoformat())
                             )
@@ -227,7 +240,7 @@ def fetch_earnings_for_ticker(
     except Exception as e:
         logger.debug(f"DB lookup failed for {ticker}: {e}")
 
-    # PRIORITY 2: Fallback to Alpha Vantage API
+    # PRIORITY 2: Fallback to Finnhub's earnings calendar
     finnhub = container.finnhub
     result = finnhub.get_earnings_calendar(symbol=ticker, horizon="3month")
 
@@ -263,13 +276,13 @@ def validate_tradeable_earnings_dates(tradeable_results: List[dict], container: 
     """
     Validate earnings dates for tradeable opportunities only.
 
-    Cross-references earnings dates from Yahoo Finance and Alpha Vantage
+    Cross-references earnings dates from Yahoo Finance and Finnhub
     for tickers that passed all filters and have tradeable strategies.
     This optimizes validation by skipping tickers that won't be displayed.
 
     Args:
         tradeable_results: List of tradeable result dictionaries
-        container: DI container with Alpha Vantage API
+        container: DI container (Finnhub client)
     """
     if not tradeable_results:
         return
@@ -280,20 +293,23 @@ def validate_tradeable_earnings_dates(tradeable_results: List[dict], container: 
     if not tickers_to_validate:
         return
 
-    # Skip tickers validated in the last 5 min — fetch_earnings_for_ticker already checked them
-    import sqlite3
-    _cutoff = (datetime.now() - timedelta(minutes=5)).isoformat()
+    # Skip tickers validated in the last 5 min — fetch_earnings_for_ticker already checked them.
+    # An aware cutoff: a naive ISO string is read in the session TimeZone (UTC), which
+    # on an ET-local Mac made "5 min" four hours and five.
+    _cutoff = now_et() - timedelta(minutes=5)
     try:
-        with sqlite3.connect(container.config.database.path, timeout=10) as _conn:
-            _ph = ','.join('?' * len(tickers_to_validate))
+        with connect() as _conn:
+            _ph = ','.join(['%s'] * len(tickers_to_validate))
             _rows = _conn.execute(
                 f"SELECT DISTINCT ticker FROM earnings_calendar "
-                f"WHERE ticker IN ({_ph}) AND earnings_date >= date('now') "
-                f"AND last_validated_at > ?",
+                f"WHERE ticker IN ({_ph}) AND earnings_date >= CURRENT_DATE "
+                f"AND last_validated_at > %s",
                 tickers_to_validate + [_cutoff]
             ).fetchall()
             _recently_validated = {row[0] for row in _rows}
     except Exception:
+        # Was silent, which hid a query psycopg refused on every run until 2026-09-14.
+        logger.warning("Recently validated lookup failed; validating every ticker", exc_info=True)
         _recently_validated = set()
 
     if _recently_validated:
@@ -335,6 +351,17 @@ def validate_tradeable_earnings_dates(tradeable_results: List[dict], container: 
     logger.info("")
 
 
+def _tickers_without_future_earnings(conn, tickers: list[str]) -> list[str]:
+    """The tickers with no earnings_calendar row dated today or later, in input
+    order -- one statement for the whole list."""
+    present = {row[0] for row in conn.execute(
+        "SELECT DISTINCT ticker FROM earnings_calendar"
+        " WHERE ticker = ANY(%s) AND earnings_date >= CURRENT_DATE",
+        (list(tickers),),
+    )}
+    return [ticker for ticker in tickers if ticker not in present]
+
+
 def ensure_tickers_in_db(tickers: list[str], container: Container) -> None:
     """
     Ensure all tickers are in the database, resolving each missing ticker's
@@ -354,21 +381,9 @@ def ensure_tickers_in_db(tickers: list[str], container: Container) -> None:
         tickers: List of ticker symbols to ensure in database
         container: DI container
     """
-    import sqlite3
-
-    db_path = container.config.database.path
-
     # Check which tickers are missing from DB
-    missing_tickers = []
-    with sqlite3.connect(db_path, timeout=30) as conn:
-        cursor = conn.cursor()
-        for ticker in tickers:
-            cursor.execute(
-                "SELECT COUNT(*) FROM earnings_calendar WHERE ticker = ? AND earnings_date >= date('now')",
-                (ticker,)
-            )
-            if cursor.fetchone()[0] == 0:
-                missing_tickers.append(ticker)
+    with connect() as conn:
+        missing_tickers = _tickers_without_future_earnings(conn, tickers)
 
     if not missing_tickers:
         logger.info(f"\u2713 All {len(tickers)} tickers already in database")
@@ -388,20 +403,38 @@ def ensure_tickers_in_db(tickers: list[str], container: Container) -> None:
             unresolved.append(ticker)
 
     if resolved:
-        with sqlite3.connect(db_path, timeout=30) as conn:
+        with connect() as conn:
             cursor = conn.cursor()
+            inserted = []
             for ticker, earnings_date_str, timing_value in resolved:
+                # ⚠️ "No future row" does not mean "no row for this event". A
+                # ticker that reported yesterday has none, and Yahoo files a
+                # pre-market report as the previous evening, so its date for
+                # that same event can land a day or two later -- a second,
+                # confirmed row for one quarter. Same guard as
+                # backfill_historical's Yahoo discovery.
+                near = cursor.execute(
+                    "SELECT earnings_date FROM earnings_calendar WHERE ticker = %s"
+                    " AND abs(earnings_date - %s::date) <= %s LIMIT 1",
+                    (ticker, earnings_date_str, EARNINGS_SAME_EVENT_DAYS),
+                ).fetchone()
+                if near is not None:
+                    logger.info(f"  ↷ {ticker}: skipped Yahoo {earnings_date_str}, within "
+                                f"{EARNINGS_SAME_EVENT_DAYS}d of stored {near[0]}")
+                    continue
+                inserted.append(ticker)
                 cursor.execute(
-                    """INSERT OR IGNORE INTO earnings_calendar
+                    """INSERT INTO earnings_calendar
                        (ticker, earnings_date, timing, confirmed, last_validated_at)
-                       VALUES (?, ?, ?, 1, datetime('now'))""",
+                       VALUES (%s, %s, %s, true, now())
+                       ON CONFLICT (ticker, earnings_date) DO NOTHING""",
                     (ticker, earnings_date_str, timing_value)
                 )
             conn.commit()
         logger.info(
-            f"\u2713 Added {len(resolved)} tickers with validated earnings dates: "
-            f"{', '.join(t for t, _, _ in resolved[:10])}" +
-            ("..." if len(resolved) > 10 else "")
+            f"\u2713 Added {len(inserted)} tickers with validated earnings dates: "
+            f"{', '.join(inserted[:10])}" +
+            ("..." if len(inserted) > 10 else "")
         )
 
     if unresolved:

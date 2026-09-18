@@ -1,13 +1,14 @@
 """Integration tests for health check service."""
 
-import pytest
 import asyncio
 from dataclasses import replace
-from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from src.application.services.health import HealthCheckService, ServiceHealth
 from src.config.config import Config
 from src.container import Container
-from src.application.services.health import HealthCheckService, ServiceHealth
 
 
 @pytest.fixture
@@ -141,16 +142,31 @@ class TestHealthCheckService:
         assert "Connection refused" in result
 
     @pytest.mark.asyncio
-    async def test_database_health_with_missing_db(self, config):
-        """Test database health check with missing database."""
-        # Use non-existent database path
-        modified_db = replace(config.database, path=Path("/tmp/nonexistent_test_db.db"))
-        modified_config = replace(config, database=modified_db)
-        container = Container(modified_config, skip_validation=True)
+    async def test_database_health_reports_unhealthy_when_unreachable(self, config):
+        """An unreachable database must report UNHEALTHY, with the error.
+
+        ⚠️ This test previously asserted the opposite, and was right to at the
+        time: under SQLite it pointed at a nonexistent path and commented
+        "Should still be healthy as it creates the db". That was true — and it
+        is precisely the phantom-database behaviour the Postgres migration
+        exists to end. A health check that reports healthy because it silently
+        created an empty database is worse than no health check.
+
+        Postgres cannot do that. Since the cutover the database is the single
+        point of failure for every scheduled job, so the contract that matters
+        is the inverse one: when it cannot be reached, say so.
+        """
+        container = Container(config, skip_validation=True)
         health_service = container.health_check_service
 
-        result = await health_service._check_database()
+        # Fail the round-trip the way a real outage does, at connection time.
+        broken = MagicMock()
+        broken.connection.side_effect = OSError("connection refused")
+        container._db_pool = broken
+        with patch.object(type(container), "db_pool", property(lambda self: broken)):
+            result = await health_service._check_database()
 
-        # Should still be healthy as it creates the db
         assert result.name == "database"
+        assert result.healthy is False, "an unreachable database must not report healthy"
+        assert "connection refused" in (result.error or "")
         assert result.latency_ms >= 0

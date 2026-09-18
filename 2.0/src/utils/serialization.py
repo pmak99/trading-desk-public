@@ -8,17 +8,23 @@ Supports all domain types: Money, Percentage, Strike, OptionChain, etc.
 import json
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
-from src.domain.types import (
-    Money, Percentage, Strike, OptionQuote, OptionChain,
-    ImpliedMove, HistoricalMove, VRPResult, ConsistencyResult,
-    SkewResult, TermStructureResult, TickerAnalysis,
-    StrategyLeg, Strategy, StrategyRecommendation
-)
 from src.domain.enums import (
-    EarningsTiming, OptionType, Recommendation, StrategyType,
-    DirectionalBias
+    DirectionalBias,
+    EarningsTiming,
+    OptionType,
+    Recommendation,
+    StrategyType,
+)
+from src.domain.types import (
+    ImpliedMove,
+    Money,
+    OptionChain,
+    OptionQuote,
+    Percentage,
+    Strike,
+    VRPResult,
 )
 
 
@@ -131,6 +137,8 @@ class DomainJSONEncoder(json.JSONEncoder):
                 'vrp_ratio': obj.vrp_ratio,
                 'edge_score': obj.edge_score,
                 'recommendation': obj.recommendation.value,
+                'historical_quarters': obj.historical_quarters,
+                'move_metric': obj.move_metric,
             }
 
         # Handle enums
@@ -242,6 +250,8 @@ def domain_object_hook(dct: Dict[str, Any]) -> Any:
             vrp_ratio=dct['vrp_ratio'],
             edge_score=dct['edge_score'],
             recommendation=Recommendation(dct['recommendation']),
+            historical_quarters=dct.get('historical_quarters'),
+            move_metric=dct.get('move_metric', 'intraday'),
         )
 
     # Handle enums
@@ -293,7 +303,17 @@ def serialize(obj: Any) -> str:
         deserialize: Reconstruct objects from JSON string
         DomainJSONEncoder: The encoder handling all domain types
     """
-    return json.dumps(obj, cls=DomainJSONEncoder, indent=None, separators=(',', ':'))
+    # allow_nan=False so this actually returns JSON. Python's default emits the
+    # non-standard tokens NaN / Infinity / -Infinity, which no strict parser
+    # accepts -- and Postgres `jsonb` is a strict parser. Before this, a payload
+    # containing a non-finite float serialised "successfully" and was then
+    # rejected at write time with `invalid input syntax for type json`, silently
+    # demoting the L2 cache to L1-only for that value. Raising here names the
+    # real cause (a float that is not a number) at the point it occurs.
+    return json.dumps(
+        obj, cls=DomainJSONEncoder, indent=None, separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def deserialize(json_str: str) -> Any:

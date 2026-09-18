@@ -2,45 +2,81 @@
 import functools
 import logging
 import sys
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
 from src.container import Container
+from src.domain.trading_expiration import calculate_expiration_date
 from src.infrastructure.data_sources.earnings_whisper_scraper import (
     EarningsWhisperScraper,
     get_week_monday,
 )
 
 from ..constants import LIQUIDITY_PRIORITY_ORDER
-from ..date_utils import calculate_expiration_date
-from ..filters import should_filter_ticker, filter_ticker_concurrent
-from ..quality_scorer import _precalculate_quality_scores
-from ..formatters import parse_liquidity_tier, format_liquidity_display, _display_scan_results
 from ..earnings_fetcher import (
+    ensure_tickers_in_db,
     fetch_earnings_for_ticker,
     validate_tradeable_earnings_dates,
-    ensure_tickers_in_db,
+)
+from ..filters import filter_ticker_concurrent, should_filter_ticker
+from ..formatters import (
+    _display_scan_results,
+    format_liquidity_display,
+    format_recommendation,
+    log_existing_position_warnings,
+    log_stale_history_warnings,
+    parse_liquidity_tier,
 )
 from ..market_data import get_shared_cache
-
-from .vix import _log_vix_context
+from ..quality_scorer import _precalculate_quality_scores
 from .ticker_analysis import analyze_ticker, analyze_ticker_concurrent
+from .vix import _log_vix_context
 
 logger = logging.getLogger(__name__)
 
 
-def whisper_mode_parallel(
+@dataclass
+class ScanRun:
+    """Data output of a scan pass, decoupled from CLI display.
+
+    whisper_mode_parallel() used to return only an exit code, so the analysis
+    results were unreachable outside the terminal. Anything that needs the data
+    rather than the table — the Telegram digest, the A/B diff harness — consumes
+    this instead.
+
+    `results` entries are the dicts built by ticker_analysis.analyze_ticker():
+    ticker, ticker_name, earnings_date, expiration_date, stock_price,
+    implied_move_pct (str), historical_mean_pct (str), vrp_ratio (float),
+    edge_score (float), recommendation (str), is_tradeable (bool),
+    liquidity_tier, liquidity_oi_ratio, directional_bias, status. Tradeable rows
+    additionally carry '_quality_score' once _precalculate_quality_scores() runs.
+    """
+
+    results: List[dict]
+    success_count: int
+    error_count: int
+    skip_count: int
+    filtered_count: int
+    week_range: Optional[Tuple[date, date]] = None
+    # True when no ticker had an upcoming earnings date at all. The CLI path
+    # returns 0 immediately in that case without rendering a table, so the
+    # distinction has to survive the extraction.
+    no_earnings_found: bool = False
+
+
+def collect_whisper_results(
     container: Container,
     tickers: List[str],
     monday: date,
     week_end: date,
     expiration_offset: Optional[int] = None,
     skip_weekly_filter: bool = False
-) -> int:
+) -> ScanRun:
     """
-    Parallel whisper mode: Analyze anticipated earnings using ConcurrentScanner.
+    Analyze anticipated earnings and return the results as data.
 
     Uses thread pool for ~5x speedup on multi-ticker analysis.
 
@@ -53,7 +89,7 @@ def whisper_mode_parallel(
         skip_weekly_filter: If True, skip weekly options filter
 
     Returns:
-        Exit code (0 = success, 1 = error)
+        ScanRun with the analysis results and batch counters.
     """
     logger.info("")
     logger.info("\U0001f680 Using PARALLEL processing for faster analysis...")
@@ -73,7 +109,15 @@ def whisper_mode_parallel(
 
     if not earnings_lookup:
         logger.warning("No earnings found for any anticipated tickers")
-        return 0
+        return ScanRun(
+            results=[],
+            success_count=0,
+            error_count=0,
+            skip_count=len(tickers),
+            filtered_count=0,
+            week_range=(monday, week_end),
+            no_earnings_found=True,
+        )
 
     logger.info(f"Starting parallel analysis of {len(earnings_lookup)} tickers...")
 
@@ -88,14 +132,18 @@ def whisper_mode_parallel(
 
     # Run concurrent scan
     # Bind skip_weekly_filter to analyze function for weekly options filter
-    analyze_func = functools.partial(analyze_ticker_concurrent, skip_weekly_filter=skip_weekly_filter)
+    analyze_func = functools.partial(
+        analyze_ticker_concurrent,
+        skip_weekly_filter=skip_weekly_filter,
+        source="whisper",
+    )
     scanner = container.concurrent_scanner
     batch_result = scanner.scan_tickers(
         tickers=list(earnings_lookup.keys()),
         earnings_lookup=earnings_lookup,
         analyze_func=analyze_func,
         filter_func=filter_func,
-        expiration_offset=expiration_offset or 0,
+        expiration_offset=expiration_offset,
         progress_callback=progress_callback,
     )
 
@@ -111,7 +159,7 @@ def whisper_mode_parallel(
         validate_tradeable_earnings_dates(tradeable, container)
 
     # Log statistics
-    logger.info(f"\n\U0001f4ca Parallel Analysis Complete:")
+    logger.info("\n\U0001f4ca Parallel Analysis Complete:")
     logger.info(f"   Total time: {batch_result.total_duration_ms:.0f}ms")
     logger.info(f"   Avg per ticker: {batch_result.avg_duration_ms:.0f}ms")
     logger.info(f"   Success: {batch_result.success_count}")
@@ -119,15 +167,54 @@ def whisper_mode_parallel(
     logger.info(f"   Skipped: {batch_result.skip_count}")
     logger.info(f"   Errors: {batch_result.error_count}")
 
-    # Display results using shared helper
-    return _display_scan_results(
+    return ScanRun(
         results=results,
         success_count=batch_result.success_count,
         error_count=batch_result.error_count,
         skip_count=batch_result.skip_count + (len(tickers) - len(earnings_lookup)),
         filtered_count=batch_result.filtered_count,
+        week_range=(monday, week_end),
+    )
+
+
+def whisper_mode_parallel(
+    container: Container,
+    tickers: List[str],
+    monday: date,
+    week_end: date,
+    expiration_offset: Optional[int] = None,
+    skip_weekly_filter: bool = False
+) -> int:
+    """
+    CLI wrapper: collect results, then render them as a table.
+
+    Kept as a thin shim so every existing caller (scan.py, trade.sh whisper)
+    keeps its exit-code contract unchanged.
+
+    Returns:
+        Exit code (0 = success, 1 = error)
+    """
+    run = collect_whisper_results(
+        container,
+        tickers,
+        monday,
+        week_end,
+        expiration_offset=expiration_offset,
+        skip_weekly_filter=skip_weekly_filter,
+    )
+
+    if run.no_earnings_found:
+        return 0
+
+    # Display results using shared helper
+    return _display_scan_results(
+        results=run.results,
+        success_count=run.success_count,
+        error_count=run.error_count,
+        skip_count=run.skip_count,
+        filtered_count=run.filtered_count,
         mode_name="WHISPER MODE",
-        week_range=(monday, week_end)
+        week_range=run.week_range
     )
 
 
@@ -172,9 +259,10 @@ def whisper_mode(
         week_str = None
 
     logger.info("Fetching ticker list...")
-    # Shared 6-day persistent cache (scan_cache.db) keeps repeated /whisper runs
-    # within a week off earningswhispers.com's undocumented internal API — that
-    # endpoint soft-rate-limits after a handful of rapid requests.
+    # Shared 6-day persistent cache (Postgres whisper_cache) keeps repeated /whisper
+    # runs within a week off earningswhispers.com's undocumented internal API — that
+    # endpoint soft-rate-limits after a handful of rapid requests. A database
+    # fallback list is cached for an hour only.
     scraper = EarningsWhisperScraper(cache=get_shared_cache(container))
     result = scraper.get_most_anticipated_earnings(week_monday=week_str)
 
@@ -290,6 +378,7 @@ def whisper_mode(
             auto_backfill=True,
             skip_weekly_filter=skip_weekly_filter,
             earnings_timing=timing,
+            source="whisper",
         )
 
         if result:
@@ -311,11 +400,11 @@ def whisper_mode(
     logger.info("\n" + "=" * 80)
     logger.info("WHISPER MODE - SUMMARY")
     logger.info("=" * 80)
-    logger.info(f"\n\U0001f50a Most Anticipated Earnings Analysis:")
-    logger.info(f"   Mode: Earnings Whispers")
+    logger.info("\n\U0001f50a Most Anticipated Earnings Analysis:")
+    logger.info("   Mode: Earnings Whispers")
     logger.info(f"   Week: {monday.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}")
     logger.info(f"   Total Tickers: {len(tickers)}")
-    logger.info(f"\n\U0001f4ca Analysis Results:")
+    logger.info("\n\U0001f4ca Analysis Results:")
     logger.info(f"   \U0001f50d Filtered (Market Cap Only): {filtered_count}")
     logger.info(f"   ✓ Successfully Analyzed: {success_count}")
     logger.info(f"   ⏭️  Skipped (No Earnings/Data): {skip_count}")
@@ -330,10 +419,10 @@ def whisper_mode(
         # Pre-calculate quality scores once (avoids ~82% duplicate calculations)
         _precalculate_quality_scores(tradeable)
 
-        logger.info(f"\n" + "=" * 80)
+        logger.info("\n" + "=" * 80)
         logger.info(f"✅ RESULT: {len(tradeable)} TRADEABLE OPPORTUNITIES FOUND")
         logger.info("=" * 80)
-        logger.info(f"\n\U0001f3af Most Anticipated + High VRP (Sorted by Earnings Date, Quality Score):")
+        logger.info("\n\U0001f3af Most Anticipated + High VRP (Sorted by Earnings Date, Quality Score):")
 
         # Table header (UPDATED Dec 2025 - Added Quality Score for risk-adjusted ranking)
         logger.info(f"   {'#':<3} {'Ticker':<8} {'Name':<20} {'Score':<7} {'VRP':<8} {'Implied':<9} {'Edge':<7} {'Recommendation':<15} {'Bias':<15} {'Earnings':<12} {'Liquidity':<12}")
@@ -377,7 +466,7 @@ def whisper_mode(
             vrp = f"{r['vrp_ratio']:.2f}x"
             implied = str(r['implied_move_pct'])
             edge = f"{r['edge_score']:.2f}"
-            rec = r['recommendation'].upper()
+            rec = format_recommendation(r)
             bias = r.get('directional_bias', 'NEUTRAL')  # NEW: Display directional bias
             earnings = r['earnings_date']
 
@@ -396,19 +485,24 @@ def whisper_mode(
 
         # Add footer note if market closed (OI-only scoring)
         if has_oi_only:
-            logger.info(f"\n   * Liquidity based on OI only (market closed, volume unavailable)")
+            logger.info("\n   * Liquidity based on OI only (market closed, volume unavailable)")
 
-        logger.info(f"\n\U0001f4a1 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
+        # One position per event (closed, journaled trades only)
+        log_existing_position_warnings(tradeable)
+        # A quarter missing from historical_moves entirely
+        log_stale_history_warnings(tradeable)
+
+        logger.info("\n\U0001f4a1 Run './trade.sh TICKER YYYY-MM-DD' for detailed strategy recommendations")
     else:
-        logger.info(f"\n" + "=" * 80)
+        logger.info("\n" + "=" * 80)
         logger.info("⏭️  RESULT: NO TRADEABLE OPPORTUNITIES")
         logger.info("=" * 80)
-        logger.info(f"\n❌ No opportunities found among most anticipated earnings")
+        logger.info("\n❌ No opportunities found among most anticipated earnings")
         if skip_count > 0:
             logger.info(f"   Note: {skip_count} ticker(s) had no upcoming earnings or insufficient data")
-        logger.info(f"\n\U0001f4dd Recommendation:")
-        logger.info(f"   High market attention doesn't always mean high VRP")
-        logger.info(f"   Try: ./trade.sh scan YYYY-MM-DD for broader earnings scan")
+        logger.info("\n\U0001f4dd Recommendation:")
+        logger.info("   High market attention doesn't always mean high VRP")
+        logger.info("   Try: ./trade.sh scan YYYY-MM-DD for broader earnings scan")
 
     # Return 0 if we successfully completed the scan (even if some tickers had errors)
     # Only return 1 for fatal errors (calendar fetch failure, etc.)

@@ -7,10 +7,14 @@ This is the market's expectation of price movement.
 
 import logging
 from datetime import date
-from src.domain.types import Money, Percentage, Strike, ImpliedMove, OptionChain
-from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
-from src.domain.protocols import OptionsDataProvider
+
+from common.timezone import now_et
 from src.application.metrics.implied_move_common import calculate_from_atm_chain
+from src.domain.errors import AppError, Err, ErrorCode, Result
+from src.domain.protocols import OptionsDataProvider
+from src.domain.types import (
+    ImpliedMove,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +51,7 @@ class ImpliedMoveCalculator:
         logger.info(f"Calculating implied move: {ticker} exp {expiration}")
 
         # Validate expiration is not in the past
-        today = date.today()
+        today = now_et().date()
         if expiration < today:
             return Err(
                 AppError(

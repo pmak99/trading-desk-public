@@ -4,7 +4,8 @@ IV Crush Scanner Package.
 Decomposed from the monolithic scan.py into focused modules:
 - cli: Argument parsing
 - constants: All hardcoded thresholds, scoring weights, configuration
-- date_utils: Trading day calculations, expiration date logic
+- date_utils: Date parsing and the expiration sanity check (the trading
+  expiration and market calendar are src/domain's)
 - market_data: Market cap lookups, stock price fetching, liquidity checks
 - filters: Ticker filtering logic
 - quality_scorer: Composite quality scoring (VRP + liquidity + difficulty)
@@ -17,96 +18,94 @@ Decomposed from the monolithic scan.py into focused modules:
 # Tests and other scripts import from scripts.scan
 
 # Constants (used by tests)
+# CLI
+from .cli import parse_args
 from .constants import (
-    SCORE_VRP_MAX_POINTS,
-    SCORE_VRP_TARGET,
-    SCORE_EDGE_MAX_POINTS,
-    SCORE_EDGE_TARGET,
-    SCORE_LIQUIDITY_MAX_POINTS,
-    SCORE_LIQUIDITY_EXCELLENT_POINTS,
-    SCORE_LIQUIDITY_GOOD_POINTS,
-    SCORE_LIQUIDITY_WARNING_POINTS,
-    SCORE_LIQUIDITY_REJECT_POINTS,
-    SCORE_MOVE_MAX_POINTS,
-    SCORE_MOVE_EASY_THRESHOLD,
-    SCORE_MOVE_MODERATE_THRESHOLD,
-    SCORE_MOVE_MODERATE_POINTS,
-    SCORE_MOVE_CHALLENGING_THRESHOLD,
-    SCORE_MOVE_CHALLENGING_POINTS,
-    SCORE_MOVE_EXTREME_POINTS,
-    SCORE_DEFAULT_MOVE_POINTS,
-    SCORE_MOVE_USE_CONTINUOUS,
-    SCORE_MOVE_BASELINE_PCT,
-    SCORE_VRP_USE_LINEAR,
-    LIQUIDITY_PRIORITY_ORDER,
-    MARKET_CLOSED_INDICATOR,
-    FINNHUB_CALLS_PER_MINUTE,
-    RATE_LIMIT_PAUSE_SECONDS,
+    BACKFILL_TIMEOUT_SECONDS,
+    BACKFILL_YEARS,
     CACHE_L1_TTL_SECONDS,
     CACHE_L2_TTL_SECONDS,
     CACHE_MAX_L1_SIZE,
-    BACKFILL_TIMEOUT_SECONDS,
-    BACKFILL_YEARS,
-    MAX_TRADING_DAY_ITERATIONS,
-    API_CALL_DELAY,
+    FINNHUB_CALLS_PER_MINUTE,
+    LIQUIDITY_PRIORITY_ORDER,
+    MARKET_CLOSED_INDICATOR,
+    RATE_LIMIT_PAUSE_SECONDS,
+    SCORE_DEFAULT_MOVE_POINTS,
+    SCORE_EDGE_MAX_POINTS,
+    SCORE_EDGE_TARGET,
+    SCORE_LIQUIDITY_EXCELLENT_POINTS,
+    SCORE_LIQUIDITY_GOOD_POINTS,
+    SCORE_LIQUIDITY_MAX_POINTS,
+    SCORE_LIQUIDITY_REJECT_POINTS,
+    SCORE_LIQUIDITY_WARNING_POINTS,
+    SCORE_MOVE_BASELINE_PCT,
+    SCORE_MOVE_CHALLENGING_POINTS,
+    SCORE_MOVE_CHALLENGING_THRESHOLD,
+    SCORE_MOVE_EASY_THRESHOLD,
+    SCORE_MOVE_EXTREME_POINTS,
+    SCORE_MOVE_MAX_POINTS,
+    SCORE_MOVE_MODERATE_POINTS,
+    SCORE_MOVE_MODERATE_THRESHOLD,
+    SCORE_MOVE_USE_CONTINUOUS,
+    SCORE_VRP_MAX_POINTS,
+    SCORE_VRP_TARGET,
+    SCORE_VRP_USE_LINEAR,
 )
 
 # Date utilities (used by tests)
 from .date_utils import (
     parse_date,
-    get_us_market_holidays,
-    is_market_holiday,
-    adjust_to_trading_day,
-    get_next_friday,
-    calculate_implied_move_expiration,
-    calculate_expiration_date,
     validate_expiration_date,
-)
-
-# Quality scoring (used by tests)
-from .quality_scorer import (
-    calculate_scan_quality_score,
-    _precalculate_quality_scores,
-)
-
-# Formatters (used by tests and other modules)
-from .formatters import (
-    parse_liquidity_tier,
-    format_liquidity_display,
-    _display_scan_results,
-)
-
-# Market data
-from .market_data import (
-    get_ticker_info,
-    get_market_cap_millions,
-    get_ticker_name,
-    clean_company_name,
-    check_liquidity_with_tier,
-    check_basic_liquidity,
-    get_liquidity_tier_for_display,
-    check_liquidity_hybrid,
-    get_shared_cache,
-)
-
-# Filters
-from .filters import (
-    should_filter_ticker,
-    filter_ticker_concurrent,
 )
 
 # Earnings fetcher
 from .earnings_fetcher import (
+    ensure_tickers_in_db,
     fetch_earnings_for_date,
     fetch_earnings_for_ticker,
     validate_tradeable_earnings_dates,
-    ensure_tickers_in_db,
+)
+
+# Filters
+from .filters import (
+    filter_ticker_concurrent,
+    should_filter_ticker,
+)
+
+# Formatters (used by tests and other modules)
+from .formatters import (
+    _display_scan_results,
+    format_liquidity_display,
+    parse_liquidity_tier,
+)
+
+# Market data
+from .market_data import (
+    check_basic_liquidity,
+    check_liquidity_hybrid,
+    check_liquidity_with_tier,
+    clean_company_name,
+    get_liquidity_tier_for_display,
+    get_market_cap_millions,
+    get_shared_cache,
+    get_ticker_info,
+    get_ticker_name,
+)
+
+# Quality scoring (used by tests)
+from .quality_scorer import (
+    _precalculate_quality_scores,
+    calculate_scan_quality_score,
 )
 
 # Workflows (used by scan_async.py)
 from .workflows import (
+    # Data seam — lets non-CLI consumers (Telegram digest, A/B diff harness)
+    # reach the analysis results instead of just an exit code.
+    ScanRun,
     analyze_ticker,
     analyze_ticker_concurrent,
+    collect_whisper_results,
     scanning_mode,
     scanning_mode_parallel,
     ticker_mode,
@@ -114,6 +113,3 @@ from .workflows import (
     whisper_mode,
     whisper_mode_parallel,
 )
-
-# CLI
-from .cli import parse_args

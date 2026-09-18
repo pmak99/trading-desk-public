@@ -1,21 +1,16 @@
 """Unit tests for scripts/taco/scoring.py — tiered entry score."""
 
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from scripts.taco.constants import (
-    EventType,
-    FUND_SIZE,
-    Tier,
     WEIGHT_CROSS_ASSET,
     WEIGHT_DIP,
     WEIGHT_EVENT,
     WEIGHT_TERM,
     WEIGHT_VIX,
+    EventType,
+    Tier,
 )
 from scripts.taco.scoring import (
     cross_asset_component,
@@ -64,8 +59,8 @@ class TestComponents:
 
 class TestScoreEntry:
     def _panic_kwargs(self):
-        return dict(vix_level=35.0, vix_spike_ratio=1.6,
-                    vix3m_ratio=1.15, event_type=EventType.GEOPOLITICAL)
+        return {"vix_level": 35.0, "vix_spike_ratio": 1.6,
+                "vix3m_ratio": 1.15, "event_type": EventType.GEOPOLITICAL}
 
     def test_full_panic_call_all_confirm(self):
         sig = score_entry("CALL", drawdown=9.0, cross_asset_count=3,
@@ -74,7 +69,7 @@ class TestScoreEntry:
         assert sig.score == pytest.approx(97.5)
         assert sig.components["cross_asset"] == pytest.approx(15.0)
         assert sig.tier == Tier.FULL
-        assert sig.sizing_usd == pytest.approx(0.40 * FUND_SIZE)
+        assert sig.sizing_usd == pytest.approx(0.40 * 400_000)
 
     def test_call_no_cross_asset_renormalizes(self):
         sig = score_entry("CALL", drawdown=9.0, **self._panic_kwargs())
@@ -121,8 +116,8 @@ class TestScoreEntry:
     def test_event_misclassification_one_step_rarely_flips_full_to_skip(self):
         # Audit finding 5 (2026-07-14): +/-1 category must not flip FULL<->SKIP.
         # Max adjacent gap is now GEO(18.5) vs FED(10.1) = 8.4 pts.
-        base = dict(drawdown=6.0, vix_level=30.0, vix_spike_ratio=1.4,
-                    cross_asset_count=2, cross_asset_available=3)
+        base = {"drawdown": 6.0, "vix_level": 30.0, "vix_spike_ratio": 1.4,
+                "cross_asset_count": 2, "cross_asset_available": 3}
         hi = score_entry("CALL", event_type=EventType.GEOPOLITICAL,
                          vix3m_ratio=1.10, **base)
         lo = score_entry("CALL", event_type=EventType.FED_REGIME_SHIFT,

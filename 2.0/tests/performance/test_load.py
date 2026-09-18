@@ -6,17 +6,16 @@ to validate production readiness and ensure the system can handle concurrent
 analysis at scale.
 """
 
-import pytest
 import asyncio
 import time
 from datetime import date, timedelta
 
-FUTURE_EXPIRATION = date.today() + timedelta(days=45)
+import pytest
 
-from src.domain.types import Money, Percentage, Strike, OptionQuote, OptionChain
-from src.domain.errors import ErrorCode
 from src.application.metrics.implied_move import ImpliedMoveCalculator
-from tests.conftest import MockOptionsProvider
+from src.domain.types import Money, OptionChain, OptionQuote, Percentage, Strike
+
+FUTURE_EXPIRATION = date.today() + timedelta(days=45)
 
 
 def create_realistic_chain(ticker: str, stock_price: Money, expiration: date) -> OptionChain:
@@ -325,7 +324,7 @@ class TestPerformanceScaling:
 
             calc = ImpliedMoveCalculator(mock_options_provider)
 
-            async def analyze_ticker(ticker):
+            async def analyze_ticker(ticker, calc=calc):  # bind this pass's calc (B023)
                 loop = asyncio.get_event_loop()
                 return await loop.run_in_executor(None, lambda: calc.calculate(ticker, expiration))
 
@@ -372,7 +371,7 @@ class TestMemoryStability:
             return await loop.run_in_executor(None, lambda: calc.calculate(ticker, expiration))
 
         # Run same analysis multiple times
-        for iteration in range(5):
+        for _ in range(5):
             results = await asyncio.gather(*[analyze_ticker(t) for t in tickers])
             assert len(results) == 10
             successful = sum(1 for r in results if r.is_ok)

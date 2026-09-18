@@ -5,21 +5,19 @@ Provides yfinance-based ticker info and Tradier-based liquidity tier classificat
 """
 
 import logging
-import threading
-import time
 from datetime import date
 from typing import Dict, Optional, Tuple
 
 from src.container import Container
+from src.infrastructure.api.yahoo import yahoo_call
 from src.infrastructure.cache.hybrid_cache import HybridCache
 
 from .constants import (
-    API_CALL_DELAY,
+    _COMPANY_SUFFIX_PATTERNS,
+    _TRAILING_AMPERSAND_PATTERN,
     CACHE_L1_TTL_SECONDS,
     CACHE_L2_TTL_SECONDS,
     CACHE_MAX_L1_SIZE,
-    _COMPANY_SUFFIX_PATTERNS,
-    _TRAILING_AMPERSAND_PATTERN,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,7 +45,6 @@ _ticker_info_cache: Dict[str, Tuple[Optional[float], Optional[str]]] = {}  # Com
 _liquidity_cache: Dict[Tuple[str, date], Tuple[bool, str]] = {}  # Cache for liquidity checks (ticker, expiration) -> (has_liq, tier)
 _hybrid_liquidity_cache: Dict[Tuple[str, date, float], Tuple[bool, str, Dict]] = {}
 _shared_cache: Optional[HybridCache] = None
-_api_call_lock = threading.Lock()  # Thread-safe API rate limiting
 
 
 def get_shared_cache(container: Container) -> HybridCache:
@@ -66,9 +63,12 @@ def get_shared_cache(container: Container) -> HybridCache:
     global _shared_cache
 
     if _shared_cache is None:
-        cache_db_path = container.config.database.path.parent / "scan_cache.db"
+        # No path: L2 is the Postgres `whisper_cache` table, shared across
+        # hosts. It used to be scan_cache.db beside the SQLite database, which
+        # meant the Mac and the server each kept their own copy and each paid their
+        # own scrape of EarningsWhispers' undocumented, rate-limit-sensitive
+        # endpoint. One cache halves that traffic.
         _shared_cache = HybridCache(
-            db_path=cache_db_path,
             l1_ttl_seconds=CACHE_L1_TTL_SECONDS,
             l2_ttl_seconds=CACHE_L2_TTL_SECONDS,
             max_l1_size=CACHE_MAX_L1_SIZE
@@ -128,13 +128,11 @@ def get_ticker_info(ticker: str) -> Tuple[Optional[float], Optional[str]]:
         return cached_value
 
     try:
-        # Thread-safe API rate limiting - CRITICAL: Keep lock until API call completes
-        with _api_call_lock:
-            time.sleep(API_CALL_DELAY)  # Respect rate limits
-            stock = yf.Ticker(ticker)
-            info = stock.info  # Actual API call - must complete before releasing lock
+        # One Yahoo request under the process's Yahoo limit, which replaced a
+        # 0.2 s sleep under a module lock. The Ticker is built inside the call:
+        # yfinance marks .info fetched before asking, so a retry needs a new one.
+        info = yahoo_call(lambda: yf.Ticker(ticker).info)
 
-        # Process data outside lock (no API calls, safe to parallelize)
         market_cap = info.get('marketCap')
         market_cap_millions = None
         if market_cap and market_cap > 0:
@@ -279,7 +277,6 @@ def check_liquidity_hybrid(
     expiration: date,
     implied_move_pct: float,
     container: Container,
-    max_loss_budget: float = 20000.0,
     use_dynamic_thresholds: bool = True,
 ) -> Tuple[bool, str, Dict]:
     """
@@ -292,17 +289,19 @@ def check_liquidity_hybrid(
     Method C: Check strikes just outside implied move (preferred)
     Method B: Fall back to 20-delta strikes if C fails
 
-    Dynamic thresholds are based on position size for $20k max loss:
+    Dynamic thresholds are multiples of the position the engine would size
+    (full_size_contracts from container.config.strategy: RISK_BUDGET_PER_TRADE x
+    KELLY_FRACTION over the estimated max loss, capped at SIZING_DEFAULT_CAP):
     - REJECT: OI < 1x position size
-    - WARNING: OI < 5x position size
+    - WARNING: OI < 2x position size
+    - GOOD: OI < 5x position size
     - EXCELLENT: OI >= 5x position size
 
     Args:
         ticker: Stock ticker symbol
         expiration: Options expiration date
         implied_move_pct: Implied move as percentage (e.g., 8.5 for 8.5%)
-        container: DI container for API access
-        max_loss_budget: Maximum loss budget (default $20,000)
+        container: DI container for API access and the sizing config
         use_dynamic_thresholds: Whether to use dynamic or static thresholds
 
     Returns:
@@ -337,7 +336,7 @@ def check_liquidity_hybrid(
         tier, market_open, market_reason, details = liquidity_scorer.classify_hybrid_tier_market_aware(
             chain=chain,
             implied_move_pct=implied_move_pct,
-            max_loss_budget=max_loss_budget,
+            strategy_config=container.config.strategy,
             use_dynamic_thresholds=use_dynamic_thresholds,
         )
 
@@ -450,7 +449,7 @@ def validate_harvest_chain(
     Args:
         ticker: Stock ticker symbol.
         expiry: Options expiration date (~45 DTE).
-        container: DI container (Tradier client).
+        container: DI container (its cached_options_provider).
         target_delta: Abs delta to target on short leg (default 0.30).
         min_bid: Minimum acceptable bid on the short leg (default $0.50).
         min_oi: Minimum acceptable OI on the short leg (default 50).
@@ -470,8 +469,10 @@ def validate_harvest_chain(
         'spread_width': 5.0, 'short_strike': None, 'error': None,
     }
     try:
-        tradier = container.tradier
-        chain_result = tradier.get_option_chain(ticker, expiry)
+        # Cached, like the liquidity checks above: the same (ticker, expiry)
+        # chain is one Tradier call however many callers ask within the cache
+        # TTL, and a failed fetch is never cached.
+        chain_result = container.cached_options_provider.get_option_chain(ticker, expiry)
         if chain_result.is_err:
             result['error'] = str(chain_result.error)
             return result

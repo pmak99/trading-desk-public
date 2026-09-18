@@ -6,12 +6,12 @@ Earnings Whisper) to ensure accuracy and flag conflicts.
 """
 
 import logging
-from datetime import date, timedelta
-from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
+from typing import List, Optional, Tuple
 
-from src.domain.errors import Result, AppError, ErrorCode
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
 from src.domain.types import EarningsTiming
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,18 @@ class ValidationResult:
     sources: List[EarningsDateInfo]
     has_conflict: bool
     conflict_details: Optional[str] = None
+
+    @property
+    def corroborated(self) -> bool:
+        """Two different sources answered and they agree.
+
+        `has_conflict` alone cannot say this: with one source there is nothing to
+        disagree with, so a lone Finnhub date read as a no-conflict consensus and
+        the calendar sync wrote it as confirmed (SKYT 2026-11-03, a company
+        delisted 2026-07-31, on 2026-09-15). Writers that store a date as fact
+        check this; display paths that validate against Yahoo alone do not need it.
+        """
+        return len({s.source for s in self.sources}) >= 2 and not self.has_conflict
 
 
 class EarningsDateValidator:
@@ -161,7 +173,7 @@ class EarningsDateValidator:
 
         # Check if we have any data
         if not sources:
-            return Result.Err(
+            return Err(
                 AppError(
                     ErrorCode.NODATA,
                     f"No earnings date found from any source for {ticker}"
@@ -206,7 +218,7 @@ class EarningsDateValidator:
             f"{' ⚠️  CONFLICT' if has_conflict else ''}"
         )
 
-        return Result.Ok(result)
+        return Ok(result)
 
     def _get_consensus(
         self, sources: List[EarningsDateInfo]
@@ -223,13 +235,29 @@ class EarningsDateValidator:
         Returns:
             Tuple of (consensus_date, consensus_timing)
         """
-        # If we have Yahoo Finance, trust it (highest confidence)
+        sources_sorted = sorted(sources, key=lambda s: s.confidence, reverse=True)
+
+        # If we have Yahoo Finance, trust its date (highest confidence).
+        # Its timing can legitimately come back UNKNOWN (no matching row in
+        # Yahoo's own earnings_dates history) — that's not the same as "AMC
+        # is correct", so prefer a definite timing from any other source
+        # over discarding it. Root-caused 2026-09-10: a bug in Yahoo's own
+        # timing detection meant it always returned UNKNOWN in practice, and
+        # this method used to take Yahoo's timing unconditionally — silently
+        # overwriting a correct Finnhub BMO tag with a wrong guess on every
+        # sync. The detection bug is fixed separately; this fallback is a
+        # second, independent safeguard against the same failure mode.
         yf_sources = [s for s in sources if s.source == EarningsSource.YAHOO_FINANCE]
         if yf_sources:
-            return yf_sources[0].earnings_date, yf_sources[0].timing
+            consensus_date = yf_sources[0].earnings_date
+            timing = yf_sources[0].timing
+            if timing == EarningsTiming.UNKNOWN:
+                definite = [s for s in sources_sorted if s.timing != EarningsTiming.UNKNOWN]
+                if definite:
+                    timing = definite[0].timing
+            return consensus_date, timing
 
         # Otherwise, use the source with highest confidence
-        sources_sorted = sorted(sources, key=lambda s: s.confidence, reverse=True)
         best_source = sources_sorted[0]
 
         return best_source.earnings_date, best_source.timing
@@ -251,12 +279,14 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
 
     # Test with real data sources
+    from src.config.config import Config
     from src.infrastructure.api.finnhub import FinnhubAPI
-    from src.infrastructure.data_sources.yahoo_finance_earnings import YahooFinanceEarnings
-    import os
+    from src.infrastructure.data_sources.yahoo_finance_earnings import (
+        YahooFinanceEarnings,
+    )
 
     finnhub = FinnhubAPI(
-        api_key=os.getenv("FINNHUB_API_KEY", ""),
+        api_key=Config.from_env().api.finnhub_key,
         rate_limiter=None
     )
     yahoo_finance = YahooFinanceEarnings()

@@ -1,13 +1,9 @@
 """Tests for calculate_harvest_score() and _rslp30_to_skew_label()."""
 
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from scripts.scan.quality_scorer import calculate_harvest_score, _rslp30_to_skew_label
+from scripts.scan.quality_scorer import _rslp30_to_skew_label, calculate_harvest_score
 
 
 class TestRslp30ToSkewLabel:
@@ -54,9 +50,9 @@ class TestCalculateHarvestScore:
         assert calculate_harvest_score(candidate) == 100.0
 
     def test_minimum_gate_candidate(self):
-        # iv_rank=60 → 0pts, iv_hv=1.0 → 0pts, NEUTRAL → 10pts, max_contracts=100 → 20pts
+        # iv_rank=25 (the gate) → 0pts, iv_hv=1.0 → 0pts, NEUTRAL → 10pts, max_contracts=100 → 20pts
         candidate = {
-            'iv_rank_1y': 60.0,
+            'iv_rank_1y': 25.0,
             'iv_hv_ratio': 1.0,
             'r_slp_30': 1.0,      # NEUTRAL
             'max_contracts': 100,

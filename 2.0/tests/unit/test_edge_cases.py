@@ -5,18 +5,16 @@ Tests comprehensive error handling for unusual inputs, boundary conditions,
 and failure scenarios that may occur in production.
 """
 
-import pytest
 from datetime import date, timedelta
+from decimal import Decimal
+
+import pytest
+
+from src.application.metrics.implied_move import ImpliedMoveCalculator
+from src.domain.errors import AppError, ErrorCode
+from src.domain.types import Money, OptionChain, OptionQuote, Percentage, Strike
 
 FUTURE_EXPIRATION = date.today() + timedelta(days=45)
-from decimal import Decimal
-from pathlib import Path
-
-from src.domain.types import Money, Percentage, Strike, OptionQuote, OptionChain
-from src.domain.errors import ErrorCode, AppError
-from src.application.metrics.implied_move import ImpliedMoveCalculator
-from src.application.metrics.vrp import VRPCalculator
-from tests.conftest import MockOptionsProvider
 
 
 class TestZeroAndNegativeValues:
@@ -120,15 +118,8 @@ class TestEmptyAndMissingData:
         assert result.is_err, "Expected error for chain with no ATM strikes"
         assert result.unwrap_err().code in (ErrorCode.NODATA, ErrorCode.INVALID, ErrorCode.CALCULATION)
 
-    def test_missing_historical_data(self, mock_options_provider):
-        """Insufficient historical data for VRP calculation."""
-        stock_price = Money(100)
-        mock_options_provider.set_stock_price("NOHISTORY", stock_price)
-
-        # VRP calculator needs historical moves
-        calc = VRPCalculator(mock_options_provider)
-        # With no historical data, should return error
-        # (Implementation specific - depends on how VRP handles missing data)
+    # VRP with no or too few historical moves: test_vrp_edge_cases.py,
+    # TestVRPMinimumQuarters.
 
 
 class TestExtremeValues:
@@ -382,8 +373,9 @@ class TestConcurrencyEdgeCases:
 
     def test_cache_concurrent_access(self):
         """Multiple threads accessing cache simultaneously."""
-        from src.infrastructure.cache.memory_cache import MemoryCache
         import threading
+
+        from src.infrastructure.cache.memory_cache import MemoryCache
 
         cache = MemoryCache(ttl_seconds=60, max_size=100)
 
@@ -416,16 +408,15 @@ class TestConfigurationEdgeCases:
     def test_config_with_minimum_values(self, tmp_path):
         """Configuration with absolute minimum valid values."""
         from src.config.config import (
-            Config,
-            APIConfig,
-            DatabaseConfig,
-            CacheConfig,
-            ThresholdsConfig,
-            RateLimitConfig,
             AlgorithmConfig,
+            APIConfig,
+            CacheConfig,
+            Config,
             LoggingConfig,
-            StrategyConfig,
+            RateLimitConfig,
             ScanConfig,
+            StrategyConfig,
+            ThresholdsConfig,
         )
         from src.config.validation import validate_configuration
 
@@ -433,7 +424,6 @@ class TestConfigurationEdgeCases:
             api=APIConfig(
                 tradier_api_key="test_key",
             ),
-            database=DatabaseConfig(path=tmp_path / "test.db"),
             cache=CacheConfig(l1_ttl=1, l2_ttl=2),  # Minimum valid TTLs
             thresholds=ThresholdsConfig(
                 vrp_excellent=1.3,  # Minimum valid ordering
@@ -456,24 +446,22 @@ class TestConfigurationEdgeCases:
     def test_config_cache_ttl_equal(self, tmp_path):
         """L1 and L2 TTL equal should fail validation."""
         from src.config.config import (
-            Config,
-            APIConfig,
-            DatabaseConfig,
-            CacheConfig,
-            ThresholdsConfig,
-            RateLimitConfig,
             AlgorithmConfig,
+            APIConfig,
+            CacheConfig,
+            Config,
             LoggingConfig,
-            StrategyConfig,
+            RateLimitConfig,
             ScanConfig,
+            StrategyConfig,
+            ThresholdsConfig,
         )
-        from src.config.validation import validate_configuration, ConfigurationError
+        from src.config.validation import ConfigurationError, validate_configuration
 
         config = Config(
             api=APIConfig(
                 tradier_api_key="test_key",
             ),
-            database=DatabaseConfig(path=tmp_path / "test.db"),
             cache=CacheConfig(l1_ttl=30, l2_ttl=30),  # Equal!
             thresholds=ThresholdsConfig(),
             strategy=StrategyConfig(),
@@ -492,7 +480,7 @@ class TestErrorHandling:
 
     def test_result_type_chaining(self):
         """Result type error chaining."""
-        from src.domain.errors import Ok, Err, AppError, ErrorCode
+        from src.domain.errors import Err, ErrorCode, Ok
 
         # Test Ok chaining
         result = Ok(42).map(lambda x: x * 2)

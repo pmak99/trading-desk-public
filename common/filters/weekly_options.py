@@ -19,6 +19,8 @@ Detection Logic (from archive/1.0):
 from datetime import datetime, timedelta
 from typing import List, Tuple
 
+from common.timezone import today_et
+
 # Detection parameters
 WEEKLY_DETECTION_WINDOW_DAYS = 21
 WEEKLY_DETECTION_MIN_FRIDAYS = 2
@@ -55,9 +57,9 @@ def has_weekly_options(expirations: List[str], reference_date: str = None) -> Tu
         try:
             ref_date = datetime.strptime(reference_date, "%Y-%m-%d").date()
         except ValueError:
-            ref_date = datetime.now().date()
+            ref_date = today_et()
     else:
-        ref_date = datetime.now().date()
+        ref_date = today_et()
 
     # Calculate window end date
     window_end = ref_date + timedelta(days=WEEKLY_DETECTION_WINDOW_DAYS)

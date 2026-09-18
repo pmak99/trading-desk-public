@@ -1,17 +1,18 @@
 """harvest_mode — non-earnings 45 DTE premium harvest candidates."""
 import logging
 
-from src.container import Container
+from common.db import as_date  # noqa: E402
+from common.timezone import today_et  # noqa: E402
 
 from ..constants import (
     HARVEST_EARNINGS_EXCLUSION_DAYS,
+    HARVEST_IV_RANK_MIN,
     HARVEST_TOP_N,
     MEGACAP_CLUSTER,
 )
-from ..market_data import validate_harvest_chain, _harvest_target_expiry
 from ..harvest_live import get_live_harvest_candidates
-from ..quality_scorer import calculate_harvest_score, _rslp30_to_skew_label
-
+from ..market_data import _harvest_target_expiry, validate_harvest_chain
+from ..quality_scorer import _rslp30_to_skew_label, calculate_harvest_score
 from .vix import _check_vix_term_structure
 
 logger = logging.getLogger(__name__)
@@ -19,15 +20,14 @@ logger = logging.getLogger(__name__)
 
 def harvest_mode(
     container,
-    db_path: str,
     top_n: int = HARVEST_TOP_N,
-    iv_rank_min: float = 60.0,
+    iv_rank_min: float = HARVEST_IV_RANK_MIN,
     earnings_exclusion_days: int = HARVEST_EARNINGS_EXCLUSION_DAYS,
 ) -> int:
     """
     Surface non-earnings premium harvest candidates (~45 DTE entry, close at 21 DTE).
 
-    Phase 1: SQL filter from position_limits (IV rank, TRR, skew, earnings exclusion).
+    Phase 1: live gates (index IVR, IV/HV, TRR, earnings exclusion) — harvest_live.py.
     Phase 2: Parallel Tradier chain validation — real bid, OI, $5-wide spread credit.
 
     Returns 0 on success, 1 on DB error or no data.
@@ -69,7 +69,6 @@ def harvest_mode(
     logger.info("\nFetching live IV/HV for the harvest universe...")
     candidates, phase1_skipped = get_live_harvest_candidates(
         container,
-        db_path=db_path,
         iv_rank_min=iv_rank_min,
         earnings_exclusion_days=earnings_exclusion_days,
     )
@@ -84,7 +83,7 @@ def harvest_mode(
         logger.info("PREMIUM HARVEST — No candidates found")
         logger.info("=" * 70)
         logger.info(
-            f"\nNo tickers passed live filters: index IVR >= {iv_rank_min:.0f}%, "
+            f"\nNo tickers passed live filters: index IVR > {iv_rank_min:.0f}, "
             f"IV/HV >= 1.2, TRR != HIGH, "
             f"no earnings in next {earnings_exclusion_days}d."
         )
@@ -96,8 +95,8 @@ def harvest_mode(
     candidates.sort(key=lambda x: x['_harvest_score'], reverse=True)
 
     # ── Phase 2: parallel chain validation ───────────────────────────────────
-    target_expiry = _harvest_target_expiry(_dt.date.today())
-    dte = (target_expiry - _dt.date.today()).days
+    target_expiry = _harvest_target_expiry(today_et())
+    dte = (target_expiry - today_et()).days
     logger.info(f"\nValidating {len(candidates)} candidates vs live chain at {target_expiry} ({dte} DTE)...")
 
     chain_data: dict[str, dict] = {}
@@ -166,7 +165,7 @@ def harvest_mode(
         _megacap_warn = None
 
     # ── Output ───────────────────────────────────────────────────────────────
-    today_str = _dt.date.today().strftime("%b %d, %Y")
+    today_str = today_et().strftime("%b %d, %Y")
     logger.info("\n" + "=" * 90)
     logger.info(f"PREMIUM HARVEST — {today_str}  |  Expiry: {target_expiry} ({dte} DTE)")
     logger.info("~45 DTE entry | Close at 21 DTE | Exit: 50% profit OR 21 DTE")
@@ -210,8 +209,8 @@ def harvest_mode(
 
         if next_ern:
             try:
-                ern_date = _dt.datetime.strptime(next_ern, '%Y-%m-%d').date()
-                days_to_ern = (ern_date - _dt.date.today()).days
+                ern_date = as_date(next_ern)
+                days_to_ern = (ern_date - today_et()).days
                 ern_display = ern_date.strftime('%b %d')
                 if days_to_ern <= 45:
                     warn_tickers.append((c['ticker'], ern_display, days_to_ern))
@@ -251,19 +250,18 @@ def harvest_mode(
 
     logger.info("\nTRADE PARAMETERS")
     logger.info(f"  Expiry    : {target_expiry} ({dte} DTE)")
-    logger.info("  Structure : Defined-risk spreads — $5 wide max")
-    logger.info("              Index options (SPX/SPXW/NDX): $10-25 wide, 60/40 tax treatment")
-    logger.info("  Entry     : ~45 DTE (nearest standard monthly expiry >= 30 DTE)")
-    logger.info("  Exit      : 50% profit OR 21 DTE remaining — whichever first")
+    logger.info("  Structure : Bull put or bear call spread, $5-10 wide, 30Δ short / 20Δ long — no iron condors")
+    logger.info("  Entry     : ~45 DTE (nearest standard monthly expiry >= 30 DTE); VIX > 30 → 30 DTE")
+    logger.info("  Exit      : 50% of credit · time stop at 21 DTE · hard stop at −200% of credit")
     logger.info("  Credit    : Estimated $5-wide spread credit at 30-delta short leg")
-    logger.info("  Size      : max_contracts per TRR level; no single name > 25% of harvest portfolio")
+    logger.info("  Size      : $25K risk per trade, 8-10 concurrent, $100K deployed max — IRA sleeve only")
     logger.info("  Liq       : ✓GOOD = bid≥$1.00 + OI≥200 | ⚠WARN = bid≥$0.75 + OI≥100 | ✗THIN = below")
 
     if warn_tickers:
         logger.info("\nEARNINGS APPROACHING (within 45d — plan exit before earnings):")
         for ticker, ern_display, days_to_ern in warn_tickers:
-            close_by = (_dt.date.today() + _dt.timedelta(days=days_to_ern - 21)).strftime('%b %d')
+            close_by = (today_et() + _dt.timedelta(days=days_to_ern - 21)).strftime('%b %d')
             logger.info(f"  {ticker}: {ern_display} ({days_to_ern}d away) → close by {close_by}")
 
-    logger.info(f"\n\U0001f4a1 Run './trade.sh TICKER YYYY-MM-DD' for full options chain and strategy details")
+    logger.info("\n\U0001f4a1 Run './trade.sh TICKER YYYY-MM-DD' for full options chain and strategy details")
     return 0

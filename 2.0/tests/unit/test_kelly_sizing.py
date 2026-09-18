@@ -6,10 +6,12 @@ based on probability of profit, win/loss ratio, and edge.
 """
 
 import pytest
-from src.domain.types import Money
-from src.config.config import StrategyConfig, ScoringWeights
-from src.application.services.strategy import StrategyGenerator
+
 from src.application.metrics.liquidity_scorer import LiquidityScorer
+from src.application.services.strategy import StrategyGenerator
+from src.config.config import StrategyConfig
+from src.domain.scoring.weights import ScoringWeights
+from src.domain.types import Money
 
 
 class TestKellySizing:
@@ -21,7 +23,6 @@ class TestKellySizing:
         return StrategyConfig(
             use_kelly_sizing=True,
             kelly_fraction=0.25,
-            kelly_min_edge=0.05,
             kelly_min_contracts=1,
             risk_budget_per_trade=20000.0,
             max_contracts=100,
@@ -218,7 +219,6 @@ class TestKellySizing:
         config_no_kelly = StrategyConfig(
             use_kelly_sizing=False,  # DISABLED
             kelly_fraction=0.25,
-            kelly_min_edge=0.05,
             kelly_min_contracts=1,
             risk_budget_per_trade=20000.0,
             max_contracts=100,

@@ -1,14 +1,16 @@
 """TACO CLI — argparse front end over the tested engine modules.
 
 Invoked via: ./trade.sh taco <subcommand>  (see .claude/commands/taco.md).
-DB path resolves like the rest of 2.0: DB_PATH env var, default data/ivcrush.db.
+The database comes from PG* in the environment, like the rest of 2.0.
 """
 
 import argparse
 import json
-import os
 import sys
 from datetime import date, datetime
+
+from common.timezone import today_et
+from src.domain.market_calendar import get_market_status
 
 from .constants import (
     CROSS_ASSET_SYMBOLS,
@@ -39,15 +41,23 @@ from .market_data import (
     with_live_override,
 )
 from .scoring import score_entry
-from .store import close_position, log_run, open_positions, record_position
-from src.utils.market_hours import get_market_status
+from .store import (
+    close_position,
+    log_run,
+    open_positions,
+    record_position,
+    require_min_dte,
+)
 
 
-def _db_path() -> str:
-    return os.getenv("DB_PATH", "data/ivcrush.db")
+def _parse_date(s) -> date:
+    """A YYYY-MM-DD argument, or a `date` read back from taco_positions.
 
-
-def _parse_date(s: str) -> date:
+    The columns became real dates in migration 2, so rows no longer carry
+    strings; strptime() on a date raises TypeError, not ValueError.
+    """
+    if isinstance(s, date):
+        return s
     return datetime.strptime(s, "%Y-%m-%d").date()
 
 
@@ -69,7 +79,7 @@ def _live_quotes():
 
 
 def cmd_check(args) -> int:
-    today = date.today()
+    today = today_et()
     ok, guard_msg = entries_allowed(today)
     if guard_msg:
         print(f"⚠️  {guard_msg}")
@@ -166,7 +176,7 @@ def cmd_check(args) -> int:
     for n in sig.notes:
         print(f"  note: {n}")
 
-    log_run(_db_path(), mode="check", direction=direction, spot=spot,
+    log_run(mode="check", direction=direction, spot=spot,
             drawdown_pct=dd, runup_z=zu, vix=vix_level, vix_spike=spike,
             vix_term_ratio=term, event_date=event_date.isoformat(),
             event_type=event_type.value, event_rationale=args.rationale,
@@ -184,12 +194,12 @@ def cmd_check(args) -> int:
 
 
 def cmd_positions(args) -> int:
-    today = date.today()
+    today = today_et()
     phase = winddown_phase(today)
     if phase not in (WinddownPhase.CLEAR, WinddownPhase.RELEASED):
         print(f"⚠️  IPO wind-down phase: {phase.value}")
 
-    positions = open_positions(_db_path())
+    positions = open_positions()
     if not positions:
         print("No open TACO positions.")
         return 0
@@ -217,7 +227,7 @@ def cmd_positions(args) -> int:
         spx_since = [x for x in spx if x[0] >= entry]
         vix_since = [x for x in vix if x[0] >= entry]
         ev = evaluate_exit(refs, spx_since, vix_since)
-        compliant = "" if p["rule_compliant"] else " [rule_compliant=0]"
+        compliant = "" if p["rule_compliant"] else " [not rule-compliant]"
         liq = (" ⚠️ LIQUIDATE BEFORE IPO FUNDING"
                if phase == WinddownPhase.LIQUIDATE else "")
         print(f"[{p['id']}] {p['direction']} {p['symbol']} "
@@ -226,7 +236,7 @@ def cmd_positions(args) -> int:
         print(f"     {ev.status.value}: {ev.reason}")
         # Exit-signal forward validation: without this, there is no record of
         # what the engine said and when (audit finding 3).
-        log_run(_db_path(), mode="positions", direction=p["direction"],
+        log_run(mode="positions", direction=p["direction"],
                 spot=spx[-1][1], event_date=p["event_date"],
                 recommendation=(f"pos {p['id']} {p['symbol']} "
                                 f"{ev.status.value}: {ev.reason}"))
@@ -237,11 +247,9 @@ def cmd_record(args) -> int:
     entry = _parse_date(args.entry_date)
     event = _parse_date(args.event_date)
     exp = _parse_date(args.expiration)
-    dte = (exp - entry).days
-    if dte < MIN_DTE:
-        print(f"REFUSED: DTE {dte} < hard minimum {MIN_DTE} — "
-              f"short-dated index trades are a different, worse strategy")
-        return 1
+    # The store enforces this on the write; checking first only saves the
+    # download. A ValueError reaches main(), which prints it and returns 1.
+    require_min_dte(entry, exp)
     spx = fetch_series(SPX_SYMBOL, "1y")
     vix = fetch_series(VIX_SYMBOL, "6mo")
     if not spx or not vix:
@@ -249,11 +257,11 @@ def cmd_record(args) -> int:
         return 1
     refs = compute_refs(args.direction.upper(), spx, vix, event, entry)
     pid = record_position(
-        _db_path(), direction=args.direction.upper(), symbol=args.symbol,
+        direction=args.direction.upper(), symbol=args.symbol,
         contracts=args.contracts, strike=args.strike,
         expiration=args.expiration, premium_paid=args.premium,
         entry_date=args.entry_date, event_date=args.event_date, refs=refs,
-        rule_compliant=0 if args.not_compliant else 1)
+        rule_compliant=not args.not_compliant)
     anchor = (f"panic_low {refs.panic_low:,.0f}" if refs.panic_low is not None
               else f"euphoria_high {refs.euphoria_high:,.0f}")
     print(f"Recorded position {pid}: refs frozen — pre_event_high "
@@ -263,8 +271,8 @@ def cmd_record(args) -> int:
 
 
 def cmd_close(args) -> int:
-    exit_date = args.exit_date or date.today().isoformat()
-    pnl = close_position(_db_path(), args.id, exit_date, args.proceeds)
+    exit_date = args.exit_date or today_et().isoformat()
+    pnl = close_position(args.id, exit_date, args.proceeds)
     print(f"Closed position {args.id}: P&L ${pnl:,.0f}")
     return 0
 
@@ -291,7 +299,9 @@ def main(argv=None) -> int:
     r = sub.add_parser("record", help="record an executed fill")
     r.add_argument("--direction", required=True, choices=["call", "put"])
     r.add_argument("--symbol", required=True, choices=["SPX", "SPY"])
-    r.add_argument("--contracts", required=True, type=float)
+    # int, not float: the column is an integer, and Postgres would silently
+    # round 5.5 to 6 on the float-to-bigint assignment cast.
+    r.add_argument("--contracts", required=True, type=int)
     r.add_argument("--strike", required=True, type=float)
     r.add_argument("--expiration", required=True, help="YYYY-MM-DD")
     r.add_argument("--premium", required=True, type=float,
@@ -299,7 +309,7 @@ def main(argv=None) -> int:
     r.add_argument("--entry-date", required=True, help="YYYY-MM-DD")
     r.add_argument("--event-date", required=True, help="YYYY-MM-DD")
     r.add_argument("--not-compliant", action="store_true",
-                   help="mark rule_compliant=0 (excluded from validation)")
+                   help="mark not rule-compliant (excluded from validation)")
     r.set_defaults(fn=cmd_record)
 
     x = sub.add_parser("close", help="close a recorded position")

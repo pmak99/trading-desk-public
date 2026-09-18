@@ -1,25 +1,26 @@
 """Ticker analyzer service for IV Crush analysis."""
 
 import logging
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
-from src.domain.types import (
-    TickerAnalysis, ImpliedMove, VRPResult, PositionLimitsSnapshot,
-    SizingContext, snapshot_is_stale,
-)
-from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
-from src.domain.enums import DirectionalBias, EarningsTiming, Recommendation
-from src.application.metrics.market_conditions import MarketConditions
-from src.application.metrics.vrp import compute_close_baseline_vrp
+from common.constants import ORATS_SNAPSHOT_MAX_AGE_DAYS  # noqa: E402
+from common.timezone import now_et
+from src.application.metrics.implied_move_expiration import implied_move_expiration
 from src.application.metrics.skew_enhanced import SkewAnalysis, fuse_skew_bias
-
-import sys as _sys
-from pathlib import Path as _Path
-_root = str(_Path(__file__).resolve().parent.parent.parent.parent.parent)
-if _root not in _sys.path:
-    _sys.path.insert(0, _root)
-from common.constants import ORATS_ENABLED, ORATS_SNAPSHOT_MAX_AGE_DAYS  # noqa: E402
+from src.application.metrics.vrp import logged_vrp_columns
+from src.application.services.existing_position import existing_position_warning
+from src.application.services.stale_history import stale_history_warning
+from src.domain.enums import DirectionalBias, EarningsTiming, Recommendation
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
+from src.domain.market_conditions import MarketConditions
+from src.domain.tail_risk import tail_risk_level
+from src.domain.types import (
+    PositionLimitsSnapshot,
+    SizingContext,
+    TickerAnalysis,
+    snapshot_is_stale,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class TickerAnalyzer:
         ticker: str,
         earnings_date: date,
         expiration: date,
+        earnings_timing: EarningsTiming,
         generate_strategies: bool = False
     ) -> Result[TickerAnalysis, AppError]:
         """Analyze a ticker for IV Crush opportunity.
@@ -51,18 +53,20 @@ class TickerAnalyzer:
         Args:
             ticker: Stock ticker symbol
             earnings_date: Date of earnings announcement
-            expiration: Option expiration date (will be adjusted to nearest available)
-            generate_strategies: If True, generate trade strategies (bull put, bear call, iron condor)
+            expiration: TRADING expiration (calculate_expiration_date), adjusted to
+                the nearest listed one. Strategies, skew and term structure use it.
+            earnings_timing: BMO/AMC/DMH/UNKNOWN. Picks the implied-move
+                expiration, the same one scan/whisper/bot price at.
+            generate_strategies: If True, generate trade strategies (bull put, bear call)
 
         Returns:
             Result containing TickerAnalysis or error
         """
         sizing_ctx = None
+        provider = self.container.cached_options_provider
         try:
-            # Step 0: Find nearest available expiration if exact date not available
-            nearest_exp_result = self.container.tradier.find_nearest_expiration(
-                ticker, expiration
-            )
+            # Step 0: Find nearest available trading expiration
+            nearest_exp_result = provider.find_nearest_expiration(ticker, expiration)
             if nearest_exp_result.is_err:
                 return Err(nearest_exp_result.error)
 
@@ -73,9 +77,17 @@ class TickerAnalyzer:
                     f"(requested {expiration})"
                 )
 
-            # Step 1: Calculate implied move
+            # Step 1: Implied move at the first expiration containing the
+            # reaction, not the trading expiration: the later expiry's extra
+            # diffusion inflated VRP on /analyze only (audit 3.1).
+            im_exp_result = implied_move_expiration(
+                provider, ticker, earnings_date, earnings_timing
+            )
+            if im_exp_result.is_err:
+                return Err(im_exp_result.error)
+            implied_move_exp = im_exp_result.value
             implied_result = self.container.implied_move_calculator.calculate(
-                ticker, actual_expiration
+                ticker, implied_move_exp
             )
 
             if implied_result.is_err:
@@ -97,6 +109,14 @@ class TickerAnalyzer:
                 )
 
             historical_moves = hist_result.value
+
+            # A gap here means at least one quarter is missing from
+            # historical_moves entirely -- VRP/TRR below window off whatever is
+            # stored, stale or not. Checked before the min_quarters gate: a
+            # ticker can clear that count and still be missing its two most
+            # recent reactions (LEN: 12 quarters on file, but the newest two
+            # were six months stale).
+            stale_warning = stale_history_warning(ticker, historical_moves, earnings_date)
 
             min_quarters = self.container.config.thresholds.min_historical_quarters
             if len(historical_moves) < min_quarters:
@@ -121,8 +141,9 @@ class TickerAnalyzer:
 
             vrp = vrp_result.value
 
-            # Step 3.5: Apply adaptive thresholds based on VIX regime
-            vrp, market_conditions = self._apply_adaptive_thresholds(ticker, vrp)
+            # Step 3.6: both conventions' VRP for analysis_log -- close-to-close
+            # graded above, intraday recomputed as a reference.
+            vrp_columns = logged_vrp_columns(vrp, historical_moves)
 
             # Step 4: Optionally calculate enhanced skew (Phase 4)
             skew = None
@@ -153,13 +174,13 @@ class TickerAnalyzer:
             snapshot = PositionLimitsSnapshot()
             if vrp.is_tradeable:
                 tail_risk_level = self._compute_tail_risk_level(historical_moves)
-                if ORATS_ENABLED:
+                if self.container.config.api.orats_enabled:
                     snapshot = self._load_position_limits(ticker)
 
-            # Step 5.6: Fuse skew with ORATS rSlp30 when available; when r_slp_30
-            # is None (ORATS retired Jun 2026, or ticker missing from snapshot),
-            # _fuse_skew_signals substitutes the Tradier slope_atm proxy at
-            # reduced confidence — the post-ORATS continuity path.
+            # Step 5.6: Fuse skew with ORATS rSlp30 when available. When r_slp_30
+            # is None (ORATS retired Jun 2026, or ticker missing from snapshot)
+            # there is no second source and the Tradier bias passes through
+            # unchanged (skew_enhanced.fuse_skew_bias).
             if skew is not None and (
                 snapshot.r_slp_30 is not None or skew.slope_atm is not None
             ):
@@ -167,7 +188,7 @@ class TickerAnalyzer:
                 slope_desc = (
                     f"rSlp30={snapshot.r_slp_30:.3f}"
                     if snapshot.r_slp_30 is not None
-                    else f"proxy(slope_atm={skew.slope_atm:.1f})"
+                    else "no second source (Tradier only)"
                 )
                 logger.debug(
                     f"{ticker}: Skew fused: Tradier={skew.directional_bias.value} "
@@ -200,11 +221,9 @@ class TickerAnalyzer:
                 )
 
             # Step 6: Optionally generate trade strategies
-            # market_conditions is None only when VIX fetch failed — don't generate
-            # strategies without regime confirmation even if raw VRP looks tradeable.
             strategies = None
             option_chain = None
-            if generate_strategies and vrp.is_tradeable and market_conditions is not None:
+            if generate_strategies and vrp.is_tradeable:
                 try:
                     chain_result = self.container.cached_options_provider.get_option_chain(
                         ticker, actual_expiration
@@ -227,33 +246,35 @@ class TickerAnalyzer:
 
             # Step 6.5: IV term structure + calendar spread pilot (Jun 2026).
             # Both are best-effort — failures degrade to None, never block analysis.
-            term_structure = None
-            calendar_candidate = None
-            if vrp.is_tradeable:
-                term_structure, calendar_candidate = self._analyze_term_structure(
-                    ticker, actual_expiration, option_chain, skew, sizing_ctx
-                )
-
-            # Compute gap-inclusive close-to-close VRP before building TickerAnalysis
-            # so the value is carried on the object (not only logged to the DB).
-            close_mean, vrp_close = compute_close_baseline_vrp(
-                float(implied_move.implied_move_pct.value), historical_moves
+            #
+            # Term structure is computed for EVERY ticker, tradeable or not.
+            # It is the logged A/B variable, and gating it on is_tradeable
+            # biased the sample toward names that already look like good
+            # candidates: the Sep 4 2026 evaluation found the flat/mild
+            # (<1.10) comparison bucket held 0 of 37 qualifying events, so the
+            # hypothesis under test could not be evaluated at all. The calendar
+            # pilot stays gated on is_tradeable — that one is a trade
+            # recommendation, not an observation, and must never be built for a
+            # ticker the VRP gate rejected.
+            term_structure, calendar_candidate = self._analyze_term_structure(
+                ticker, actual_expiration, option_chain, skew, sizing_ctx,
+                allow_calendar=vrp.is_tradeable,
             )
 
             # Step 6.6: "One position per ticker per earnings event" (CLAUDE.md).
-            # Best-effort check against journaled history — see field docstring
-            # on TickerAnalysis.existing_position_warning for the real limit
-            # (no live open-position tracker exists for this system).
-            existing_position_warning = None
-            if generate_strategies and strategies is not None:
-                existing_position_warning = self._check_existing_position(ticker, earnings_date)
+            # The same check scan, whisper and the bot run, on every analysis:
+            # it was gated on generate_strategies until 2026-09-14. It sees
+            # closed, journaled trades only (services/existing_position.py).
+            existing_position = existing_position_warning(
+                self.container.db_pool, ticker, earnings_date
+            )
 
             # Build complete analysis
             analysis = TickerAnalysis(
                 ticker=ticker,
                 earnings_date=earnings_date,
-                earnings_timing=EarningsTiming.AMC,  # Default to After Market Close
-                entry_time=datetime.now(),
+                earnings_timing=earnings_timing,
+                entry_time=now_et(),
                 expiration=actual_expiration,  # Use adjusted expiration
                 implied_move=implied_move,
                 vrp=vrp,
@@ -264,9 +285,9 @@ class TickerAnalyzer:
                 sizing_context=sizing_ctx,
                 strategies=strategies,  # Strategy recommendations
                 calendar_candidate=calendar_candidate,
-                vrp_close_ratio=vrp_close,
-                historical_close_mean_pct=close_mean,
-                existing_position_warning=existing_position_warning,
+                **vrp_columns,
+                existing_position_warning=existing_position,
+                stale_history_warning=stale_warning,
             )
 
             # Recent-move streak (observational only, no gate — Sep 2026 OOS
@@ -281,14 +302,13 @@ class TickerAnalyzer:
             # Persist to analysis_log — fire-and-forget (failures caught inside repo)
             self.container.analysis_repository.log_analysis(
                 analysis,
-                market_conditions,
-                historical_close_mean_pct=analysis.historical_close_mean_pct,
-                vrp_close_ratio=analysis.vrp_close_ratio,
+                self._market_conditions_for_log(ticker),
                 term_slope_ratio=(
                     term_structure.slope_ratio if term_structure else None
                 ),
                 recent_move_up_count=recent_move_up_count,
                 recent_move_qtrs=recent_move_qtrs,
+                source="analyze",
             )
 
             return Ok(analysis)
@@ -306,20 +326,26 @@ class TickerAnalyzer:
         front_chain,
         skew,
         sizing_ctx,
+        allow_calendar: bool = True,
     ):
         """
         Compute IV term structure (front vs ~30d-out ATM IV) and, when
         elevated tail risk coincides with backwardation, build the calendar
         spread pilot candidate as the defined-risk alternative to skipping.
 
+        allow_calendar=False computes and returns the term structure but never
+        builds a calendar candidate. Callers pass False for tickers that failed
+        the VRP gate: the term structure is still logged (it is the A/B
+        variable), but a non-tradeable ticker must not produce a trade.
+
         Returns (TermStructureResult | None, Strategy | None). Best-effort:
         any failure returns (None, None) or (ts, None) — never raises.
         """
         from src.application.metrics.term_structure import (
-            select_back_expiration,
+            RATIO_MODERATE,
             analyze_term_structure,
             classify_slope_ratio,
-            RATIO_MODERATE,
+            select_back_expiration,
         )
         from src.application.services.calendar_spread import build_calendar_spread
         from src.domain.enums import DirectionalBias
@@ -363,10 +389,12 @@ class TickerAnalyzer:
             risk_elevated = sizing_ctx is not None and (
                 sizing_ctx.trr_level == 'HIGH' or sizing_ctx.iv_effect_reduction
             )
-            if risk_elevated and ts.slope_ratio is not None and ts.slope_ratio >= RATIO_MODERATE:
+            if (allow_calendar and risk_elevated and ts.slope_ratio is not None
+                    and ts.slope_ratio >= RATIO_MODERATE):
                 bias = skew.directional_bias if skew is not None else DirectionalBias.NEUTRAL
                 cal_result = build_calendar_spread(
-                    front_chain, back_result.value, bias, sizing_ctx
+                    front_chain, back_result.value, self.container.liquidity_scorer,
+                    bias, sizing_ctx,
                 )
                 if cal_result.is_ok:
                     calendar = cal_result.value
@@ -379,91 +407,33 @@ class TickerAnalyzer:
             return None, None
 
     def _compute_tail_risk_level(self, historical_moves) -> Optional[str]:
-        gap_moves = [
-            abs(m.gap_move_pct.value) for m in historical_moves
-            if m.gap_move_pct is not None
-        ]
-        if len(gap_moves) < 2:
-            return None
-        avg_gap = sum(gap_moves) / len(gap_moves)
-        max_gap = max(gap_moves)
-        trr = max_gap / avg_gap if avg_gap > 0 else 0
-        if trr > 2.5:
-            return 'HIGH'
-        if trr >= 1.5:
-            return 'NORMAL'
-        return 'LOW'
-
-    def _check_existing_position(self, ticker: str, earnings_date: date) -> Optional[str]:
-        """
-        CLAUDE.md: "One position per ticker per earnings event. No second
-        bet, no repair attempt." — a real repair campaign that turned a
-        large first loss catastrophic is the exact failure mode this guards
-        against.
-
-        This is a best-effort check against the journaled `strategies`
-        table (populated by /journal after fills are imported from Fidelity
-        exports), NOT a live open-position tracker — no such tracker exists
-        for the main earnings system (unlike TACO's taco_positions, which
-        is updated in real time). It will catch a repeat attempt on a
-        ticker+earnings_date that was already journaled; it cannot catch a
-        same-day repeat entered before /journal has been run for the first
-        leg. Best-effort, not a guarantee — surfaced as a warning, not a
-        hard block, since a human may have deliberately closed and
-        re-entered, or the journal may simply be behind.
-        """
-        try:
-            with self.container.db_pool.get_connection() as conn:
-                cursor = conn.execute(
-                    "SELECT strategy_type, quantity, acquired_date, sale_date, "
-                    "gain_loss, campaign_id FROM strategies "
-                    "WHERE symbol = ? AND earnings_date = ? "
-                    "ORDER BY acquired_date DESC LIMIT 5",
-                    (ticker, earnings_date.isoformat()),
-                )
-                rows = cursor.fetchall()
-        except Exception as e:
-            logger.debug(f"{ticker}: Existing-position check failed (non-fatal): {e}")
-            return None
-
-        if not rows:
-            return None
-
-        n = len(rows)
-        latest = rows[0]
-        detail = (
-            f"{n} prior journaled position(s) already exist for {ticker} on "
-            f"{earnings_date.isoformat()} — most recent: {latest['strategy_type']} "
-            f"x{latest['quantity']}, acquired {latest['acquired_date']}"
+        return tail_risk_level(
+            m.gap_move_pct.value for m in historical_moves if m.gap_move_pct is not None
         )
-        if latest['campaign_id']:
-            detail += f", campaign={latest['campaign_id']}"
-        logger.warning(f"{ticker}: {detail} — CLAUDE.md: no second bet, no repair attempt.")
-        return detail
 
     def _load_position_limits(self, ticker: str) -> PositionLimitsSnapshot:
-        with self.container.db_pool.get_connection() as conn:
+        with self.container.db_pool.connection() as conn:
             cursor = conn.execute(
                 "SELECT fcst_ern_iv_effect, iee_earn_effect, r_slp_30, last_updated "
-                "FROM position_limits WHERE ticker = ?",
+                "FROM position_limits WHERE ticker = %s",
                 (ticker,)
             )
             row = cursor.fetchone()
         if not row:
             return PositionLimitsSnapshot()
-        if snapshot_is_stale(row['last_updated']):
+        if snapshot_is_stale(row.last_updated):
             logger.warning(
                 f"{ticker}: position_limits snapshot is stale "
-                f"(last_updated={row['last_updated']}, max age "
+                f"(last_updated={row.last_updated}, max age "
                 f"{ORATS_SNAPSHOT_MAX_AGE_DAYS}d) — treating as absent. "
                 f"ORATS-era snapshot (subscription ended Jun 2026): "
                 f"historical context only, not refreshable."
             )
             return PositionLimitsSnapshot()
         return PositionLimitsSnapshot(
-            fcst_ern_iv_effect=row['fcst_ern_iv_effect'],
-            iee_earn_effect=row['iee_earn_effect'],
-            r_slp_30=row['r_slp_30'],
+            fcst_ern_iv_effect=row.fcst_ern_iv_effect,
+            iee_earn_effect=row.iee_earn_effect,
+            r_slp_30=row.r_slp_30,
         )
 
     def _build_sizing_context(
@@ -473,7 +443,11 @@ class TickerAnalyzer:
         fused_bias: Optional['DirectionalBias'] = None,
         vrp_marginal: bool = False,
     ) -> SizingContext:
-        return SizingContext(
+        # Tiers come from config, not the SizingContext defaults — otherwise
+        # SIZING_* env vars are unreachable on the live path (the same defect
+        # that made MAX_CONTRACTS a no-op until Sep 2026).
+        return SizingContext.from_strategy_config(
+            self.container.config.strategy,
             trr_level=trr_level,
             fcst_ern_iv_effect=snapshot.fcst_ern_iv_effect,
             iee_earn_effect=snapshot.iee_earn_effect,
@@ -500,93 +474,22 @@ class TickerAnalyzer:
             return tradier_skew.directional_bias
         return fused
 
-    def _apply_adaptive_thresholds(
-        self, ticker: str, vrp: VRPResult
-    ) -> tuple[VRPResult, Optional[MarketConditions]]:
-        """Apply adaptive thresholds based on current VIX regime.
+    def _market_conditions_for_log(self, ticker: str) -> Optional[MarketConditions]:
+        """VIX regime for the analysis_log row, or None. Display and logging only.
 
-        In elevated volatility environments, we require higher VRP ratios
-        to maintain edge. This may downgrade recommendations from the base
-        VRP calculation.
-
-        Args:
-            ticker: Stock ticker (for logging)
-            vrp: Original VRP result with base recommendation
-
-        Returns:
-            Tuple of (adjusted VRPResult, MarketConditions or None on failure)
+        Until 2026-09-14 this regime also raised the VRP thresholds 1.1-1.5x and
+        refused every trade at VIX 40+, on /analyze alone. A pre-registered test
+        (scripts/research/vix_adaptive_thresholds.py) found 29 demoted events on
+        17 dates in three years, too few to support it, and those crushed more
+        often than the events kept, so every path now uses the CLAUDE.md tiers.
         """
         try:
-            # Get current market conditions (cached for 15 min — one fetch per scan session)
-            market_conditions_result = self.container.market_conditions_analyzer.get_current_conditions()
-
-            if market_conditions_result.is_err:
-                logger.warning(
-                    f"{ticker}: VIX unavailable — adaptive thresholds NOT applied. "
-                    f"Base recommendation ({vrp.recommendation.value}) may overstate edge."
-                )
-                return vrp, None
-
-            market_conditions = market_conditions_result.value
-
-            # Get adaptive thresholds based on VIX regime
-            adapted = self.container.adaptive_threshold_calculator.calculate(market_conditions)
-
-            # Check if trading is not recommended in current regime
-            if not adapted.trade_recommended:
-                logger.warning(
-                    f"{ticker}: Trading not recommended in {adapted.regime} regime "
-                    f"(VIX={adapted.vix_level:.1f}). Overriding to SKIP."
-                )
-                return VRPResult(
-                    ticker=vrp.ticker,
-                    expiration=vrp.expiration,
-                    implied_move_pct=vrp.implied_move_pct,
-                    historical_mean_move_pct=vrp.historical_mean_move_pct,
-                    vrp_ratio=vrp.vrp_ratio,
-                    edge_score=vrp.edge_score,
-                    recommendation=Recommendation.SKIP,
-                ), market_conditions
-
-            # Re-evaluate recommendation using adapted thresholds
-            if vrp.vrp_ratio >= adapted.vrp_excellent:
-                new_recommendation = Recommendation.EXCELLENT
-            elif vrp.vrp_ratio >= adapted.vrp_good:
-                new_recommendation = Recommendation.GOOD
-            elif vrp.vrp_ratio >= adapted.vrp_marginal:
-                new_recommendation = Recommendation.MARGINAL
-            else:
-                new_recommendation = Recommendation.SKIP
-
-            # Log if recommendation changed
-            if new_recommendation != vrp.recommendation:
-                logger.info(
-                    f"{ticker}: Adaptive thresholds adjusted recommendation from "
-                    f"{vrp.recommendation.value} → {new_recommendation.value} "
-                    f"(VIX regime: {adapted.regime}, factor: {adapted.adjustment_factor:.1f}x)"
-                )
-                return VRPResult(
-                    ticker=vrp.ticker,
-                    expiration=vrp.expiration,
-                    implied_move_pct=vrp.implied_move_pct,
-                    historical_mean_move_pct=vrp.historical_mean_move_pct,
-                    vrp_ratio=vrp.vrp_ratio,
-                    edge_score=vrp.edge_score,
-                    recommendation=new_recommendation,
-                ), market_conditions
-
-            # Log that adaptive thresholds were applied but no change needed
-            if adapted.is_adjusted:
-                logger.debug(
-                    f"{ticker}: Adaptive thresholds applied (factor: {adapted.adjustment_factor:.1f}x) "
-                    f"but recommendation unchanged: {vrp.recommendation.value}"
-                )
-
-            return vrp, market_conditions
-
-        except Exception as e:
-            logger.warning(
-                f"{ticker}: Error applying adaptive thresholds: {e}. "
-                f"Using base recommendation: {vrp.recommendation.value}"
-            )
-            return vrp, None
+            result = self.container.market_conditions_analyzer.get_current_conditions()
+        except Exception:
+            logger.warning(f"{ticker}: VIX regime fetch failed — analysis_log vix_level NULL",
+                           exc_info=True)
+            return None
+        if result.is_err:
+            logger.debug(f"{ticker}: VIX regime unavailable: {result.error}")
+            return None
+        return result.value

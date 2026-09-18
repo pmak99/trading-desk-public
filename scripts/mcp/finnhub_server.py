@@ -36,6 +36,10 @@ import requests
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT / "2.0"))
 
+from mcp.server import MCPServer  # noqa: E402
+from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
+
+from common.timezone import today_et  # noqa: E402
 from src.config.config import Config  # noqa: E402
 from src.container import Container  # noqa: E402
 from src.infrastructure.api.finnhub import (  # noqa: E402
@@ -43,9 +47,6 @@ from src.infrastructure.api.finnhub import (  # noqa: E402
     RATE_LIMIT_BACKOFF_SECONDS,
     RATE_LIMIT_MAX_RETRIES,
 )
-
-from mcp.server import MCPServer  # noqa: E402
-from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 logger = logging.getLogger("finnhub-mcp")
@@ -102,11 +103,10 @@ def _raw_get(path: str, params: dict) -> dict | list:
     if client.rate_limiter and not client.rate_limiter.acquire(blocking=True):
         raise ToolError("Finnhub rate limit exceeded (local bucket)")
 
-    params = {**params, "token": client.api_key}
-
     for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
         response = requests.get(
-            f"{client.base_url}/{path}", params=params, timeout=client.timeout
+            f"{client.base_url}/{path}", params=params,
+            headers=client.auth_headers, timeout=client.timeout
         )
 
         if response.status_code == 429:
@@ -204,7 +204,7 @@ def _company_news(args: dict) -> dict:
     symbol = (args.get("symbol") or "").strip().upper()
     if not symbol:
         raise ToolError("symbol is required")
-    to_date = _parse_date(args.get("to_date") or date.today(), "to_date")
+    to_date = _parse_date(args.get("to_date") or today_et(), "to_date")
     from_date = _parse_date(
         args.get("from_date") or (to_date - timedelta(days=7)), "from_date"
     )

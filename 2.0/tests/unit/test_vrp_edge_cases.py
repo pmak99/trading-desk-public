@@ -6,24 +6,25 @@ Tests boundary conditions, guard clauses, and error handling in VRP calculation:
 - NaN/Inf mean_move (recently added guards)
 - Minimum quarters requirement
 - Negative implied move
-- VRP ratio at exact threshold boundaries (1.2, 1.4, 1.8)
+- VRP ratio at exact threshold boundaries (VRP_MARGINAL_FROM, VRP_GOOD_FROM,
+  VRP_EXCELLENT_FROM)
 """
 
-import pytest
-import numpy as np
 from datetime import date, timedelta
 
-from src.application.metrics.vrp import VRPCalculator
+import pytest
+
+from src.application.metrics.vrp import VRPCalculator, compute_baseline_vrp
+from src.domain.enums import Recommendation
+from src.domain.errors import ErrorCode
 from src.domain.types import (
-    Money,
-    Percentage,
     HistoricalMove,
     ImpliedMove,
+    Money,
+    Percentage,
     Strike,
 )
-from src.domain.errors import ErrorCode
-from src.domain.enums import Recommendation
-
+from src.domain.vrp_tier import VRP_EXCELLENT_FROM, VRP_GOOD_FROM, VRP_MARGINAL_FROM
 
 # ============================================================================
 # Helpers
@@ -231,19 +232,14 @@ class TestVRPNegativeImpliedMove:
 class TestVRPThresholdBoundaries:
     """Tests for VRP ratio at exact threshold boundaries.
 
-    Uses BALANCED mode default thresholds: 1.8 (excellent), 1.4 (good), 1.2 (marginal).
-    The VRPCalculator defaults are LEGACY (7.0, 4.0, 1.5) so we set them explicitly.
+    The calculator's defaults are CLAUDE.md §1 (close-to-close): VRP_EXCELLENT_FROM
+    (excellent), VRP_GOOD_FROM (good), VRP_MARGINAL_FROM (marginal).
     """
 
     @pytest.fixture
     def balanced_calc(self):
-        """VRP calculator with BALANCED thresholds."""
-        return VRPCalculator(
-            threshold_excellent=1.8,
-            threshold_good=1.4,
-            threshold_marginal=1.2,
-            min_quarters=4,
-        )
+        """VRP calculator on its default (CLAUDE.md §1) thresholds."""
+        return VRPCalculator(min_quarters=4)
 
     def _make_vrp_at_ratio(self, target_ratio: float):
         """Create test data to produce a specific VRP ratio.
@@ -259,57 +255,63 @@ class TestVRPThresholdBoundaries:
         return moves, implied
 
     def test_exactly_at_excellent_threshold(self, balanced_calc):
-        """VRP = 1.8x should be EXCELLENT (>= threshold)."""
-        moves, implied = self._make_vrp_at_ratio(1.8)
+        """VRP = VRP_EXCELLENT_FROM should be EXCELLENT (>= threshold)."""
+        moves, implied = self._make_vrp_at_ratio(VRP_EXCELLENT_FROM)
         result = balanced_calc.calculate("TEST", date(2026, 6, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.EXCELLENT
-        assert abs(result.value.vrp_ratio - 1.8) < 0.01
+        assert abs(result.value.vrp_ratio - VRP_EXCELLENT_FROM) < 0.01
 
     def test_just_below_excellent_threshold(self, balanced_calc):
-        """VRP = 1.79x should be GOOD, not EXCELLENT."""
-        moves, implied = self._make_vrp_at_ratio(1.79)
+        """A ratio just below VRP_EXCELLENT_FROM should be GOOD, not EXCELLENT."""
+        moves, implied = self._make_vrp_at_ratio(VRP_EXCELLENT_FROM - 0.01)
         result = balanced_calc.calculate("TEST", date(2026, 6, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.GOOD
 
     def test_exactly_at_good_threshold(self, balanced_calc):
-        """VRP = 1.4x should be GOOD (>= threshold)."""
-        moves, implied = self._make_vrp_at_ratio(1.4)
+        """VRP = VRP_GOOD_FROM should be GOOD (>= threshold)."""
+        moves, implied = self._make_vrp_at_ratio(VRP_GOOD_FROM)
         result = balanced_calc.calculate("TEST", date(2026, 6, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.GOOD
 
     def test_just_below_good_threshold(self, balanced_calc):
-        """VRP = 1.39x should be MARGINAL, not GOOD."""
-        moves, implied = self._make_vrp_at_ratio(1.39)
+        """A ratio just below VRP_GOOD_FROM should be MARGINAL, not GOOD."""
+        moves, implied = self._make_vrp_at_ratio(VRP_GOOD_FROM - 0.01)
         result = balanced_calc.calculate("TEST", date(2026, 6, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.MARGINAL
 
     def test_exactly_at_marginal_threshold(self, balanced_calc):
-        """VRP = 1.2x should be MARGINAL (>= threshold)."""
-        moves, implied = self._make_vrp_at_ratio(1.2)
+        """VRP = VRP_MARGINAL_FROM should be MARGINAL (>= threshold)."""
+        moves, implied = self._make_vrp_at_ratio(VRP_MARGINAL_FROM)
         result = balanced_calc.calculate("TEST", date(2026, 6, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.MARGINAL
 
     def test_just_below_marginal_threshold(self, balanced_calc):
-        """VRP = 1.19x should be SKIP."""
-        moves, implied = self._make_vrp_at_ratio(1.19)
+        """A ratio just below VRP_MARGINAL_FROM should be SKIP."""
+        moves, implied = self._make_vrp_at_ratio(VRP_MARGINAL_FROM - 0.01)
         result = balanced_calc.calculate("TEST", date(2026, 6, 16), implied, moves)
 
         assert result.is_ok
         assert result.value.recommendation == Recommendation.SKIP
 
     def test_ratio_at_1_0_is_skip(self, balanced_calc):
-        """VRP = 1.0x (implied = historical) should be SKIP."""
-        moves, implied = self._make_vrp_at_ratio(1.0)
+        """A ratio well below VRP_MARGINAL_FROM should be SKIP.
+
+        1.0x (implied = historical) is no longer a SKIP-representative ratio on
+        the close-to-close ladder: below 1.0 the straddle prices less than the
+        average realized move, which the intraday ladder also admitted, in
+        units that hid it (see vrp_tier.py).
+        """
+        moves, implied = self._make_vrp_at_ratio(VRP_MARGINAL_FROM - 0.2)
         result = balanced_calc.calculate("TEST", date(2026, 6, 16), implied, moves)
 
         assert result.is_ok
@@ -356,92 +358,39 @@ class TestVRPMoveMetric:
         assert abs(result.value.vrp_ratio - 2.0) < 0.01
 
 
-class TestVRPConsistencyMetrics:
-    """Tests for calculate_with_consistency method."""
-
-    def test_consistency_metrics_returned(self):
-        """calculate_with_consistency should return VRPResult and consistency dict."""
-        calc = VRPCalculator(min_quarters=4)
-        moves = make_historical_moves(n=8, close_move_pct=5.0)
-        implied = make_implied_move(implied_pct=10.0)
-
-        result = calc.calculate_with_consistency(
-            "TEST", date(2026, 6, 16), implied, moves
-        )
-
-        assert result.is_ok
-        vrp_result, consistency = result.value
-        assert vrp_result.vrp_ratio > 0
-        assert "mean" in consistency
-        assert "median" in consistency
-        assert "std" in consistency
-        assert "mad" in consistency
-        assert "tail_risk_ratio" in consistency
-        assert "tail_risk_level" in consistency
-
-    def test_consistency_error_propagation(self):
-        """Errors from calculate() should propagate through calculate_with_consistency."""
-        calc = VRPCalculator(min_quarters=4)
-        result = calc.calculate_with_consistency(
-            "TEST", date(2026, 6, 16), make_implied_move(), []
-        )
-
-        assert result.is_err
-
-    def test_tail_risk_level_classification(self):
-        """Tail risk levels should match thresholds (>2.5=HIGH, 1.5-2.5=NORMAL, <1.5=LOW)."""
-        calc = VRPCalculator(min_quarters=4)
-
-        # Uniform moves -> low tail risk
-        moves = make_historical_moves(n=8, close_move_pct=5.0)
-        implied = make_implied_move(implied_pct=10.0)
-
-        result = calc.calculate_with_consistency(
-            "TEST", date(2026, 6, 16), implied, moves
-        )
-
-        assert result.is_ok
-        _, consistency = result.value
-        # All uniform -> tail_risk_ratio = max/mean = 1.0 -> LOW
-        assert consistency["tail_risk_level"] == "LOW"
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
 
 # ============================================================================
-# compute_close_baseline_vrp (gap-inclusive VRP for live A/B, migration 016)
+# compute_baseline_vrp (metric="close": gap-inclusive VRP, migration 016)
 # ============================================================================
-
-from src.application.metrics.vrp import compute_close_baseline_vrp
-
 
 class TestComputeCloseBaselineVRP:
     """Tests for the gap-inclusive close-baseline VRP helper."""
 
     def test_basic_ratio(self):
         moves = [make_historical_move(close_move_pct=c) for c in (4.0, -6.0, 5.0, -5.0)]
-        mean_close, ratio = compute_close_baseline_vrp(7.5, moves)
+        mean_close, ratio = compute_baseline_vrp(7.5, moves, "close")
         assert mean_close == pytest.approx(5.0)
         assert ratio == pytest.approx(1.5)
 
     def test_uses_absolute_values(self):
         """Signed moves must not cancel — baseline uses |close_move_pct|."""
         moves = [make_historical_move(close_move_pct=c) for c in (5.0, -5.0, 5.0, -5.0)]
-        mean_close, ratio = compute_close_baseline_vrp(10.0, moves)
+        mean_close, ratio = compute_baseline_vrp(10.0, moves, "close")
         assert mean_close == pytest.approx(5.0)
         assert ratio == pytest.approx(2.0)
 
     def test_insufficient_quarters_returns_none(self):
         moves = [make_historical_move(close_move_pct=5.0) for _ in range(3)]
-        mean_close, ratio = compute_close_baseline_vrp(10.0, moves)
+        mean_close, ratio = compute_baseline_vrp(10.0, moves, "close")
         assert mean_close is None
         assert ratio is None
 
     def test_zero_mean_returns_none(self):
         moves = [make_historical_move(close_move_pct=0.0) for _ in range(4)]
-        mean_close, ratio = compute_close_baseline_vrp(10.0, moves)
+        mean_close, ratio = compute_baseline_vrp(10.0, moves, "close")
         assert mean_close is None
         assert ratio is None
 
@@ -450,6 +399,6 @@ class TestComputeCloseBaselineVRP:
         # Frozen dataclass — rebuild one move without close_move_pct via __dict__ copy
         import dataclasses
         broken = dataclasses.replace(moves[0], close_move_pct=None)
-        mean_close, ratio = compute_close_baseline_vrp(10.0, moves[:3] + [broken])
+        mean_close, ratio = compute_baseline_vrp(10.0, moves[:3] + [broken], "close")
         assert mean_close is None  # only 3 valid quarters remain
         assert ratio is None

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Import enhanced CSV trade journal into ivcrush.db trade_journal table.
+Import the enhanced CSV trade journal into Postgres trade_journal.
 
 Reads trading_journal_enhanced.csv (output of parse_fidelity_csv.py) and inserts
-rows into trade_journal using INSERT OR IGNORE to skip duplicates.
+rows with ON CONFLICT ON CONSTRAINT trade_journal_dedup DO NOTHING, so a
+re-import skips rows already present. Each row runs in its own savepoint: a
+row the database rejects is reported and skipped, and the rest still commit.
 
 Aggregates multiple fills that share the same UNIQUE key
 (symbol, acquired_date, sale_date, option_type, strike, cost_basis)
@@ -11,9 +13,10 @@ before inserting, so Fidelity's multi-fill lots don't get dropped.
 """
 
 import csv
-import sqlite3
 from collections import defaultdict
 from pathlib import Path
+
+from common.db import connect, target  # noqa: E402
 
 
 def parse_dollar(val: str) -> float:
@@ -51,14 +54,15 @@ def aggregate_fills(rows: list[dict]) -> list[dict]:
         groups[key].append(row)
 
     aggregated = []
-    for key, fill_rows in groups.items():
+    for fill_rows in groups.values():
         if len(fill_rows) == 1:
             aggregated.append(fill_rows[0])
             continue
 
         # Aggregate: sum quantity, proceeds, gain_loss, cost_basis
         base = dict(fill_rows[0])  # copy first row as template
-        total_qty = sum(int(float(r['Quantity'])) for r in fill_rows if r.get('Quantity', '').strip())
+        # float: fractional share lots exist, and int() truncated them.
+        total_qty = sum(float(r['Quantity']) for r in fill_rows if r.get('Quantity', '').strip())
         total_proceeds = sum(parse_dollar(r['Proceeds']) for r in fill_rows)
         total_cost = sum(parse_dollar(r['Cost Basis']) for r in fill_rows)
         total_gl = sum(parse_dollar(r['Gain/Loss']) for r in fill_rows)
@@ -78,7 +82,7 @@ def aggregate_fills(rows: list[dict]) -> list[dict]:
     return aggregated
 
 
-def import_csv_to_db(csv_path: str, db_path: str, dry_run: bool = False, account_type: str = 'TAXABLE') -> dict:
+def import_csv_to_db(csv_path: str, dry_run: bool = False, account_type: str = 'TAXABLE') -> dict:
     """Import enhanced CSV into trade_journal table."""
     inserted = 0
     skipped = 0
@@ -95,7 +99,7 @@ def import_csv_to_db(csv_path: str, db_path: str, dry_run: bool = False, account
     if dry_run:
         conn = None
     else:
-        conn = sqlite3.connect(db_path)
+        conn = connect()
         cursor = conn.cursor()
 
     try:
@@ -114,11 +118,15 @@ def import_csv_to_db(csv_path: str, db_path: str, dry_run: bool = False, account
             strike = float(row['Strike']) if row.get('Strike', '').strip() else None
             expiration = row.get('Expiration', '').strip() or None
             qty_str = row.get('Quantity', '').strip()
-            quantity = int(float(qty_str)) if qty_str else None
+            # float, not int(float(...)): trade_journal.quantity is numeric
+            # because Fidelity reports fractional share lots (9 rows hold 0.4,
+            # 2.4, 0.444 ...). int() truncated a 0.4 lot to 0.
+            quantity = float(qty_str) if qty_str else None
             cost_basis = parse_dollar(row['Cost Basis'])
             proceeds = parse_dollar(row['Proceeds'])
             gain_loss = parse_dollar(row['Gain/Loss'])
-            is_winner = 1 if row.get('Winner', '').strip().upper() == 'YES' else 0
+            # bool: is_winner is a boolean column, and Postgres rejects 1/0.
+            is_winner = row.get('Winner', '').strip().upper() == 'YES'
             term = row.get('Term', '').strip() or None
             wash_sale = parse_dollar(row.get('Wash Sale', ''))
             earnings_date = row.get('Earnings Date', '').strip() or None
@@ -130,17 +138,32 @@ def import_csv_to_db(csv_path: str, db_path: str, dry_run: bool = False, account
                 continue
 
             try:
-                cursor.execute("""
-                    INSERT OR IGNORE INTO trade_journal
-                    (symbol, acquired_date, sale_date, days_held, option_type, strike,
-                     expiration, quantity, cost_basis, proceeds, gain_loss, is_winner,
-                     term, wash_sale_amount, earnings_date, actual_move, account_type)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    symbol, acquired_date, sale_date, days_held, option_type, strike,
-                    expiration, quantity, cost_basis, proceeds, gain_loss, is_winner,
-                    term, wash_sale, earnings_date, actual_move, account_type,
-                ))
+                # One SAVEPOINT per row. Without it, the first failing row
+                # aborts the whole transaction, every later execute raises
+                # "current transaction is aborted", each is counted as skipped,
+                # and the final commit silently rolls back rows that looked
+                # inserted -- one bad CSV line cost the entire import.
+                with conn.transaction():
+                    cursor.execute("""
+                        INSERT INTO trade_journal
+                        (symbol, acquired_date, sale_date, days_held, option_type, strike,
+                         expiration, quantity, cost_basis, proceeds, gain_loss, is_winner,
+                         term, wash_sale_amount, earnings_date, actual_move, account_type)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        -- ⚠️ This named idx_trade_journal_dedup, a unique INDEX, from
+                        -- the 2026-09-12 cutover until migration 2. ON CONFLICT ON
+                        -- CONSTRAINT accepts only a constraint, so every row raised
+                        -- "constraint ... does not exist", the except below
+                        -- swallowed it, and an import reported zero inserts.
+                        -- trade_journal_dedup is a real UNIQUE NULLS NOT DISTINCT
+                        -- constraint: NULL option_type/strike (stock legs) compare
+                        -- equal, which is what the old COALESCE index did.
+                        ON CONFLICT ON CONSTRAINT trade_journal_dedup DO NOTHING
+                    """, (
+                        symbol, acquired_date, sale_date, days_held, option_type, strike,
+                        expiration, quantity, cost_basis, proceeds, gain_loss, is_winner,
+                        term, wash_sale, earnings_date, actual_move, account_type,
+                    ))
                 if cursor.rowcount > 0:
                     inserted += 1
                 else:
@@ -151,9 +174,9 @@ def import_csv_to_db(csv_path: str, db_path: str, dry_run: bool = False, account
 
         if conn and not dry_run:
             conn.commit()
-            print(f"Committed to database")
+            print("Committed to database")
 
-    except Exception as e:
+    except Exception:
         if conn:
             conn.rollback()
         raise
@@ -169,24 +192,24 @@ def main():
 
     project_root = Path(__file__).parent.parent
     default_csv = project_root / "docs" / "2025 Trades" / "trading_journal_enhanced.csv"
-    default_db = project_root / "2.0" / "data" / "ivcrush.db"
 
     parser = argparse.ArgumentParser(description='Import enhanced CSV into trade_journal')
     parser.add_argument('--csv', default=str(default_csv), help='Path to enhanced CSV')
-    parser.add_argument('--db', default=str(default_db), help='Database path')
-    parser.add_argument('--dry-run', action='store_true', help='Preview without inserting')
+    parser.add_argument('--execute', action='store_true',
+                        help='Insert into trade_journal (default: report only)')
     parser.add_argument('--account-type', default='TAXABLE', choices=['TAXABLE', 'IRA'],
                         help='Account type tag for imported rows (default: TAXABLE)')
 
     args = parser.parse_args()
+    args.dry_run = not args.execute
 
     print(f"CSV: {args.csv}")
-    print(f"Database: {args.db}")
+    print(f"Database: {target()}")
     print(f"Account type: {args.account_type}")
-    print(f"Mode: {'DRY RUN' if args.dry_run else 'LIVE'}")
+    print(f"Mode: {'DRY RUN (pass --execute to write)' if args.dry_run else 'LIVE'}")
     print()
 
-    result = import_csv_to_db(args.csv, args.db, dry_run=args.dry_run, account_type=args.account_type)
+    result = import_csv_to_db(args.csv, dry_run=args.dry_run, account_type=args.account_type)
 
     prefix = "[DRY RUN] " if args.dry_run else ""
     print(f"\n{prefix}Results:")

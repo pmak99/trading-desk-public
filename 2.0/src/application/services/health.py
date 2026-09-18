@@ -1,11 +1,13 @@
 """Health check service for monitoring system components."""
 
 import asyncio
-import time
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, Optional
+
+from common.timezone import now_et
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,7 @@ class ServiceHealth:
 
     def __post_init__(self):
         if self.checked_at is None:
-            self.checked_at = datetime.now()
+            self.checked_at = now_et()
 
     def __str__(self):
         status = "✅ UP" if self.healthy else "❌ DOWN"
@@ -67,7 +69,7 @@ class HealthCheckService:
         }
 
         results = await asyncio.gather(*checks.values(), return_exceptions=False)
-        return dict(zip(checks.keys(), results))
+        return dict(zip(checks.keys(), results, strict=True))
 
     async def _check_tradier(self) -> ServiceHealth:
         """Check Tradier API health by fetching stock price.
@@ -109,14 +111,14 @@ class HealthCheckService:
         """
         start = time.perf_counter()
         try:
-            import sqlite3
-
-            dbpath = str(self.container.config.database.path)
             loop = asyncio.get_event_loop()
 
             def check_db():
-                with sqlite3.connect(dbpath, timeout=self.timeout_seconds):
-                    pass
+                # Round-trip a real query. Checking out a pooled connection
+                # alone proves nothing: the pool hands back a cached handle
+                # without touching the server.
+                with self.container.db_pool.connection() as conn:
+                    conn.execute("SELECT 1").fetchone()
 
             await asyncio.wait_for(
                 loop.run_in_executor(None, check_db),

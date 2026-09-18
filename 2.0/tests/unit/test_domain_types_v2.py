@@ -4,8 +4,10 @@ Test suite for domain types (Money, Percentage, Strike, etc.).
 Tests the fundamental value objects used throughout the 2.0 system.
 """
 
-import pytest
 from decimal import Decimal
+
+import pytest
+
 from src.domain.types import Money, Percentage, Strike
 
 

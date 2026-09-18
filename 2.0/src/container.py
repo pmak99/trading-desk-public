@@ -3,40 +3,63 @@ Dependency Injection Container for IV Crush 2.0.
 
 Provides lazy-loaded singletons for all services, calculators, and infrastructure.
 Makes the entire system testable by allowing easy mocking.
+
+⚠️ **Constructing a Container touches no database** (since 2026-09-14). It used
+to run `MigrationManager.migrate()` from `__init__`, so every Container -- in a
+test, the Finnhub MCP server, `trade.sh health` -- applied pending migrations to
+whatever PGDATABASE named. The entry points that write call
+`apply_migrations()` themselves, once (migrations/migration_manager.py lists
+them). There is no process-global Container either: an entry point builds one
+and passes it down.
+
+The data providers are handed out as the domain's protocols
+(src/domain/protocols.py) since 2026-09-14: `tradier` and
+`cached_options_provider` as options data providers, `cache` as a CacheProvider,
+`prices_repository` as a PriceRepository, and `implied_move_calculator` as an
+ImpliedMoveCalculator (it is either calculator, per USE_INTERPOLATED_MOVE, and
+neither subclasses the other). The rest stay concrete;
+tests/unit/test_container_protocols.py lists them and why.
 """
 
 import logging
-import threading
-from pathlib import Path
 from typing import Optional
+
+from src.application.metrics.implied_move import (
+    ImpliedMoveCalculator as StandardImpliedMoveCalculator,
+)
+from src.application.metrics.liquidity_scorer import LiquidityScorer
+from src.application.metrics.market_conditions import MarketConditionsAnalyzer
+from src.application.metrics.vrp import VRPCalculator
+from src.application.services.analyzer import TickerAnalyzer
+from src.application.services.health import HealthCheckService
+from src.application.services.strategy import StrategyGenerator
 from src.config.config import Config
 from src.config.validation import validate_configuration
-from src.infrastructure.api.tradier import TradierAPI
+from src.domain.protocols import (
+    CachedOptionsProvider,
+    CacheProvider,
+    ImpliedMoveCalculator,
+    OptionsDataProvider,
+    PriceRepository,
+)
 from src.infrastructure.api.finnhub import FinnhubAPI
-from src.infrastructure.cache.memory_cache import MemoryCache, CachedOptionsDataProvider
-from src.infrastructure.cache.hybrid_cache import HybridCache
+from src.infrastructure.api.tradier import TradierAPI
+from src.infrastructure.cache.memory_cache import CachedOptionsDataProvider, MemoryCache
+from src.infrastructure.database.pg_pool import get_pool
+from src.infrastructure.database.repositories.analysis_repository import (
+    AnalysisRepository,
+)
 from src.infrastructure.database.repositories.earnings_repository import (
     EarningsRepository,
 )
 from src.infrastructure.database.repositories.prices_repository import (
     PricesRepository,
 )
-from src.application.metrics.implied_move import ImpliedMoveCalculator
-from src.application.metrics.vrp import VRPCalculator
-from src.application.metrics.liquidity_scorer import LiquidityScorer
-from src.application.metrics.market_conditions import MarketConditionsAnalyzer
-from src.application.metrics.adaptive_thresholds import AdaptiveThresholdCalculator
-from src.application.services.analyzer import TickerAnalyzer
-from src.application.services.strategy import StrategyGenerator
-from src.application.services.health import HealthCheckService
-from src.infrastructure.database.repositories.analysis_repository import AnalysisRepository
+from src.utils.concurrent_scanner import ConcurrentScanner
 from src.utils.rate_limiter import (
     create_finnhub_limiter,
     create_tradier_limiter,
 )
-from src.utils.concurrent_scanner import ConcurrentScanner
-from src.infrastructure.database.connection_pool import ConnectionPool
-from src.infrastructure.database.migrations import MigrationManager
 
 logger = logging.getLogger(__name__)
 
@@ -53,42 +76,43 @@ class Container:
     - No circular dependencies
     """
 
-    def __init__(self, config: Config, skip_validation: bool = False, run_migrations: bool = True):
+    def __init__(
+        self,
+        config: Config,
+        skip_validation: bool = False,
+        *,
+        tradier: Optional[OptionsDataProvider] = None,
+        cache: Optional[CacheProvider] = None,
+    ):
         """
-        Initialize container with configuration.
+        Initialize container with configuration. Opens no connection.
 
         Args:
             config: Configuration instance
             skip_validation: If True, skip configuration validation (useful for testing)
-            run_migrations: If True, run database migrations on initialization (default: True)
+            tradier: A Tradier client to use instead of building one (a test's fake)
+            cache: A cache to use instead of building one
         """
         if not skip_validation:
             validate_configuration(config)
 
         self.config = config
-
-        # Run database migrations automatically
-        if run_migrations:
-            self._run_migrations()
-        self._tradier: Optional[TradierAPI] = None
+        self._tradier: Optional[OptionsDataProvider] = tradier
         self._finnhub: Optional[FinnhubAPI] = None
-        self._cache: Optional[MemoryCache] = None
-        self._hybrid_cache: Optional[HybridCache] = None
-        self._cached_options_provider: Optional[CachedOptionsDataProvider] = None
+        self._cache: Optional[CacheProvider] = cache
+        self._cached_options_provider: Optional[CachedOptionsProvider] = None
         self._earnings_repo: Optional[EarningsRepository] = None
-        self._prices_repo: Optional[PricesRepository] = None
+        self._prices_repo: Optional[PriceRepository] = None
         self._implied_move_calc: Optional[ImpliedMoveCalculator] = None
         self._vrp_calc: Optional[VRPCalculator] = None
         self._skew_analyzer = "uninitialized"  # SkewAnalyzerEnhanced or None (Phase 4)
         self._consistency_analyzer = "uninitialized"  # ConsistencyAnalyzerEnhanced or None (Phase 4)
         self._liquidity_scorer: Optional[LiquidityScorer] = None
         self._market_conditions: Optional[MarketConditionsAnalyzer] = None
-        self._adaptive_thresholds: Optional[AdaptiveThresholdCalculator] = None
         self._strategy_generator: Optional[StrategyGenerator] = None
         self._analyzer: Optional[TickerAnalyzer] = None
         self._analysis_repo: Optional[AnalysisRepository] = None
         self._health_check_service: Optional[HealthCheckService] = None
-        self._db_pool: Optional[ConnectionPool] = None
         self._concurrent_scanner: Optional[ConcurrentScanner] = None
 
     # ========================================================================
@@ -96,7 +120,7 @@ class Container:
     # ========================================================================
 
     @property
-    def tradier(self) -> TradierAPI:
+    def tradier(self) -> OptionsDataProvider:
         """Get Tradier API client."""
         if self._tradier is None:
             rate_limiter = create_tradier_limiter(
@@ -111,7 +135,7 @@ class Container:
         return self._tradier
 
     @property
-    def cache(self) -> MemoryCache:
+    def cache(self) -> CacheProvider:
         """Get memory cache."""
         if self._cache is None:
             self._cache = MemoryCache(
@@ -120,27 +144,14 @@ class Container:
             logger.debug("Created MemoryCache")
         return self._cache
 
-    @property
-    def hybrid_cache(self) -> HybridCache:
-        """
-        Get hybrid cache (L1 memory + L2 SQLite persistence).
-
-        Phase 2 feature: Persistent cache that survives restarts.
-        """
-        if self._hybrid_cache is None:
-            # Use separate database file for L2 cache
-            cache_db_path = self.config.database.path.parent / "cache.db"
-            self._hybrid_cache = HybridCache(
-                db_path=cache_db_path,
-                l1_ttl_seconds=self.config.cache.l1_ttl,
-                l2_ttl_seconds=self.config.cache.l2_ttl,
-                max_l1_size=1000
-            )
-            logger.debug(f"Created HybridCache (db={cache_db_path})")
-        return self._hybrid_cache
+    # NOTE: `Container.hybrid_cache` was deleted at the Postgres port. It
+    # handed out a HybridCache over `data/cache.db` — a file that has never
+    # existed on any machine — and had zero consumers. The live persistent
+    # cache is `get_shared_cache()` in scripts/scan/market_data.py, over
+    # `scan_cache.db`, which is untouched. HybridCache the class stays.
 
     @property
-    def cached_options_provider(self) -> CachedOptionsDataProvider:
+    def cached_options_provider(self) -> CachedOptionsProvider:
         """Get cached options data provider (wraps Tradier with cache)."""
         if self._cached_options_provider is None:
             self._cached_options_provider = CachedOptionsDataProvider(
@@ -164,37 +175,27 @@ class Container:
         return self._finnhub
 
     @property
-    def db_pool(self) -> ConnectionPool:
-        """Get database connection pool."""
-        if self._db_pool is None:
-            self._db_pool = ConnectionPool(
-                db_path=self.config.database.path,
-                pool_size=5,
-                max_overflow=10,
-                connection_timeout=self.config.database.timeout,
-            )
-            logger.debug("Created ConnectionPool")
-        return self._db_pool
+    def db_pool(self):
+        """The process-wide Postgres pool, opened on first use.
+
+        No per-container instance: the pool is a process singleton, shared by
+        every Container and by `apply_migrations()`.
+        """
+        return get_pool()
 
     @property
     def earnings_repository(self) -> EarningsRepository:
         """Get earnings repository with connection pooling."""
         if self._earnings_repo is None:
-            self._earnings_repo = EarningsRepository(
-                db_path=str(self.config.database.path),
-                pool=self.db_pool
-            )
+            self._earnings_repo = EarningsRepository(pool=self.db_pool)
             logger.debug("Created EarningsRepository with connection pool")
         return self._earnings_repo
 
     @property
-    def prices_repository(self) -> PricesRepository:
+    def prices_repository(self) -> PriceRepository:
         """Get prices repository with connection pooling."""
         if self._prices_repo is None:
-            self._prices_repo = PricesRepository(
-                db_path=str(self.config.database.path),
-                pool=self.db_pool
-            )
+            self._prices_repo = PricesRepository(pool=self.db_pool)
             logger.debug("Created PricesRepository with connection pool")
         return self._prices_repo
 
@@ -208,13 +209,15 @@ class Container:
         if self._implied_move_calc is None:
             # Use enhanced interpolated calculator if enabled in config
             if self.config.algorithms.use_interpolated_move:
-                from src.application.metrics.implied_move_interpolated import ImpliedMoveCalculatorInterpolated
+                from src.application.metrics.implied_move_interpolated import (
+                    ImpliedMoveCalculatorInterpolated,
+                )
                 self._implied_move_calc = ImpliedMoveCalculatorInterpolated(
                     provider=self.cached_options_provider
                 )
                 logger.info("Created ImpliedMoveCalculatorInterpolated (Phase 4)")
             else:
-                self._implied_move_calc = ImpliedMoveCalculator(
+                self._implied_move_calc = StandardImpliedMoveCalculator(
                     provider=self.cached_options_provider
                 )
                 logger.debug("Created ImpliedMoveCalculator (standard)")
@@ -255,7 +258,9 @@ class Container:
         """Get consistency analyzer (enhanced if enabled in config, None if disabled)."""
         if self._consistency_analyzer == "uninitialized":
             if self.config.algorithms.use_enhanced_consistency:
-                from src.application.metrics.consistency_enhanced import ConsistencyAnalyzerEnhanced
+                from src.application.metrics.consistency_enhanced import (
+                    ConsistencyAnalyzerEnhanced,
+                )
                 # FIX: Pass the same move_metric as VRP to ensure apples-to-apples comparison
                 self._consistency_analyzer = ConsistencyAnalyzerEnhanced(
                     move_metric=self.config.algorithms.vrp_move_metric
@@ -274,45 +279,47 @@ class Container:
         """
         Get liquidity scorer with thresholds from config.
 
-        Uses the 3-tier system calibrated for 50-200 contract trades:
-        - EXCELLENT: High liquidity for smooth fills
-        - WARNING: Tradeable but watch for slippage
-        - REJECT: Truly untradeable
+        Four tiers, from ThresholdsConfig (LIQUIDITY_* in .env). The static
+        open-interest bars below grade strategy legs. The scan's hybrid check
+        replaces them with multiples of the position the engine would size
+        (liquidity/hybrid.py, full_size_contracts) and keeps only the spread bars.
         """
         if self._liquidity_scorer is None:
             # Use config thresholds to ensure consistency across all modes
             thresholds = self.config.thresholds
 
             self._liquidity_scorer = LiquidityScorer(
-                # REJECT tier (minimum acceptable) - spread > 15%
+                # REJECT: OI < warning_oi (min_oi, default 10, is a floor below it), spread > 25%
                 min_oi=thresholds.liquidity_reject_min_oi,
                 min_volume=thresholds.liquidity_reject_min_volume,
-                max_spread_pct=thresholds.liquidity_reject_max_spread_pct,  # 15%
+                max_spread_pct=thresholds.liquidity_reject_max_spread_pct,
 
-                # WARNING tier - OI 1-2x, spread > 12%
-                warning_oi=thresholds.liquidity_warning_min_oi,  # 200
-                warning_spread_pct=thresholds.liquidity_warning_max_spread_pct,  # 12%
+                # WARNING: OI from liquidity_warning_min_oi (default 50), spread 18-25%
+                warning_oi=thresholds.liquidity_warning_min_oi,
+                warning_spread_pct=thresholds.liquidity_warning_max_spread_pct,
 
-                # GOOD tier - OI 2-5x, spread > 8%
-                good_oi=thresholds.liquidity_good_min_oi,  # 500
+                # GOOD: OI from liquidity_good_min_oi (default 100), spread 12-18%
+                good_oi=thresholds.liquidity_good_min_oi,
                 good_volume=thresholds.liquidity_warning_min_volume,
-                good_spread_pct=thresholds.liquidity_good_max_spread_pct,  # 8%
+                good_spread_pct=thresholds.liquidity_good_max_spread_pct,
 
-                # EXCELLENT tier - OI >= 5x, spread <= 8%
-                excellent_oi=thresholds.liquidity_excellent_min_oi,  # 1000
+                # EXCELLENT: OI from liquidity_excellent_min_oi (default 200), spread < 12%
+                excellent_oi=thresholds.liquidity_excellent_min_oi,
                 excellent_volume=thresholds.liquidity_excellent_min_volume,
                 excellent_spread_pct=thresholds.liquidity_excellent_max_spread_pct,
             )
             logger.debug(f"Created LiquidityScorer with 4-tier config: "
-                        f"EXCELLENT={thresholds.liquidity_excellent_min_oi} OI (spread<=8%), "
-                        f"GOOD={thresholds.liquidity_good_min_oi} OI (spread<=12%), "
-                        f"WARNING={thresholds.liquidity_warning_min_oi} OI (spread<=15%), "
-                        f"REJECT={thresholds.liquidity_reject_min_oi} OI (spread>15%)")
+                        f"EXCELLENT OI>={thresholds.liquidity_excellent_min_oi}, "
+                        f"GOOD OI>={thresholds.liquidity_good_min_oi}, "
+                        f"WARNING OI>={thresholds.liquidity_warning_min_oi}, else REJECT; "
+                        f"spread REJECT>{thresholds.liquidity_reject_max_spread_pct}% "
+                        f"WARNING>={thresholds.liquidity_warning_max_spread_pct}% "
+                        f"GOOD>={thresholds.liquidity_good_max_spread_pct}%")
         return self._liquidity_scorer
 
     @property
     def market_conditions_analyzer(self) -> MarketConditionsAnalyzer:
-        """Get market conditions analyzer (VIX regime detection)."""
+        """VIX regime, for display and analysis_log only — it moves no tier or size."""
         if self._market_conditions is None:
             self._market_conditions = MarketConditionsAnalyzer(
                 provider=self.tradier,
@@ -320,16 +327,6 @@ class Container:
             )
             logger.debug("Created MarketConditionsAnalyzer")
         return self._market_conditions
-
-    @property
-    def adaptive_threshold_calculator(self) -> AdaptiveThresholdCalculator:
-        """Get adaptive threshold calculator for VIX-adjusted VRP thresholds."""
-        if self._adaptive_thresholds is None:
-            self._adaptive_thresholds = AdaptiveThresholdCalculator(
-                base_thresholds=self.config.thresholds
-            )
-            logger.debug("Created AdaptiveThresholdCalculator")
-        return self._adaptive_thresholds
 
     # ========================================================================
     # Application Layer - Services
@@ -366,10 +363,7 @@ class Container:
     def analysis_repository(self) -> AnalysisRepository:
         """Get analysis repository for logging analysis results with connection pooling."""
         if self._analysis_repo is None:
-            self._analysis_repo = AnalysisRepository(
-                db_path=str(self.config.database.path),
-                pool=self.db_pool
-            )
+            self._analysis_repo = AnalysisRepository(pool=self.db_pool)
             logger.debug("Created AnalysisRepository with connection pool")
         return self._analysis_repo
 
@@ -401,147 +395,14 @@ class Container:
         """
         from src.infrastructure.database.init_schema import init_database
 
-        init_database(self.config.database.path)
+        with self.db_pool.connection() as conn:
+            init_database(conn)
         logger.info("Database initialized")
 
-    def verify_configuration(self) -> None:
-        """
-        Verify configuration is valid.
-        Raises ConfigurationError if invalid.
-        """
-        from src.config.validation import validate_configuration
-
-        validate_configuration(self.config)
-        logger.info("Configuration verified")
-
-    def cleanup_caches(self) -> int:
-        """Remove expired entries from persistent caches. Returns count deleted."""
-        deleted = 0
-        if self._hybrid_cache is not None:
-            deleted = self._hybrid_cache.cleanup_expired()
-            if deleted:
-                logger.info(f"Cleaned {deleted} expired entries from hybrid cache")
-        return deleted
-
-    def clear_cache(self) -> None:
-        """Clear all caches."""
-        if self._cache:
-            self._cache.clear()
-            logger.info("Cache cleared")
-
-    def get_cache_stats(self) -> dict:
-        """Get cache statistics."""
-        if self._cache:
-            return self._cache.get_stats()
-        return {}
-
-    # ========================================================================
-    # Factory Methods (for testing)
-    # ========================================================================
-
-    @classmethod
-    def create_from_env(cls, env_file: Optional[str] = None) -> 'Container':
-        """
-        Create container from environment variables.
-
-        Args:
-            env_file: Optional path to .env file
-
-        Returns:
-            Configured container instance
-        """
-        config = Config.from_env(env_file)
-        return cls(config)
-
-    def _run_migrations(self):
-        """
-        Run database migrations on container initialization.
-
-        Automatically applies pending schema migrations to ensure
-        database is at the latest version.
-        """
-        try:
-            manager = MigrationManager(self.config.database.path)
-            current_version = manager.get_current_version()
-            pending = manager.get_pending_migrations()
-
-            if pending:
-                logger.info(
-                    f"Applying {len(pending)} database migration(s) "
-                    f"(current version: {current_version})..."
-                )
-                manager.migrate()
-                logger.info(f"Database migrations complete (version: {manager.get_current_version()})")
-            else:
-                logger.debug(f"Database up to date (version: {current_version})")
-        except Exception as e:
-            logger.error(f"Database migration failed: {e}")
-            raise RuntimeError(f"Failed to apply database migrations: {e}") from e
-
-    def with_mock_tradier(self, mock_tradier) -> 'Container':
-        """
-        Replace Tradier client with mock (for testing).
-
-        Args:
-            mock_tradier: Mock TradierAPI instance
-
-        Returns:
-            Self for chaining
-        """
-        self._tradier = mock_tradier
-        self._cached_options_provider = None  # Force recreation
-        return self
-
-    def with_mock_cache(self, mock_cache) -> 'Container':
-        """
-        Replace cache with mock (for testing).
-
-        Args:
-            mock_cache: Mock cache instance
-
-        Returns:
-            Self for chaining
-        """
-        self._cache = mock_cache
-        self._cached_options_provider = None  # Force recreation
-        return self
-
-
-# ============================================================================
-# Global Container (Singleton Pattern)
-# ============================================================================
-
-_container: Optional[Container] = None
-_container_lock = threading.Lock()
-
-
-def get_container() -> Container:
-    """
-    Get global container instance.
-
-    Loads from environment on first call.
-    Use this in CLI scripts for convenience.
-    Thread-safe via double-checked locking.
-
-    For testing, create Container instances directly.
-    """
-    global _container
-    if _container is None:
-        with _container_lock:
-            if _container is None:
-                _container = Container.create_from_env()
-    return _container
-
-
-def reset_container() -> None:
-    """
-    Reset global container (useful for testing).
-
-    Closes connection pool if exists.
-    Thread-safe via lock.
-    """
-    global _container
-    with _container_lock:
-        if _container and _container._db_pool:
-            _container._db_pool.close_all()
-        _container = None
+    # `create_from_env`, `with_mock_tradier`, `with_mock_cache` and the global
+    # `get_container()` / `reset_container()` were removed 2026-09-14 (audit
+    # 5.5). None had a caller: the entry points build `Container(config)` and
+    # pass it down, and a test injects fakes through the constructor
+    # (`Container(config, tradier=fake, cache=...)`). `verify_configuration`,
+    # `clear_cache` and `get_cache_stats` followed the same day, also uncalled:
+    # the constructor already validates unless `skip_validation`.

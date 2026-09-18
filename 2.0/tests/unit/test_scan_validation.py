@@ -5,23 +5,14 @@ Tests the new validation and date adjustment logic added to prevent
 weekend expiration dates and invalid date configurations.
 """
 
-import sys
 from datetime import date, timedelta
-from pathlib import Path
+
 import pytest
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-# Import functions from scan.py
-from scripts.scan import (
-    adjust_to_trading_day,
-    validate_expiration_date,
-    calculate_expiration_date,
-    calculate_implied_move_expiration,
-    get_next_friday,
-)
+from scripts.scan import validate_expiration_date
 from src.domain.enums import EarningsTiming
+from src.domain.market_calendar import adjust_to_trading_day
+from src.domain.trading_expiration import calculate_expiration_date, get_next_friday
 
 
 class TestAdjustToTradingDay:
@@ -29,12 +20,13 @@ class TestAdjustToTradingDay:
 
     def test_weekday_unchanged(self):
         """Weekdays should pass through unchanged."""
-        # Monday through Friday should not change
-        monday = date(2025, 1, 6)  # Monday
-        tuesday = date(2025, 1, 7)  # Tuesday
-        wednesday = date(2025, 1, 8)  # Wednesday
-        thursday = date(2025, 1, 9)  # Thursday
-        friday = date(2025, 1, 10)  # Friday
+        # Monday through Friday of a week with no closure. Not the week of
+        # 2025-01-06: NYSE closed Thursday 01-09 for President Carter.
+        monday = date(2025, 2, 3)  # Monday
+        tuesday = date(2025, 2, 4)  # Tuesday
+        wednesday = date(2025, 2, 5)  # Wednesday
+        thursday = date(2025, 2, 6)  # Thursday
+        friday = date(2025, 2, 7)  # Friday
 
         assert adjust_to_trading_day(monday) == monday
         assert adjust_to_trading_day(tuesday) == tuesday
@@ -82,12 +74,12 @@ class TestCalculateExpirationDate:
 
     def test_custom_offset_on_weekday(self):
         """Custom offset (>= min_dte) on weekday should pass through."""
-        earnings = date(2025, 1, 6)  # Monday
+        earnings = date(2025, 2, 3)  # Monday
         result = calculate_expiration_date(
             earnings, EarningsTiming.BMO, offset_days=3
         )
         # Monday + 3 = Thursday (weekday)
-        assert result == date(2025, 1, 9)
+        assert result == date(2025, 2, 6)
 
     def test_custom_offset_adjusts_weekend(self):
         """Custom offset resulting in weekend should adjust to Monday."""
@@ -133,10 +125,9 @@ class TestCalculateExpirationDate:
 
 
 class TestMinimumDTEFloor:
-    """Test minimum DTE floor enforcement.
+    """Test minimum DTE floor enforcement (Feb 2026).
 
-    Backtesting showed comparable win rates below and above the floor, but
-    loss severity was materially worse below it.
+    Evidence: CLAUDE.md §5 (scripts/rule_evidence.py).
     Wednesday earnings → same-week Friday = 2 DTE, should bump to next Friday.
     """
 
@@ -196,7 +187,7 @@ class TestMinimumDTEFloor:
 
     def test_custom_offset_enforces_min_dte(self):
         """Custom offset_days below min_dte is raised to the floor — no path
-        may produce 0-2 DTE (backtesting showed materially worse loss severity there)."""
+        may produce 0-2 DTE."""
         wednesday = date(2025, 1, 8)
         result = calculate_expiration_date(wednesday, EarningsTiming.AMC, offset_days=1)
         # offset raised 1 → 3: Jan 11 (Saturday) → adjusted to Monday Jan 13
@@ -326,100 +317,6 @@ class TestIntegrationScenarios:
         assert validation is None
 
 
-class TestCalculateImpliedMoveExpiration:
-    """Test implied move expiration calculation.
-
-    The implied move expiration should ALWAYS be the first trading day
-    after earnings, regardless of earnings timing (BMO/AMC). This ensures
-    VRP calculations capture the pure IV crush effect.
-    """
-
-    def test_monday_earnings_returns_tuesday(self):
-        """Monday earnings should return Tuesday."""
-        monday = date(2025, 1, 6)
-        result = calculate_implied_move_expiration(monday)
-        assert result == date(2025, 1, 7)  # Tuesday
-
-    def test_tuesday_earnings_returns_wednesday(self):
-        """Tuesday earnings should return Wednesday."""
-        tuesday = date(2025, 1, 7)
-        result = calculate_implied_move_expiration(tuesday)
-        assert result == date(2025, 1, 8)  # Wednesday
-
-    def test_wednesday_earnings_returns_thursday(self):
-        """Wednesday earnings should return Thursday."""
-        wednesday = date(2025, 1, 8)
-        result = calculate_implied_move_expiration(wednesday)
-        assert result == date(2025, 1, 9)  # Thursday
-
-    def test_thursday_earnings_returns_friday(self):
-        """Thursday earnings should return Friday (not next week Friday)."""
-        thursday = date(2025, 1, 9)
-        result = calculate_implied_move_expiration(thursday)
-        # Should be Friday, not next week (unlike calculate_expiration_date)
-        assert result == date(2025, 1, 10)  # Friday
-
-    def test_friday_earnings_returns_monday(self):
-        """Friday earnings should return Monday (skipping weekend)."""
-        friday = date(2025, 1, 10)
-        result = calculate_implied_move_expiration(friday)
-        assert result == date(2025, 1, 13)  # Monday (skip weekend)
-
-    def test_saturday_earnings_returns_monday(self):
-        """Saturday earnings (hypothetical) should return Monday."""
-        saturday = date(2025, 1, 11)
-        result = calculate_implied_move_expiration(saturday)
-        assert result == date(2025, 1, 13)  # Monday
-
-    def test_sunday_earnings_returns_monday(self):
-        """Sunday earnings (hypothetical) should return Monday."""
-        sunday = date(2025, 1, 12)
-        result = calculate_implied_move_expiration(sunday)
-        assert result == date(2025, 1, 13)  # Monday
-
-    def test_differs_from_trading_expiration_on_thursday(self):
-        """Implied move exp should differ from trading exp on Thursday.
-
-        This is the key bug that was fixed: Thursday earnings should use
-        Friday for implied move (first post-earnings), but calculate_expiration_date
-        uses next week Friday for trading (0DTE avoidance).
-        """
-        thursday = date(2025, 1, 9)
-
-        implied_exp = calculate_implied_move_expiration(thursday)
-        trading_exp = calculate_expiration_date(thursday, EarningsTiming.AMC)
-
-        # Implied move: Friday (next day)
-        assert implied_exp == date(2025, 1, 10)
-
-        # Trading: Next Friday (1 week out)
-        assert trading_exp == date(2025, 1, 17)
-
-        # They should be different
-        assert implied_exp != trading_exp
-
-    def test_same_as_trading_expiration_on_monday(self):
-        """Implied move exp may match trading exp on early-week days.
-
-        On Monday, both should use a day soon after earnings.
-        Trading uses Friday (same week), implied move uses Tuesday.
-        """
-        monday = date(2025, 1, 6)
-
-        implied_exp = calculate_implied_move_expiration(monday)
-        trading_exp = calculate_expiration_date(monday, EarningsTiming.AMC)
-
-        # Implied move: Tuesday (next day)
-        assert implied_exp == date(2025, 1, 7)
-
-        # Trading: Friday (same week)
-        assert trading_exp == date(2025, 1, 10)
-
-        # They differ, but both are in the same week
-        assert implied_exp != trading_exp
-        assert implied_exp < trading_exp
-
-
 class TestNextQuarterDetection:
     """Test next-quarter detection logic for stale cache validation.
 
@@ -527,8 +424,8 @@ class TestNextQuarterDetection:
 class TestSpreadExitWarning:
     """Test that spread strategies include next-day exit warning in rationale.
 
-    Data: Spreads held 2+ days have 31% win rate vs 69% for 0-1 day holds.
-    Singles held 2+ days have 78% win rate — no warning needed.
+    Evidence: CLAUDE.md §8 (scripts/rule_evidence.py) — spreads held 2+ trading
+    days win far less often than those closed the next day. Singles carry no warning.
     """
 
     @pytest.fixture
@@ -539,7 +436,6 @@ class TestSpreadExitWarning:
     def _make_mock_strategy(self, strategy_type):
         """Create minimal mock strategy for rationale generation."""
         from unittest.mock import MagicMock
-        from decimal import Decimal
 
         strategy = MagicMock()
         strategy.strategy_type = strategy_type
@@ -566,7 +462,9 @@ class TestSpreadExitWarning:
 
         rationale = scorer._generate_strategy_rationale(strategy, vrp)
         assert "EXIT next trading day" in rationale
-        assert "31%" in rationale
+        # No figure in the warning: the one it carried (31%) went stale when the
+        # journal was reconciled. The evidence lives in CLAUDE.md §8.
+        assert "%" not in rationale.split("EXIT next trading day", 1)[1]
 
     def test_bear_call_spread_has_exit_warning(self, scorer):
         """Bear call spread rationale should include exit warning."""
@@ -584,7 +482,7 @@ class TestSpreadExitWarning:
         vrp = self._make_mock_vrp()
 
         rationale = scorer._generate_strategy_rationale(strategy, vrp)
-        # Spreads must include the next-day exit warning (31% win rate if held longer)
+        # Spreads must include the next-day exit warning
         assert "EXIT next trading day" in rationale
 
 

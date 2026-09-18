@@ -1,23 +1,33 @@
 """
-Tests for strategy/strike_selection.py — delta constants and all strike selection functions.
-"""
-import pytest
-from decimal import Decimal
-from datetime import date
+Tests for strategy/strike_selection.py — the strike selection functions.
 
+That directional bias never moves the deltas is tested end to end in
+test_strategy_generator.py (TestShortStrikeIgnoresBias).
+"""
+from datetime import date
+from decimal import Decimal
+from unittest.mock import MagicMock
+
+import pytest
+
+from src.application.services.strategy.spread_builder import build_vertical_spread
 from src.application.services.strategy.strike_selection import (
     find_nearest_strike,
-    verify_strikes_outside_implied_move,
-    get_asymmetric_deltas,
     select_strikes_delta_based,
     select_strikes_distance_based,
     select_strikes_for_spread,
-    DELTA_ADJUSTMENT_STRONG, DELTA_ADJUSTMENT_MODERATE, DELTA_ADJUSTMENT_WEAK,
-    MIN_DELTA, MAX_DELTA, MIN_SPREAD,
+    verify_strikes_outside_implied_move,
 )
 from src.config.config import StrategyConfig
-from src.domain.types import Money, Strike, OptionQuote, OptionChain, VRPResult, Percentage
-from src.domain.enums import DirectionalBias, OptionType, Recommendation
+from src.domain.enums import OptionType, Recommendation, StrategyType
+from src.domain.types import (
+    Money,
+    OptionChain,
+    OptionQuote,
+    Percentage,
+    Strike,
+    VRPResult,
+)
 
 
 def make_strike(price: float) -> Strike:
@@ -60,17 +70,6 @@ def make_chain(stock_price: float, strikes_and_deltas: list, option_type: Option
 @pytest.fixture
 def config():
     return StrategyConfig()
-
-
-class TestConstants:
-    def test_strong_adjustment_is_10pct(self):
-        assert DELTA_ADJUSTMENT_STRONG == 0.10
-
-    def test_min_delta_floor(self):
-        assert MIN_DELTA == 0.10
-
-    def test_min_spread_gap(self):
-        assert MIN_SPREAD == 0.05
 
 
 class TestFindNearestStrike:
@@ -120,45 +119,13 @@ class TestVerifyStrikesOutsideImpliedMove:
         assert result is None
 
 
-class TestGetAsymmetricDeltas:
-    def test_neutral_bias_returns_config_defaults(self, config):
-        short_d, long_d = get_asymmetric_deltas(config, OptionType.PUT, DirectionalBias.NEUTRAL)
-        assert abs(short_d - config.target_delta_short) < 0.001
-        assert abs(long_d - config.target_delta_long) < 0.001
-
-    def test_strong_bullish_put_spread_lowers_deltas(self, config):
-        short_d, long_d = get_asymmetric_deltas(config, OptionType.PUT, DirectionalBias.STRONG_BULLISH)
-        # Bullish → put spread safer → lower deltas
-        assert short_d < config.target_delta_short
-
-    def test_strong_bearish_put_spread_raises_deltas(self, config):
-        short_d, long_d = get_asymmetric_deltas(config, OptionType.PUT, DirectionalBias.STRONG_BEARISH)
-        assert short_d > config.target_delta_short
-
-    def test_spread_invariant_short_always_greater_than_long(self, config):
-        for bias in DirectionalBias:
-            for opt_type in [OptionType.PUT, OptionType.CALL]:
-                s, l = get_asymmetric_deltas(config, opt_type, bias)
-                assert s > l, f"short={s} <= long={l} for bias={bias.value}, type={opt_type.value}"
-
-    def test_deltas_within_bounds(self, config):
-        for bias in DirectionalBias:
-            for opt_type in [OptionType.PUT, OptionType.CALL]:
-                s, l = get_asymmetric_deltas(config, opt_type, bias)
-                assert MIN_DELTA <= s <= MAX_DELTA
-                assert MIN_DELTA <= l <= MAX_DELTA
-
-
 class TestSelectStrikeDeltaBased:
     def test_selects_strikes_closest_to_target_delta(self, config):
         # Put chain: strikes at 90, 95, 97, 98 with increasing deltas
         chain = make_chain(100.0, [
             (90.0, -0.10), (95.0, -0.15), (97.0, -0.20), (98.0, -0.25),
         ])
-        result = select_strikes_delta_based(
-            config, chain, OptionType.PUT,
-            target_delta_short=0.25, target_delta_long=0.20
-        )
+        result = select_strikes_delta_based(config, chain, OptionType.PUT)
         assert result is not None
         short_s, long_s = result
         # short should be closer to ATM (higher price), long further OTM
@@ -202,3 +169,114 @@ class TestSelectStrikesDistanceBased:
         short_s, long_s = result
         # For call spread: long strike must be above short (further OTM)
         assert float(long_s.price) > float(short_s.price)
+
+
+def _sparse_chain(option_type: OptionType, drop_beyond: float = None) -> OptionChain:
+    """$250 stock on $10 strikes, where 25Δ and 20Δ land on one listed strike.
+
+    Seen live on FDX. Puts: $230 sits at 22Δ, nearest both 25Δ (0.03 away) and
+    20Δ (0.02 away; $220 is 0.08 away). Calls: $270 at 23Δ, likewise.
+    `drop_beyond` removes every strike further OTM than that price.
+    """
+    rows = {
+        OptionType.PUT: [(250.0, -0.50, 9.00), (240.0, -0.35, 5.50), (230.0, -0.22, 3.00),
+                         (220.0, -0.12, 1.40), (210.0, -0.06, 0.60)],
+        OptionType.CALL: [(250.0, 0.50, 9.00), (260.0, 0.36, 5.50), (270.0, 0.23, 3.00),
+                          (280.0, 0.13, 1.40), (290.0, 0.07, 0.60)],
+    }[option_type]
+    put = option_type == OptionType.PUT
+    side = {
+        make_strike(price): OptionQuote(bid=Money(mid - 0.05), ask=Money(mid + 0.05),
+                                        open_interest=500, delta=delta)
+        for price, delta, mid in rows
+        if drop_beyond is None or (price >= drop_beyond if put else price <= drop_beyond)
+    }
+    return OptionChain(
+        ticker="TEST", expiration=date(2026, 7, 18), stock_price=Money(250.0),
+        puts=side if put else {}, calls={} if put else side,
+    )
+
+
+BOTH_SIDES = pytest.mark.parametrize("option_type, below", [
+    (OptionType.PUT, True), (OptionType.CALL, False),
+])
+
+
+class TestSparseChainNeverZeroWidth:
+    """When 25Δ and 20Δ map to one listed strike, the long leg steps out a strike.
+
+    Delta-based selection chose each leg independently, so on a sparse chain both
+    legs came back as the same strike. That zero-width pair passed the implied-move
+    check, so the distance-based fallback never ran, and the builder refused it for
+    zero credit: no spread was offered at all (FDX). The short stays nearest 25Δ;
+    the long is the strike nearest 20Δ among those strictly further OTM. Only when
+    no such strike exists does delta-based selection return None, and the module's
+    existing fallback to distance-based selection runs. Distance-based selection
+    had the same flaw (its $5 long target rounded back to the short on a $10 chain)
+    and gets the same rule.
+    """
+
+    @BOTH_SIDES
+    def test_delta_based_long_leg_is_the_next_strike_out(self, config, option_type, below):
+        short_s, long_s = select_strikes_delta_based(config, _sparse_chain(option_type), option_type)
+        assert (float(short_s.price), float(long_s.price)) == (
+            (230.0, 220.0) if below else (270.0, 280.0))
+
+    @BOTH_SIDES
+    def test_the_builder_offers_the_spread(self, config, option_type, below):
+        scorer = MagicMock()
+        scorer.classify_option_tier.return_value = "EXCELLENT"
+        strategy = build_vertical_spread(
+            config, scorer, "TEST", _sparse_chain(option_type),
+            make_vrp(2.0, implied_move_pct=4.0), option_type,
+            StrategyType.BULL_PUT_SPREAD if below else StrategyType.BEAR_CALL_SPREAD, below=below,
+        )
+        assert strategy is not None
+        legs = {leg.action: float(leg.strike.price) for leg in strategy.legs}
+        assert legs == ({"SELL": 230.0, "BUY": 220.0} if below else {"SELL": 270.0, "BUY": 280.0})
+        assert float(strategy.net_credit.amount) == pytest.approx(1.60)
+
+    @BOTH_SIDES
+    def test_delta_based_with_nothing_beyond_the_short_is_none(self, config, option_type, below):
+        chain = _sparse_chain(option_type, drop_beyond=230.0 if below else 270.0)
+        assert select_strikes_delta_based(config, chain, option_type) is None
+
+    @BOTH_SIDES
+    def test_distance_based_long_leg_is_the_next_strike_out(self, config, option_type, below):
+        # A 3% move is $7.50; with the 10% buffer the short target is $241.75
+        # ($258.25), nearest $240 ($260), and the $5-wide long target rounds back
+        # to that same strike on a $10 chain.
+        short_s, long_s = select_strikes_distance_based(
+            config, _sparse_chain(option_type), make_vrp(2.0, implied_move_pct=3.0),
+            option_type, below=below,
+        )
+        assert (float(short_s.price), float(long_s.price)) == (
+            (240.0, 230.0) if below else (260.0, 270.0))
+
+    @BOTH_SIDES
+    def test_distance_based_with_nothing_beyond_the_short_is_none(self, config, option_type, below):
+        chain = _sparse_chain(option_type, drop_beyond=240.0 if below else 260.0)
+        vrp = make_vrp(2.0, implied_move_pct=3.0)
+        assert select_strikes_distance_based(config, chain, vrp, option_type, below=below) is None
+
+    @BOTH_SIDES
+    def test_when_delta_based_cannot_pair_the_distance_fallback_runs(self, config, option_type, below):
+        # Nothing listed beyond the 25Δ strike: delta-based gives up, and
+        # distance-based pairs $240/$230 ($260/$270) on the strikes that remain.
+        chain = _sparse_chain(option_type, drop_beyond=230.0 if below else 270.0)
+        short_s, long_s = select_strikes_for_spread(
+            config, "TEST", chain, make_vrp(2.0, implied_move_pct=3.0), option_type, below=below,
+        )
+        assert (float(short_s.price), float(long_s.price)) == (
+            (240.0, 230.0) if below else (260.0, 270.0))
+
+    @BOTH_SIDES
+    @pytest.mark.parametrize("move", [1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0])
+    def test_selection_never_returns_a_zero_width_pair(self, config, option_type, below, move):
+        strikes = select_strikes_for_spread(
+            config, "TEST", _sparse_chain(option_type), make_vrp(2.0, implied_move_pct=move),
+            option_type, below=below,
+        )
+        if strikes is not None:
+            short_s, long_s = strikes
+            assert (long_s < short_s) if below else (short_s < long_s)

@@ -1,6 +1,8 @@
 """Tests for liquidity.scoring and liquidity.score module functions."""
 import pytest
+
 from src.application.metrics.liquidity.score import LiquidityScore, LiquidityThresholds
+from src.domain.types import Money, OptionQuote, Percentage
 
 
 class TestLiquidityThresholds:
@@ -70,10 +72,6 @@ class TestLiquidityScore:
 # ============================================================================
 # Scoring module tests (added in Task 2)
 # ============================================================================
-
-from decimal import Decimal
-from src.domain.types import Money, Percentage, Strike, OptionQuote, OptionChain
-
 
 def make_thresholds() -> LiquidityThresholds:
     """Standard thresholds used across scoring tests."""
@@ -156,7 +154,9 @@ class TestScoreHelpers:
         assert score_depth(50, 60) == 100.0
 
     def test_redistribute_weights(self):
-        from src.application.metrics.liquidity.scoring import redistribute_weights_without_depth
+        from src.application.metrics.liquidity.scoring import (
+            redistribute_weights_without_depth,
+        )
         t = LiquidityThresholds()
         weights = redistribute_weights_without_depth(t)
         assert abs(weights['oi'] + weights['volume'] + weights['spread'] - 1.0) < 1e-9
@@ -218,8 +218,8 @@ class TestScoreOption:
         assert result.is_liquid is False
 
     def test_returns_liquidity_score_type(self):
-        from src.application.metrics.liquidity.scoring import score_option
         from src.application.metrics.liquidity.score import LiquidityScore
+        from src.application.metrics.liquidity.scoring import score_option
         t = make_thresholds()
         result = score_option(make_option(), t)
         assert isinstance(result, LiquidityScore)
@@ -241,7 +241,9 @@ class TestStraddleTier:
         assert classify_straddle_tier(call, put, t) == "REJECT"
 
     def test_market_aware_returns_tuple(self):
-        from src.application.metrics.liquidity.scoring import classify_straddle_tier_market_aware
+        from src.application.metrics.liquidity.scoring import (
+            classify_straddle_tier_market_aware,
+        )
         t = make_thresholds()
         call = make_option(bid=3.00, ask=3.05, oi=1500, volume=300)
         put = make_option(bid=3.00, ask=3.05, oi=1500, volume=300)

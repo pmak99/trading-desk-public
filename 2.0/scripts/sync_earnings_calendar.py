@@ -11,45 +11,51 @@ This script proactively discovers and validates upcoming earnings dates by:
 
 Designed to run as a daily cron job (recommended: 8 PM ET after market close)
 
-Usage:
-    # Dry run (no database updates)
-    python scripts/sync_earnings_calendar.py --dry-run
+Report-only unless --execute is passed (--check-staleness never writes).
 
-    # Live sync
+Usage:
+    # Show what a sync would change
     python scripts/sync_earnings_calendar.py
 
+    # Sync
+    python scripts/sync_earnings_calendar.py --execute
+
     # Custom horizon
-    python scripts/sync_earnings_calendar.py --horizon 6month
+    python scripts/sync_earnings_calendar.py --horizon 6month --execute
 
     # Check staleness only
     python scripts/sync_earnings_calendar.py --check-staleness --threshold 14
 
     # Cleanup duplicate entries only (no sync)
-    python scripts/sync_earnings_calendar.py --cleanup-dupes
-    python scripts/sync_earnings_calendar.py --cleanup-dupes --dry-run
+    python scripts/sync_earnings_calendar.py --cleanup-dupes            # report
+    python scripts/sync_earnings_calendar.py --cleanup-dupes --execute  # delete
+
+    # A backlog older than the routine 14-day scan needs a tighter quarter window
+    python scripts/sync_earnings_calendar.py --cleanup-dupes --window-past-days 400 \\
+        --quarter-window-days 45
 """
 
-import sys
 import argparse
 import logging
-from pathlib import Path
-from datetime import datetime, date, timedelta
-from typing import List, Tuple, Dict, Set
+import sys
 from collections import defaultdict
-import sqlite3
+from datetime import date, datetime, timedelta, timezone
+from typing import Dict, List, Set, Tuple
+
 from tqdm import tqdm
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.utils.logging import setup_logging
+from common.db import connect  # noqa: E402
+from common.timezone import now_et, today_et  # noqa: E402
+from src.application.services.earnings_date_validator import EarningsDateValidator
+from src.config.config import Config
+from src.domain.types import EarningsTiming
 from src.infrastructure.api.finnhub import FinnhubAPI
 from src.infrastructure.data_sources.yahoo_finance_earnings import YahooFinanceEarnings
-from src.application.services.earnings_date_validator import EarningsDateValidator
-from src.infrastructure.database.repositories.earnings_repository import EarningsRepository
-from src.domain.types import EarningsTiming
+from src.infrastructure.database.repositories.earnings_repository import (
+    EarningsRepository,
+)
+from src.utils.logging import setup_logging
 from src.utils.rate_limiter import create_finnhub_limiter
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +67,28 @@ STALENESS_THRESHOLD_DAYS = 14
 
 # Max days apart for two entries to be considered the same earnings event
 DEDUP_QUARTER_WINDOW_DAYS = 90
+
+# ⚠️ Rules 1 and 3 delete entries up to the quarter window apart, and real
+# consecutive quarters are ~90 days apart. Inside the routine 14-day scan that
+# only ever meets a stale echo; scan back further and it meets real quarters: a
+# 1000-day dry run proposed deleting 2,093 rows against 507 genuine clusters.
+# So a scan wider than WIDE_SCAN_PAST_DAYS must tighten the quarter window to at
+# most WIDE_SCAN_MAX_QUARTER_WINDOW_DAYS -- halfway to the next quarter, the
+# same threshold scan/earnings_fetcher.py uses to call a date a different quarter.
+WIDE_SCAN_PAST_DAYS = 180
+WIDE_SCAN_MAX_QUARTER_WINDOW_DAYS = 45
+
+
+def check_scan_windows(window_past_days: int, quarter_window_days: int) -> None:
+    """Refuse a wide dedup scan that keeps the full quarter window."""
+    if (window_past_days > WIDE_SCAN_PAST_DAYS
+            and quarter_window_days > WIDE_SCAN_MAX_QUARTER_WINDOW_DAYS):
+        raise ValueError(
+            f"a {window_past_days}-day scan with a {quarter_window_days}-day quarter window "
+            f"would treat real consecutive quarters as duplicates; above "
+            f"{WIDE_SCAN_PAST_DAYS} days pass --quarter-window-days "
+            f"{WIDE_SCAN_MAX_QUARTER_WINDOW_DAYS} or less"
+        )
 
 
 def should_skip_validation(last_validated_at: datetime | None) -> bool:
@@ -75,7 +103,7 @@ def should_skip_validation(last_validated_at: datetime | None) -> bool:
     """
     if last_validated_at is None:
         return False
-    hours_since_validation = (datetime.now() - last_validated_at).total_seconds() / 3600
+    hours_since_validation = (datetime.now(timezone.utc) - last_validated_at).total_seconds() / 3600
     return hours_since_validation < VALIDATION_SKIP_HOURS
 
 
@@ -87,19 +115,51 @@ class SyncStats:
         self.updated_dates = 0
         self.unchanged_dates = 0
         self.conflicts_detected = 0
+        self.uncorroborated = 0  # only one source had a date
         self.validation_skipped = 0  # Tickers skipped due to recent validation
         self.dupes_removed = 0
         self.errors = 0
         self.tickers_processed: Set[str] = set()
         self.changes: List[Dict] = []
         self.dedup_details: List[Dict] = []
+        # Every date the sync did not write, listed at the END of the summary. On
+        # 2026-09-15 the unattended /maintenance run saw a truncated tool output that
+        # ended before the summary; it reported one conflict (FDX) of four and read
+        # exit 1 as harmless. The per-ticker log lines are thousands of characters
+        # upstream -- the list has to live where the summary is.
+        self.needs_review: List[Dict] = []
         # Tickers whose date was cross-validated (Yahoo+Finnhub, no conflict) earlier
         # in this same run. Handed to cleanup_duplicate_earnings() so the post-sync
         # dedup pass can reuse that consensus instead of re-deriving it from scratch.
         self.resolved_this_run: Dict[str, Tuple[date, EarningsTiming]] = {}
 
+    def add_review(self, ticker: str, stored: date | None, sources: str, conflict: bool) -> None:
+        """Record a date the sync refused to write: sources disagree, or only one has it."""
+        if conflict:
+            self.conflicts_detected += 1
+            reason = "sources disagree"
+        else:
+            self.uncorroborated += 1
+            reason = "only one source has a date"
+        self.errors += 1
+        self.needs_review.append(
+            {"ticker": ticker, "stored": stored, "sources": sources, "reason": reason}
+        )
+        logger.warning(
+            f"  ⏭️  NEEDS REVIEW — {ticker}: {reason} ({sources}); stored "
+            f"{stored or 'nothing'}. Not written, will retry next sync."
+        )
+
+    def review(self, ticker: str, stored: date | None, validation) -> None:
+        """add_review() for a validator result that is not corroborated."""
+        sources = " | ".join(
+            f"{s.source.value} {s.earnings_date} ({s.timing.value})" for s in validation.sources
+        )
+        self.add_review(ticker, stored, sources, conflict=validation.has_conflict)
+
     def log_summary(self):
         """Log summary statistics."""
+        failed = self.errors - len(self.needs_review)
         logger.info("\n" + "=" * 80)
         logger.info("SYNC SUMMARY")
         logger.info("=" * 80)
@@ -109,11 +169,14 @@ class SyncStats:
         logger.info(f"  = Unchanged: {self.unchanged_dates}")
         logger.info(f"  ⏭️  Validation skipped (recent): {self.validation_skipped}")
         logger.info(f"  ⚠️  Conflicts detected: {self.conflicts_detected}")
+        logger.info(f"  ⚠️  Single-source dates not written: {self.uncorroborated}")
         logger.info(f"  🗑️  Duplicates removed: {self.dupes_removed}")
-        logger.info(f"  ✗ Errors: {self.errors}")
+        logger.info(
+            f"  ✗ Errors: {self.errors} ({len(self.needs_review)} need review, {failed} failed)"
+        )
 
         if self.changes:
-            logger.info(f"\nCHANGES DETECTED:")
+            logger.info("\nCHANGES DETECTED:")
             for change in self.changes:
                 logger.info(
                     f"  {change['ticker']}: {change['old_date']} → {change['new_date']} "
@@ -121,7 +184,7 @@ class SyncStats:
                 )
 
         if self.dedup_details:
-            logger.info(f"\nDUPLICATES REMOVED:")
+            logger.info("\nDUPLICATES REMOVED:")
             for d in self.dedup_details:
                 logger.info(
                     f"  {d['ticker']}: removed {d['removed_date']} "
@@ -130,13 +193,20 @@ class SyncStats:
                     f"{d['days_apart']}d apart)"
                 )
 
+        if self.needs_review:
+            logger.info(f"\nNEEDS REVIEW ({len(self.needs_review)}) — not written:")
+            for r in self.needs_review:
+                logger.info(
+                    f"  {r['ticker']}: stored {r['stored'] or 'nothing'} — {r['reason']}: {r['sources']}"
+                )
 
-def get_focused_tickers(db_path: str) -> Set[str]:
+
+def get_focused_tickers() -> Set[str]:
     """
     Return tickers we've actually traded (from strategies + trade_journal).
     Used as the default sync target to avoid crawling thousands of irrelevant tickers.
     """
-    conn = sqlite3.connect(db_path)
+    conn = connect()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT DISTINCT symbol FROM strategies "
@@ -148,7 +218,6 @@ def get_focused_tickers(db_path: str) -> Set[str]:
 
 
 def get_database_dates(
-    db_path: str,
     horizon_days: int = 90,
     ticker_filter: Set[str] | None = None,
 ) -> Dict[str, Tuple[date, EarningsTiming, datetime, datetime | None]]:
@@ -161,19 +230,19 @@ def get_database_dates(
     Returns:
         Dict[ticker] = (earnings_date, timing, updated_at, last_validated_at)
     """
-    conn = sqlite3.connect(db_path)
+    conn = connect()
     cursor = conn.cursor()
 
-    cutoff_date = (date.today() - timedelta(days=7)).isoformat()
-    future_date = (date.today() + timedelta(days=horizon_days)).isoformat()
+    cutoff_date = (today_et() - timedelta(days=7)).isoformat()
+    future_date = (today_et() + timedelta(days=horizon_days)).isoformat()
 
     if ticker_filter:
-        placeholders = ",".join("?" * len(ticker_filter))
+        placeholders = ", ".join(["%s"] * len(ticker_filter))
         cursor.execute(
             f"""
             SELECT ticker, earnings_date, timing, updated_at, last_validated_at
             FROM earnings_calendar
-            WHERE earnings_date >= ? AND earnings_date <= ?
+            WHERE earnings_date >= %s AND earnings_date <= %s
             AND ticker IN ({placeholders})
             ORDER BY earnings_date
             """,
@@ -184,7 +253,7 @@ def get_database_dates(
             """
             SELECT ticker, earnings_date, timing, updated_at, last_validated_at
             FROM earnings_calendar
-            WHERE earnings_date >= ? AND earnings_date <= ?
+            WHERE earnings_date >= %s AND earnings_date <= %s
             ORDER BY earnings_date
             """,
             (cutoff_date, future_date),
@@ -192,31 +261,28 @@ def get_database_dates(
 
     result = {}
     for row in cursor.fetchall():
-        ticker, earnings_date_str, timing_str, updated_at_str, last_validated_str = row
-        earnings_date = datetime.strptime(earnings_date_str, "%Y-%m-%d").date()
+        # date / timestamptz columns arrive already typed. The old "handle
+        # both ISO and simple format" dance existed because SQLite stored
+        # two text conventions; Postgres stores one instant.
+        ticker, earnings_date, timing_str, updated_at, last_validated_at = row
         timing = EarningsTiming(timing_str)
-        # Handle both ISO format (with T and microseconds) and simple format
-        updated_at = datetime.fromisoformat(updated_at_str.replace(" ", "T").split(".")[0])
-        last_validated_at = None
-        if last_validated_str:
-            last_validated_at = datetime.fromisoformat(last_validated_str.replace(" ", "T").split(".")[0])
         result[ticker] = (earnings_date, timing, updated_at, last_validated_at)
 
     conn.close()
     return result
 
 
-def check_staleness(db_path: str, threshold_days: int = STALENESS_THRESHOLD_DAYS) -> List[Dict]:
+def check_staleness(threshold_days: int = STALENESS_THRESHOLD_DAYS) -> List[Dict]:
     """
     Check for stale earnings data.
 
     Returns:
         List of dicts with stale ticker info
     """
-    conn = sqlite3.connect(db_path)
+    conn = connect()
     cursor = conn.cursor()
 
-    future_date = (date.today() + timedelta(days=90)).isoformat()
+    future_date = (today_et() + timedelta(days=90)).isoformat()
 
     cursor.execute(
         """
@@ -225,11 +291,11 @@ def check_staleness(db_path: str, threshold_days: int = STALENESS_THRESHOLD_DAYS
             earnings_date,
             timing,
             updated_at,
-            julianday('now') - julianday(updated_at) as days_stale
+            EXTRACT(EPOCH FROM (now() - updated_at))/86400 as days_stale
         FROM earnings_calendar
-        WHERE earnings_date >= date('now')
-          AND earnings_date <= ?
-          AND julianday('now') - julianday(updated_at) > ?
+        WHERE earnings_date >= CURRENT_DATE
+          AND earnings_date <= %s
+          AND EXTRACT(EPOCH FROM (now() - updated_at))/86400 > %s
         ORDER BY days_stale DESC
         """,
         (future_date, threshold_days),
@@ -253,13 +319,13 @@ def check_staleness(db_path: str, threshold_days: int = STALENESS_THRESHOLD_DAYS
 
 
 def cleanup_duplicate_earnings(
-    db_path: str,
     dry_run: bool = False,
     finnhub=None,
     yahoo_finance=None,
     resolved_this_run: Dict[str, Tuple[date, EarningsTiming]] | None = None,
     window_past_days: int = 14,
     window_future_days: int = 120,
+    quarter_window_days: int = DEDUP_QUARTER_WINDOW_DAYS,
 ) -> List[Dict]:
     """
     Remove duplicate earnings entries for the same ticker within the same quarter.
@@ -299,7 +365,6 @@ def cleanup_duplicate_earnings(
     and both are kept.
 
     Args:
-        db_path: Path to ivcrush.db
         dry_run: If True, report duplicates without deleting
         finnhub: FinnhubAPI client, used only to corroborate confirmed-vs-confirmed
             ties (rule 2) when resolved_this_run has no answer. If None, such
@@ -317,27 +382,36 @@ def cleanup_duplicate_earnings(
             backlog older than the routine window gets reached (Aug 30 2026 audit
             found 39 such pairs, 18-27 days old, unreachable by the default).
         window_future_days: How many days ahead of today to scan (default 120).
+        quarter_window_days: Max days apart for rules 1 and 3 to treat two entries
+            as one event (default 90). Must be at most 45 when window_past_days
+            exceeds 180 -- see check_scan_windows.
 
     Returns:
         List of dicts describing each removed entry
+
+    Raises:
+        ValueError: a wide scan with the quarter window left at full width.
     """
+    check_scan_windows(window_past_days, quarter_window_days)
     resolved_this_run = resolved_this_run or {}
-    conn = sqlite3.connect(db_path)
+    conn = connect()
     try:
         cursor = conn.cursor()
 
         # Past window catches recently-reported earnings that still have stale future dupes.
-        cutoff_past = (date.today() - timedelta(days=window_past_days)).isoformat()
-        cutoff_future = (date.today() + timedelta(days=window_future_days)).isoformat()
+        cutoff_past = (today_et() - timedelta(days=window_past_days)).isoformat()
+        cutoff_future = (today_et() + timedelta(days=window_future_days)).isoformat()
 
         # Find tickers with multiple entries in the window
         cursor.execute(
             """
             SELECT ticker, COUNT(*) as cnt
             FROM earnings_calendar
-            WHERE earnings_date >= ? AND earnings_date <= ?
+            WHERE earnings_date >= %s AND earnings_date <= %s
             GROUP BY ticker
-            HAVING cnt > 1
+            -- Repeat the aggregate: SQLite allows a SELECT alias in HAVING,
+            -- Postgres does not (column "cnt" does not exist).
+            HAVING COUNT(*) > 1
             """,
             (cutoff_past, cutoff_future),
         )
@@ -417,12 +491,12 @@ def cleanup_duplicate_earnings(
                 return yf_date
             return None
 
-        for ticker, count in dupes:
+        for ticker, _count in dupes:
             cursor.execute(
                 """
                 SELECT ticker, earnings_date, timing, confirmed, updated_at
                 FROM earnings_calendar
-                WHERE ticker = ? AND earnings_date >= ? AND earnings_date <= ?
+                WHERE ticker = %s AND earnings_date >= %s AND earnings_date <= %s
                 ORDER BY earnings_date
                 """,
                 (ticker, cutoff_past, cutoff_future),
@@ -431,9 +505,14 @@ def cleanup_duplicate_earnings(
 
             entries = []
             for row in rows:
+                # earnings_date is a real date column now. `date` stays an ISO
+                # STRING deliberately: it is the reporting contract -- printed
+                # by /maintenance and JSON-serialised -- and a datetime.date is
+                # not JSON-serialisable. `date_obj` is the typed one for the
+                # arithmetic below.
                 entries.append({
-                    "date": row[1],
-                    "date_obj": _parse_date(row[1]),
+                    "date": row[1].isoformat(),
+                    "date_obj": row[1],
                     "timing": row[2],
                     "confirmed": row[3],
                     "updated_at": row[4],
@@ -454,7 +533,7 @@ def cleanup_duplicate_earnings(
                     if not c["confirmed"]:
                         continue
                     days_apart = abs((uc["date_obj"] - c["date_obj"]).days)
-                    if days_apart <= DEDUP_QUARTER_WINDOW_DAYS:
+                    if days_apart <= quarter_window_days:
                         to_remove.add(i)
                         rule1_pending.append((i, j))
                         break
@@ -590,7 +669,7 @@ def cleanup_duplicate_earnings(
                 for uc in sorted_uc[1:]:
                     uc_idx = entries.index(uc)
                     days_apart = abs((uc["date_obj"] - keeper["date_obj"]).days)
-                    if days_apart <= DEDUP_QUARTER_WINDOW_DAYS:
+                    if days_apart <= quarter_window_days:
                         to_remove.add(uc_idx)
                         detail = {
                             "ticker": ticker,
@@ -610,7 +689,7 @@ def cleanup_duplicate_earnings(
                 for i in to_remove:
                     entry = entries[i]
                     cursor.execute(
-                        "DELETE FROM earnings_calendar WHERE ticker = ? AND earnings_date = ?",
+                        "DELETE FROM earnings_calendar WHERE ticker = %s AND earnings_date = %s",
                         (ticker, entry["date"]),
                     )
 
@@ -630,22 +709,28 @@ def cleanup_duplicate_earnings(
 
 
 def _sync_via_yahoo_fallback(
-    db_path: str,
-    dry_run: bool,
     stats: "SyncStats",
     ticker_filter: Set[str] | None = None,
 ) -> "SyncStats":
     """
-    Yahoo Finance per-ticker fallback used when Finnhub bulk fetch fails.
+    Yahoo Finance per-ticker check used when the Finnhub bulk fetch fails.
 
-    Iterates DB tickers with upcoming earnings (next 90 days) and queries
-    Yahoo Finance individually. Slower but functional when Finnhub is unavailable.
-    Respects ticker_filter (focused mode) to avoid crawling thousands of tickers.
+    Iterates DB tickers with upcoming earnings (next 90 days) and asks Yahoo
+    for each. Respects ticker_filter (focused mode) to avoid crawling thousands
+    of tickers.
+
+    ⚠️ REPORT ONLY -- it never writes. With Finnhub down there is one source,
+    and a date change needs two to agree. Until 2026-09-13 this inserted
+    Yahoo's date whenever it differed, keyed on (ticker, earnings_date), so a
+    different date became a second row: a single-source duplicate quarter, the
+    mechanism backfill_historical's 15-day guard was added to stop. A
+    disagreement is now NEEDS REVIEW, and the next sync with Finnhub up settles
+    it through the corroborated path.
     """
     yahoo = YahooFinanceEarnings()
-    db_dates = get_database_dates(db_path, ticker_filter=ticker_filter)
+    db_dates = get_database_dates(ticker_filter=ticker_filter)
 
-    today = date.today()
+    today = today_et()
     cutoff = today + timedelta(days=90)
     stale_tickers = [
         ticker for ticker, dates in db_dates.items()
@@ -665,23 +750,20 @@ def _sync_via_yahoo_fallback(
             existing_date = db_dates.get(ticker, (None,))[0]
 
             if yf_date != existing_date:
-                logger.info(f"{ticker}: Yahoo Finance found new date {yf_date} ({yf_timing.value})")
-                if not dry_run:
-                    with sqlite3.connect(db_path, timeout=30) as conn:
-                        conn.execute(
-                            """INSERT OR REPLACE INTO earnings_calendar
-                               (ticker, earnings_date, timing, updated_at)
-                               VALUES (?, ?, ?, datetime('now'))""",
-                            (ticker, yf_date.isoformat(), yf_timing.value)
-                        )
-                        conn.commit()
-                stats.new_dates += 1
+                stats.add_review(
+                    ticker, existing_date,
+                    f"Yahoo Finance {yf_date} ({yf_timing.value}), Finnhub unavailable",
+                    conflict=True,
+                )
             else:
                 stats.unchanged_dates += 1
         except Exception as e:
             logger.debug(f"{ticker}: Yahoo Finance fallback error: {e}")
 
-    logger.info(f"Yahoo Finance fallback complete: {stats.new_dates} new, {stats.unchanged_dates} unchanged")
+    logger.info(
+        f"Yahoo Finance fallback complete: {stats.unchanged_dates} agree, "
+        f"{stats.conflicts_detected} need review (nothing written)"
+    )
     return stats
 
 
@@ -689,7 +771,6 @@ def sync_earnings_calendar(
     validator: EarningsDateValidator,
     earnings_repo: EarningsRepository,
     finnhub: FinnhubAPI,
-    db_path: str,
     horizon: str = "3month",
     dry_run: bool = False,
     focused: bool = True,
@@ -701,7 +782,6 @@ def sync_earnings_calendar(
         validator: Earnings date validator
         earnings_repo: Earnings repository
         finnhub: Finnhub API client
-        db_path: Database path
         horizon: Time horizon (3month, 6month, 12month)
         dry_run: If True, don't update database
         focused: If True (default), only sync tickers we've actually traded.
@@ -716,12 +796,12 @@ def sync_earnings_calendar(
     logger.info("Loading current database state...")
     ticker_filter: Set[str] | None = None
     if focused:
-        ticker_filter = get_focused_tickers(db_path)
+        ticker_filter = get_focused_tickers()
         logger.info(
             f"Focused mode: targeting {len(ticker_filter)} traded tickers "
             f"(use --all to sync full calendar)"
         )
-    db_dates = get_database_dates(db_path, ticker_filter=ticker_filter)
+    db_dates = get_database_dates(ticker_filter=ticker_filter)
     logger.info(f"Found {len(db_dates)} existing earnings dates in database")
 
     # Fetch full calendar from Finnhub
@@ -730,8 +810,8 @@ def sync_earnings_calendar(
 
     if calendar_result.is_err:
         logger.error(f"Failed to fetch calendar: {calendar_result.error}")
-        logger.warning("Finnhub unavailable — falling back to Yahoo Finance per-ticker lookup")
-        return _sync_via_yahoo_fallback(db_path=db_path, dry_run=dry_run, stats=stats, ticker_filter=ticker_filter)
+        logger.warning("Finnhub unavailable — checking stored dates against Yahoo Finance (report only)")
+        return _sync_via_yahoo_fallback(stats=stats, ticker_filter=ticker_filter)
 
     calendar = calendar_result.value
     logger.info(f"✓ Fetched {len(calendar)} earnings events from Finnhub")
@@ -755,7 +835,7 @@ def sync_earnings_calendar(
         # adding thousands of unwanted tickers from the full calendar
         tickers_to_process = db_tickers & finnhub_tickers
 
-    logger.info(f"\nFiltering tickers:")
+    logger.info("\nFiltering tickers:")
     logger.info(f"  • Database: {len(db_tickers)} tickers")
     logger.info(f"  • Finnhub calendar: {len(finnhub_tickers)} tickers")
     logger.info(f"  • Intersection (to process): {len(tickers_to_process)} tickers")
@@ -783,7 +863,7 @@ def sync_earnings_calendar(
         # Check if ticker exists in database
         if ticker in db_dates:
             db_date, db_timing, db_updated_at, last_validated_at = db_dates[ticker]
-            days_stale = (datetime.now() - db_updated_at).days
+            days_stale = (datetime.now(timezone.utc) - db_updated_at).days
 
             # Check if date changed
             if finnhub_date != db_date or finnhub_timing != db_timing:
@@ -820,16 +900,10 @@ def sync_earnings_calendar(
                 if result.is_ok:
                     validation = result.value
 
-                    if validation.has_conflict:
-                        stats.conflicts_detected += 1
-                        logger.warning(
-                            f"  ⚠️  CONFLICT: {validation.conflict_details}"
-                        )
-                        logger.warning(
-                            f"  ⏭️  NEEDS REVIEW — sources disagree, not overwriting "
-                            f"the existing date on a single-source guess. Will retry next sync."
-                        )
-                        stats.errors += 1
+                    # Not has_conflict: with Yahoo silent, Finnhub's date alone has
+                    # nothing to conflict with, and this branch used to write it.
+                    if not validation.corroborated:
+                        stats.review(ticker, db_date, validation)
                         continue
 
                     consensus_date = validation.consensus_date
@@ -839,6 +913,22 @@ def sync_earnings_calendar(
                         f"  ✓ Consensus: {consensus_date} ({consensus_timing.value})"
                     )
                     stats.resolved_this_run[ticker] = (consensus_date, consensus_timing)
+
+                    if (consensus_date, consensus_timing) == (db_date, db_timing):
+                        # Finnhub differed but Yahoo backs the stored row. Counted as an
+                        # update until 2026-09-15: 67 "Updated dates", each listed as
+                        # "Timing changed", on a run that changed nothing.
+                        if not dry_run:
+                            save_result = earnings_repo.save_earnings_event(
+                                ticker=ticker, earnings_date=db_date, timing=db_timing,
+                            )
+                            if save_result.is_err:
+                                logger.error(f"  ✗ Failed to record validation: {save_result.error}")
+                                stats.errors += 1
+                                continue
+                        logger.info("  = Stored date confirmed")
+                        stats.unchanged_dates += 1
+                        continue
 
                     # Update database
                     if not dry_run:
@@ -860,13 +950,13 @@ def sync_earnings_calendar(
                                     else "Timing changed",
                                 }
                             )
-                            logger.info(f"  💾 Updated database")
+                            logger.info("  💾 Updated database")
                         else:
                             logger.error(f"  ✗ Failed to update: {save_result.error}")
                             stats.errors += 1
                     else:
                         stats.updated_dates += 1
-                        logger.info(f"  🔍 DRY RUN - Would update database")
+                        logger.info("  🔍 DRY RUN - Would update database")
                 else:
                     logger.error(f"  ✗ Validation failed: {result.error}")
                     stats.errors += 1
@@ -875,7 +965,7 @@ def sync_earnings_calendar(
                 if days_stale > STALENESS_THRESHOLD_DAYS:
                     # Check if we can skip validation (validated within 48 hours)
                     if should_skip_validation(last_validated_at):
-                        hours_ago = (datetime.now() - last_validated_at).total_seconds() / 3600
+                        hours_ago = (datetime.now(timezone.utc) - last_validated_at).total_seconds() / 3600
                         logger.debug(
                             f"{ticker}: Stale ({days_stale}d) but validated {hours_ago:.1f}h ago - skipping"
                         )
@@ -892,16 +982,8 @@ def sync_earnings_calendar(
                         )
                         if result.is_ok:
                             validation = result.value
-                            if validation.has_conflict:
-                                stats.conflicts_detected += 1
-                                logger.warning(
-                                    f"  ⚠️  CONFLICT: {validation.conflict_details}"
-                                )
-                                logger.warning(
-                                    f"  ⏭️  NEEDS REVIEW — sources disagree, not overwriting "
-                                    f"stale-but-existing date {db_date} on a single-source guess."
-                                )
-                                stats.errors += 1
+                            if not validation.corroborated:
+                                stats.review(ticker, db_date, validation)
                             elif validation.consensus_date != db_date:
                                 # Date changed according to validation
                                 logger.info(
@@ -932,17 +1014,28 @@ def sync_earnings_calendar(
                                                 "reason": "Stale data corrected",
                                             }
                                         )
+                                    else:
+                                        logger.error(f"  ✗ Failed to update: {save_result.error}")
+                                        stats.errors += 1
+                                else:
+                                    stats.updated_dates += 1
                             else:
                                 # Date confirmed unchanged, update validation timestamp
                                 if not dry_run:
-                                    earnings_repo.save_earnings_event(
+                                    save_result = earnings_repo.save_earnings_event(
                                         ticker=ticker,
                                         earnings_date=db_date,
                                         timing=db_timing,
                                     )
+                                    if save_result.is_err:
+                                        logger.error(
+                                            f"  ✗ Failed to record validation: {save_result.error}"
+                                        )
+                                        stats.errors += 1
                                 stats.unchanged_dates += 1
                         else:
-                            stats.unchanged_dates += 1
+                            logger.error(f"  ✗ Validation failed: {result.error}")
+                            stats.errors += 1
                 else:
                     stats.unchanged_dates += 1
         else:
@@ -962,14 +1055,11 @@ def sync_earnings_calendar(
             if result.is_ok:
                 validation = result.value
 
-                if validation.has_conflict:
-                    stats.conflicts_detected += 1
-                    logger.warning(f"  ⚠️  CONFLICT: {validation.conflict_details}")
-                    logger.warning(
-                        f"  ⏭️  NEEDS REVIEW — sources disagree, not auto-saving "
-                        f"a guess for a new ticker. Will retry next sync."
-                    )
-                    stats.errors += 1
+                # A new row needs both sources too: a lone Finnhub date was saved as
+                # confirmed, and a traded ticker Yahoo has no date for is usually one
+                # that stopped reporting (SKYT, delisted 2026-07-31, stored 2026-11-03).
+                if not validation.corroborated:
+                    stats.review(ticker, None, validation)
                     continue
 
                 logger.info(
@@ -985,13 +1075,13 @@ def sync_earnings_calendar(
                     )
                     if save_result.is_ok:
                         stats.new_dates += 1
-                        logger.info(f"  💾 Saved to database")
+                        logger.info("  💾 Saved to database")
                     else:
                         logger.error(f"  ✗ Failed to save: {save_result.error}")
                         stats.errors += 1
                 else:
                     stats.new_dates += 1
-                    logger.info(f"  🔍 DRY RUN - Would save to database")
+                    logger.info("  🔍 DRY RUN - Would save to database")
             else:
                 logger.error(f"  ✗ Validation failed: {result.error}")
                 stats.errors += 1
@@ -999,7 +1089,7 @@ def sync_earnings_calendar(
     # Dedup after sync — remove stale duplicate entries
     logger.info("\nRunning post-sync deduplication...")
     dedup_results = cleanup_duplicate_earnings(
-        db_path, dry_run=dry_run,
+        dry_run=dry_run,
         finnhub=validator.finnhub, yahoo_finance=validator.yahoo_finance,
         resolved_this_run=stats.resolved_this_run,
     )
@@ -1014,10 +1104,9 @@ def main():
         description="Automated earnings calendar synchronization"
     )
     parser.add_argument(
-        "--dry-run",
-        "-n",
+        "--execute",
         action="store_true",
-        help="Don't update database, just show what would change",
+        help="Write changes to the database (default: report what would change)",
     )
     parser.add_argument(
         "--horizon",
@@ -1035,6 +1124,31 @@ def main():
         "--cleanup-dupes",
         action="store_true",
         help="Remove duplicate earnings entries (same ticker, same quarter) and exit",
+    )
+    parser.add_argument(
+        "--window-past-days",
+        type=int,
+        default=14,
+        help=(
+            "How far back --cleanup-dupes scans, in days (default: 14, matching the "
+            "routine sync window). A duplicate pair whose dates are BOTH older than "
+            "this is never examined and stays in the database permanently, so "
+            "clearing a historical backlog needs an explicit wider pass "
+            "with --quarter-window-days). Above 180 days the quarter window must be "
+            "45 or less, or real consecutive quarters (~90 days apart) are deleted "
+            "as duplicates."
+        ),
+    )
+    parser.add_argument(
+        "--quarter-window-days",
+        type=int,
+        default=DEDUP_QUARTER_WINDOW_DAYS,
+        help=(
+            f"Max days apart for --cleanup-dupes to treat two entries as one event "
+            f"(default: {DEDUP_QUARTER_WINDOW_DAYS}). Required at "
+            f"{WIDE_SCAN_MAX_QUARTER_WINDOW_DAYS} or less when --window-past-days "
+            f"exceeds {WIDE_SCAN_PAST_DAYS}."
+        ),
     )
     parser.add_argument(
         "--threshold",
@@ -1056,16 +1170,25 @@ def main():
     )
 
     args = parser.parse_args()
+    dry_run = not args.execute
+    try:
+        check_scan_windows(args.window_past_days, args.quarter_window_days)
+    except ValueError as e:
+        parser.error(f"{e} (--window-past-days / --quarter-window-days)")
 
     # Setup logging
     setup_logging(level=args.log_level)
 
-    db_path = os.getenv("DB_PATH", "data/ivcrush.db")
+    # `db_path` was removed at the tail of the Postgres migration: every
+    # function here already called common.db.connect(), which reads PG*
+    # from the environment, so the parameter was threaded through and
+    # never used. It defaulted to "data/ivcrush.db" -- a file that no
+    # longer exists.
 
     # Check staleness only
     if args.check_staleness:
         logger.info("Checking for stale earnings data...")
-        stale = check_staleness(db_path, threshold_days=args.threshold)
+        stale = check_staleness(threshold_days=args.threshold)
 
         if stale:
             logger.warning(
@@ -1087,23 +1210,25 @@ def main():
         logger.info("=" * 80)
         logger.info("EARNINGS CALENDAR DEDUP")
         logger.info("=" * 80)
-        logger.info(f"Mode: {'DRY RUN' if args.dry_run else 'LIVE CLEANUP'}")
-        logger.info(f"Database: {db_path}")
-        logger.info(f"Quarter window: {DEDUP_QUARTER_WINDOW_DAYS} days")
+        logger.info(f"Mode: {'DRY RUN (pass --execute to delete)' if dry_run else 'LIVE CLEANUP'}")
+        logger.info(f"Quarter window: {args.quarter_window_days} days")
+        logger.info(f"Scan window: {args.window_past_days}d back .. 120d forward")
         logger.info("=" * 80)
 
         _finnhub = FinnhubAPI(
-            api_key=os.getenv("FINNHUB_API_KEY", ""),
+            api_key=Config.from_env().api.finnhub_key,
             rate_limiter=create_finnhub_limiter(),
         )
         _yahoo_finance = YahooFinanceEarnings()
         removed = cleanup_duplicate_earnings(
-            db_path, dry_run=args.dry_run,
+            dry_run=dry_run,
             finnhub=_finnhub, yahoo_finance=_yahoo_finance,
+            window_past_days=args.window_past_days,
+            quarter_window_days=args.quarter_window_days,
         )
 
         if removed:
-            logger.info(f"\n{'DRY RUN: Would remove' if args.dry_run else 'Removed'} "
+            logger.info(f"\n{'DRY RUN: Would remove' if dry_run else 'Removed'} "
                         f"{len(removed)} duplicate entries")
         else:
             logger.info("\n✓ No duplicates found")
@@ -1114,15 +1239,14 @@ def main():
     logger.info("=" * 80)
     logger.info("EARNINGS CALENDAR SYNC")
     logger.info("=" * 80)
-    logger.info(f"Mode: {'DRY RUN' if args.dry_run else 'LIVE SYNC'}")
+    logger.info(f"Mode: {'DRY RUN (pass --execute to write)' if dry_run else 'LIVE SYNC'}")
     logger.info(f"Horizon: {args.horizon}")
-    logger.info(f"Database: {db_path}")
-    logger.info(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"Time: {now_et().strftime('%Y-%m-%d %H:%M:%S %Z')}")
     logger.info("=" * 80)
 
     # Initialize data sources
     finnhub = FinnhubAPI(
-        api_key=os.getenv("FINNHUB_API_KEY", ""),
+        api_key=Config.from_env().api.finnhub_key,
         rate_limiter=create_finnhub_limiter(),
     )
     yahoo_finance = YahooFinanceEarnings()
@@ -1132,25 +1256,25 @@ def main():
         finnhub=finnhub, yahoo_finance=yahoo_finance
     )
 
-    # Initialize repository
-    earnings_repo = EarningsRepository(db_path)
+    # Initialize repository. Takes no path since the Postgres port — the rest
+    # of this script is still SQLite and is ported in Task 4.
+    earnings_repo = EarningsRepository()
 
     # Run sync
     stats = sync_earnings_calendar(
         validator=validator,
         earnings_repo=earnings_repo,
         finnhub=finnhub,
-        db_path=db_path,
         horizon=args.horizon,
-        dry_run=args.dry_run,
+        dry_run=dry_run,
         focused=not args.all,
     )
 
     # Print summary
     stats.log_summary()
 
-    if args.dry_run:
-        logger.info("\n🔍 DRY RUN - No changes made to database")
+    if dry_run:
+        logger.info("\n🔍 DRY RUN - No changes made to database (pass --execute to write)")
 
     # Exit with error code if there were errors
     sys.exit(1 if stats.errors > 0 else 0)

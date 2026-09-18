@@ -6,8 +6,9 @@ Shared logic to avoid duplication between standard and interpolated calculators.
 
 import logging
 from datetime import date
-from src.domain.types import Money, Percentage, ImpliedMove, OptionChain
-from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
+
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
+from src.domain.types import ImpliedMove, Money, OptionChain, Percentage
 
 logger = logging.getLogger(__name__)
 

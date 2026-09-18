@@ -1,0 +1,79 @@
+# The repo-root distribution: `common/`, the package the engine (2.0/src,
+# 2.0/scripts) and the repo-root scripts all import.
+#
+# Installed editable into 2.0/venv, beside the engine's own `ivcrush`
+# distribution (2.0/pyproject.toml, which packages `src`):
+#
+#     2.0/venv/bin/pip install --no-deps -e . -e 2.0/
+#
+# That is what makes `import common` and `import src` resolve from any working
+# directory, with no sys.path edit anywhere (audit 5.2, 2026-09-14). Until then
+# six modules in 2.0/src, the domain layer among them, pushed the repo root onto
+# sys.path at import time. Runtime dependencies are pinned in requirements.txt,
+# not here.
+#
+# ⚠️ Editable installs map a package NAME to one checkout. From a git worktree
+# that shares 2.0/venv, `common` and `src` resolve to the MAIN checkout unless
+# the worktree's own directories come first: PYTHONPATH=<worktree>:<worktree>/2.0.
+
+[project]
+name = "trading-desk-common"
+version = "1.0.0"
+description = "Trading Desk shared package: database access, constants, timezone, direction rules"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["common*"]
+
+# ---- Import contracts (import-linter; `lint-imports` from the repo root) -----
+# Run by CI (.github/workflows/pr-tests.yml) and by
+# scripts/tests/test_import_contracts.py. Both packages must be importable,
+# which the editable installs above provide.
+#
+# Until 2026-09-14 the layering was convention only, and infrastructure imported
+# application (analysis_repository.py took MarketConditions from
+# application/metrics). grimp follows indirect chains too, so a route through
+# src.config, src.utils or src.container counts.
+[tool.importlinter]
+root_packages = ["src", "common"]
+# So a contract can name `scripts`, which is not analysed, only refused.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Engine layers: application over infrastructure over config over domain"
+type = "layers"
+# Higher layers may import lower ones, never the reverse: domain imports neither
+# application, infrastructure nor config, infrastructure imports no application,
+# and config imports only domain. Application importing infrastructure is allowed
+# (earnings_date_validator.py builds its Finnhub and Yahoo clients). Config sits
+# just above domain: it is built from domain values (VRP tiers, ScoringWeights),
+# and until 2026-09-14, outside the layers, it let domain scoring import it.
+# src.utils and src.container sit outside the layers.
+layers = [
+    "src.application",
+    "src.infrastructure",
+    "src.config",
+    "src.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "common imports nothing from the engine"
+type = "forbidden"
+# Every layer may import common; common is the base, so it may import no layer.
+source_modules = ["common"]
+forbidden_modules = ["src"]
+
+[[tool.importlinter.contracts]]
+name = "The engine and common import nothing from the scripts tree"
+type = "forbidden"
+# scripts/ and 2.0/scripts/ are entry points over src and common, never under
+# them. Until 2026-09-14 src.utils.concurrent_scanner imported
+# scripts.scan.date_utils for the trading expiration rule.
+source_modules = ["src", "common"]
+forbidden_modules = ["scripts"]

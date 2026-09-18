@@ -11,9 +11,8 @@ from typing import Dict, Optional, Tuple
 from src.container import Container
 
 from .market_data import (
-    get_market_cap_millions,
     check_liquidity_with_tier,
-    check_liquidity_hybrid,
+    get_market_cap_millions,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,9 +24,6 @@ def should_filter_ticker(
     container: Container,
     check_market_cap: bool = True,
     check_liquidity: bool = True,
-    implied_move_pct: Optional[float] = None,
-    use_hybrid_liquidity: bool = False,
-    max_loss_budget: float = 20000.0,
 ) -> Tuple[bool, Optional[str], Optional[str], Optional[Dict]]:
     """
     Determine if ticker should be filtered out based on market cap (LIQUIDITY NO LONGER FILTERS).
@@ -36,9 +32,10 @@ def should_filter_ticker(
     cause filtering. All tradeable opportunities are shown regardless of liquidity tier,
     with appropriate warnings in the output.
 
-    When use_hybrid_liquidity=True and implied_move_pct is provided, uses the new
-    C-then-B hybrid liquidity check which evaluates strikes at actual trading levels
-    (outside implied move) with dynamic thresholds based on position size.
+    This is the mid-chain check. The tier every scan row displays and scores is
+    the hybrid C-then-B check in ticker_analysis.analyze_ticker, which needs the
+    implied move and sizes its open-interest bar from the sizing config. A
+    hybrid branch here was never called and was removed 2026-09-14.
 
     Args:
         ticker: Stock ticker symbol
@@ -46,16 +43,13 @@ def should_filter_ticker(
         container: DI container
         check_market_cap: Whether to check market cap threshold
         check_liquidity: Whether to check liquidity tier (for display only, doesn't filter)
-        implied_move_pct: Implied move percentage (required for hybrid check)
-        use_hybrid_liquidity: Use C-then-B hybrid check instead of mid-chain
-        max_loss_budget: Maximum loss budget for dynamic thresholds (default $20k)
 
     Returns:
         (should_filter, reason, liquidity_tier, hybrid_details)
         - should_filter: True if should skip ticker
         - reason: Why filtered
         - liquidity_tier: "EXCELLENT", "WARNING", or "REJECT"
-        - hybrid_details: Dict with method, strikes, OI if hybrid check used
+        - hybrid_details: always None (kept for the callers' 4-tuple unpacking)
     """
     liquidity_tier = None
     hybrid_details = None
@@ -70,19 +64,7 @@ def should_filter_ticker(
 
     # Check liquidity tier (for display only - does NOT filter anymore)
     if check_liquidity:
-        if use_hybrid_liquidity and implied_move_pct is not None:
-            # Use new hybrid C-then-B approach with dynamic thresholds
-            has_liquidity, liquidity_tier, hybrid_details = check_liquidity_hybrid(
-                ticker=ticker,
-                expiration=expiration,
-                implied_move_pct=implied_move_pct,
-                container=container,
-                max_loss_budget=max_loss_budget,
-                use_dynamic_thresholds=True,
-            )
-        else:
-            # Fall back to old mid-chain approach
-            has_liquidity, liquidity_tier = check_liquidity_with_tier(ticker, expiration, container)
+        has_liquidity, liquidity_tier = check_liquidity_with_tier(ticker, expiration, container)
         # NOTE: We no longer filter based on liquidity tier
         # All opportunities are shown with their tier displayed as a warning
 

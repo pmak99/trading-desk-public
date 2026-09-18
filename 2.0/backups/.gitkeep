@@ -1,3 +1,20 @@
-# This directory stores automated database backups
-# Add this folder to Google Drive sync for cloud backup
-# Retention: 30 days (auto-cleanup via trade.sh)
+# Empty since the Postgres cutover (2026-09-12), and kept only so the path
+# still resolves for anything that assumes it.
+#
+# This used to hold SQLite snapshots written by trade.sh::backup_database(),
+# which was itself never called -- the six files were manual pre-repair copies
+# from the Sep 2026 data fixes, all superseded (each held MORE historical_moves
+# rows than production, because they predate the duplicate cleanup).
+#
+# ⚠️ This note previously said those six were "removed here." That was only
+# true on the Mac. the server still had all six -- 49MB of them -- until 2026-09-12,
+# because the cutover cleaned one host and the note was written as if it had
+# cleaned both. Same shape as the Sep 8 propagation failure that motivated
+# consolidating onto one database in the first place: "done" and "done
+# everywhere" are separate claims. Both hosts are now genuinely empty here.
+#
+# Backups now live on the server: a host-side pg-backup script, run nightly by
+# trading-pg-backup.timer, writing pg_dump -Fc to local disk, a backup host and Google
+# Drive -- verified monthly by RESTORING the dump, not
+# by assuming it. To recover data, use 2.0/scripts/restore_database.sh, which
+# restores side by side and leaves production alone unless told otherwise.

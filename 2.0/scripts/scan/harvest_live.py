@@ -20,9 +20,13 @@ scorer's HARVEST_SKEW_NULL_SCORE midpoint applies.
 
 import logging
 import math
-import sqlite3
-from datetime import date, timedelta
+from datetime import date
 from typing import Dict, List, Optional, Tuple
+
+from common.db import connect  # noqa: E402
+from common.timezone import today_et  # noqa: E402
+from src.domain.tail_risk import tail_risk_level  # noqa: E402
+from src.infrastructure.api.yahoo import yahoo_call  # noqa: E402
 
 from .constants import (
     HARVEST_EARNINGS_EXCLUSION_DAYS,
@@ -37,8 +41,6 @@ logger = logging.getLogger(__name__)
 MIN_IV_HV_RATIO = 1.2       # same gate as the old snapshot SQL
 HV20_WINDOW = 20            # trading days of log returns
 MIN_IVR_HISTORY_POINTS = 10  # below this a percentile is meaningless
-TRR_HIGH = 2.5
-TRR_NORMAL = 1.5
 
 
 def compute_hv20(closes: List[float]) -> Optional[float]:
@@ -71,22 +73,8 @@ def compute_ivr(current: float, history: List[float]) -> Optional[float]:
 
 
 def classify_trr(gap_moves: List[float]) -> Optional[str]:
-    """
-    TRR level from historical gap moves (same thresholds as
-    analyzer._compute_tail_risk_level): max|move| / avg|move|.
-    """
-    moves = [abs(m) for m in gap_moves if m is not None]
-    if len(moves) < 2:
-        return None
-    avg = sum(moves) / len(moves)
-    if avg <= 0:
-        return None
-    trr = max(moves) / avg
-    if trr > TRR_HIGH:
-        return "HIGH"
-    if trr >= TRR_NORMAL:
-        return "NORMAL"
-    return "LOW"
+    """TRR level from historical gap moves, by the engine's own definition."""
+    return tail_risk_level(gap_moves)
 
 
 def build_live_candidates(
@@ -99,17 +87,17 @@ def build_live_candidates(
     Apply harvest gates to prefetched live inputs.
 
     Each raw entry: {ticker, is_index, iv30d, hv20d, ivr, gap_moves,
-    next_earnings (ISO str or None), max_contracts}.
+    next_earnings (datetime.date or None), max_contracts}.
 
-    Gates (in order): IV/HV >= 1.2; index IVR >= iv_rank_min (stocks have no
+    Gates (in order): IV/HV >= 1.2; index IVR > iv_rank_min (stocks have no
     IVR gate — flagged 'unavailable'); TRR != HIGH; no earnings within
-    earnings_exclusion_days.
+    earnings_exclusion_days (inclusive).
 
     Returns (candidates, skipped) where candidates are dicts shaped for
     calculate_harvest_score and the harvest_mode display, and skipped is
     [(ticker, reason)].
     """
-    today = today or date.today()
+    today = today or today_et()
     candidates: List[Dict] = []
     skipped: List[Tuple[str, str]] = []
 
@@ -128,8 +116,8 @@ def build_live_candidates(
 
         ivr = r.get("ivr")
         if r.get("is_index") and ivr is not None:
-            if ivr < iv_rank_min:
-                skipped.append((ticker, f"IVR {ivr:.0f} < {iv_rank_min:.0f}"))
+            if ivr <= iv_rank_min:  # CLAUDE.md: IVR > 25
+                skipped.append((ticker, f"IVR {ivr:.1f} <= {iv_rank_min:.0f}"))
                 continue
             ivr_source = "vol-index"
         else:
@@ -146,7 +134,7 @@ def build_live_candidates(
 
         next_earnings = r.get("next_earnings")
         if next_earnings:
-            days_out = (date.fromisoformat(next_earnings) - today).days
+            days_out = (next_earnings - today).days   # date column, already typed
             if 0 <= days_out <= earnings_exclusion_days:
                 skipped.append(
                     (ticker, f"earnings {next_earnings} within {earnings_exclusion_days}d"))
@@ -171,11 +159,11 @@ def build_live_candidates(
 # ── IO orchestration ─────────────────────────────────────────────────────────
 
 def _fetch_closes_yf(symbol: str, period: str) -> List[float]:
-    """Daily closes via yfinance; [] on any failure."""
+    """Daily closes via yfinance, under the Yahoo limit; [] on any failure."""
     try:
         import yfinance as yf  # noqa: PLC0415
-        hist = yf.Ticker(symbol).history(period=period, interval="1d",
-                                         auto_adjust=False)
+        hist = yahoo_call(lambda: yf.Ticker(symbol).history(
+            period=period, interval="1d", auto_adjust=False))
         return [float(c) for c in hist["Close"].tolist() if c and c > 0]
     except Exception as e:
         logger.warning(f"{symbol}: yfinance history failed — {e}")
@@ -183,7 +171,10 @@ def _fetch_closes_yf(symbol: str, period: str) -> List[float]:
 
 
 def _fetch_live_iv30(api, ticker: str, today: date) -> Optional[float]:
-    """ATM IV nearest 30 DTE from Tradier — same method as track_iv_weekly."""
+    """ATM IV nearest 30 DTE from Tradier — same method as track_iv_weekly.
+
+    `api` is the container's cached_options_provider here (expirations and
+    chains through the cache); track_iv_weekly has its own fetch."""
     from scripts.track_iv_weekly import _atm_iv, _pick_expiration  # noqa: PLC0415
 
     exp_result = api.get_expirations(ticker)
@@ -202,9 +193,37 @@ def _fetch_live_iv30(api, ticker: str, today: date) -> Optional[float]:
     return iv
 
 
+def _database_inputs(
+    conn, tickers: List[str]
+) -> Dict[str, Tuple[List[float], Optional[date], Optional[int]]]:
+    """(gap moves, next earnings date, max_contracts) per ticker, three statements
+    for the whole universe. Gap moves are the 12 most recent quarters, newest
+    first; a ticker with no rows gets ([], None, None)."""
+    tickers = list(tickers)
+    gap_moves: Dict[str, List[float]] = {t: [] for t in tickers}
+    for ticker, gap_move_pct in conn.execute(
+            "SELECT ticker, gap_move_pct FROM ("
+            " SELECT ticker, gap_move_pct, earnings_date,"
+            "  row_number() OVER (PARTITION BY ticker ORDER BY earnings_date DESC) AS n"
+            " FROM historical_moves"
+            " WHERE ticker = ANY(%s) AND gap_move_pct IS NOT NULL"
+            ") recent WHERE n <= 12 ORDER BY ticker, earnings_date DESC", (tickers,)):
+        gap_moves[ticker].append(gap_move_pct)
+
+    next_earnings = dict(conn.execute(
+        "SELECT ticker, MIN(earnings_date) FROM earnings_calendar "
+        "WHERE ticker = ANY(%s) AND earnings_date >= CURRENT_DATE GROUP BY ticker",
+        (tickers,)))
+
+    max_contracts = dict(conn.execute(
+        "SELECT ticker, max_contracts FROM position_limits WHERE ticker = ANY(%s)",
+        (tickers,)))
+
+    return {t: (gap_moves[t], next_earnings.get(t), max_contracts.get(t)) for t in tickers}
+
+
 def get_live_harvest_candidates(
     container,
-    db_path: str,
     iv_rank_min: float = HARVEST_IV_RANK_MIN,
     earnings_exclusion_days: int = HARVEST_EARNINGS_EXCLUSION_DAYS,
 ) -> Tuple[List[Dict], List[Tuple[str, str]]]:
@@ -215,54 +234,44 @@ def get_live_harvest_candidates(
     HV20 and vol-index IVR); only earnings dates, gap moves, and the
     max_contracts policy value come from the DB.
     """
-    today = date.today()
+    today = today_et()
     universe = list(HARVEST_UNIVERSE_INDEX) + list(HARVEST_UNIVERSE_STOCK)
 
-    conn = sqlite3.connect(db_path)
+    # Read before the vendor calls, so no connection is held open across them
+    conn = connect()
     try:
-        raw: List[Dict] = []
-        for ticker in universe:
-            is_index = ticker in HARVEST_UNIVERSE_INDEX
-
-            iv30d = _fetch_live_iv30(container.tradier, ticker, today)
-            closes = _fetch_closes_yf(ticker, period="3mo")
-            hv20d = compute_hv20(closes)
-
-            ivr = None
-            vol_sym = HARVEST_VOL_INDEX_FOR.get(ticker) if is_index else None
-            if vol_sym:
-                vol_hist = _fetch_closes_yf(vol_sym, period="1y")
-                if vol_hist:
-                    ivr = compute_ivr(vol_hist[-1], vol_hist)
-
-            gap_moves = [row[0] for row in conn.execute(
-                "SELECT gap_move_pct FROM historical_moves "
-                "WHERE ticker = ? AND gap_move_pct IS NOT NULL "
-                "ORDER BY earnings_date DESC LIMIT 12", (ticker,))]
-
-            ern_row = conn.execute(
-                "SELECT MIN(earnings_date) FROM earnings_calendar "
-                "WHERE ticker = ? AND earnings_date >= date('now')",
-                (ticker,)).fetchone()
-            next_earnings = ern_row[0] if ern_row else None
-
-            mc_row = conn.execute(
-                "SELECT max_contracts FROM position_limits WHERE ticker = ?",
-                (ticker,)).fetchone()
-            max_contracts = mc_row[0] if mc_row else None
-
-            raw.append({
-                "ticker": ticker,
-                "is_index": is_index,
-                "iv30d": iv30d,
-                "hv20d": hv20d,
-                "ivr": ivr,
-                "gap_moves": gap_moves,
-                "next_earnings": next_earnings,
-                "max_contracts": max_contracts,
-            })
+        db_inputs = _database_inputs(conn, universe)
     finally:
         conn.close()
+
+    raw: List[Dict] = []
+    for ticker in universe:
+        is_index = ticker in HARVEST_UNIVERSE_INDEX
+
+        # Scan code fetches through the cache, never the raw client: the
+        # chain validation that follows can reuse this chain.
+        iv30d = _fetch_live_iv30(container.cached_options_provider, ticker, today)
+        closes = _fetch_closes_yf(ticker, period="3mo")
+        hv20d = compute_hv20(closes)
+
+        ivr = None
+        vol_sym = HARVEST_VOL_INDEX_FOR.get(ticker) if is_index else None
+        if vol_sym:
+            vol_hist = _fetch_closes_yf(vol_sym, period="1y")
+            if vol_hist:
+                ivr = compute_ivr(vol_hist[-1], vol_hist)
+
+        gap_moves, next_earnings, max_contracts = db_inputs[ticker]
+        raw.append({
+            "ticker": ticker,
+            "is_index": is_index,
+            "iv30d": iv30d,
+            "hv20d": hv20d,
+            "ivr": ivr,
+            "gap_moves": gap_moves,
+            "next_earnings": next_earnings,
+            "max_contracts": max_contracts,
+        })
 
     return build_live_candidates(
         raw, iv_rank_min=iv_rank_min,

@@ -6,12 +6,14 @@ Rate limits: 60 calls/minute, 30k calls/month (free tier).
 
 import logging
 import time
-import requests
 from datetime import date, timedelta
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
 
+import requests
+
+from common.timezone import now_et
 from src.domain.enums import EarningsTiming
-from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
 from src.utils.rate_limiter import TokenBucketRateLimiter
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,12 @@ class FinnhubAPI:
     def __repr__(self):
         return f"FinnhubAPI(base_url={self.base_url}, key=***)"
 
+    @property
+    def auth_headers(self) -> dict:
+        """The token as a header, never a query parameter: requests' error text
+        quotes the URL, which is how a Twelve Data key reached a log (2026-09-13)."""
+        return {"X-Finnhub-Token": self.api_key}
+
     def get_earnings_calendar(
         self,
         symbol: Optional[str] = None,
@@ -96,7 +104,7 @@ class FinnhubAPI:
         """
         try:
             days = _HORIZON_DAYS.get(horizon, 30) if horizon else 30
-            start = from_date if from_date is not None else date.today()
+            start = from_date if from_date is not None else now_et().date()
             end = to_date if to_date is not None else start + timedelta(days=days)
 
             if symbol:
@@ -156,7 +164,6 @@ class FinnhubAPI:
         params = {
             "from": from_date.isoformat(),
             "to": to_date.isoformat(),
-            "token": self.api_key,
         }
         if symbol:
             params["symbol"] = symbol
@@ -166,6 +173,7 @@ class FinnhubAPI:
                 response = requests.get(
                     f"{self.base_url}/calendar/earnings",
                     params=params,
+                    headers=self.auth_headers,
                     timeout=self.timeout,
                 )
 

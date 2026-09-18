@@ -5,30 +5,48 @@ Tests the core decision-making rules that determine which strategies
 are generated, how they are sized, and how they are scored/ranked.
 
 Business rules tested (from CLAUDE.md):
-1. VRP tier classification: EXCELLENT >= 1.8, GOOD >= 1.4, MARGINAL >= 1.2, SKIP < 1.2
-2. TRR-based position limits: HIGH (>2.5x) = 50 max, NORMAL/LOW = 100
-3. Strategy type selection based on VRP level and directional bias
-4. Score calculation and ranking priority
-5. Kelly-based position sizing respects trade quality
-6. Directional alignment bonuses/penalties
+1. VRP tier classification (close-to-close, CLAUDE.md §1): EXCELLENT >= 0.99, GOOD >= 0.78,
+   MARGINAL >= 0.71, SKIP < 0.71
+2. Score calculation and ranking priority
+3. Directional bias read from skew (it chooses no spread -- see
+   test_strategy_generator.TestOfferingIgnoresBias)
+4. Kelly-based position sizing respects trade quality
+
+TRR tiers are pinned in test_domain_tail_risk.py, and the TRR contract caps in
+test_sizing_context.py.
 """
 
-import pytest
 from datetime import date, timedelta
 
-from src.domain.types import (
-    Money, Percentage, Strike, OptionQuote, OptionChain,
-    VRPResult, SkewResult, Strategy, StrategyLeg, StrategyRecommendation,
-)
-from src.domain.enums import (
-    StrategyType, DirectionalBias, OptionType, Recommendation,
-)
-from src.config.config import StrategyConfig, ScoringWeights, ThresholdsConfig
-from src.application.services.strategy import StrategyGenerator
+import pytest
+
 from src.application.metrics.liquidity_scorer import LiquidityScorer
 from src.application.metrics.vrp import VRPCalculator
+from src.application.services.strategy import StrategyGenerator
+from src.config.config import StrategyConfig, ThresholdsConfig
+from src.domain.enums import (
+    DirectionalBias,
+    OptionType,
+    Recommendation,
+    StrategyType,
+)
 from src.domain.scoring.strategy_scorer import StrategyScorer
-
+from src.domain.scoring.weights import ScoringWeights
+from src.domain.types import (
+    Money,
+    Percentage,
+    SkewResult,
+    Strategy,
+    StrategyLeg,
+    Strike,
+    VRPResult,
+)
+from src.domain.vrp_tier import (
+    VRP_EXCELLENT_FROM,
+    VRP_GOOD_FROM,
+    VRP_MARGINAL_FROM,
+    vrp_tier,
+)
 
 # ============================================================================
 # Fixtures
@@ -41,7 +59,6 @@ def default_config():
     return StrategyConfig(
         use_kelly_sizing=True,
         kelly_fraction=0.25,
-        kelly_min_edge=0.05,
         kelly_min_contracts=1,
         risk_budget_per_trade=20000.0,
         max_contracts=100,
@@ -86,10 +103,10 @@ def _make_vrp(
     vrp_ratio: float = 2.0,
     implied_move_pct: float = 8.0,
     historical_mean: float = 4.0,
-    recommendation: Recommendation = Recommendation.EXCELLENT,
+    recommendation: Recommendation = None,
     expiration: date = None,
 ) -> VRPResult:
-    """Helper to create VRPResult with sensible defaults."""
+    """Helper to create VRPResult; the recommendation defaults to the ratio's tier."""
     if expiration is None:
         expiration = date(2026, 6, 23)
     return VRPResult(
@@ -99,7 +116,7 @@ def _make_vrp(
         historical_mean_move_pct=Percentage(historical_mean),
         vrp_ratio=vrp_ratio,
         edge_score=vrp_ratio / 2.0,
-        recommendation=recommendation,
+        recommendation=recommendation or vrp_tier(vrp_ratio),
     )
 
 
@@ -175,25 +192,19 @@ class TestVRPTierClassification:
     """
     Test VRP tier boundaries match CLAUDE.md specification.
 
-    BALANCED profile thresholds:
-    - EXCELLENT: >= 1.8x
-    - GOOD: >= 1.4x
-    - MARGINAL: >= 1.2x
-    - SKIP: < 1.2x
+    CLAUDE.md §1 thresholds (src/domain/vrp_tier.py, close-to-close):
+    - EXCELLENT: >= VRP_EXCELLENT_FROM
+    - GOOD: >= VRP_GOOD_FROM
+    - MARGINAL: >= VRP_MARGINAL_FROM
+    - SKIP: below VRP_MARGINAL_FROM
     """
 
     def test_vrp_excellent_at_boundary(self):
-        """VRP ratio of exactly 1.8x should classify as EXCELLENT in BALANCED profile."""
-        config = ThresholdsConfig()  # Default = BALANCED
-        assert config.vrp_excellent == 1.8
-        # The VRP calculator uses configurable thresholds
-        calc = VRPCalculator(
-            threshold_excellent=config.vrp_excellent,
-            threshold_good=config.vrp_good,
-            threshold_marginal=config.vrp_marginal,
-        )
-        # At exactly 1.8x, recommendation should be EXCELLENT
-        vrp = _make_vrp(vrp_ratio=1.8, recommendation=Recommendation.EXCELLENT)
+        """VRP ratio of exactly VRP_EXCELLENT_FROM should classify as EXCELLENT."""
+        config = ThresholdsConfig()
+        assert config.vrp_excellent == VRP_EXCELLENT_FROM
+        # At exactly the boundary, recommendation should be EXCELLENT
+        vrp = _make_vrp(vrp_ratio=VRP_EXCELLENT_FROM, recommendation=Recommendation.EXCELLENT)
         assert vrp.vrp_ratio >= config.vrp_excellent
         assert vrp.is_tradeable is True
 
@@ -205,40 +216,44 @@ class TestVRPTierClassification:
         assert vrp.is_tradeable is True
 
     def test_vrp_good_at_boundary(self):
-        """VRP ratio of exactly 1.4x should be in GOOD tier."""
+        """VRP ratio of exactly VRP_GOOD_FROM should be in GOOD tier."""
         config = ThresholdsConfig()
-        assert config.vrp_good == 1.4
-        vrp = _make_vrp(vrp_ratio=1.4, recommendation=Recommendation.GOOD)
+        assert config.vrp_good == VRP_GOOD_FROM
+        vrp = _make_vrp(vrp_ratio=VRP_GOOD_FROM, recommendation=Recommendation.GOOD)
         assert vrp.vrp_ratio >= config.vrp_good
         assert vrp.vrp_ratio < config.vrp_excellent
         assert vrp.is_tradeable is True
 
     def test_vrp_good_below_excellent(self):
-        """VRP at 1.79x is GOOD, not EXCELLENT."""
+        """A ratio just below VRP_EXCELLENT_FROM is GOOD, not EXCELLENT."""
         config = ThresholdsConfig()
-        assert 1.79 >= config.vrp_good
-        assert 1.79 < config.vrp_excellent
+        ratio = VRP_EXCELLENT_FROM - 0.01
+        assert ratio >= config.vrp_good
+        assert ratio < config.vrp_excellent
 
     def test_vrp_marginal_at_boundary(self):
-        """VRP ratio of exactly 1.2x should be MARGINAL."""
+        """VRP ratio of exactly VRP_MARGINAL_FROM should be MARGINAL."""
         config = ThresholdsConfig()
-        assert config.vrp_marginal == 1.2
-        vrp = _make_vrp(vrp_ratio=1.2, recommendation=Recommendation.MARGINAL)
+        assert config.vrp_marginal == VRP_MARGINAL_FROM
+        vrp = _make_vrp(vrp_ratio=VRP_MARGINAL_FROM, recommendation=Recommendation.MARGINAL)
         assert vrp.vrp_ratio >= config.vrp_marginal
         assert vrp.vrp_ratio < config.vrp_good
         # MARGINAL is tradeable (50% reduced size) per CLAUDE.md's VRP tier
-        # table -- only SKIP (<1.2x) means don't trade.
+        # table -- only SKIP (below VRP_MARGINAL_FROM) means don't trade.
         assert vrp.is_tradeable is True
 
     def test_vrp_skip_below_marginal(self):
-        """VRP ratio of 1.1x should be SKIP."""
+        """A ratio below VRP_MARGINAL_FROM should be SKIP."""
         config = ThresholdsConfig()
-        vrp = _make_vrp(vrp_ratio=1.1, recommendation=Recommendation.SKIP)
+        ratio = VRP_MARGINAL_FROM - 0.1
+        vrp = _make_vrp(vrp_ratio=ratio, recommendation=Recommendation.SKIP)
         assert vrp.vrp_ratio < config.vrp_marginal
         assert vrp.is_tradeable is False
 
-    def test_vrp_skip_at_unity(self):
-        """VRP ratio of 1.0x means no edge -- implied matches historical."""
+    def test_vrp_is_tradeable_reads_the_injected_recommendation(self):
+        """is_tradeable follows the injected recommendation, not a tier re-derived from
+        the ratio. 1.0x is EXCELLENT on the live close-to-close ladder (>= VRP_EXCELLENT_FROM,
+        0.99) -- an injected SKIP at that ratio still reads not tradeable."""
         vrp = _make_vrp(vrp_ratio=1.0, recommendation=Recommendation.SKIP)
         assert vrp.is_tradeable is False
 
@@ -248,273 +263,11 @@ class TestVRPTierClassification:
         assert config.vrp_excellent > config.vrp_good > config.vrp_marginal
 
     def test_balanced_profile_defaults(self):
-        """BALANCED profile should use 1.8/1.4/1.2 thresholds."""
+        """Default thresholds are CLAUDE.md §1 (close-to-close)."""
         config = ThresholdsConfig()
-        assert config.vrp_threshold_mode == "BALANCED"
-        assert config.vrp_excellent == 1.8
-        assert config.vrp_good == 1.4
-        assert config.vrp_marginal == 1.2
-
-
-# ============================================================================
-# TRR-Based Position Limit Tests
-# ============================================================================
-
-
-class TestTRRPositionLimits:
-    """
-    Test Tail Risk Ratio classification and position limits.
-
-    From CLAUDE.md:
-    - HIGH: TRR > 2.5x -> max 50 contracts
-    - NORMAL: TRR 1.5-2.5x -> max 100 contracts
-    - LOW: TRR < 1.5x -> max 100 contracts (best performance: 70.6% win)
-    """
-
-    def test_trr_high_classification(self):
-        """TRR > 2.5 should be classified as HIGH."""
-        trr = 3.0
-        assert trr > 2.5
-        level = 'HIGH' if trr > 2.5 else ('NORMAL' if trr >= 1.5 else 'LOW')
-        assert level == 'HIGH'
-
-    def test_trr_normal_classification(self):
-        """TRR between 1.5 and 2.5 should be NORMAL."""
-        for trr in [1.5, 2.0, 2.5]:
-            level = 'HIGH' if trr > 2.5 else ('NORMAL' if trr >= 1.5 else 'LOW')
-            assert level == 'NORMAL', f"TRR {trr} should be NORMAL, got {level}"
-
-    def test_trr_low_classification(self):
-        """TRR < 1.5 should be LOW (best historical performance)."""
-        for trr in [1.0, 1.2, 1.49]:
-            level = 'HIGH' if trr > 2.5 else ('NORMAL' if trr >= 1.5 else 'LOW')
-            assert level == 'LOW', f"TRR {trr} should be LOW, got {level}"
-
-    def test_trr_high_max_contracts(self):
-        """HIGH TRR should limit to 50 contracts."""
-        trr = 3.0
-        max_contracts = 50 if trr > 2.5 else 100
-        assert max_contracts == 50
-
-    def test_trr_normal_max_contracts(self):
-        """NORMAL TRR should allow 100 contracts."""
-        trr = 2.0
-        max_contracts = 50 if trr > 2.5 else 100
-        assert max_contracts == 100
-
-    def test_trr_low_max_contracts(self):
-        """LOW TRR should allow 100 contracts."""
-        trr = 1.2
-        max_contracts = 50 if trr > 2.5 else 100
-        assert max_contracts == 100
-
-    def test_trr_at_high_boundary(self):
-        """TRR at exactly 2.5 is NORMAL, not HIGH (boundary is > 2.5)."""
-        trr = 2.5
-        level = 'HIGH' if trr > 2.5 else ('NORMAL' if trr >= 1.5 else 'LOW')
-        assert level == 'NORMAL'
-
-    def test_trr_classification_matches_vrp_calculator(self):
-        """
-        Verify TRR classification in VRPCalculator.calculate_with_consistency
-        matches the documented thresholds.
-
-        The VRP calculator returns tail_risk_level in the consistency dict
-        using the same thresholds:
-        - > 2.5: HIGH
-        - >= 1.5: NORMAL
-        - < 1.5: LOW
-        """
-        # These are the thresholds used in vrp.py calculate_with_consistency
-        test_cases = [
-            (3.0, 'HIGH'),
-            (2.51, 'HIGH'),
-            (2.5, 'NORMAL'),
-            (2.0, 'NORMAL'),
-            (1.5, 'NORMAL'),
-            (1.49, 'LOW'),
-            (1.0, 'LOW'),
-        ]
-        for trr, expected_level in test_cases:
-            if trr > 2.5:
-                level = 'HIGH'
-            elif trr >= 1.5:
-                level = 'NORMAL'
-            else:
-                level = 'LOW'
-            assert level == expected_level, (
-                f"TRR {trr}: expected {expected_level}, got {level}"
-            )
-
-
-# ============================================================================
-# Strategy Type Selection Tests
-# ============================================================================
-
-
-class TestStrategyTypeSelection:
-    """
-    Test that _select_strategy_types returns correct strategy mix
-    based on VRP level and directional bias.
-    """
-
-    @pytest.fixture
-    def generator(self, default_config, liquidity_scorer):
-        return StrategyGenerator(default_config, liquidity_scorer)
-
-    def test_high_vrp_neutral_generates_two_strategies(self, generator):
-        """VRP >= 2.0 + neutral generates 2 directional spreads (no IC/IB)."""
-        vrp = _make_vrp(vrp_ratio=2.0)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        assert len(types) == 2
-        assert StrategyType.IRON_CONDOR not in types
-        assert StrategyType.BULL_PUT_SPREAD in types
-        assert StrategyType.BEAR_CALL_SPREAD in types
-
-    def test_high_vrp_strong_bullish_single_strategy(self, generator):
-        """VRP >= 2.0 + strong bullish generates only Bull Put Spread."""
-        vrp = _make_vrp(vrp_ratio=2.0)
-        types = generator._select_strategy_types(vrp, DirectionalBias.STRONG_BULLISH)
-        assert StrategyType.BEAR_CALL_SPREAD not in types
-        assert StrategyType.BULL_PUT_SPREAD in types
-        assert len(types) == 1
-
-    def test_high_vrp_strong_bearish_single_strategy(self, generator):
-        """VRP >= 2.0 + strong bearish generates only Bear Call Spread."""
-        vrp = _make_vrp(vrp_ratio=2.0)
-        types = generator._select_strategy_types(vrp, DirectionalBias.STRONG_BEARISH)
-        assert StrategyType.BULL_PUT_SPREAD not in types
-        assert StrategyType.BEAR_CALL_SPREAD in types
-        assert len(types) == 1
-
-    def test_high_vrp_moderate_bullish_two_strategies(self, generator):
-        """VRP >= 2.0 + moderate bullish: Bull Put first, Bear Call second."""
-        vrp = _make_vrp(vrp_ratio=2.0)
-        types = generator._select_strategy_types(vrp, DirectionalBias.BULLISH)
-        assert len(types) == 2
-        assert types[0] == StrategyType.BULL_PUT_SPREAD
-
-    def test_high_vrp_moderate_bearish_two_strategies(self, generator):
-        """VRP >= 2.0 + moderate bearish: Bear Call first, Bull Put second."""
-        vrp = _make_vrp(vrp_ratio=2.0)
-        types = generator._select_strategy_types(vrp, DirectionalBias.BEARISH)
-        assert len(types) == 2
-        assert types[0] == StrategyType.BEAR_CALL_SPREAD
-
-    def test_moderate_vrp_neutral_two_strategies(self, generator):
-        """VRP 1.5-2.0 + neutral generates 2 directional spreads."""
-        vrp = _make_vrp(vrp_ratio=1.7)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        assert len(types) == 2
-        assert StrategyType.IRON_CONDOR not in types
-        assert StrategyType.BULL_PUT_SPREAD in types
-        assert StrategyType.BEAR_CALL_SPREAD in types
-
-    def test_moderate_vrp_bullish_prioritizes_bull_put(self, generator):
-        """VRP 1.5-2.0 + bullish bias generates only Bull Put Spread."""
-        vrp = _make_vrp(vrp_ratio=1.7)
-        types = generator._select_strategy_types(vrp, DirectionalBias.BULLISH)
-        assert types[0] == StrategyType.BULL_PUT_SPREAD
-        assert len(types) == 1
-
-    def test_moderate_vrp_bearish_prioritizes_bear_call(self, generator):
-        """VRP 1.5-2.0 + bearish bias generates only Bear Call Spread."""
-        vrp = _make_vrp(vrp_ratio=1.7)
-        types = generator._select_strategy_types(vrp, DirectionalBias.STRONG_BEARISH)
-        assert types[0] == StrategyType.BEAR_CALL_SPREAD
-        assert len(types) == 1
-
-    def test_low_vrp_single_strategy_only(self, generator):
-        """VRP < 1.5 should generate only a single strategy."""
-        vrp = _make_vrp(vrp_ratio=1.3)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        assert len(types) == 1
-
-    def test_low_vrp_neutral_defaults_to_bull_put(self, generator):
-        """VRP < 1.5 + neutral defaults to bull put spread."""
-        vrp = _make_vrp(vrp_ratio=1.3)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        assert types[0] == StrategyType.BULL_PUT_SPREAD
-
-    def test_low_vrp_bullish_selects_bull_put(self, generator):
-        """VRP < 1.5 + bullish selects bull put spread."""
-        vrp = _make_vrp(vrp_ratio=1.3)
-        types = generator._select_strategy_types(vrp, DirectionalBias.BULLISH)
-        assert types[0] == StrategyType.BULL_PUT_SPREAD
-
-    def test_low_vrp_bearish_selects_bear_call(self, generator):
-        """VRP < 1.5 + bearish selects bear call spread."""
-        vrp = _make_vrp(vrp_ratio=1.3)
-        types = generator._select_strategy_types(vrp, DirectionalBias.BEARISH)
-        assert types[0] == StrategyType.BEAR_CALL_SPREAD
-
-    def test_high_trr_restricts_to_single_strategy(self, generator):
-        """HIGH TRR restricts strategy output to a single directional spread."""
-        vrp = _make_vrp(vrp_ratio=2.0)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL, tail_risk_level='HIGH')
-        assert len(types) == 1
-
-    def test_normal_trr_allows_two_strategies(self, generator):
-        """NORMAL TRR allows two strategies for VRP >= 2.0 + neutral."""
-        vrp = _make_vrp(vrp_ratio=2.0)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL, tail_risk_level='NORMAL')
-        assert len(types) == 2
-
-    def test_weak_bias_treated_like_neutral(self, generator):
-        """Weak bias (strength 1) should be treated similarly to neutral."""
-        vrp = _make_vrp(vrp_ratio=2.0)
-        neutral_types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        weak_types = generator._select_strategy_types(vrp, DirectionalBias.WEAK_BULLISH)
-        # Both should generate the same strategy set
-        assert set(neutral_types) == set(weak_types)
-
-
-# ============================================================================
-# Banned Strategy Tests
-# ============================================================================
-
-
-class TestBannedStrategies:
-    """Verifies that permanently banned strategies are never generated."""
-
-    @pytest.fixture
-    def generator(self, default_config, liquidity_scorer):
-        return StrategyGenerator(default_config, liquidity_scorer)
-
-    def test_very_high_vrp_neutral_no_iron_butterfly(self, generator):
-        """VRP >= 2.5 + neutral bias: Iron Butterfly is banned; Bull Put Spread leads."""
-        vrp = _make_vrp(vrp_ratio=2.5)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        assert StrategyType.IRON_BUTTERFLY not in types
-        assert StrategyType.BULL_PUT_SPREAD in types
-        assert types[0] == StrategyType.BULL_PUT_SPREAD
-
-    def test_very_high_vrp_neutral_no_iron_condor(self, generator):
-        """VRP >= 2.5 + neutral: Iron Condor is banned from all paths."""
-        vrp = _make_vrp(vrp_ratio=2.5)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        assert StrategyType.IRON_CONDOR not in types
-
-    def test_moderate_vrp_neutral_no_iron_condor(self, generator):
-        """VRP 1.5-2.0 + neutral: Iron Condor is still banned."""
-        vrp = _make_vrp(vrp_ratio=1.7)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        assert StrategyType.IRON_CONDOR not in types
-
-    def test_low_vrp_no_iron_condor(self, generator):
-        """VRP < 1.5: Iron Condor is still banned."""
-        vrp = _make_vrp(vrp_ratio=1.3)
-        types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-        assert StrategyType.IRON_CONDOR not in types
-
-    def test_no_bias_no_iron_butterfly(self, generator):
-        """Iron Butterfly is banned at every VRP level."""
-        for ratio in [1.3, 1.7, 2.0, 2.5, 3.0]:
-            vrp = _make_vrp(vrp_ratio=ratio)
-            types = generator._select_strategy_types(vrp, DirectionalBias.NEUTRAL)
-            assert StrategyType.IRON_BUTTERFLY not in types, (
-                f"IRON_BUTTERFLY appeared at VRP {ratio}x"
-            )
+        assert config.vrp_excellent == VRP_EXCELLENT_FROM
+        assert config.vrp_good == VRP_GOOD_FROM
+        assert config.vrp_marginal == VRP_MARGINAL_FROM
 
 
 # ============================================================================
@@ -532,10 +285,6 @@ class TestScoreCalculation:
     - VRP: 17% weight
     - Edge (Kelly): 13% weight
     - Greeks: 8% weight
-
-    From CLAUDE.md:
-    - Score >= 50 for pre-filter (2.0 Score)
-    - Score >= 55 for post-filter (4.0 Score with sentiment)
     """
 
     @pytest.fixture
@@ -547,7 +296,7 @@ class TestScoreCalculation:
         w = ScoringWeights()
         total = (
             w.pop_weight + w.liquidity_weight + w.vrp_weight
-            + w.reward_risk_weight + w.greeks_weight + w.size_weight
+            + w.reward_risk_weight + w.greeks_weight
         )
         assert abs(total - 100.0) < 0.01, f"Weights sum to {total}, expected 100"
 
@@ -557,7 +306,6 @@ class TestScoreCalculation:
         total = (
             w.pop_weight_no_greeks + w.liquidity_weight_no_greeks
             + w.vrp_weight_no_greeks + w.reward_risk_weight_no_greeks
-            + w.size_weight_no_greeks
         )
         assert abs(total - 100.0) < 0.01, f"No-Greeks weights sum to {total}, expected 100"
 
@@ -588,9 +336,9 @@ class TestScoreCalculation:
             position_theta=5.0,
             position_vega=-10.0,
         )
-        vrp = _make_vrp(vrp_ratio=1.3)
+        vrp = _make_vrp(vrp_ratio=VRP_MARGINAL_FROM + 0.02)
         result = scorer.score_strategy(strategy, vrp)
-        # Poor setup should score below the 50-point pre-filter
+        # Poor setup should score below 50
         assert result.overall_score < 50, (
             f"Poor setup scored {result.overall_score:.1f}, expected < 50"
         )
@@ -627,9 +375,11 @@ class TestScoreCalculation:
 
     def test_higher_vrp_increases_score(self, scorer):
         """Higher VRP ratio should produce a higher score (all else equal)."""
+        # Both stay below ScoringWeights.target_vrp (1.07) so the VRP term
+        # hasn't saturated for either input.
         strategy = _make_strategy()
-        low_vrp = _make_vrp(vrp_ratio=1.4)
-        high_vrp = _make_vrp(vrp_ratio=2.5)
+        low_vrp = _make_vrp(vrp_ratio=ScoringWeights().target_vrp - 0.3)
+        high_vrp = _make_vrp(vrp_ratio=ScoringWeights().target_vrp - 0.05)
 
         low_score = scorer.score_strategy(strategy, low_vrp).overall_score
         high_score = scorer.score_strategy(strategy, high_vrp).overall_score
@@ -670,93 +420,79 @@ class TestScoreCalculation:
         assert result.overall_score > 0
 
 
-# ============================================================================
-# Directional Alignment Scoring Tests
-# ============================================================================
+def _no_greeks(strategy):
+    strategy.position_theta = None
+    strategy.position_vega = None
+    return strategy
 
 
-class TestDirectionalAlignmentScoring:
-    """
-    Test that directional alignment bonuses/penalties are applied correctly.
+def _no_breakeven(strategy):
+    strategy.breakeven = []    # the calendar pilot's shape (calendar_spread.py)
+    return strategy
 
-    From strategy_scorer.py:
-    - STRONG bias + aligned: +8 points
-    - MODERATE bias + aligned: +5 points
-    - WEAK bias + aligned: +3 points
-    - Counter-trend: -3 points
-    - Neutral bias: no adjustment
+
+class TestScoreHasNoDeadTerms:
+    """The overall score is the sum of its weighted factors and nothing else.
+
+    Until 2026-09-14 two more terms were applied. A profit-zone multiplier
+    penalised a narrow range between two breakevens; no strategy the engine
+    builds has two (a spread has one, the calendar pilot none) since iron
+    condors and strangles were banned, so it was always 1.0. A size term was
+    weighted 0.0 in both weight sets. The pinned scores below were recorded
+    with both terms still in place.
     """
 
     @pytest.fixture
     def scorer(self):
         return StrategyScorer(ScoringWeights())
 
-    def test_bullish_strategy_with_strong_bullish_bias_gets_bonus(self, scorer):
-        """Bull put spread + strong bullish should get +8 bonus."""
-        strategy = _make_strategy(strategy_type=StrategyType.BULL_PUT_SPREAD)
+    @pytest.mark.parametrize("strategy,vrp,overall", [
+        (lambda: _make_strategy(), lambda: _make_vrp(vrp_ratio=2.0), 93.48571428571428),
+        (lambda: _make_strategy(strategy_type=StrategyType.BEAR_CALL_SPREAD, pop=0.68,
+                                liquidity_tier="WARNING", contracts=40),
+         lambda: _make_vrp(vrp_ratio=0.81), 69.06915887850467),
+        (lambda: _no_greeks(_make_strategy(pop=0.62, liquidity_tier="WARNING", max_profit=100.0,
+                                           max_loss=400.0, contracts=100)),
+         lambda: _make_vrp(vrp_ratio=0.70), 67.04457225017973),
+        (lambda: _no_breakeven(_make_strategy(pop=0.55, contracts=10)),
+         lambda: _make_vrp(vrp_ratio=2.4, implied_move_pct=15.0), 78.04615384615384),
+    ], ids=["put-spread", "call-spread-warning", "no-greeks", "no-breakeven"])
+    def test_scores_are_unchanged(self, scorer, strategy, vrp, overall):
+        assert scorer.score_strategy(strategy(), vrp()).overall_score == pytest.approx(overall, abs=1e-9)
+
+    @pytest.mark.parametrize("build", [_make_strategy, lambda **kw: _no_greeks(_make_strategy(**kw))],
+                             ids=["greeks", "no-greeks"])
+    def test_contract_count_does_not_move_the_score(self, scorer, build):
         vrp = _make_vrp(vrp_ratio=2.0)
+        scores = {scorer.score_strategy(build(contracts=n), vrp).overall_score for n in (1, 10, 100)}
+        assert len(scores) == 1
 
-        score_neutral = scorer.score_strategy(strategy, vrp, DirectionalBias.NEUTRAL).overall_score
-        score_aligned = scorer.score_strategy(strategy, vrp, DirectionalBias.STRONG_BULLISH).overall_score
+    def test_overall_is_the_sum_of_the_weighted_factors(self, scorer):
+        from src.domain.scoring.factors import (
+            calculate_greeks_score,
+            calculate_kelly_edge_score,
+            calculate_liquidity_score,
+        )
+        w = scorer.weights
+        strategy, vrp = _make_strategy(pop=0.70, liquidity_tier="WARNING"), _make_vrp(vrp_ratio=1.6)
+        expected = (
+            min(strategy.probability_of_profit / w.target_pop, 1.0) * w.pop_weight
+            + calculate_liquidity_score(strategy, w)
+            + min(vrp.vrp_ratio / w.target_vrp, 1.0) * w.vrp_weight
+            + calculate_kelly_edge_score(strategy.probability_of_profit,
+                                         strategy.reward_risk_ratio, w.reward_risk_weight)
+            + calculate_greeks_score(strategy, w)
+        )
+        assert scorer.score_strategy(strategy, vrp).overall_score == pytest.approx(expected, abs=1e-9)
 
-        assert score_aligned > score_neutral
-        diff = score_aligned - score_neutral
-        assert diff > 5.0, f"Expected significant bonus, got {diff:.2f}"
+    def test_the_dead_terms_are_gone(self):
+        from dataclasses import fields
 
-    def test_bearish_strategy_with_strong_bearish_bias_gets_bonus(self, scorer):
-        """Bear call spread + strong bearish should get meaningful bonus."""
-        strategy = _make_strategy(strategy_type=StrategyType.BEAR_CALL_SPREAD)
-        vrp = _make_vrp(vrp_ratio=2.0)
+        from src.domain.scoring import factors
 
-        score_neutral = scorer.score_strategy(strategy, vrp, DirectionalBias.NEUTRAL).overall_score
-        score_aligned = scorer.score_strategy(strategy, vrp, DirectionalBias.STRONG_BEARISH).overall_score
-
-        diff = score_aligned - score_neutral
-        assert diff > 5.0, f"Expected significant bonus, got {diff:.2f}"
-
-    def test_counter_trend_strategy_gets_penalty(self, scorer):
-        """Bull put spread with bearish bias should get -3 penalty."""
-        strategy = _make_strategy(strategy_type=StrategyType.BULL_PUT_SPREAD)
-        vrp = _make_vrp(vrp_ratio=2.0)
-
-        score_neutral = scorer.score_strategy(strategy, vrp, DirectionalBias.NEUTRAL).overall_score
-        score_counter = scorer.score_strategy(strategy, vrp, DirectionalBias.STRONG_BEARISH).overall_score
-
-        diff = score_counter - score_neutral
-        assert abs(diff - (-3.0)) < 0.01, f"Expected -3 penalty, got {diff:.2f}"
-
-    def test_moderate_bias_gives_moderate_bonus(self, scorer):
-        """Moderate (not prefixed) bias should give +5 bonus."""
-        strategy = _make_strategy(strategy_type=StrategyType.BULL_PUT_SPREAD)
-        vrp = _make_vrp(vrp_ratio=2.0)
-
-        score_neutral = scorer.score_strategy(strategy, vrp, DirectionalBias.NEUTRAL).overall_score
-        score_moderate = scorer.score_strategy(strategy, vrp, DirectionalBias.BULLISH).overall_score
-
-        diff = score_moderate - score_neutral
-        assert abs(diff - 5.0) < 0.01, f"Expected +5 bonus, got {diff:.2f}"
-
-    def test_weak_bias_gives_weak_bonus(self, scorer):
-        """Weak bias should give +3 bonus."""
-        strategy = _make_strategy(strategy_type=StrategyType.BULL_PUT_SPREAD)
-        vrp = _make_vrp(vrp_ratio=2.0)
-
-        score_neutral = scorer.score_strategy(strategy, vrp, DirectionalBias.NEUTRAL).overall_score
-        score_weak = scorer.score_strategy(strategy, vrp, DirectionalBias.WEAK_BULLISH).overall_score
-
-        diff = score_weak - score_neutral
-        assert abs(diff - 3.0) < 0.01, f"Expected +3 bonus, got {diff:.2f}"
-
-    def test_neutral_bias_no_adjustment(self, scorer):
-        """NEUTRAL bias should produce 0 directional adjustment for any strategy type."""
-        strategy = _make_strategy(strategy_type=StrategyType.BULL_PUT_SPREAD)
-        vrp = _make_vrp(vrp_ratio=2.0)
-
-        score_neutral_a = scorer.score_strategy(strategy, vrp, DirectionalBias.NEUTRAL).overall_score
-        score_neutral_b = scorer.score_strategy(strategy, vrp, DirectionalBias.NEUTRAL).overall_score
-
-        # Neutral bias is deterministic — same score both times
-        assert abs(score_neutral_a - score_neutral_b) < 0.01
+        assert not hasattr(factors, "calculate_profit_zone_multiplier")
+        assert not hasattr(StrategyScorer, "_calculate_profit_zone_multiplier")
+        assert not {"size_weight", "size_weight_no_greeks"} & {f.name for f in fields(ScoringWeights)}
 
 
 # ============================================================================
@@ -812,23 +548,6 @@ class TestStrategyPriorityOrder:
 
         scorer.score_strategies([good, bad], vrp)
         assert good.overall_score > bad.overall_score
-
-    def test_aligned_strategy_beats_counter_trend(self, scorer):
-        """Bull put spread with bullish bias should beat bear call spread."""
-        aligned = _make_strategy(
-            strategy_type=StrategyType.BULL_PUT_SPREAD, pop=0.75,
-        )
-        counter = _make_strategy(
-            strategy_type=StrategyType.BEAR_CALL_SPREAD, pop=0.75,
-        )
-        vrp = _make_vrp(vrp_ratio=2.0)
-
-        scorer.score_strategies([aligned, counter], vrp, DirectionalBias.STRONG_BULLISH)
-
-        # Aligned gets bonus, counter gets penalty => meaningful difference
-        assert aligned.overall_score > counter.overall_score
-        diff = aligned.overall_score - counter.overall_score
-        assert diff > 8.0, f"Expected >8 point diff, got {diff:.1f}"
 
 
 # ============================================================================
@@ -972,34 +691,6 @@ class TestBiasDetermination:
 class TestDirectionalBiasEnum:
     """Test DirectionalBias enum helper methods."""
 
-    def test_bullish_variants_are_bullish(self):
-        """All bullish variants should return True for is_bullish()."""
-        for bias in [
-            DirectionalBias.WEAK_BULLISH,
-            DirectionalBias.BULLISH,
-            DirectionalBias.STRONG_BULLISH,
-        ]:
-            assert bias.is_bullish(), f"{bias.value} should be bullish"
-            assert not bias.is_bearish(), f"{bias.value} should not be bearish"
-            assert not bias.is_neutral(), f"{bias.value} should not be neutral"
-
-    def test_bearish_variants_are_bearish(self):
-        """All bearish variants should return True for is_bearish()."""
-        for bias in [
-            DirectionalBias.WEAK_BEARISH,
-            DirectionalBias.BEARISH,
-            DirectionalBias.STRONG_BEARISH,
-        ]:
-            assert bias.is_bearish(), f"{bias.value} should be bearish"
-            assert not bias.is_bullish(), f"{bias.value} should not be bullish"
-            assert not bias.is_neutral(), f"{bias.value} should not be neutral"
-
-    def test_neutral_is_neutral(self):
-        """NEUTRAL should only be neutral."""
-        assert DirectionalBias.NEUTRAL.is_neutral()
-        assert not DirectionalBias.NEUTRAL.is_bullish()
-        assert not DirectionalBias.NEUTRAL.is_bearish()
-
     def test_strength_levels(self):
         """Verify strength levels: 0=NEUTRAL, 1=WEAK, 2=MODERATE, 3=STRONG."""
         assert DirectionalBias.NEUTRAL.strength() == 0
@@ -1021,20 +712,20 @@ class TestVRPCalculatorRecommendation:
     Test VRPCalculator.calculate() produces correct Recommendation enums
     for different VRP ratio levels.
 
-    Uses the production default thresholds:
-    - EXCELLENT: >= 1.8x
-    - GOOD: >= 1.4x
-    - MARGINAL: >= 1.2x
-    - SKIP: < 1.2x
+    Uses the production default thresholds (CLAUDE.md §1, close-to-close):
+    - EXCELLENT: >= VRP_EXCELLENT_FROM
+    - GOOD: >= VRP_GOOD_FROM
+    - MARGINAL: >= VRP_MARGINAL_FROM
+    - SKIP: below VRP_MARGINAL_FROM
     """
 
     @pytest.fixture
     def calculator(self):
-        """VRP calculator with BALANCED profile thresholds."""
+        """VRP calculator on the CLAUDE.md §1 thresholds."""
         return VRPCalculator(
-            threshold_excellent=1.8,
-            threshold_good=1.4,
-            threshold_marginal=1.2,
+            threshold_excellent=VRP_EXCELLENT_FROM,
+            threshold_good=VRP_GOOD_FROM,
+            threshold_marginal=VRP_MARGINAL_FROM,
             min_quarters=4,
         )
 
@@ -1075,7 +766,7 @@ class TestVRPCalculatorRecommendation:
         return moves
 
     def test_excellent_recommendation(self, calculator):
-        """VRP >= 1.8x should produce EXCELLENT recommendation."""
+        """A VRP well above VRP_EXCELLENT_FROM (0.99) should produce EXCELLENT recommendation."""
         exp = date(2026, 6, 23)
         # implied=9%, historical close mean ~ 9/(ratio) = 9/1.8 = 5%
         # close_move_pct = pct * 0.5, so pct * 0.5 should average ~5%
@@ -1086,20 +777,20 @@ class TestVRPCalculatorRecommendation:
         result = calculator.calculate("TEST", exp, implied, hist)
         assert result.is_ok
         vrp = result.value
-        assert vrp.vrp_ratio >= 1.8
+        assert vrp.vrp_ratio >= 1.8   # comfortably above VRP_EXCELLENT_FROM (0.99)
         assert vrp.recommendation == Recommendation.EXCELLENT
 
     def test_skip_recommendation(self, calculator):
-        """VRP < 1.2x should produce SKIP recommendation."""
+        """A VRP below VRP_MARGINAL_FROM should produce SKIP recommendation."""
         exp = date(2026, 6, 23)
-        # implied=5%, historical close mean ~5% => ratio ~1.0
-        implied = self._make_implied_move("TEST", 5.0, exp)
+        # implied=2%, historical close mean ~5% => ratio ~0.4, well below VRP_MARGINAL_FROM
+        implied = self._make_implied_move("TEST", 2.0, exp)
         hist = self._make_historical_moves(mean_pct=10.0)  # close avg ~5%
 
         result = calculator.calculate("TEST", exp, implied, hist)
         assert result.is_ok
         vrp = result.value
-        assert vrp.vrp_ratio < 1.2
+        assert vrp.vrp_ratio < VRP_MARGINAL_FROM
         assert vrp.recommendation == Recommendation.SKIP
 
     def test_insufficient_history_returns_error(self, calculator):
@@ -1155,81 +846,6 @@ class TestKellyEdgeScore:
         score = scorer._calculate_kelly_edge_score(pop=0.80, rr=0.50)
         # With default weight=13.0, should be near 13.0
         assert score >= 12.0, f"Expected near 13.0, got {score:.2f}"
-
-
-# ============================================================================
-# Asymmetric Delta Tests
-# ============================================================================
-
-
-class TestAsymmetricDeltas:
-    """
-    Test that directional bias correctly adjusts delta targets
-    for asymmetric strike positioning.
-    """
-
-    @pytest.fixture
-    def generator(self, default_config, liquidity_scorer):
-        return StrategyGenerator(default_config, liquidity_scorer)
-
-    def test_neutral_bias_returns_base_deltas(self, generator):
-        """Neutral bias should return default 0.25/0.20 deltas."""
-        short_d, long_d = generator._get_asymmetric_deltas(
-            OptionType.PUT, DirectionalBias.NEUTRAL
-        )
-        assert short_d == 0.25
-        assert long_d == 0.20
-
-    def test_bullish_bias_lowers_put_deltas(self, generator):
-        """Bullish bias should lower put spread deltas (safer/further OTM)."""
-        short_d, long_d = generator._get_asymmetric_deltas(
-            OptionType.PUT, DirectionalBias.BULLISH
-        )
-        assert short_d < 0.25, "Bullish put short delta should be lower"
-        assert long_d < 0.20, "Bullish put long delta should be lower"
-
-    def test_bearish_bias_raises_put_deltas(self, generator):
-        """Bearish bias should raise put spread deltas (riskier/closer ATM)."""
-        short_d, long_d = generator._get_asymmetric_deltas(
-            OptionType.PUT, DirectionalBias.BEARISH
-        )
-        assert short_d > 0.25, "Bearish put short delta should be higher"
-        assert long_d > 0.20, "Bearish put long delta should be higher"
-
-    def test_strong_bias_adjusts_more_than_weak(self, generator):
-        """Strong bias should produce larger delta adjustment than weak."""
-        strong_short, _ = generator._get_asymmetric_deltas(
-            OptionType.PUT, DirectionalBias.STRONG_BULLISH
-        )
-        weak_short, _ = generator._get_asymmetric_deltas(
-            OptionType.PUT, DirectionalBias.WEAK_BULLISH
-        )
-        # Both lower put deltas for bullish, but strong lowers more
-        assert strong_short < weak_short, (
-            f"Strong ({strong_short}) should be further from ATM than weak ({weak_short})"
-        )
-
-    def test_delta_spread_always_maintained(self, generator):
-        """Long delta should always be lower than short delta (MIN_SPREAD enforced)."""
-        for bias in DirectionalBias:
-            for opt_type in [OptionType.PUT, OptionType.CALL]:
-                short_d, long_d = generator._get_asymmetric_deltas(opt_type, bias)
-                assert long_d < short_d, (
-                    f"Spread violated for {opt_type.value}/{bias.value}: "
-                    f"short={short_d}, long={long_d}"
-                )
-
-    def test_deltas_within_valid_range(self, generator):
-        """All delta values should be within [MIN_DELTA, MAX_DELTA]."""
-        for bias in DirectionalBias:
-            for opt_type in [OptionType.PUT, OptionType.CALL]:
-                short_d, long_d = generator._get_asymmetric_deltas(opt_type, bias)
-                assert generator.MIN_DELTA <= short_d <= generator.MAX_DELTA, (
-                    f"Short delta {short_d} out of range for {opt_type.value}/{bias.value}"
-                )
-                assert generator.MIN_DELTA <= long_d <= generator.MAX_DELTA, (
-                    f"Long delta {long_d} out of range for {opt_type.value}/{bias.value}"
-                )
 
 
 if __name__ == "__main__":

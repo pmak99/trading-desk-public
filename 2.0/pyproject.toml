@@ -21,7 +21,6 @@ dependencies = [
     "requests>=2.32.5",
     "python-dotenv>=1.2.1",
     "numpy>=2.4.0",
-    "rich>=15.0.0",
     "tqdm>=4.67.0",
 ]
 
@@ -32,7 +31,8 @@ dev = [
     "pytest-mock>=3.15.0",
     "pytest-asyncio>=0.24.0",
     "black>=26.3.1",
-    "ruff>=0.9.0",
+    "ruff>=0.16.7",   # exact pins live in requirements.txt
+    "mypy>=2.3.1",
 ]
 
 [project.scripts]
@@ -53,13 +53,13 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 asyncio_mode = "auto"
+# No --cov here: forcing coverage on every run made --no-cov mandatory and slowed
+# every suite. Coverage is opt-in: `pytest tests/ --cov --cov-report=term-missing`
+# (source and report settings are [tool.coverage.*] below).
 addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
-    "--cov=src",
-    "--cov-report=html",
-    "--cov-report=term-missing",
     "--timeout=300",
 ]
 markers = [
@@ -68,6 +68,7 @@ markers = [
     "performance: Performance/load tests",
     "slow: Slow running tests",
     "asyncio: Async tests using pytest-asyncio",
+    "pg: Requires a reachable Postgres (skipped when unavailable)",
 ]
 
 [tool.coverage.run]
@@ -92,6 +93,26 @@ exclude_lines = [
     "@abstractmethod",
 ]
 
+[tool.mypy]
+# CI gate (.github/workflows/pr-tests.yml runs `mypy` from 2.0/): these files
+# type-check clean. The whole engine package since 2026-09-14 (src/domain and
+# src/application/metrics before). Widen `files` as more of the tree is made
+# clean -- scripts/, common/ -- never narrow it to get a red build green.
+files = ["src"]
+python_version = "3.12"  # numpy's stubs need 3.12 syntax; CI and the server run 3.12
+strict_optional = true
+# 2.0 first, so `src` and `scripts` resolve here; the repo root for `common`.
+mypy_path = ["$MYPY_CONFIG_FILE_DIR", "$MYPY_CONFIG_FILE_DIR/.."]
+# Modules outside `files` are still read for their types, but their own errors
+# belong to whoever widens the gate to them.
+follow_imports = "silent"
+
+# yfinance ships no type information (no stubs, no py.typed); its import is
+# typed Any. Every call goes through src/infrastructure/api/yahoo.py's gate.
+[[tool.mypy.overrides]]
+module = ["yfinance", "yfinance.*"]
+ignore_missing_imports = true
+
 [tool.black]
 line-length = 88
 target-version = ['py311']
@@ -100,6 +121,8 @@ include = '\.pyi?$'
 [tool.ruff]
 line-length = 88
 target-version = "py311"
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -113,5 +136,9 @@ ignore = [
     "B008",  # do not perform function calls in argument defaults
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.isort]
+# Installed editable, so ruff cannot tell them from third-party packages on its own.
+known-first-party = ["common", "src", "scripts"]
+
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]

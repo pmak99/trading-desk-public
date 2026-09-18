@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# The one way a command file reaches the trading database.
+#
+# A wrapper rather than bare `psql` for three reasons, each with a failure
+# mode behind it:
+#
+#   1. It sources 2.0/.env, so no invocation can die on a missing password.
+#      CLAUDE.md's "check env vars first" rule exists because plain `source`
+#      does not export, and the child process then sees nothing.
+#   2. ⚠️ A caller's PG* wins over .env. `set -a; . .env` alone would clobber
+#      `PGDATABASE=ivcrush_scratch scripts/db ...` back to `ivcrush` and run
+#      the query against PRODUCTION while the caller believed otherwise --
+#      silent, and the worst failure this wrapper could have.
+#   3. It resolves psql itself. On the Mac libpq is keg-only and NOT on the
+#      Bash tool's PATH (~/.zshrc is not consulted there -- the same reason
+#      CLAUDE.md notes sed and python3 are missing). On the server it is
+#      /usr/bin/psql. One spelling has to work on both.
+#
+# 1 and 2 live in scripts/with-env, which /maintenance also runs its Python
+# steps through; this file resolves psql and hands over.
+#
+# Usage is psql's own, unchanged:
+#   scripts/db -tAc "SELECT COUNT(*) FROM strategies"   # bare value
+#   scripts/db -c "SELECT ..."                          # aligned + header
+#   scripts/db --csv -c "SELECT ..." > out.csv
+#   scripts/db -x -c "SELECT ..."                       # one field per line
+#   PGDATABASE=ivcrush_scratch scripts/db -c "..."      # against scratch
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+PSQL="$(command -v psql || true)"
+if [ -z "$PSQL" ]; then
+    for candidate in /opt/homebrew/opt/libpq/bin/psql \
+                     /usr/local/opt/libpq/bin/psql \
+                     /usr/bin/psql; do
+        if [ -x "$candidate" ]; then PSQL="$candidate"; break; fi
+    done
+fi
+
+if [ -z "$PSQL" ]; then
+    echo "scripts/db: psql not found." >&2
+    echo "  Mac:    brew install libpq" >&2
+    echo "  Debian/Ubuntu: apt install postgresql-client" >&2
+    exit 127
+fi
+
+exec "$ROOT/scripts/with-env" "$PSQL" "$@"

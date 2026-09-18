@@ -10,6 +10,33 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    # Postgres-marked tests skip when no server is reachable. Without this
+    # service they would ALL skip in CI, which is a worse outcome than failing:
+    # the suite would go green while nothing about the database layer was
+    # exercised. Pinned to the same 18.6 the server runs.
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: trading
+          POSTGRES_DB: ivcrush
+          POSTGRES_PASSWORD: ci-not-a-secret
+          TZ: UTC
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U trading -d ivcrush"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGDATABASE: ivcrush
+      PGUSER: trading
+      PGPASSWORD: ci-not-a-secret
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -17,8 +44,8 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
-        # Keep in step with 5.0/Dockerfile — the deployed image and CI should
-        # not run different Python minors.
+        # Keep in step with the server's venv — the host that actually runs the
+        # scheduled jobs and CI should not be on different Python minors.
         python-version: '3.12'
         cache: 'pip'
 
@@ -26,30 +53,64 @@ jobs:
       run: |
         python -m pip install --upgrade pip setuptools wheel
         pip install -r requirements.txt
-        pip install -e 2.0/
+        # Both distributions, editable, exactly as 2.0/venv has them on the Mac
+        # and the server: the repo root packages `common`, 2.0/ packages `src`.
+        # Nothing edits sys.path to find either (audit 5.2, 2026-09-14), so a
+        # run without the first would fail at `import common`.
+        pip install -e . -e 2.0/
+
+    # The engine's layer contracts ([tool.importlinter] in the root
+    # pyproject.toml): domain imports neither application nor infrastructure,
+    # infrastructure imports no application, common imports nothing from src.
+    # First, and on its own, so a layering break is named as one rather than
+    # found inside a test log. scripts/tests/test_import_contracts.py runs the
+    # same check and proves each contract refuses a planted import.
+    - name: Import contracts
+      run: lint-imports --no-cache
+
+    # One rule set for the repo (root ruff.toml extends 2.0/pyproject.toml). It reached
+    # zero findings on 2026-09-14; this keeps it there.
+    - name: Lint (ruff)
+      run: ruff check .
 
     - name: Run 2.0 tests
       run: |
         cd 2.0
-        python -m pytest tests/ -v --tb=short --no-cov
+        python -m pytest tests/ -v --tb=short
       continue-on-error: false
 
-    # 4.0 and 6.0 are archived and deliberately not run here: 6.0 no longer
-    # exists at that path (moved to archived/6.0/), and 4.0 has known
-    # failing tests from sentiment-neutralization drift.
-    - name: Run 5.0 tests
-      run: |
-        cd 5.0
-        pip install -r requirements.txt
-        python -m pytest tests/ -v --tb=short --no-cov
+    # 4.0, 5.0 and 6.0 no longer exist in the working tree — all three were
+    # removed 2026-09-12 and are recoverable at tags pre-4.0-removal /
+    # pre-5.0-removal / pre-6.0-removal. There is nothing here left to skip.
+
+    # Two more suites live outside the 2.0 tree, and BOTH were missed here at
+    # some point — scripts/tests/ until Sep 8 2026, tests/ until Sep 12 2026.
+    # Neither is reachable from the step above. They run in one invocation so
+    # this step also proves they can be collected together: tests/journal/ was
+    # named tests/scripts/ with an __init__.py until Sep 12, which made it a
+    # package literally named `scripts`, shadowing the real top-level one and
+    # breaking any combined run with a ModuleNotFoundError.
+    #
+    # If a fourth test root ever appears, add it here.
+    # `find . -name 'test_*.py' -maxdepth 3` is how to spot one.
+    - name: Run scripts/ and root tests
+      run: python -m pytest scripts/tests/ tests/ -v --tb=short
       continue-on-error: false
+
+    # The files that must type-check clean are listed once, in [tool.mypy]
+    # `files` in 2.0/pyproject.toml (all of 2.0/src since 2026-09-14). Widen
+    # the gate there, not here.
+    - name: Type-check (mypy gate)
+      run: |
+        cd 2.0
+        mypy
 
     - name: Test summary
       run: |
         echo "✅ All active test suites passed"
-        echo "  - 2.0: Core math engine"
-        echo "  - 5.0: Cloud autopilot"
-        echo "  - 4.0, 6.0: archived, not part of CI"
+        echo "  - 2.0/tests:     core math engine"
+        echo "  - scripts/tests: shared tooling + the server ops scripts"
+        echo "  - tests/journal: Fidelity journal parsing"
 
   security-scan:
     runs-on: ubuntu-latest

@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+
 class _CorrelationIdFilter(logging.Filter):
     """Add a placeholder correlation_id to log records for format string compatibility."""
 
@@ -130,7 +131,7 @@ def setup_logging(
 
     # Create formatter based on format type
     if json_format:
-        formatter = JSONFormatter()
+        formatter: logging.Formatter = JSONFormatter()
     else:
         # Default text format with correlation ID
         if log_format is None:

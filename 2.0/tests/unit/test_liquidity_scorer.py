@@ -10,16 +10,13 @@ Unit tests for the 4-tier liquidity scoring system.
 Final tier = worse of (OI tier, Spread tier)
 """
 
+from datetime import date
+
 import pytest
-import sys
-from pathlib import Path
-from datetime import date, timedelta
 
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from src.application.metrics.liquidity_scorer import LiquidityScorer, LiquidityScore
-from src.domain.types import Money, Percentage, Strike, OptionQuote, OptionChain
+from src.application.metrics.liquidity_scorer import LiquidityScorer
+from src.config.config import StrategyConfig
+from src.domain.types import Money, OptionChain, OptionQuote, Percentage, Strike
 
 
 @pytest.fixture
@@ -158,7 +155,6 @@ class TestHybridTierClassification:
     def sample_chain(self):
         """Create a sample option chain for testing."""
         stock_price = Money(100.0)
-        strikes = [Strike(90), Strike(95), Strike(100), Strike(105), Strike(110)]
 
         # Create calls with varying liquidity
         calls = {
@@ -201,22 +197,22 @@ class TestHybridTierClassification:
     def test_dynamic_thresholds_calculation(self, scorer):
         """Test dynamic threshold calculation based on stock price."""
         # Low price stock
-        thresholds_20 = scorer.calculate_dynamic_thresholds(stock_price=20.0)
+        thresholds_20 = scorer.calculate_dynamic_thresholds(stock_price=20.0, strategy_config=StrategyConfig())
         assert thresholds_20['spread_width'] == 5.0
         assert thresholds_20['price_tier'] == "$20-100"
 
         # Mid price stock
-        thresholds_150 = scorer.calculate_dynamic_thresholds(stock_price=150.0)
+        thresholds_150 = scorer.calculate_dynamic_thresholds(stock_price=150.0, strategy_config=StrategyConfig())
         assert thresholds_150['spread_width'] == 10.0
         assert thresholds_150['price_tier'] == "$100-200"
 
         # High price stock
-        thresholds_500 = scorer.calculate_dynamic_thresholds(stock_price=500.0)
+        thresholds_500 = scorer.calculate_dynamic_thresholds(stock_price=500.0, strategy_config=StrategyConfig())
         assert thresholds_500['spread_width'] == 50.0
         assert thresholds_500['price_tier'] == "$500-1000"
 
         # Very high price stock
-        thresholds_1500 = scorer.calculate_dynamic_thresholds(stock_price=1500.0)
+        thresholds_1500 = scorer.calculate_dynamic_thresholds(stock_price=1500.0, strategy_config=StrategyConfig())
         assert thresholds_1500['spread_width'] == 100.0
         assert thresholds_1500['price_tier'] == "$1000+"
 
@@ -412,11 +408,11 @@ class TestScanScoringConstants:
     def test_import_constants(self):
         """Verify all 4-tier constants are defined."""
         from scripts.scan import (
-            SCORE_LIQUIDITY_MAX_POINTS,
             SCORE_LIQUIDITY_EXCELLENT_POINTS,
             SCORE_LIQUIDITY_GOOD_POINTS,
-            SCORE_LIQUIDITY_WARNING_POINTS,
+            SCORE_LIQUIDITY_MAX_POINTS,
             SCORE_LIQUIDITY_REJECT_POINTS,
+            SCORE_LIQUIDITY_WARNING_POINTS,
         )
 
         assert SCORE_LIQUIDITY_MAX_POINTS == 20
@@ -430,8 +426,8 @@ class TestScanScoringConstants:
         from scripts.scan import (
             SCORE_LIQUIDITY_EXCELLENT_POINTS,
             SCORE_LIQUIDITY_GOOD_POINTS,
-            SCORE_LIQUIDITY_WARNING_POINTS,
             SCORE_LIQUIDITY_REJECT_POINTS,
+            SCORE_LIQUIDITY_WARNING_POINTS,
         )
 
         assert SCORE_LIQUIDITY_EXCELLENT_POINTS > SCORE_LIQUIDITY_GOOD_POINTS
@@ -441,7 +437,10 @@ class TestScanScoringConstants:
 
     def test_quality_score_with_good_tier(self):
         """Test calculate_scan_quality_score with GOOD liquidity tier."""
-        from scripts.scan import calculate_scan_quality_score, SCORE_LIQUIDITY_GOOD_POINTS
+        from scripts.scan import (
+            SCORE_LIQUIDITY_GOOD_POINTS,
+            calculate_scan_quality_score,
+        )
 
         result = {
             'vrp_ratio': 5.0,

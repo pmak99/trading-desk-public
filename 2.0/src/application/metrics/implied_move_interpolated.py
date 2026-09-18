@@ -1,36 +1,113 @@
 """
-Interpolated Implied Move Calculator - Phase 4 Algorithmic Optimization
+Interpolated Implied Move Calculator
 
-Enhanced implied move calculation with linear interpolation between strikes.
-Avoids rounding errors when no exact ATM strike exists.
+Implied move for a stock that sits between two strikes, priced as the at-the-money straddle
+at spot rather than the straddle at the nearest strike.
+
+The two bracketing straddles are not averaged. Each carries intrinsic value |spot - strike|,
+and a straddle is convex in strike, so their chord sits above the ATM straddle -- +20.8% at
+$52.50 between $5 strikes at 80% IV and 3 DTE -- which inflated implied move, VRP and size.
+Instead each bracket's volatility is read back out of its own straddle quote, interpolated to
+spot by strike, and the ATM straddle is priced from it.
 """
 
 import bisect
 import logging
+import math
 from datetime import date
 from typing import Optional, Tuple
 
-from src.domain.types import Money, Percentage, Strike, ImpliedMove, OptionChain, OptionQuote
-from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
+from common.timezone import now_et
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
 from src.domain.protocols import OptionsDataProvider
+from src.domain.types import (
+    ImpliedMove,
+    Money,
+    OptionChain,
+    Percentage,
+    Strike,
+)
 
 logger = logging.getLogger(__name__)
+
+_SQRT2 = math.sqrt(2.0)
+
+# Total volatility (sigma * sqrt(T)) beyond which a straddle is worth spot + strike to
+# double precision. A quote that needs more is not a price.
+_MAX_TOTAL_VOL = 64.0
+_BISECTION_STEPS = 200
+
+# The straddle-cost sanity bounds calculate_from_atm_chain applies (implied_move_common.py),
+# as a percentage of spot. A test holds the two paths to the same warn/no-warn decision.
+_STRADDLE_PCT_TOO_LOW = 0.5
+_STRADDLE_PCT_TOO_HIGH = 30.0
+
+
+def _straddle_value(spot: float, strike: float, total_vol: float) -> float:
+    """Black-Scholes straddle at zero rates, as a function of total volatility v = sigma*sqrt(T).
+
+    call + put = S*erf(d1/sqrt2) - K*erf(d2/sqrt2), with d1 = ln(S/K)/v + v/2 and d2 = d1 - v.
+    At S = K it is 2S*erf(v / 2sqrt2), which is S*v*sqrt(2/pi) to first order.
+
+    The price depends on sigma and T only through v, so neither the inversion below nor the
+    re-pricing at spot needs a time-to-expiry convention: reading v out of a quote and pricing
+    with the same v cancels whatever convention the quote was made on.
+    """
+    if total_vol <= 0.0:
+        return abs(spot - strike)
+    d1 = math.log(spot / strike) / total_vol + total_vol / 2.0
+    d2 = d1 - total_vol
+    return spot * math.erf(d1 / _SQRT2) - strike * math.erf(d2 / _SQRT2)
+
+
+def _implied_total_vol(spot: float, strike: float, straddle: float) -> Optional[float]:
+    """Total volatility at which the Black-Scholes straddle at ``strike`` is worth ``straddle``.
+
+    None when the quote is outside the no-arbitrage range (intrinsic, spot + strike): at or
+    below intrinsic there is no time value to read a volatility from, and a straddle cannot
+    be worth more than spot + strike.
+    """
+    if spot <= 0.0 or strike <= 0.0:
+        return None
+    if not abs(spot - strike) < straddle < spot + strike:
+        return None
+
+    # The straddle is strictly increasing in v, so bracket the root and bisect.
+    lo, hi = 0.0, 1.0
+    while _straddle_value(spot, strike, hi) < straddle:
+        lo, hi = hi, hi * 2.0
+        if hi > _MAX_TOTAL_VOL:
+            return None
+    for _ in range(_BISECTION_STEPS):
+        mid = 0.5 * (lo + hi)
+        if mid <= lo or mid >= hi:
+            break
+        if _straddle_value(spot, strike, mid) < straddle:
+            lo = mid
+        else:
+            hi = mid
+    total_vol = 0.5 * (lo + hi)
+    return total_vol if total_vol > 0.0 else None
 
 
 class ImpliedMoveCalculatorInterpolated:
     """
-    Enhanced implied move calculator with strike interpolation.
+    Implied move calculator that prices the ATM straddle at spot.
 
-    Standard calculator uses closest ATM strike, which can have rounding error.
-    For example, if stock is at $150.50 and strikes are $145, $150, $155:
-    - Standard: Uses $150 or $155 (depends on rounding)
-    - Interpolated: Uses weighted average of $150 and $155
+    Standard calculator uses the straddle at the closest strike. If the stock is at $152.50
+    with $150 and $155 strikes, that straddle is struck $2.50 away from spot.
 
-    Benefits:
-    - Smoother calculations (no discontinuities)
-    - More accurate for stocks between strikes
-    - Better for high-priced stocks with wide strike spacing
-    - Reduces noise in historical comparisons
+    This calculator:
+    - Stock within STRIKE_MATCH_TOLERANCE of a strike: that strike's straddle, as the
+      standard calculator does.
+    - Otherwise: implied total volatility from each bracketing straddle quote, interpolated
+      linearly in strike to spot, priced as the Black-Scholes ATM straddle. One unusable
+      bracket (missing, illiquid, or quoted outside its no-arbitrage range) leaves the other
+      bracket's volatility; two is NODATA.
+
+    Both paths are priced from the option quotes, so the result is continuous as spot crosses
+    a strike. The vendor IVs are reported as avg_iv but never priced: they may be absent, can
+    lag the quotes, and are computed on a time convention this engine does not share.
     """
 
     # Configuration
@@ -47,7 +124,7 @@ class ImpliedMoveCalculatorInterpolated:
         expiration: date
     ) -> Result[ImpliedMove, AppError]:
         """
-        Calculate implied move using interpolated straddle.
+        Calculate implied move from the ATM straddle at spot.
 
         Args:
             ticker: Stock symbol
@@ -59,7 +136,7 @@ class ImpliedMoveCalculatorInterpolated:
         logger.info(f"Calculating interpolated implied move: {ticker} exp {expiration}")
 
         # Validate expiration is not in the past
-        today = date.today()
+        today = now_et().date()
         if expiration < today:
             return Err(
                 AppError(
@@ -79,12 +156,11 @@ class ImpliedMoveCalculatorInterpolated:
         # Find bracketing strikes
         bracket_result = self._find_bracketing_strikes(chain, stock_price)
         if bracket_result is None:
-            # Fall back to exact ATM if stock is exactly at a strike
+            # Stock at a strike (or outside the strike range): price that strike's straddle
             return self._calculate_exact_atm(chain, ticker, expiration)
 
         lower_strike, upper_strike, weight = bracket_result
 
-        # Interpolate straddle cost
         try:
             straddle_cost = self._interpolate_straddle(
                 chain,
@@ -95,14 +171,23 @@ class ImpliedMoveCalculatorInterpolated:
         except ValueError as e:
             return Err(AppError(ErrorCode.NODATA, str(e)))
 
-        # Calculate implied move
-        implied_move_pct = Percentage((straddle_cost / stock_price) * 100)
+        if straddle_cost <= 0:
+            return Err(
+                AppError(
+                    ErrorCode.INVALID,
+                    f"Invalid straddle cost <= 0 between strikes {lower_strike} and {upper_strike}",
+                )
+            )
 
-        # Calculate bounds
+        straddle_pct = (straddle_cost / stock_price) * 100
+        implied_move_pct = Percentage(straddle_pct)
+
         upper_bound = Money(stock_price + straddle_cost)
         lower_bound = Money(stock_price - straddle_cost)
 
-        # Interpolate IVs
+        self._warn_if_implausible(ticker, straddle_pct, lower_bound)
+
+        # Interpolate the vendor IVs for reporting
         avg_iv = self._interpolate_iv(
             chain,
             lower_strike,
@@ -130,7 +215,7 @@ class ImpliedMoveCalculatorInterpolated:
 
         logger.info(
             f"{ticker}: Interpolated implied move {implied_move_pct.value:.2f}% "
-            f"(${straddle_cost:.2f} straddle, "
+            f"(${straddle_cost:.2f} ATM straddle at spot, "
             f"strikes ${lower_strike.price:.2f}-${upper_strike.price:.2f})"
         )
 
@@ -184,11 +269,12 @@ class ImpliedMoveCalculatorInterpolated:
         weight: float
     ) -> float:
         """
-        Interpolate straddle cost between two strikes.
+        Price the ATM straddle at spot from the bracketing straddle quotes.
 
-        When both brackets are liquid, performs full linear interpolation.
-        When only one bracket is liquid (e.g. upper strike has no bids at open),
-        falls back to that bracket's straddle rather than failing entirely.
+        Each usable bracket's total volatility is implied from its straddle mid; the two are
+        interpolated linearly by ``weight`` and the Black-Scholes straddle struck at spot is
+        priced from the result. When only one bracket is usable (e.g. the upper strike has
+        no bids at the open), its volatility is priced at spot alone.
 
         Args:
             chain: Option chain
@@ -197,37 +283,83 @@ class ImpliedMoveCalculatorInterpolated:
             weight: Interpolation weight (0-1)
 
         Returns:
-            Interpolated straddle cost
+            ATM straddle cost at spot
 
         Raises:
-            ValueError: If options are missing or illiquid at both brackets
+            ValueError: If neither bracket yields a volatility
         """
-        lower_call = chain.calls.get(lower_strike)
-        lower_put = chain.puts.get(lower_strike)
-        upper_call = chain.calls.get(upper_strike)
-        upper_put = chain.puts.get(upper_strike)
+        spot = float(chain.stock_price.amount)
 
-        lower_ok = bool(lower_call and lower_put and lower_call.is_liquid and lower_put.is_liquid)
-        upper_ok = bool(upper_call and upper_put and upper_call.is_liquid and upper_put.is_liquid)
+        lower_vol, lower_reason = self._bracket_total_vol(chain, lower_strike, spot)
+        upper_vol, upper_reason = self._bracket_total_vol(chain, upper_strike, spot)
 
-        if not lower_ok and not upper_ok:
-            if not lower_call or not lower_put:
-                raise ValueError(f"Missing options at lower strike {lower_strike}")
-            if not upper_call or not upper_put:
-                raise ValueError(f"Missing options at upper strike {upper_strike}")
-            raise ValueError(f"Illiquid options at both bracket strikes {lower_strike} and {upper_strike}")
+        if lower_vol is not None and upper_vol is not None:
+            total_vol = lower_vol * (1 - weight) + upper_vol * weight
+        elif lower_vol is not None:
+            logger.warning(
+                f"Upper strike {upper_strike} unusable ({upper_reason}), "
+                f"using lower bracket volatility only"
+            )
+            total_vol = lower_vol
+        elif upper_vol is not None:
+            logger.warning(
+                f"Lower strike {lower_strike} unusable ({lower_reason}), "
+                f"using upper bracket volatility only"
+            )
+            total_vol = upper_vol
+        else:
+            raise ValueError(
+                f"No usable bracket straddle: lower strike {lower_strike}: {lower_reason}; "
+                f"upper strike {upper_strike}: {upper_reason}"
+            )
 
-        if lower_ok and upper_ok:
-            lower_straddle = float(lower_call.mid.amount + lower_put.mid.amount)
-            upper_straddle = float(upper_call.mid.amount + upper_put.mid.amount)
-            return lower_straddle * (1 - weight) + upper_straddle * weight
+        return _straddle_value(spot, spot, total_vol)
 
-        if lower_ok:
-            logger.warning(f"Upper strike {upper_strike} illiquid, using lower bracket only")
-            return float(lower_call.mid.amount + lower_put.mid.amount)
+    def _bracket_total_vol(
+        self,
+        chain: OptionChain,
+        strike: Strike,
+        spot: float
+    ) -> Tuple[Optional[float], str]:
+        """
+        Total volatility implied by the straddle quote at one bracketing strike.
 
-        logger.warning(f"Lower strike {lower_strike} illiquid, using upper bracket only")
-        return float(upper_call.mid.amount + upper_put.mid.amount)
+        Returns:
+            (total_vol, "") when usable, else (None, reason)
+        """
+        call = chain.calls.get(strike)
+        put = chain.puts.get(strike)
+
+        if call is None or put is None:
+            return None, "missing call or put"
+        if not (call.is_liquid and put.is_liquid):
+            return None, "illiquid options"
+
+        mid = float(call.mid.amount + put.mid.amount)
+        strike_price = float(strike.price)
+        total_vol = _implied_total_vol(spot, strike_price, mid)
+        if total_vol is None:
+            return None, (
+                f"straddle mid ${mid:.2f} outside "
+                f"(intrinsic ${abs(spot - strike_price):.2f}, ${spot + strike_price:.2f})"
+            )
+        return total_vol, ""
+
+    def _warn_if_implausible(self, ticker: str, straddle_pct: float, lower_bound: Money) -> None:
+        """The straddle-cost checks calculate_from_atm_chain runs on the exact-strike path."""
+        if straddle_pct < _STRADDLE_PCT_TOO_LOW:
+            logger.warning(
+                f"{ticker}: Straddle cost {straddle_pct:.2f}% of stock price seems too low - validate data"
+            )
+        elif straddle_pct > _STRADDLE_PCT_TOO_HIGH:
+            logger.warning(
+                f"{ticker}: Straddle cost {straddle_pct:.2f}% of stock price seems too high - validate data"
+            )
+
+        if lower_bound.amount <= 0:
+            logger.warning(
+                f"{ticker}: Lower bound negative (${lower_bound.amount:.2f})"
+            )
 
     def _interpolate_iv(
         self,
@@ -254,28 +386,18 @@ class ImpliedMoveCalculatorInterpolated:
         upper_call = chain.calls.get(upper_strike)
         upper_put = chain.puts.get(upper_strike)
 
-        if not all([lower_call, lower_put, upper_call, upper_put]):
+        if lower_call is None or lower_put is None or upper_call is None or upper_put is None:
             return None
 
         # Check if all have IVs
-        if not all([
-            lower_call.implied_volatility,
-            lower_put.implied_volatility,
-            upper_call.implied_volatility,
-            upper_put.implied_volatility
-        ]):
+        lower_call_iv, lower_put_iv = lower_call.implied_volatility, lower_put.implied_volatility
+        upper_call_iv, upper_put_iv = upper_call.implied_volatility, upper_put.implied_volatility
+        if lower_call_iv is None or lower_put_iv is None or upper_call_iv is None or upper_put_iv is None:
             return None
 
         # Calculate average IVs at each strike
-        lower_avg = (
-            lower_call.implied_volatility.value +
-            lower_put.implied_volatility.value
-        ) / 2.0
-
-        upper_avg = (
-            upper_call.implied_volatility.value +
-            upper_put.implied_volatility.value
-        ) / 2.0
+        lower_avg = (lower_call_iv.value + lower_put_iv.value) / 2.0
+        upper_avg = (upper_call_iv.value + upper_put_iv.value) / 2.0
 
         # Interpolate
         interpolated = lower_avg * (1 - weight) + upper_avg * weight
@@ -291,7 +413,8 @@ class ImpliedMoveCalculatorInterpolated:
         """
         Fall back to exact ATM calculation when stock is at a strike.
 
-        Uses shared calculation logic from implied_move_common.
+        Uses shared calculation logic from implied_move_common, with the same straddle-cost
+        validation the standard calculator runs.
 
         Args:
             chain: Option chain
@@ -305,4 +428,4 @@ class ImpliedMoveCalculatorInterpolated:
 
         # Use shared calculation logic (no circular import since it's in common module)
         from src.application.metrics.implied_move_common import calculate_from_atm_chain
-        return calculate_from_atm_chain(chain, ticker, expiration, validate_straddle_cost=False)
+        return calculate_from_atm_chain(chain, ticker, expiration, validate_straddle_cost=True)

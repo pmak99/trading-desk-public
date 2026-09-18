@@ -8,13 +8,16 @@ for setups where compound tail risk (TRR HIGH / ORATS sizing alarm) would
 otherwise force a skip or a 25-contract cap on a credit spread.
 
 Evidence (practitioner, 2020-2026): ~58-63% win rates, 1.7-2:1 managed P/L
-when gated on VRP >= 1.4x and exited within 24-48h post-earnings (MenthorQ
-ACES; ORATS earnings-effect research). Direction: call calendar by default,
-put calendar when fused skew bias is bearish (put IV rich -> put calendar
-collects more front premium).
+when gated on a GOOD-or-better VRP tier and exited within 24-48h post-earnings
+(MenthorQ ACES; ORATS earnings-effect research). Direction: call calendar by
+default, put calendar when fused skew bias is bearish (put IV rich -> put
+calendar collects more front premium).
 
 PILOT CONSTRAINTS:
-- max 10 contracts regardless of conviction (PILOT_MAX_CONTRACTS)
+- max 10 contracts regardless of conviction (PILOT_MAX_CONTRACTS), halved by
+  the cut that halves a vertical's cap (CLAUDE.md §2, §6 rule 3: a WARNING leg,
+  or MARGINAL VRP); a REJECT leg builds nothing;
+  and never more than MAX_LOSS_WARN_THRESHOLD of natural-price debit
 - generated only when term structure shows backwardation (the front IV
   must contain event premium for the short leg to crush)
 - exit rule unchanged: close next trading day after earnings; do NOT hold
@@ -26,9 +29,13 @@ reward/risk is intentionally conservative.
 """
 
 import logging
+from dataclasses import replace
 from typing import Optional
 
-from src.domain.enums import StrategyType, OptionType, DirectionalBias
+from src.application.metrics.liquidity_scorer import LiquidityScorer
+from src.application.services.strategy.metrics import position_liquidity_tier
+from src.domain.enums import DirectionalBias, OptionType, StrategyType
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
 from src.domain.types import (
     Money,
     OptionChain,
@@ -36,7 +43,6 @@ from src.domain.types import (
     Strategy,
     StrategyLeg,
 )
-from src.domain.errors import Result, AppError, Ok, Err, ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +64,16 @@ BEARISH_BIASES = (
 def build_calendar_spread(
     front_chain: OptionChain,
     back_chain: OptionChain,
+    liquidity_scorer: LiquidityScorer,
     bias: DirectionalBias = DirectionalBias.NEUTRAL,
     sizing_context: Optional[SizingContext] = None,
 ) -> Result[Strategy, AppError]:
     """
     Build an ATM calendar spread from front and back chains.
 
-    Returns Err when the structure is not constructible (missing strike in
-    the back chain, non-positive debit, illiquid legs).
+    Both legs are graded by `liquidity_scorer`, the container's, which grades a
+    vertical's short legs. Returns Err when the structure is not constructible
+    (missing strike in the back chain, non-positive debit, a REJECT leg).
     """
     ticker = front_chain.ticker
     option_type = (
@@ -91,16 +99,26 @@ def build_calendar_spread(
             f"{ticker}: strike {strike} not present in both expirations",
         ))
 
-    if not front_quote.is_liquid or not back_quote.is_liquid:
+    # Both legs, not only the short one a vertical's liquidity reads: the long
+    # back leg is a different expiration with its own book. Until 2026-09-14 a
+    # leg was refused only when it failed OptionQuote.is_liquid (no open
+    # interest, or a spread of 50%+), so a WARNING or REJECT leg sized at 10.
+    liquidity_tier = position_liquidity_tier([
+        liquidity_scorer.classify_option_tier(front_quote),
+        liquidity_scorer.classify_option_tier(back_quote),
+    ])
+    if liquidity_tier == "REJECT":
         return Err(AppError(
             ErrorCode.NODATA,
-            f"{ticker}: calendar legs fail liquidity check "
+            f"{ticker}: calendar legs grade REJECT on liquidity "
             f"(front OI={front_quote.open_interest}, back OI={back_quote.open_interest})",
         ))
 
-    # Buy back at ask-leaning mid, sell front at bid-leaning mid: use mids,
-    # consistent with the vertical spread builder's pricing convention.
+    # Priced at mids, as the vertical spread builder prices; the natural debit
+    # (buy the back leg at its ask, sell the front at its bid) is the worst case
+    # a fill reaches, and the one the contract count is held to.
     net_debit = float(back_quote.mid.amount) - float(front_quote.mid.amount)
+    natural_debit = float(back_quote.ask.amount) - float(front_quote.bid.amount)
     if net_debit <= 0:
         return Err(AppError(
             ErrorCode.INVALID,
@@ -108,9 +126,18 @@ def build_calendar_spread(
             f"front mid >= back mid, structure has no edge to buy",
         ))
 
-    contracts = PILOT_MAX_CONTRACTS
-    if sizing_context is not None:
-        contracts = min(contracts, sizing_context.trr_cap)
+    # The pilot cap stands in for the TRR and compound-risk caps that gate the
+    # pilot; the rule-3 cut (MARGINAL VRP, WARNING liquidity) still applies,
+    # once, through the context a vertical sizes with. A WARNING tier sets
+    # the flag as StrategyGenerator does for a vertical.
+    context = sizing_context if sizing_context is not None else SizingContext()
+    if liquidity_tier == "WARNING":
+        context = replace(context, liquidity_warning=True)
+    contracts = max(1, context.apply_vrp_or_liquidity_reduction(
+        min(PILOT_MAX_CONTRACTS, context.trr_cap)
+    ))
+    # Net debit is the max loss, so MAX_LOSS_WARN_THRESHOLD bounds it too.
+    contracts = context.cap_to_max_loss(contracts, max(net_debit, natural_debit) * 100)
 
     max_loss = net_debit * 100 * contracts
     est_max_profit = max_loss * ESTIMATED_PROFIT_FRACTION
@@ -165,6 +192,11 @@ def build_calendar_spread(
             f"Profit/POP figures are managed-exit estimates, not model prices. "
             f"Exit next trading day after earnings."
         ),
+        liquidity_tier=liquidity_tier,
+        min_open_interest=min_oi,
+        max_spread_pct=max_spread_pct,
+        natural_credit=Money(-natural_debit),
+        natural_max_loss=Money(natural_debit * 100 * contracts),
     )
     logger.info(
         f"{ticker}: calendar pilot candidate — {strategy.strike_description}, "

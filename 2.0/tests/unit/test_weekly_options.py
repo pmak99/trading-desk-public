@@ -5,13 +5,12 @@ Tests the detection logic that determines whether a ticker has weekly options
 based on the number of Friday expirations within a 21-day window.
 """
 
-import pytest
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
-from src.application.filters.weekly_options import (
-    has_weekly_options,
-    WEEKLY_DETECTION_WINDOW_DAYS,
+from common.filters.weekly_options import (
     WEEKLY_DETECTION_MIN_FRIDAYS,
+    WEEKLY_DETECTION_WINDOW_DAYS,
+    has_weekly_options,
 )
 
 

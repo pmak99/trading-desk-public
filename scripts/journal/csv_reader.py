@@ -8,11 +8,22 @@ from journal.models import Trade
 from journal.parsing import (
     COLUMN_MAPPINGS,
     find_column,
-    parse_option_description,
-    parse_occ_symbol,
     parse_date,
     parse_money,
+    parse_occ_symbol,
+    parse_option_description,
 )
+
+
+def _row_reader(row: List[str], col_idx: dict):
+    """One row's cells by field name: stripped, or '' when the column is absent
+    or the row is short. Bound to the row it is built from -- the two closures it
+    replaced were defined inside the row loop and read `row` late (ruff B023),
+    harmless only while every call ran in the iteration that defined them."""
+    def get_val(field: str) -> str:
+        idx = col_idx.get(field)
+        return row[idx].strip() if idx is not None and idx < len(row) else ''
+    return get_val
 
 
 def parse_fidelity_csv(filepath: str) -> Tuple[List[Trade], List[Tuple], List[dict]]:
@@ -60,6 +71,7 @@ def parse_fidelity_csv(filepath: str) -> Tuple[List[Trade], List[Tuple], List[di
 
         # Parse rows
         row_num = header_idx + 1
+        last_trade = None
         for row in reader:
             row_num += 1
 
@@ -67,17 +79,40 @@ def parse_fidelity_csv(filepath: str) -> Tuple[List[Trade], List[Tuple], List[di
                 skipped_rows.append((row_num, 'Insufficient columns', None))
                 continue
 
-            # Skip summary/total rows and wash sale adjustment rows
+            # ⚠️ A wash-sale adjustment is its own row under the lot it adjusts:
+            # no symbol, "Wash Sale" in a date column, the disallowed loss as a
+            # negative cost basis and a positive gain. Fold it into that lot.
+            # Skipping it (as this reader did until 2026-09-13) left Fidelity's
+            # tax-lot figure, whose cost basis already carries losses disallowed
+            # on earlier sales -- taxable 2025 losses came out materially larger
+            # than the statements' cash. Lot + wash rows = cash, to the cent.
+            get_val = _row_reader(row, col_idx)
+            if any(cell.strip().lower() == 'wash sale' for cell in row):
+                if last_trade is None:
+                    skipped_rows.append((row_num, 'Wash sale row with no lot above it', row[:9]))
+                    continue
+                wash_cost = parse_money(get_val('cost_basis'))
+                wash_gain = parse_money(get_val('short_term_gl')) + parse_money(get_val('long_term_gl'))
+                last_trade.cost_basis += wash_cost
+                last_trade.gain_loss += wash_gain
+                last_trade.wash_sale_amount += wash_gain
+                continue
+
+            # Skip summary/total rows (wash sale rows are handled above)
             first_col = row[0].strip() if row else ''
             if not first_col:
                 skipped_rows.append((row_num, 'Empty first column', None))
+                last_trade = None
                 continue
 
-            row_text = str(row).lower()
-            skip_terms = ['total', 'subtotal', 'disclaimer', 'wash sale']
-            if any(skip in row_text for skip in skip_terms):
-                matched_term = [s for s in skip_terms if s in row_text][0]
-                skipped_rows.append((row_num, f'Summary row ({matched_term})', None))
+            # A summary row names itself in the first cell ("Total", "Subtotal"). Matching
+            # 'total' anywhere in the row dropped every TotalEnergies (TTE) lot as one.
+            summary = re.match(r'(sub)?total\b', first_col.lower())
+            if summary:
+                skipped_rows.append((row_num, f'Summary row ({summary.group(0)})', None))
+                continue
+            if 'disclaimer' in str(row).lower():
+                skipped_rows.append((row_num, 'Summary row (disclaimer)', None))
                 continue
 
             # Detect Fidelity "unable to provide" rows — real positions with missing G/L data
@@ -93,12 +128,6 @@ def parse_fidelity_csv(filepath: str) -> Tuple[List[Trade], List[Tuple], List[di
                     'expiration': opt.get('expiration', ''),
                 })
                 continue
-
-            def get_val(field: str) -> str:
-                idx = col_idx.get(field)
-                if idx is not None and idx < len(row):
-                    return row[idx].strip()
-                return ''
 
             raw_symbol = get_val('symbol')
             if not raw_symbol:
@@ -181,5 +210,6 @@ def parse_fidelity_csv(filepath: str) -> Tuple[List[Trade], List[Tuple], List[di
                 underlying=opt_details['underlying'],
             )
             trades.append(trade)
+            last_trade = trade
 
     return trades, skipped_rows, unable_rows

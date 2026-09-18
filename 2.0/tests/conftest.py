@@ -2,19 +2,54 @@
 Pytest configuration and fixtures for IV Crush 2.0 tests.
 """
 
-import pytest
-import sys
-from pathlib import Path
-from datetime import date, datetime, timedelta
-from decimal import Decimal
+from datetime import date, timedelta
+from hashlib import sha1
 
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pytest
 
 from src.config.config import Config
 from src.container import Container
-from src.domain.types import Money, Percentage, Strike, OptionQuote, OptionChain
-from src.domain.enums import EarningsTiming
+from src.domain.types import Money, OptionChain, OptionQuote, Percentage, Strike
+
+
+class VendorClock:
+    """Virtual time for the Yahoo and Twelve Data gates: sleeping advances it."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def time(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += max(seconds, 0.0)
+
+
+@pytest.fixture(scope="session")
+def _vendor_state(tmp_path_factory):
+    return tmp_path_factory.mktemp("vendor-state")
+
+
+@pytest.fixture(autouse=True)
+def vendor_clock(monkeypatch, request, _vendor_state):
+    """Every test gets fresh Yahoo and Twelve Data gates on a fake clock.
+
+    The real gates are process-wide and sleep: a test that reaches a yfinance
+    or Twelve Data call site would wait a second per Yahoo call, or a minute
+    for a Twelve Data retry, and would inherit another test's backoff. The
+    Twelve Data gate's daily count goes to a file of the test's own, never the
+    host's real one, which the bot and record_moves spend from.
+    """
+    from src.utils import rate_limiter
+
+    monkeypatch.setenv("TWELVE_DATA_USAGE_FILE",
+                       str(_vendor_state / sha1(request.node.nodeid.encode()).hexdigest()))
+    clock = VendorClock()
+    monkeypatch.setattr(rate_limiter, "_gates", {
+        vendor: factory(clock=clock.time, sleep=clock.sleep)
+        for vendor, factory in rate_limiter._GATE_FACTORIES.items()
+    })
+    return clock
 
 
 @pytest.fixture
@@ -33,6 +68,15 @@ def container(config):
 def test_db_path(tmp_path):
     """Temporary database path for testing."""
     return tmp_path / "test_iv_crush.db"
+
+
+# Postgres fixtures live in common/pgtesting.py so scripts/tests/ can share
+# the identical definitions -- the two suites have different rootdirs and
+# cannot see each other's conftest.
+from common.pgtesting import pg_pool, pg_schema  # noqa: F401,E402
+from src.infrastructure.database.migrations.production_guard import (  # noqa: F401,E402
+    no_migration_reaches_production,
+)
 
 
 @pytest.fixture
@@ -149,7 +193,7 @@ class MockOptionsProvider:
 
     def get_stock_price(self, ticker: str):
         """Get mock stock price."""
-        from src.domain.errors import Ok, Err, AppError, ErrorCode
+        from src.domain.errors import AppError, Err, ErrorCode, Ok
 
         if ticker in self.stock_prices:
             return Ok(self.stock_prices[ticker])
@@ -157,7 +201,7 @@ class MockOptionsProvider:
 
     def get_option_chain(self, ticker: str, expiration: date):
         """Get mock option chain."""
-        from src.domain.errors import Ok, Err, AppError, ErrorCode
+        from src.domain.errors import AppError, Err, ErrorCode, Ok
 
         key = (ticker, expiration)
         if key in self.option_chains:

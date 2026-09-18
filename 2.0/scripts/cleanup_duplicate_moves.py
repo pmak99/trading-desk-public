@@ -4,7 +4,7 @@ historical_moves contains pairs where the same earnings event was written
 under two nearby dates (announce date + reaction date) — a backfill artifact
 from earnings_calendar holding both dates. Each pair double-counts a quarter
 in VRP/TRR baselines. A company cannot report earnings twice within a few
-days, so any same-ticker pair inside the window (default 2 days) is one event.
+days, so any same-ticker pair inside the window (default 15 days) is one event.
 
 Two resolvable classes are deleted automatically:
   * identical close_move_pct (regardless of enrichment), OR
@@ -23,41 +23,58 @@ matched none of them (dry-run reported 0 while 24 pairs were live).
 Differing close_move_pct with EQUAL enrichment (typically both bare, e.g.
 the MU/OKTA 2025-12 pairs) cannot be resolved from stored data — the correct
 keeper needs the true report date or reaction-day price bars. These are
-reported as `ambiguous` and never deleted; resolve them by hand.
+reported as `ambiguous` and never deleted; resolve_ambiguous_moves.py settles
+them from Yahoo plus reaction-day bars.
 
-Usage:
-    ./venv/bin/python scripts/cleanup_duplicate_moves.py --db data/ivcrush.db            # dry run
-    ./venv/bin/python scripts/cleanup_duplicate_moves.py --db data/ivcrush.db --execute
-    ./venv/bin/python scripts/cleanup_duplicate_moves.py --db data/ivcrush.db --max-gap 1 # legacy window
+⚠️ Two windows, deliberately different (2026-09-13):
+  * DETECTION is 15 days (EARNINGS_SAME_EVENT_DAYS). The default was 2, and
+    CLAUDE.md's rule is to audit at <=15: a <=2 run reported "clean" over 29
+    live pairs, most 3-8 days apart.
+  * AUTO-DELETION stays at 2 days (AUTO_RESOLVE_MAX_GAP_DAYS), the gap both
+    rules above were validated at. Widening deletion with detection would have
+    removed 8 rows on stored data alone -- four pairs of identical 0.0 moves
+    (stale prices, not a duplicated event) and four one-enriched pairs 3-8 days
+    apart, including the SIFY triple -- where a week-wide cluster can be a
+    wrong-date event with neither row right. Every pair past 2 days is
+    reported as ambiguous instead.
+
+Usage (target from PG* in the environment):
+    ./venv/bin/python scripts/cleanup_duplicate_moves.py              # dry run
+    ./venv/bin/python scripts/cleanup_duplicate_moves.py --execute
 """
 
 import argparse
 import logging
-import sqlite3
 from typing import Dict, List
+
+from common.constants import EARNINGS_SAME_EVENT_DAYS  # noqa: E402
+from common.db import connect  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 # Same-ticker pairs within this many days are the same earnings event.
-DEFAULT_MAX_GAP_DAYS = 2
+DEFAULT_MAX_GAP_DAYS = EARNINGS_SAME_EVENT_DAYS
+
+# Pairs further apart than this are reported, never deleted from stored data.
+AUTO_RESOLVE_MAX_GAP_DAYS = 2
 
 PAIR_QUERY = """
     SELECT a.id            AS id_a,
            a.earnings_date AS date_a,
            a.close_move_pct AS close_a,
-           (a.pre_earnings_straddle_pct IS NOT NULL) +
-           (a.ern_iv_effect IS NOT NULL)             AS enrich_a,
+           (a.pre_earnings_straddle_pct IS NOT NULL)::int +
+           (a.ern_iv_effect IS NOT NULL)::int        AS enrich_a,
            b.id            AS id_b,
            b.earnings_date AS date_b,
            b.close_move_pct AS close_b,
-           (b.pre_earnings_straddle_pct IS NOT NULL) +
-           (b.ern_iv_effect IS NOT NULL)             AS enrich_b,
+           (b.pre_earnings_straddle_pct IS NOT NULL)::int +
+           (b.ern_iv_effect IS NOT NULL)::int        AS enrich_b,
            a.ticker        AS ticker
     FROM historical_moves a
     JOIN historical_moves b
       ON a.ticker = b.ticker
      AND a.earnings_date < b.earnings_date
-     AND julianday(b.earnings_date) - julianday(a.earnings_date) <= :max_gap
+     AND b.earnings_date - a.earnings_date <= %(max_gap)s
      AND a.close_move_pct IS NOT NULL
      AND b.close_move_pct IS NOT NULL
     ORDER BY a.ticker, a.earnings_date
@@ -65,7 +82,7 @@ PAIR_QUERY = """
 
 
 def dedupe_duplicate_moves(
-    db_path: str, dry_run: bool = True, max_gap_days: int = DEFAULT_MAX_GAP_DAYS
+    dry_run: bool = True, max_gap_days: int = DEFAULT_MAX_GAP_DAYS
 ) -> Dict:
     """
     Find and (unless dry_run) delete near-date duplicate earnings events.
@@ -82,10 +99,10 @@ def dedupe_duplicate_moves(
         (list of {ticker, keep_date, delete_date, delete_id}), ambiguous
         (list of {ticker, date_a, close_a, date_b, close_b}).
     """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = connect()
     try:
-        rows = conn.execute(PAIR_QUERY, {"max_gap": max_gap_days}).fetchall()
+        rows = [r._asdict() for r in
+                conn.execute(PAIR_QUERY, {"max_gap": max_gap_days}).fetchall()]
 
         plan: List[Dict] = []
         ambiguous: List[Dict] = []
@@ -96,8 +113,10 @@ def dedupe_duplicate_moves(
                 continue
 
             identical = p["close_a"] == p["close_b"]
-            if not identical and p["enrich_a"] == p["enrich_b"]:
-                # Values differ and enrichment can't break the tie -> unsafe.
+            too_far = (p["date_b"] - p["date_a"]).days > AUTO_RESOLVE_MAX_GAP_DAYS
+            if too_far or (not identical and p["enrich_a"] == p["enrich_b"]):
+                # Past the validated gap, or values differ and enrichment can't
+                # break the tie -> unsafe to resolve from stored data.
                 ambiguous.append({
                     "ticker": p["ticker"],
                     "date_a": p["date_a"], "close_a": p["close_a"],
@@ -123,19 +142,23 @@ def dedupe_duplicate_moves(
         for item in plan:
             calendar_deleted += conn.execute(
                 "SELECT COUNT(*) FROM earnings_calendar "
-                "WHERE ticker = ? AND earnings_date = ?",
+                "WHERE ticker = %s AND earnings_date = %s",
                 (item["ticker"], item["delete_date"]),
             ).fetchone()[0]
 
         if not dry_run and plan:
-            conn.executemany(
-                "DELETE FROM historical_moves WHERE id = ?",
-                [(item["delete_id"],) for item in plan],
-            )
-            conn.executemany(
-                "DELETE FROM earnings_calendar WHERE ticker = ? AND earnings_date = ?",
-                [(item["ticker"], item["delete_date"]) for item in plan],
-            )
+            # executemany lives on the CURSOR in psycopg; psycopg.Connection
+            # has no such method, unlike sqlite3.Connection.
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "DELETE FROM historical_moves WHERE id = %s",
+                    [(item["delete_id"],) for item in plan],
+                )
+                cur.executemany(
+                    "DELETE FROM earnings_calendar"
+                    " WHERE ticker = %s AND earnings_date = %s",
+                    [(item["ticker"], item["delete_date"]) for item in plan],
+                )
             conn.commit()
 
         return {
@@ -151,7 +174,9 @@ def dedupe_duplicate_moves(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--db", required=True, help="Path to ivcrush.db")
+    # No --db flag: the target comes from PG* in the environment
+    # (`PGDATABASE=ivcrush_scratch ...`). A path argument would be a
+    # lie -- connect() would ignore it.
     parser.add_argument(
         "--execute", action="store_true",
         help="Actually delete (default is dry run)",
@@ -165,7 +190,7 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     result = dedupe_duplicate_moves(
-        args.db, dry_run=not args.execute, max_gap_days=args.max_gap
+        dry_run=not args.execute, max_gap_days=args.max_gap
     )
 
     mode = "EXECUTE" if args.execute else "DRY RUN"
@@ -185,8 +210,9 @@ def main() -> int:
     )
     if result["ambiguous"]:
         logger.info(
-            f"\n⚠️  {len(result['ambiguous'])} ambiguous pair(s) — differing "
-            f"moves, equal enrichment; NOT touched, verify by hand:"
+            f"\n⚠️  {len(result['ambiguous'])} ambiguous pair(s) — more than "
+            f"{AUTO_RESOLVE_MAX_GAP_DAYS}d apart, or differing moves with equal enrichment; "
+            f"NOT touched. Resolve with resolve_ambiguous_moves.py:"
         )
         for a in result["ambiguous"]:
             logger.info(

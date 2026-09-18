@@ -1,10 +1,6 @@
 """Pure factor-scoring functions for strategy scoring."""
-import logging
-
-from src.config.config import ScoringWeights
-from src.domain.types import Strategy, VRPResult
-
-logger = logging.getLogger(__name__)
+from src.domain.scoring.weights import ScoringWeights
+from src.domain.types import Strategy
 
 
 def calculate_greeks_score(strategy: Strategy, weights: ScoringWeights) -> float:
@@ -50,8 +46,9 @@ def calculate_greeks_score(strategy: Strategy, weights: ScoringWeights) -> float
 
 def calculate_liquidity_score(strategy: Strategy, weights: ScoringWeights) -> float:
     """
-    Calculate liquidity quality score (added after a liquidity-driven loss
-    made clear that poor fills can erase a real VRP edge).
+    Calculate liquidity quality score (POST-LOSS ANALYSIS - Added Nov 2025).
+
+    After a liquidity-driven loss, liquidity became critical.
 
     Scoring logic (4-tier system):
     - EXCELLENT tier: 100% of liquidity_weight
@@ -114,95 +111,3 @@ def calculate_kelly_edge_score(pop: float, rr: float, weight: float) -> float:
 
     return normalized_edge * weight
 
-
-def calculate_profit_zone_multiplier(strategy: Strategy, vrp: VRPResult) -> float:
-    """
-    Calculate profit zone multiplier (PROFIT ZONE FIX - Added Dec 2025).
-
-    Penalizes strategies with narrow profit zones when implied move is large.
-    This prevents Iron Butterflies and tight Iron Condors from being recommended
-    when the stock is expected to move far beyond their profit range.
-
-    Multiplier ranges (Jan 2026: raised floor from 0.3→0.6 for Iron Condors):
-    - 1.0 (no penalty): Profit zone >= implied move
-    - 0.9-1.0: Profit zone is 70-100% of implied move (slight penalty)
-    - 0.8-0.9: Profit zone is 40-70% of implied move (moderate penalty)
-    - 0.7-0.8: Profit zone is 20-40% of implied move (heavy penalty)
-    - 0.6: Profit zone < 20% of implied move (severe penalty)
-
-    Returns:
-        Multiplier between 0.6 and 1.0 to apply to overall score
-    """
-    if not strategy.breakeven or len(strategy.breakeven) == 0:
-        return 1.0
-
-    if len(strategy.breakeven) >= 2:
-        breakevens_sorted = sorted([float(be.amount) for be in strategy.breakeven])
-        lower_be = breakevens_sorted[0]
-        upper_be = breakevens_sorted[-1]
-        profit_zone_width = upper_be - lower_be
-
-        # Use actual stock price from strategy (FIX: was using breakeven midpoint)
-        stock_price_estimate = float(strategy.stock_price.amount)
-    else:
-        # Single breakeven (credit spread)
-        # Credit spreads have one-sided risk — give full score
-        return 1.0
-
-    if stock_price_estimate <= 0:
-        return 1.0
-    profit_zone_pct = (profit_zone_width / stock_price_estimate) * 100
-
-    # Get implied move percentage (one-sided: up OR down)
-    implied_move_pct = vrp.implied_move_pct.value
-
-    # CRITICAL FIX: Implied move is one-sided, but stock can move ±X%
-    # Total expected range = 2 × implied_move_pct (e.g., ±15% = 30% total range)
-    total_expected_range_pct = 2 * implied_move_pct
-
-    if total_expected_range_pct <= 0:
-        return 1.0
-    zone_to_move_ratio = profit_zone_pct / total_expected_range_pct
-
-    # Apply penalty based on ratio
-    if zone_to_move_ratio >= 1.0:
-        # Profit zone covers full implied move - no penalty
-        return 1.0
-    elif zone_to_move_ratio >= 0.70:
-        # Profit zone is 70-100% of implied move - slight penalty
-        # Linear interpolation: 0.70 → 0.9, 1.0 → 1.0
-        multiplier = 0.9 + (zone_to_move_ratio - 0.70) * (0.1 / 0.30)
-        logger.debug(
-            f"{strategy.strategy_type.value}: Slight profit zone penalty "
-            f"(zone {profit_zone_pct:.1f}% vs move ±{implied_move_pct:.1f}%, "
-            f"multiplier={multiplier:.2f})"
-        )
-        return multiplier
-    elif zone_to_move_ratio >= 0.40:
-        # Profit zone is 40-70% of implied move - moderate penalty
-        # Linear interpolation: 0.40 → 0.8, 0.70 → 0.9 (Jan 2026: raised from 0.7-0.9)
-        multiplier = 0.8 + (zone_to_move_ratio - 0.40) * (0.1 / 0.30)
-        logger.info(
-            f"{strategy.strategy_type.value}: Moderate profit zone penalty "
-            f"(zone {profit_zone_pct:.1f}% vs move ±{implied_move_pct:.1f}%, "
-            f"multiplier={multiplier:.2f})"
-        )
-        return multiplier
-    elif zone_to_move_ratio >= 0.20:
-        # Profit zone is 20-40% of implied move - heavy penalty
-        # Linear interpolation: 0.20 → 0.7, 0.40 → 0.8 (Jan 2026: raised from 0.5-0.7)
-        multiplier = 0.7 + (zone_to_move_ratio - 0.20) * (0.1 / 0.20)
-        logger.warning(
-            f"{strategy.strategy_type.value}: Heavy profit zone penalty - "
-            f"profit zone ({profit_zone_pct:.1f}%) much smaller than implied move "
-            f"(±{implied_move_pct:.1f}%), multiplier={multiplier:.2f}"
-        )
-        return multiplier
-    else:
-        # Profit zone < 20% of implied move - severe penalty (Jan 2026: raised from 0.3)
-        logger.warning(
-            f"{strategy.strategy_type.value}: SEVERE profit zone penalty - "
-            f"profit zone ({profit_zone_pct:.1f}%) is <20% of implied move "
-            f"(±{implied_move_pct:.1f}%), multiplier=0.60. Consider rejecting."
-        )
-        return 0.6

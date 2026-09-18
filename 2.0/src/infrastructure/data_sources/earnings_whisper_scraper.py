@@ -13,16 +13,24 @@ trade.sh never passed and no skill referenced, so /whisper could not reach it.
 import logging
 import re
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple
 from enum import Enum
+from typing import List, Optional, Tuple
 
 import requests
 from dotenv import load_dotenv
 
-from src.domain.errors import Result, AppError, ErrorCode
+from common.timezone import now_et
+from src.domain.errors import AppError, Err, ErrorCode, Ok, Result
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+# A database fallback list lives this long in the week cache. It is the week's
+# reporters, not the "most anticipated" list, and the cache is shared by the Mac
+# and the server: under the cache's week-long TTL, one failed EarningsWhispers call
+# served it to every /whisper and morning digest until the week ended. An hour
+# still spares the endpoint repeated calls while it is failing.
+WHISPER_FALLBACK_TTL_SECONDS = 3600
 
 
 class CircuitState(Enum):
@@ -91,7 +99,7 @@ class CircuitBreaker:
             result = func(*args, **kwargs)
             self._on_success()
             return result
-        except Exception as e:
+        except Exception:
             self._on_failure()
             raise
 
@@ -129,7 +137,7 @@ class CircuitBreaker:
 def get_week_monday(target_date: Optional[datetime] = None) -> datetime:
     """Get Monday of the week for given date."""
     if target_date is None:
-        target_date = datetime.now()
+        target_date = now_et().replace(tzinfo=None)  # the ET week, naive as before
 
     days_since_monday = target_date.weekday()
     monday = target_date - timedelta(days=days_since_monday)
@@ -192,7 +200,7 @@ class EarningsWhisperScraper:
             try:
                 target_date = datetime.strptime(week_monday, "%Y-%m-%d")
             except ValueError:
-                return Result.Err(AppError(
+                return Err(AppError(
                     ErrorCode.INVALID,
                     f"Invalid date format: {week_monday}. Use YYYY-MM-DD"
                 ))
@@ -201,7 +209,7 @@ class EarningsWhisperScraper:
         else:
             # No date specified - try next week first, then current week
             # @eWhispers posts about upcoming weeks, not past ones
-            current_monday = get_week_monday(datetime.now())
+            current_monday = get_week_monday()
             next_monday = current_monday + timedelta(days=7)
             weeks_to_try = [next_monday, current_monday]
             logger.info(f"No date specified, trying next week ({next_monday.strftime('%Y-%m-%d')}) then current week")
@@ -212,11 +220,11 @@ class EarningsWhisperScraper:
             result = self._try_fetch_week(monday)
             if result.is_ok:
                 # Return tickers AND the week they're for
-                return Result.Ok((result.value, monday))
+                return Ok((result.value, monday))
             last_error = result.error
             logger.debug(f"Week {monday.strftime('%Y-%m-%d')} not found, trying next...")
 
-        return Result.Err(last_error or AppError(
+        return Err(last_error or AppError(
             ErrorCode.EXTERNAL,
             "All weeks and methods failed"
         ))
@@ -228,14 +236,15 @@ class EarningsWhisperScraper:
         """Try to fetch earnings for a specific week."""
         monday_str = monday.strftime('%Y-%m-%d')
         week_end = monday + timedelta(days=6)
+        # HybridCache prefixes its CACHE_VERSION in the table
+        cache_key = f"whisper_tickers:{monday_str}"
 
         # Check cache first (week-specific key)
         if self._cache:
-            cache_key = f"whisper_tickers:{monday_str}"
             cached_tickers = self._cache.get(cache_key)
             if cached_tickers is not None:
                 logger.info(f"✓ Cache HIT for week {monday_str} ({len(cached_tickers)} tickers)")
-                return Result.Ok(cached_tickers)
+                return Ok(cached_tickers)
             logger.debug(f"Cache MISS for week {monday_str}")
 
         logger.info(f"Fetching earnings for week of {monday_str}")
@@ -248,9 +257,8 @@ class EarningsWhisperScraper:
                 logger.info(f"✓ Retrieved {len(tickers)} tickers from EarningsWhispers")
                 self._ew_breaker._on_success()
 
-                # Cache the result (week-specific)
+                # Cache the result for the week (the cache's own L2 TTL)
                 if self._cache:
-                    cache_key = f"whisper_tickers:{monday_str}"
                     self._cache.set(cache_key, tickers)
                     logger.debug(f"Cached whisper tickers for week {monday_str}")
 
@@ -268,15 +276,14 @@ class EarningsWhisperScraper:
             tickers = result.value
             logger.info(f"✓ Retrieved {len(tickers)} tickers from database")
 
-            # Cache the result (week-specific, shorter TTL for DB fallback)
+            # Cache the result for an hour, not the week
             if self._cache:
-                cache_key = f"whisper_tickers:{monday_str}"
-                self._cache.set(cache_key, tickers)
+                self._cache.set(cache_key, tickers, ttl=WHISPER_FALLBACK_TTL_SECONDS)
                 logger.debug(f"Cached database tickers for week {monday_str}")
 
             return result
 
-        return Result.Err(AppError(
+        return Err(AppError(
             ErrorCode.EXTERNAL,
             "All methods failed (earningswhispers.com, database)",
             context={"week_monday": monday.strftime("%Y-%m-%d")}
@@ -327,7 +334,7 @@ class EarningsWhisperScraper:
 
             if not response.text.strip():
                 logger.warning("Empty response from earningswhispers.com calweekview API")
-                return Result.Err(AppError(
+                return Err(AppError(
                     ErrorCode.NODATA,
                     "Empty response from earningswhispers.com — possibly rate limited or week not yet published"
                 ))
@@ -335,17 +342,17 @@ class EarningsWhisperScraper:
             tickers = self._parse_earningswhispers_weekview(response.text)
             if not tickers:
                 logger.warning("No tickers found in earningswhispers.com calweekview response")
-                return Result.Err(AppError(
+                return Err(AppError(
                     ErrorCode.NODATA,
                     "No tickers found on earningswhispers.com calweekview response"
                 ))
 
             logger.info(f"EarningsWhispers: extracted {len(tickers)} tickers")
-            return Result.Ok(tickers)
+            return Ok(tickers)
 
         except requests.RequestException as e:
             logger.warning(f"EarningsWhispers request failed: {e}")
-            return Result.Err(AppError(ErrorCode.EXTERNAL, f"EarningsWhispers fetch error: {e}"))
+            return Err(AppError(ErrorCode.EXTERNAL, f"EarningsWhispers fetch error: {e}"))
 
     def _parse_earningswhispers_weekview(self, html_fragment: str) -> List[str]:
         """Extract ticker symbols from the calweekview HTML fragment.
@@ -383,19 +390,7 @@ class EarningsWhisperScraper:
         the "most anticipated" filtering that Twitter provides.
         """
         try:
-            import sqlite3
-            from pathlib import Path
-
-            # Find database path
-            db_path = Path(__file__).parent.parent.parent.parent / "data" / "ivcrush.db"
-            if not db_path.exists():
-                return Result.Err(AppError(
-                    ErrorCode.NODATA,
-                    f"Database not found: {db_path}"
-                ))
-
-            conn = sqlite3.connect(str(db_path))
-            cursor = conn.cursor()
+            from src.infrastructure.database.pg_pool import get_pool
 
             # Get tickers with earnings in the target week
             # Order by historical move count (proxy for popularity/importance)
@@ -409,32 +404,32 @@ class EarningsWhisperScraper:
                 SELECT ec.ticker, COUNT(*) as move_count
                 FROM earnings_calendar ec
                 INNER JOIN historical_moves hm ON ec.ticker = hm.ticker
-                WHERE ec.earnings_date BETWEEN ? AND ?
+                WHERE ec.earnings_date BETWEEN %s AND %s
                 GROUP BY ec.ticker
                 ORDER BY move_count DESC
                 LIMIT 30
             """
 
-            cursor.execute(query, (
-                monday.strftime('%Y-%m-%d'),
-                week_end.strftime('%Y-%m-%d')
-            ))
+            with get_pool().connection() as conn:
+                rows = conn.execute(query, (
+                    monday.date(),
+                    week_end.date(),
+                )).fetchall()
 
-            tickers = [row[0] for row in cursor.fetchall()]
-            conn.close()
+            tickers = [row[0] for row in rows]
 
             if not tickers:
-                return Result.Err(AppError(
+                return Err(AppError(
                     ErrorCode.NODATA,
                     f"No earnings found in database for week {monday.strftime('%Y-%m-%d')}"
                 ))
 
             logger.info(f"Database fallback: Found {len(tickers)} tickers with earnings")
-            return Result.Ok(tickers)
+            return Ok(tickers)
 
         except Exception as e:
             logger.error(f"Database fallback failed: {e}")
-            return Result.Err(AppError(ErrorCode.EXTERNAL, f"Database error: {e}"))
+            return Err(AppError(ErrorCode.EXTERNAL, f"Database error: {e}"))
 
 
 if __name__ == "__main__":
@@ -444,6 +439,7 @@ if __name__ == "__main__":
     result = scraper.get_most_anticipated_earnings()
 
     if result.is_ok:
-        print(f"\n✅ Found {len(result.value)} tickers: {', '.join(result.value)}")
+        tickers, week_monday = result.value
+        print(f"\n✅ Week of {week_monday:%Y-%m-%d}: {len(tickers)} tickers: {', '.join(tickers)}")
     else:
         print(f"\n❌ Error: {result.error}")

@@ -1,198 +1,175 @@
 # Trading Desk
 
-Production options trading system for one strategy: **IV Crush** — sell defined-risk spreads before earnings when implied volatility is elevated; profit from the volatility collapse after the announcement.
+Production options trading for one strategy: **IV Crush** — sell defined-risk spreads before
+earnings when implied volatility is inflated; exit after it collapses.
 
-**Active strategies:** earnings spreads + 45 DTE non-earnings spreads (IRA active sleeve).
-**Permanently banned (May 2026):** iron condors, strangles, CSPs/wheel, naked options — the wheel strategy was a lifetime net loser and is permanently retired.
-
-**All-time validated (defined-risk only, May 2026):** 167 trades | 67% win rate
-
----
-
-## Architecture
-
-```
-5.0 Cloud     — 24/7 Cloud Run + Telegram alerts
-4.0 Sentiment — ARCHIVED May 2026 (sentiment tables migrated to ivcrush.db)
-2.0 Core      — VRP math, strategy generation, shared library
-──────────────────────────────────────────────────────────
-ivcrush.db (2.0 + sentiment tables)
-```
-
-All subsystems share `2.0/venv/bin/python` and import 2.0 via `sys.path`. 5.0 never reimplements 2.0's math — it calls it. Shared logic lives in `common/` (enums, constants, direction, timezone, filters); `5.0/common/` is a shadow copy — update both when changing shared logic.
-
-| Subsystem | Purpose | Tests |
-|-----------|---------|------:|
-| [2.0](2.0/) | Core VRP math, strategy generation, DB | 1,373 |
-| [5.0](5.0/) | Cloud autopilot (Cloud Run + Telegram) | 581 |
-
-Total: **1,954 active tests**. 4.0 (sentiment) and 6.0 (agent orchestration) are archived and not part of CI.
+**Index and earnings trades, closed through 2026-09-11:** 223 trades · 82.5% win
+**Permanently banned:** iron condors, strangles, CSPs/wheel, naked options, covered calls on
+a concentrated long. The wheel was a lifetime net loser and is permanently retired.
 
 ---
 
-## Directory Structure
+## Layout
 
 ```
 Trading Desk/
-├── 2.0/            Core math engine (VRP, liquidity, skew, strategies, DB)
-├── 4.0/            AI sentiment layer — ARCHIVED May 2026
-├── 5.0/            Cloud autopilot (FastAPI + Telegram + scheduled jobs)
-├── archived/
-│   └── 6.0/        Agent orchestration — ARCHIVED
-├── common/         Shared code (enums, constants, direction, timezone, filters)
-├── scripts/        Data pipeline scripts (journal import, backfill, sync)
-├── docs/           Research docs, scan exports
-└── .claude/        Claude Code commands and settings
+├── 2.0/        The engine — VRP math, strategy generation, DB layer, scheduled jobs
+├── common/     Shared package: constants, timezone, db, pgtesting, weekly-options filter
+├── scripts/    Tooling: journal import, dashboards, ops, the `db` shell helper
+├── docs/       Research write-ups, ops scripts and systemd units, plans/specs
+└── .claude/    Slash commands (instruction-only .md files, not Python)
 ```
 
----
+**One codebase.** The 4.0 / 5.0 / 6.0 subsystems are gone from the working tree, each
+recoverable at a pushed tag (`pre-4.0-removal`, `pre-5.0-removal`, `pre-6.0-removal`).
+Nothing imports them; the tag is what keeps them around.
 
-## Quick Start
+## Quick start
 
 ```bash
-# Single ticker analysis
-cd 2.0/ && ./trade.sh NVDA 2026-02-10
+# once per venv: `common` (this directory) and `src` (2.0/) as editable packages
+2.0/venv/bin/pip install -r requirements.txt && 2.0/venv/bin/pip install --no-deps -e . -e 2.0/
 
-# Scan all earnings on a date
-cd 2.0/ && ./trade.sh scan 2026-02-10
+set -a && source 2.0/.env && set +a       # plain `source` does not export
 
-# Find highest-VRP opportunities this week
-cd 2.0/ && ./trade.sh whisper
-
-# 45 DTE non-earnings premium candidates
-cd 2.0/ && ./trade.sh harvest
-
-# Cloud API
-curl -H "X-API-Key: $KEY" https://your-service.a.run.app/api/whisper
+cd 2.0/ && ./trade.sh NVDA 2026-02-10     # analyse one ticker
+cd 2.0/ && ./trade.sh scan 2026-02-10     # all earnings on a date
+cd 2.0/ && ./trade.sh whisper             # most anticipated this week
+cd 2.0/ && ./trade.sh harvest             # 45 DTE non-earnings candidates
+cd 2.0/ && ./trade.sh trr TICKER          # live tail-risk ratio
+cd 2.0/ && ./trade.sh health
 ```
 
----
+Ad-hoc SQL: `scripts/db -c "SELECT ..."` (sources `2.0/.env`, execs `psql`).
 
-## Claude Code Commands
+## Slash commands
 
-23 slash commands for interactive analysis (`.claude/commands/`).
+22 instruction-only files in `.claude/commands/`. They reach the database through
+`scripts/db` — there is no Python behind them.
 
-| Command | Purpose |
-|---------|---------|
-| `/analyze TICKER [--fresh-history]` | Deep dive — trade decision, strategies, sizing; `--fresh-history` adds multi-window VRP breakdown |
-| `/council TICKER` | 7-source AI sentiment consensus (Perplexity + Finnhub + skew) |
-| `/whisper` | Most anticipated earnings with VRP scoring |
-| `/scan DATE` | Scan all earnings on a date |
-| `/taco [positions\|calendar\|record\|close]` | SPX/SPY macro-event index options — tiered entry, frozen-ref exits, IPO wind-down |
-| `/harvest` | 30–45 DTE non-earnings premium candidates (IV rank + IV/HV, no binary events) |
-| `/ab-status` | Live forward-validation tracker (VRP-denominator + term-structure A/Bs) |
-| `/prime` | Pre-cache sentiment for the upcoming week |
-| `/alert` | Today's high-VRP trading alerts |
-| `/history TICKER` | Historical earnings moves with pattern analysis |
-| `/calendar [DATE]` | Weekly earnings calendar with TRR flags |
-| `/pnl [PERIOD]` | P&L summary (week/month/ytd/year/quarter/N days) |
-| `/positions [TICKER]` | Open positions and 30-day exposure |
-| `/risk [DAYS]` | Portfolio risk (TRR, concentration, drawdown) |
-| `/backtest [TICKER]` | Performance analysis from strategies DB |
-| `/postmortem TICKER` | Predicted vs actual move analysis |
-| `/backfill ARGS` | Record post-earnings outcomes for sentiment accuracy |
-| `/collect TICKER` | Collect pre-earnings sentiment |
-| `/journal FILE` | Parse Fidelity CSV/PDF into DB |
-| `/export-report [MODE]` | Export to CSV/JSON |
-| `/health` | System status (APIs, DB, cloud) |
-| `/maintenance MODE` | sync, backup, backfill, track-iv, backfill-outcomes, cleanup, validate |
-| `/deploy [FLAGS]` | Deploy 5.0 to Cloud Run |
+| | | |
+|---|---|---|
+| `/analyze TICKER` | deep dive: VRP, liquidity, skew, term structure, strategies, sizing | `--fresh-history` adds 4Q/8Q windows |
+| `/whisper` | most anticipated earnings, ranked by VRP | |
+| `/scan DATE` | every earnings on a date | |
+| `/harvest` | 30–45 DTE non-earnings premium | live IV/HV + index IVR |
+| `/taco` | SPX/SPY macro-event index options | frozen exit refs |
+| `/ab-status` | live forward-validation of one open A/B (term structure); the VRP denominator was migrated 2026-09 | |
+| `/council TICKER` | multi-source AI sentiment consensus | |
+| `/journal FILE` | parse a Fidelity CSV/PDF into the database | |
+| `/pnl` `/backtest` | performance and exposure | |
+| `/calendar` `/prime` `/collect` `/backfill` | data and prep | |
+| `/health` `/maintenance MODE` `/export-report` | operations | |
 
----
+⚠️ `/backtest` analyses **closed trades**. It is not a simulator.
 
-## Databases
+## The database
 
-### ivcrush.db
+**`db.internal:5432/ivcrush`** — Postgres 18.6 in Docker, 16 tables and one view, baseline
+`2.0/sql/baseline_schema.sql`. Migrated from SQLite 2026-09-12.
 
-`2.0/data/ivcrush.db` | GCS: `gs://your-gcs-bucket/ivcrush.db` | Schema v19
+There is **one** database. The Mac + GCS + server three-copy arrangement and the
+`sync-cloud` union merge that reconciled it are gone, along with the class of bug where a
+deleted row came back on the next sync.
 
-| Table | Rows (Jul 2026) | Notes |
-|-------|-----:|-------|
-| `historical_moves` | 13,433 | Post-earnings price movements; `ern_iv_effect` (10,780+ rows), `pre_earnings_straddle_pct` (10,800+ rows) — S&P500+MidCap400 universe, 1,353 tickers. `intraday_move_pct` = signed open→close (single convention since Jun 2026; consumers take abs()) |
-| `earnings_calendar` | 22,944 | Upcoming and past earnings dates |
-| `strategies` | 285 TAXABLE + 59 IRA | Normalized: acquired=open, sale=close. No inverted dates. |
-| `trade_journal` | 794 TAXABLE + 258 IRA | Raw Fidelity legs/fills |
-| `position_limits` | 431 | TRR + contract limits + ORATS snapshot (**frozen 2026-06-24** — ORATS disabled) |
-| `iv_history` | grows weekly | Weekly Tradier ATM IV snapshots for 9 harvest tickers; self-built IVR after 52 weeks (~June 2027) |
-| `bias_predictions` | 74 | Tradier-only skew plus compound risk columns (`compound_risk_active`, `r_slp_30`, `fused_bias`, `trr_level`, `sizing_alarm`) |
-| `analysis_log` | grows | Analysis snapshots — `implied_move_pct`, `vrp_ratio`, `vix_level`, `recommendation`; since Jun 2026 also `vrp_close_ratio` (gap-inclusive VRP live A/B) and `term_slope_ratio` (IV term-structure) |
-| `sentiment_history` | 81 | Pre-earnings AI sentiment + post-earnings outcomes (migrated from 4.0 May 2026) |
-| `sentiment_cache` | grows | 3-hour TTL sentiment cache; genuinely shared between 2.0 and 5.0 since Jul 27 2026 |
-| `iv_log` | 16 | Legacy scan-time IV snapshots (Dec 2025) — superseded by `analysis_log` |
+| Table | Rows (2026-09-15) | |
+|---|--:|---|
+| `earnings_calendar` | 30,585 | upcoming and past earnings dates |
+| `historical_moves` | 13,802 | post-earnings moves — the VRP input. S&P500 + MidCap400, 1,352 tickers |
+| `analysis_log` | 1,310 | one row per analyze/scan/whisper; feeds the live A/B evidence |
+| `trade_journal` | 1,275 | raw Fidelity legs and fills |
+| `position_limits` | 431 | contract caps + the ORATS snapshot, **frozen 2026-06-24** |
+| `strategies` | 310 | normalised closed trades, a row per account (226 TAXABLE + 84 IRA) |
+| `positions` (view) | 300 | one row per trade: a trade placed in both accounts is merged, size and P&L summed |
+| `iv_history` | 234 | weekly Tradier ATM IV; self-built IVR at 52 weeks (~Jun 2027) |
+| `bias_predictions` | 123 | Tradier-only skew + compound-risk columns |
+| `sentiment_history` | 95 | pre-earnings sentiment vs outcome |
+| `taco_log` / `taco_positions` | 24 / 10 | TACO runs and positions with frozen entry refs |
+| `risk_metrics_snapshot` | 4 | precomputed Sharpe/Sortino — `net_campaigns()` netting is not a SQL aggregate |
+| `job_status` | grows | one row per job per day; the claim is an atomic `ON CONFLICT` upsert |
+| `whisper_cache` | grows | shared L2 cache — the Mac and the server stop scraping the same endpoint twice |
+| `sentiment_cache` | grows | 3-hour TTL |
 
-Empty placeholders: `cache`, `rate_limits`, `backtest_runs`, `backtest_trades`, `job_status`, `ticker_metadata`
+**Cut at the migration**, not carried over: `cache`, `rate_limits`, `backtest_runs`,
+`backtest_trades`, `ticker_metadata`, `iv_log`. No readers, no writers — but the old schema
+loader recreated all six on every database it touched, which is why "dead" and "deleted"
+were different things until then.
 
-**Known quirks:**
-- `trade_journal` inverted dates (sale < acquired): Fidelity's convention for credit trades — not bugs
-- `strategies` is normalized — no inverted dates
-- `sync-cloud` merges by adding rows missing on either side — a row deleted only locally is resurrected from the GCS copy on the next sync; permanent deletions must overwrite the cloud copy directly
+**Working with it:**
 
-### sentiment_cache.db — ARCHIVED
+- Long-lived processes use `2.0/src/infrastructure/database/pg_pool.py`; one-shot CLI uses
+  `common/db.py`. Neither takes a path.
+- Rows are `namedtuple_row`: `row[0]` and `row.col` work, **`row['col']` raises**, and it is
+  `row._asdict()`, not `dict(row)`.
+- A naive `datetime` written to `timestamptz` is read in the **session** timezone (UTC),
+  landing an ET wall clock four hours early. Use `common.timezone.now_et()`.
+- Schema changes go through `MigrationManager` on the baseline. ⚠️ A `git pull` does not
+  apply one — migrations run in the weekly maintenance step and at the start of each entry
+  point that writes (`apply_migrations()`: the bot, the jobs, scan/analyze), never in
+  `Container()`. An applied migration file is checksummed and must never be edited; write
+  a new one.
 
-`4.0/data/sentiment_cache.db` preserved for reference only. Both tables migrated to `ivcrush.db` (schema migration 015, May 2026).
+**The only SQLite file left**, one per host: `2.0/data/ivcrush.db.pre-postgres-2026-09-12`,
+frozen `444` as the cutover rollback artifact. `2.0/backups/` is empty on both hosts —
+the server held six superseded pre-cutover snapshots there until 2026-09-12, because the
+migration cleaned one host while a note claimed it had cleaned both.
 
----
+## Operations
 
-## Data Sources
+Everything scheduled runs on a small Linux host under systemd user timers (`Linger=yes`),
+against this same engine. The units and the host-side scripts are operator
+infrastructure and live outside this repository; what they run is all here.
+
+| Unit | When | What |
+|---|---|---|
+| `trading-digest.timer` | 07:30 ET weekdays | Telegram morning digest |
+| `trading-telegram-bot.service` | always on | inbound `/whisper`, `/analyze TICKER` |
+| `trading-maintenance.timer` | Mon 03:00 UTC | pull + migrate + `/maintenance` + reaper + monthly restore-verify |
+| `trading-pg-backup.timer` | 02:30 ET nightly | `pg_dump -Fc` → local + a backup host + Drive |
+
+**Backups.** One dump, three destinations (local 7 days, backup host 30, Drive 90), nightly, each
+with a manifest of per-table row counts and content digests — and verified by *restoring* into
+a throwaway database monthly and matching every table against that manifest. A count alone
+cannot see a changed value. `2.0/.env` is backed up
+separately and encrypted to a public key, so the server cannot read what it uploads.
+
+**Dashboards.** Grafana at `https://grafana.internal`, reading Postgres through a SELECT-only
+role. `2.0/dashboards/*.json` are **generated** from `queries.sql` by
+`python -m scripts.build_dashboards`, with every panel's SQL tested in CI. Hand edits are
+silently overwritten.
+
+**Monitoring.** Three Uptime Kuma monitors (digest freshness, Postgres reachability,
+container liveness), each with a Telegram notification *and* a resend interval — a monitor
+without both is decoration.
+
+## Data sources
 
 | Source | Role | Status |
-|--------|------|--------|
-| Tradier | Options chains, Greeks, IV, term structure, weekly IV snapshots | **Primary** |
-| Finnhub | Earnings calendar (primary), analyst data + news (5.0 council) | Active |
-| Twelve Data | Historical prices (800 calls/day free tier) | Active |
-| Perplexity | AI sentiment | Active |
-| Alpha Vantage | Earnings calendar | **Dead** — superseded by Finnhub/Yahoo Finance; zero live code references |
-| ORATS | Live IV / sizing signals | **Disabled** — off by default (`ORATS_ENABLED=false`); historical backfill data (`ern_iv_effect`, `pre_earnings_straddle_pct`) is permanent; `position_limits` snapshot frozen at 2026-06-24 |
+|---|---|---|
+| Tradier | chains, Greeks, IV, term structure, weekly IV snapshots | **primary** |
+| Finnhub | earnings calendar (primary), analyst data, news | active |
+| Twelve Data | historical prices, 800 calls/day free | active |
+| Yahoo Finance | earnings-date corroboration and history | active |
+| Perplexity | AI sentiment | active |
+| ORATS | live IV and sizing signals | **retired Jul 2026** — snapshot frozen 2026-06-24; historical backfill columns are permanent |
+| Alpha Vantage | earnings calendar | **dead** — zero code references |
 
-```bash
-TRADIER_API_KEY=xxx
-TWELVE_DATA_KEY=xxx
-PERPLEXITY_API_KEY=xxx
-FINNHUB_API_KEY=xxx
-ALPHA_VANTAGE_KEY=xxx     # dead — superseded by Finnhub/Yahoo Finance
-ORATS_API_KEY=xxx         # kept for provenance only
-ORATS_ENABLED=false       # disabled by default
-DB_PATH=data/ivcrush.db
-```
-
-GCS access requires: `gcloud auth application-default login`
-
----
-
-## IV Crush Trade Rules (Summary)
-
-Key thresholds — tune these based on your own backtesting:
-
-| VRP Tier | Ratio | Action |
-|----------|-------|--------|
-| EXCELLENT | ≥1.8x | Full size |
-| GOOD | ≥1.4x | Full size |
-| MARGINAL | ≥1.2x | 50% size |
-| SKIP | <1.2x | Do not trade |
-
-| TRR Level | Ratio | Max Contracts |
-|-----------|-------|:-------------:|
-| LOW | <1.5x | 100 |
-| NORMAL | 1.5–2.5x | 100 |
-| HIGH | >2.5x | **50** |
-
-**Strategy preference:** SPREAD (defined-risk, default on all earnings) > SINGLE (liquid large-caps only when spread OI is thin) | IRON CONDOR / STRANGLE / CSP / WHEEL permanently banned
-
-**DTE minimum:** 3 days — no exceptions (0–2 DTE showed materially worse loss severity in backtesting; win rates were comparable across the two ranges)
-
-**Sizing:** 50 contracts default, 100 max ever, one position per ticker per earnings event. Compound tail risk (≥2 of TRR HIGH / sizing alarm / bearish fused skew) → 25 contracts or skip.
-
-**Exits:** spreads out next trading day; never roll (0% success); never repair (20% win rate).
-
----
+Configuration: copy `2.0/.env.example` → `2.0/.env`. It is the only `.env`.
 
 ## Testing
 
 ```bash
-cd 2.0 && ./venv/bin/python -m pytest tests/ -v    # 1,373 tests
-cd 5.0 && ../2.0/venv/bin/python -m pytest tests/  # 581 tests
-# 4.0 and 6.0 archived — not part of active CI
+set -a && source 2.0/.env && set +a
+cd 2.0 && ./venv/bin/python -m pytest tests/ -q                                   # 1,532
+cd "$(git rev-parse --show-toplevel)" && 2.0/venv/bin/python -m pytest scripts/tests/ tests/ -q   # 177
 ```
+
+**1,709 active, 0 skipped**, across three roots — `2.0/tests/`, `scripts/tests/`, and
+`tests/journal/`. The latter two live outside the engine tree and were each missed by CI at
+some point; all three run there now. Database tests run against a real Postgres: `common/pgtesting.py`
+builds a throwaway schema per test from the real baseline, so a test cannot pass against a
+schema production does not have. ⚠️ CI has Postgres but an *empty* database — a test whose
+precondition is data must skip on an empty table, not on an unreachable server.
 
 ---
 

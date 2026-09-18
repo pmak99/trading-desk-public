@@ -5,20 +5,28 @@ Protocols define interfaces without inheritance, enabling duck typing
 and easier mocking in tests.
 """
 
-from typing import Protocol, List, Optional, Any
 from datetime import date, datetime
+from typing import (
+    Any,
+    ContextManager,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    runtime_checkable,
+)
+
+from src.domain.errors import AppError, Result
 from src.domain.types import (
+    ConsistencyResult,
+    HistoricalMove,
+    ImpliedMove,
     Money,
     OptionChain,
-    ImpliedMove,
-    HistoricalMove,
-    VRPResult,
-    ConsistencyResult,
     SkewResult,
     TermStructureResult,
+    VRPResult,
 )
-from src.domain.errors import Result, AppError
-
 
 # ============================================================================
 # Data Provider Interfaces
@@ -28,7 +36,8 @@ from src.domain.errors import Result, AppError
 class OptionsDataProvider(Protocol):
     """
     Interface for fetching options market data.
-    Implementation: TradierAPI
+    Implementations: TradierAPI (container.tradier) and CachedOptionsDataProvider
+    (container.cached_options_provider), which wraps it.
     """
 
     def get_stock_price(self, ticker: str) -> Result[Money, AppError]:
@@ -44,6 +53,65 @@ class OptionsDataProvider(Protocol):
         stock_price: optional known price — implementations may use it to
         skip an internal price fetch.
         """
+        ...
+
+    def get_expirations(self, ticker: str) -> Result[List[date], AppError]:
+        """Listed option expirations for ticker."""
+        ...
+
+    def find_nearest_expiration(
+        self, ticker: str, target_date: date
+    ) -> Result[date, AppError]:
+        """The nearest listed expiration on or after target_date (else the last)."""
+        ...
+
+
+class CachedOptionsProvider(OptionsDataProvider, Protocol):
+    """
+    An OptionsDataProvider behind a cache that can be seeded in bulk.
+    Implementation: CachedOptionsDataProvider (container.cached_options_provider),
+    the provider scan code must fetch through.
+    """
+
+    def keep_stock_prices_warm(self, tickers: List[str]) -> ContextManager[int]:
+        """Batch-quote many tickers now and whenever their quotes expire, until the
+        block exits; yields how many were quoted on entry."""
+        ...
+
+
+@runtime_checkable
+class RateLimitedOptionsProvider(OptionsDataProvider, Protocol):
+    """
+    An OptionsDataProvider whose calls wait on a shared rate limiter, where a caller
+    can take a call's slot first and decide afterwards what to spend it on.
+    Implementation: TradierAPI. CachedOptionsDataProvider takes a chain's slot before
+    it reads the quote the chain is priced on, so the wait cannot age the quote.
+    """
+
+    def admit(self) -> bool:
+        """Wait for one slot; False when none comes within the wait budget. The
+        caller issues exactly one call with admitted=True next."""
+        ...
+
+    def get_stock_price(self, ticker: str, admitted: bool = False) -> Result[Money, AppError]:
+        """Current stock price; admitted=True spends a slot taken with admit()."""
+        ...
+
+    def get_stock_prices_batch(
+        self, tickers: List[str], admitted: bool = False
+    ) -> Result[Dict[str, Money], AppError]:
+        """Prices for up to 100 tickers in one call; admitted as for get_stock_price."""
+        ...
+
+    def get_option_chain(
+        self, ticker: str, expiration: date,
+        stock_price: Optional[Money] = None,
+        admitted: bool = False,
+    ) -> Result[OptionChain, AppError]:
+        """Option chain; admitted=True spends a slot taken with admit(), and then
+        needs stock_price (one slot cannot pay for a quote and a chain). Sent once:
+        a send that gets no usable answer returns an error marked retryable, for
+        the caller to resend on a new slot and a fresh price."""
         ...
 
 
@@ -116,11 +184,11 @@ class EarningsRepository(Protocol):
 class PriceRepository(Protocol):
     """
     Interface for persisting and retrieving price history.
-    Implementation: SQLite repository
+    Implementation: PricesRepository (container.prices_repository)
     """
 
     def save_historical_move(
-        self, ticker: str, move: HistoricalMove
+        self, move: HistoricalMove
     ) -> Result[None, AppError]:
         """Save historical earnings move to database."""
         ...
@@ -155,7 +223,8 @@ class MetadataRepository(Protocol):
 class ImpliedMoveCalculator(Protocol):
     """
     Interface for calculating implied move from options.
-    Implementation: Application layer
+    Implementations: ImpliedMoveCalculator and ImpliedMoveCalculatorInterpolated
+    (src/application/metrics), handed out as container.implied_move_calculator.
     """
 
     def calculate(
@@ -229,7 +298,7 @@ class TermStructureAnalyzer(Protocol):
 class CacheProvider(Protocol):
     """
     Interface for caching layer.
-    Implementations: MemoryCache, HybridCache (Phase 2)
+    Implementations: MemoryCache (container.cache), HybridCache
     """
 
     def get(self, key: str) -> Optional[Any]:

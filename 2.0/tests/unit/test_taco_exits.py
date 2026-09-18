@@ -5,13 +5,9 @@ after entry MUST trigger STOPPED. With refs recomputed daily (the bug this
 spec was audited for), the stop would chase the market and never fire.
 """
 
-import sys
 from datetime import date, timedelta
-from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from scripts.taco.exits import ExitStatus, evaluate_exit
 from scripts.taco.market_data import EntryRefs

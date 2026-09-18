@@ -1,117 +1,127 @@
 """
 Composite quality scoring for scan ranking.
 
-Multi-factor scoring that weighs risk-adjusted returns, not just VRP.
+calculate_scan_quality_score ranks scan and whisper results on VRP, liquidity
+and implied-move size; calculate_harvest_score ranks 45 DTE sleeve candidates.
 """
 
 import logging
-from typing import List
+from typing import List, Optional
 
 from .constants import (
-    HARVEST_IV_RANK_MIN,
-    HARVEST_IV_RANK_MAX_POINTS,
-    HARVEST_IV_HV_MAX_POINTS,
     HARVEST_IV_HV_CAP,
-    HARVEST_SKEW_MAX_POINTS,
-    HARVEST_LIQUIDITY_MAX_POINTS,
-    HARVEST_SKEW_SCORES,
+    HARVEST_IV_HV_MAX_POINTS,
+    HARVEST_IV_RANK_MAX_POINTS,
+    HARVEST_IV_RANK_MIN,
     HARVEST_SKEW_NULL_SCORE,
+    HARVEST_SKEW_SCORES,
+    SCORE_DEFAULT_MOVE_POINTS,
+    SCORE_LIQUIDITY_EXCELLENT_POINTS,
+    SCORE_LIQUIDITY_GOOD_POINTS,
+    SCORE_LIQUIDITY_REJECT_POINTS,
+    SCORE_LIQUIDITY_WARNING_POINTS,
+    SCORE_MOVE_BASELINE_PCT,
+    SCORE_MOVE_CHALLENGING_POINTS,
+    SCORE_MOVE_CHALLENGING_THRESHOLD,
+    SCORE_MOVE_EASY_THRESHOLD,
+    SCORE_MOVE_EXTREME_POINTS,
+    SCORE_MOVE_MAX_POINTS,
+    SCORE_MOVE_MODERATE_POINTS,
+    SCORE_MOVE_MODERATE_THRESHOLD,
+    SCORE_MOVE_USE_CONTINUOUS,
     SCORE_VRP_MAX_POINTS,
     SCORE_VRP_TARGET,
     SCORE_VRP_USE_LINEAR,
-    SCORE_EDGE_MAX_POINTS,
-    SCORE_EDGE_TARGET,
-    SCORE_LIQUIDITY_EXCELLENT_POINTS,
-    SCORE_LIQUIDITY_GOOD_POINTS,
-    SCORE_LIQUIDITY_WARNING_POINTS,
-    SCORE_LIQUIDITY_REJECT_POINTS,
-    SCORE_MOVE_MAX_POINTS,
-    SCORE_MOVE_USE_CONTINUOUS,
-    SCORE_MOVE_BASELINE_PCT,
-    SCORE_MOVE_EASY_THRESHOLD,
-    SCORE_MOVE_MODERATE_THRESHOLD,
-    SCORE_MOVE_MODERATE_POINTS,
-    SCORE_MOVE_CHALLENGING_THRESHOLD,
-    SCORE_MOVE_CHALLENGING_POINTS,
-    SCORE_MOVE_EXTREME_POINTS,
-    SCORE_DEFAULT_MOVE_POINTS,
 )
 from .formatters import parse_liquidity_tier
 
 logger = logging.getLogger(__name__)
 
 
-def calculate_scan_quality_score(result: dict) -> float:
+def calculate_scan_quality_score(result: dict, vrp_target: Optional[float] = None) -> float:
     """
-    Calculate composite quality score for scan ranking.
+    Composite quality score used to rank scan and whisper results.
 
-    Multi-factor scoring that weighs risk-adjusted returns, not just VRP.
-    This prevents high-VRP but risky trades from outranking safer opportunities.
+    score = VRP points + liquidity points + implied-move points, rounded to 0.1.
+    Weights live in constants.py (SCORE_*):
 
-    POST-PERPLEXITY ANALYSIS (Dec 2025):
-    After comparing with Perplexity's multi-factor approach, added composite
-    scoring to better align with risk-adjusted quality metrics.
+    - VRP: vrp_ratio / SCORE_VRP_TARGET (2.16) * SCORE_VRP_MAX_POINTS (55),
+      linear and uncapped (SCORE_VRP_USE_LINEAR). VRP 1.08 = 27.5, 2.16 = 55,
+      4.32 = 110. Negative VRP scores 0.
+    - Liquidity: EXCELLENT 20, GOOD 16, WARNING 12, REJECT 4. A trailing
+      market-closed "*" is stripped first; an unknown or missing tier scores
+      as WARNING.
+    - Implied move: (1 - implied_move_pct / SCORE_MOVE_BASELINE_PCT (20)) *
+      SCORE_MOVE_MAX_POINTS (25), floored at 0 (SCORE_MOVE_USE_CONTINUOUS).
+      0% = 25, 10% = 12.5, 20% or more = 0.
+    - edge_score is not scored. It is vrp_ratio / (1 + consistency)
+      (src/application/metrics/vrp.py), a rescaled VRP, so adding it would
+      count VRP twice.
+    - Directional bias is not scored here, nor by the strategy scorer
+      (src/domain/scoring/strategy_scorer.py, since 2026-09-14); it only
+      decides which spreads strategy/bias.py builds.
 
-    DIRECTIONAL BIAS REMOVED (Dec 2025):
-    Directional alignment is handled at strategy selection stage (strategy_scorer.py),
-    not at scan stage. This allows all opportunities to surface, then strategies
-    get matched appropriately (e.g., STRONG BEARISH + Bear Call Spread = aligned).
+    The score is NOT bounded at 100. Liquidity and implied move together give
+    4 to 45 points; VRP has no ceiling, so VRP 4.47 alone is worth 113.8 and a
+    total of 100 means nothing special. It is a ranking key, not a percentage.
 
-    Scoring Factors (100+ points, continuous scaling):
-    - VRP Edge (45 base): Continuous scaling from VRP ratio (no hard cap)
-    - Edge Score (DISABLED): Removed - 85% correlated with VRP, was double-counting
-    - Liquidity Quality (20 max): EXCELLENT=20, WARNING=12, REJECT=4
-    - Implied Move (35 max): Linear interpolation (0%=35pts, 20%=0pts)
+    Why the VRP term stays linear and uncapped: a pre-registered study on 5,948
+    historical events (2026-09-13) found that capping VRP at 3.0, 3.6 or 4.0
+    (intraday units), or scoring log(VRP) instead, each lowered the top-20%
+    crush rate.
 
-    OPTIMIZED via A/B Testing (Dec 2025):
-    - Tested 6 configurations over 100 Monte Carlo iterations
-    - This config won 52% of iterations (next best: 20%)
-    - Improvements vs original: +38% score separation, +12% correlation
+    Provenance of the 55/20/25 weights: set by hand on 2025-12-06, raising VRP
+    from 45 and cutting implied move from 35 so that ORCL (3.87x VRP, intraday
+    units) would outrank COST (2.54x, intraday units). The Monte Carlo A/B
+    cited for the earlier 45/35 split
+    (scoring_ab_test.py, since deleted) generated its VRP, liquidity and
+    implied-move inputs from each trade's win/loss outcome, so it is not
+    evidence for either split.
 
-    Default Score Philosophy:
-    When data is missing, defaults are CONSERVATIVE (assume worst-case or middle):
-    - Missing VRP: 0.0 (no edge = no points)
-    - Missing liquidity: WARNING tier (12/20 pts)
-    - Missing implied move: 17.5/35 pts (middle difficulty)
-
-    This philosophy prioritizes safety: only reward what we can verify.
+    Missing or unparseable data:
+    - vrp_ratio missing or None: 0.0 (no VRP points); non-numeric: 0.0 and a
+      warning is logged
+    - liquidity_tier key missing or tier unrecognised: WARNING (12). A None
+      value is not handled and raises AttributeError.
+    - implied_move_pct missing or None: SCORE_DEFAULT_MOVE_POINTS (12.5, the
+      midpoint of 25); unparseable: the same, and a warning is logged
 
     Args:
-        result: Analysis result dictionary with metrics. Expected keys:
-            - vrp_ratio (float): Volatility risk premium ratio
-            - edge_score (float): Combined VRP + historical edge
-            - liquidity_tier (str): 'EXCELLENT', 'WARNING', 'REJECT', or 'UNKNOWN'
-            - implied_move_pct (str|Percentage|None): Expected move percentage
+        result: Analysis result dictionary. Keys read:
+            - vrp_ratio (float): implied move / mean historical move
+            - liquidity_tier (str): 'EXCELLENT', 'GOOD', 'WARNING', 'REJECT'
+              or 'UNKNOWN', optionally suffixed with '*'
+            - implied_move_pct (str|Percentage|float|None): e.g. '11.69%'
+            Any other key (edge_score, directional_bias, ...) is ignored.
+        vrp_target: VRP that earns SCORE_VRP_MAX_POINTS; None = SCORE_VRP_TARGET.
+            Research scores history against the target it was run with.
 
     Returns:
-        Composite quality score (0-100)
+        Composite quality score rounded to 0.1: at least 4.0 (REJECT, no VRP,
+        implied move of 20% or more), with no upper bound.
 
     Raises:
         TypeError: If result is not a dictionary
 
-    Notes:
-        Invalid field types (e.g., string for vrp_ratio) are logged as warnings
-        and fall back to conservative defaults (0.0 for numeric fields, WARNING
-        for liquidity). This ensures graceful degradation rather than hard failures.
-
     Examples:
-        >>> result = {'vrp_ratio': 8.27, 'edge_score': 4.67,
+        >>> result = {'vrp_ratio': 4.47, 'edge_score': 4.67,
         ...           'implied_move_pct': '12.10%', 'liquidity_tier': 'WARNING'}
         >>> calculate_scan_quality_score(result)
-        81.0
+        135.7
 
-        >>> result = {'vrp_ratio': 4.00, 'edge_score': 2.79,
+        >>> result = {'vrp_ratio': 2.16, 'edge_score': 2.79,
         ...           'implied_move_pct': '11.69%', 'liquidity_tier': 'WARNING'}
         >>> calculate_scan_quality_score(result)
-        75.9
+        77.4
     """
     # Input validation - defensive programming
     if not isinstance(result, dict):
         logger.error(f"calculate_scan_quality_score requires dict, got {type(result)}")
         raise TypeError(f"result must be dict, not {type(result).__name__}")
 
-    # Factor 1: VRP Edge (max: SCORE_VRP_MAX_POINTS = 45)
-    # Primary edge signal - continuous scaling for better discrimination
+    target = SCORE_VRP_TARGET if vrp_target is None else vrp_target
+
+    # Factor 1: VRP (SCORE_VRP_MAX_POINTS = 55 at SCORE_VRP_TARGET = 2.16; no ceiling)
     vrp_ratio = result.get('vrp_ratio', 0.0)
     try:
         vrp_ratio = float(vrp_ratio) if vrp_ratio is not None else 0.0
@@ -120,18 +130,20 @@ def calculate_scan_quality_score(result: dict) -> float:
         vrp_ratio = 0.0
 
     if SCORE_VRP_USE_LINEAR:
-        # Continuous scaling: VRP 4.0 = 45pts, VRP 5.0 = 56pts, VRP 6.0 = 67pts
-        # No hard cap - allows high VRP to differentiate from medium VRP
-        vrp_normalized = vrp_ratio / SCORE_VRP_TARGET
+        # Linear, uncapped: VRP 2.16 = 55pts, 2.7 = 68.75pts, 4.32 = 110pts.
+        # Kept uncapped by the 2026-09-13 study (intraday units; the shape
+        # carries over): caps at 3.0/3.6/4.0 and a log term all lowered
+        # top-20% crush.
+        vrp_normalized = vrp_ratio / target
         vrp_score = max(0.0, vrp_normalized) * SCORE_VRP_MAX_POINTS
     else:
-        # Capped at target (legacy behavior)
-        vrp_score = max(0.0, min(vrp_ratio / SCORE_VRP_TARGET, 1.0)) * SCORE_VRP_MAX_POINTS
+        # Capped at target (legacy; not live, SCORE_VRP_USE_LINEAR is True)
+        vrp_score = max(0.0, min(vrp_ratio / target, 1.0)) * SCORE_VRP_MAX_POINTS
 
-    # Factor 2: Edge Score (DISABLED - redundant with VRP)
-    # edge_score ~ 0.85 * vrp_ratio, so having both double-counts VRP
-    # A/B testing showed removing Edge improves overall performance
-    edge_points = 0.0  # Disabled - SCORE_EDGE_MAX_POINTS = 0
+    # Factor 2: edge_score is not scored (SCORE_EDGE_MAX_POINTS = 0).
+    # edge_score = vrp_ratio / (1 + consistency), a rescaled VRP, so scoring
+    # it as well would count VRP twice.
+    edge_points = 0.0
 
     # Factor 3: Liquidity Quality (max: SCORE_LIQUIDITY_MAX_POINTS = 20)
     # 4-Tier System: EXCELLENT (20pts), GOOD (16pts), WARNING (12pts), REJECT (4pts)
@@ -150,12 +162,11 @@ def calculate_scan_quality_score(result: dict) -> float:
         # Unknown = assume WARNING (conservative default)
         liquidity_score = SCORE_LIQUIDITY_WARNING_POINTS
 
-    # Factor 4: Implied Move Difficulty (max: SCORE_MOVE_MAX_POINTS = 35)
-    # Lower implied move = easier to stay profitable = higher score
-    # Historical data shows strong correlation between low IV and win rate
+    # Factor 4: Implied move size (max: SCORE_MOVE_MAX_POINTS = 25)
+    # A smaller implied move scores higher; 0 points at SCORE_MOVE_BASELINE_PCT (20%) or more.
     implied_move_pct = result.get('implied_move_pct')
     if implied_move_pct is None:
-        move_score = SCORE_DEFAULT_MOVE_POINTS  # Default middle score (17.5)
+        move_score = SCORE_DEFAULT_MOVE_POINTS  # Missing: midpoint, 12.5 of 25
     else:
         try:
             # Extract percentage value (handles both Percentage objects and strings)
@@ -167,12 +178,11 @@ def calculate_scan_quality_score(result: dict) -> float:
                 implied_pct = float(implied_str)
 
             if SCORE_MOVE_USE_CONTINUOUS:
-                # Continuous linear interpolation: 0% = 35pts, 20% = 0pts
-                # Eliminates cliff effects (7.99% vs 8.01% no longer 5pt difference)
+                # Linear: 0% = 25pts, 10% = 12.5pts, 20% or more = 0pts
                 move_normalized = max(0.0, 1.0 - (implied_pct / SCORE_MOVE_BASELINE_PCT))
                 move_score = move_normalized * SCORE_MOVE_MAX_POINTS
             else:
-                # Discrete buckets (legacy fallback)
+                # Discrete buckets (legacy; not live, SCORE_MOVE_USE_CONTINUOUS is True)
                 if implied_pct <= SCORE_MOVE_EASY_THRESHOLD:
                     move_score = SCORE_MOVE_MAX_POINTS
                 elif implied_pct <= SCORE_MOVE_MODERATE_THRESHOLD:
@@ -222,7 +232,7 @@ def calculate_harvest_score(candidate: dict) -> float:
     Composite harvest score for 30-45 DTE non-earnings premium candidates (0-100).
 
     Factors:
-      - IV Rank     (40 pts): linear from iv_rank_min=60 → 0pts to 100 → 40pts
+      - IV Rank     (40 pts): linear from HARVEST_IV_RANK_MIN (25) → 0pts to 100 → 40pts
       - IV/HV ratio (25 pts): linear from 1.0 → 0pts to 2.0+ → 25pts (capped)
       - Skew        (15 pts): label-based from HARVEST_SKEW_SCORES; NULL → 8pts
       - Liquidity   (20 pts): max_contracts proxy (≥100 → 20, ≥50 → 12, <50 → 6)

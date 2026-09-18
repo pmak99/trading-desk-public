@@ -1,10 +1,10 @@
-"""Shared module for Trading Desk subsystems.
+"""Shared module for Trading Desk: the engine (2.0/) and the repo-root scripts.
 
-Canonical definitions for enums, constants, and utilities shared across
-2.0, 4.0, 5.0, and 6.0. Each subsystem imports from here to eliminate
-code duplication.
+Database access, constants, the timezone helper, the Postgres test fixtures and
+the weekly-options filter. Domain enums live in 2.0/src/domain/enums.py.
 
-Path setup: Each subsystem's conftest.py adds the Trading Desk root
-to sys.path so 'from common.x import y' works. For production code,
-re-export modules handle path setup inline.
+An installed package (the repo root's pyproject.toml), not a directory on
+sys.path: `2.0/venv/bin/pip install --no-deps -e . -e 2.0/` from the repo root.
+Every engine layer may import it, and it imports nothing from the engine -- an
+import-linter contract in that pyproject.toml fails if it does.
 """

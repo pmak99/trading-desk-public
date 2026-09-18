@@ -8,12 +8,11 @@ Tests exact boundary values for the 4-tier liquidity system:
 - Zero spread, zero OI edge cases
 """
 
+
 import pytest
-from datetime import date, timedelta
 
-from src.application.metrics.liquidity_scorer import LiquidityScorer, LiquidityScore
-from src.domain.types import Money, Percentage, Strike, OptionQuote
-
+from src.application.metrics.liquidity_scorer import LiquidityScorer
+from src.domain.types import Money, OptionQuote, Percentage
 
 # ============================================================================
 # Helpers

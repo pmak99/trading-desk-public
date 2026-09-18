@@ -4,10 +4,10 @@ Export scan results to CSV format.
 Parses the output of ./trade.sh scan and creates a structured CSV.
 """
 
-import sys
-import re
 import csv
 import json
+import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -177,7 +177,7 @@ def main():
     print(f"  Total tickers: {len(results)}")
     excellent = [r for r in results if r.get('vrp_tier') == 'EXCELLENT']
     print(f"  EXCELLENT VRP: {len(excellent)}")
-    print(f"  Top 3 by VRP:")
+    print("  Top 3 by VRP:")
     for r in sorted(results, key=lambda x: x.get('vrp_ratio', 0), reverse=True)[:3]:
         print(f"    {r['ticker']}: {r.get('vrp_ratio', 0):.1f}x")
 

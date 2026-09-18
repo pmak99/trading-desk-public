@@ -15,24 +15,26 @@ This module is the one place that logic lives now — same source
 (`historical_moves.gap_move_pct`, not intraday), same window (12 most
 recent quarters by `earnings_date DESC`, matching
 `prices_repository.get_historical_moves`'s default `limit=12`), same
-thresholds (`trr > 2.5` -> HIGH, `trr >= 1.5` -> NORMAL, else LOW), and the
-same `< 2 quarters` -> unknown guard `analyzer._compute_tail_risk_level`
-applies (the ad hoc SQL versions silently reported these as LOW instead).
+thresholds and the same `< 4 quarters` -> unknown guard, both imported from
+`src/domain/tail_risk.py` (the ad hoc SQL versions silently reported unknown
+as LOW instead).
 
 Usage:
     ./venv/bin/python scripts/compute_live_trr.py TICKER [TICKER ...]
-    ./venv/bin/python scripts/compute_live_trr.py --db data/ivcrush.db NVDA AAPL MU
 """
 
 import argparse
-import sqlite3
 import sys
-from pathlib import Path
 
-DEFAULT_DB = str(Path(__file__).parent.parent / "data" / "ivcrush.db")
+from common.db import connect  # noqa: E402
+from src.domain.tail_risk import (  # noqa: E402
+    TRR_LOOKBACK_QUARTERS,
+    tail_risk_ratio,
+    trr_level,
+)
 
 
-def compute_trr(db_path: str, tickers: list[str], limit: int = 12) -> dict[str, dict]:
+def compute_trr(tickers: list[str], limit: int = TRR_LOOKBACK_QUARTERS) -> dict[str, dict]:
     """
     Compute live TRR for each ticker.
 
@@ -42,66 +44,55 @@ def compute_trr(db_path: str, tickers: list[str], limit: int = 12) -> dict[str, 
       max_move: float | None
       avg_move: float | None
       trr: float | None
-      trr_level: 'HIGH' | 'NORMAL' | 'LOW' | None (None = unknown, <2 quarters)
+      trr_level: 'HIGH' | 'NORMAL' | 'LOW' | None (None = unknown, <TRR_MIN_QUARTERS)
     """
-    conn = sqlite3.connect(db_path)
+    conn = connect()
     try:
-        results = {}
-        for ticker in tickers:
-            rows = conn.execute(
-                """
-                SELECT gap_move_pct FROM (
-                    SELECT gap_move_pct, earnings_date
-                    FROM historical_moves
-                    WHERE ticker = ? AND gap_move_pct IS NOT NULL
-                    ORDER BY earnings_date DESC
-                    LIMIT ?
-                )
-                """,
-                (ticker, limit),
-            ).fetchall()
-            gap_moves = [abs(r[0]) for r in rows]
-
-            if len(gap_moves) < 2:
-                results[ticker] = {
-                    "quarters": len(gap_moves),
-                    "max_move": None,
-                    "avg_move": None,
-                    "trr": None,
-                    "trr_level": None,
-                }
-                continue
-
-            avg_move = sum(gap_moves) / len(gap_moves)
-            max_move = max(gap_moves)
-            trr = max_move / avg_move if avg_move > 0 else 0
-            if trr > 2.5:
-                trr_level = "HIGH"
-            elif trr >= 1.5:
-                trr_level = "NORMAL"
-            else:
-                trr_level = "LOW"
-
-            results[ticker] = {
-                "quarters": len(gap_moves),
-                "max_move": max_move,
-                "avg_move": avg_move,
-                "trr": trr,
-                "trr_level": trr_level,
-            }
-        return results
+        # One statement for every ticker: the `limit` most recent quarters each
+        # ((ticker, earnings_date) is unique, so the window is deterministic).
+        rows = conn.execute(
+            """
+            SELECT ticker, gap_move_pct FROM (
+                SELECT ticker, gap_move_pct,
+                       row_number() OVER (PARTITION BY ticker ORDER BY earnings_date DESC) AS n
+                FROM historical_moves
+                WHERE ticker = ANY(%s) AND gap_move_pct IS NOT NULL
+            ) recent
+            WHERE n <= %s
+            """,
+            (list(tickers), limit),
+        ).fetchall()
     finally:
         conn.close()
+
+    moves_by_ticker: dict[str, list[float]] = {ticker: [] for ticker in tickers}
+    for ticker, gap_move_pct in rows:
+        moves_by_ticker[ticker].append(abs(gap_move_pct))
+
+    results = {}
+    for ticker, gap_moves in moves_by_ticker.items():
+        trr = tail_risk_ratio(gap_moves)
+        known = trr is not None
+        results[ticker] = {
+            "quarters": len(gap_moves),
+            "max_move": max(gap_moves) if known else None,
+            "avg_move": sum(gap_moves) / len(gap_moves) if known else None,
+            "trr": trr,
+            "trr_level": trr_level(trr),
+        }
+    return results
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tickers", nargs="+", help="Ticker symbols")
-    parser.add_argument("--db", default=DEFAULT_DB, help="Path to ivcrush.db")
+    # No --db flag: the target comes from PG* in the environment
+    # (`PGDATABASE=ivcrush_scratch ...`). A path argument would be a
+    # lie -- connect() would ignore it.
     args = parser.parse_args()
 
     tickers = [t.upper() for t in args.tickers]
-    results = compute_trr(args.db, tickers)
+    results = compute_trr(tickers)
 
     ordered = sorted(
         results.items(),

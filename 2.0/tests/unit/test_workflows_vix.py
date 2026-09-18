@@ -20,7 +20,6 @@ def test_check_vix_term_structure_returns_unknown_on_fetch_error():
 
 def test_check_vix_term_structure_returns_unknown_on_bad_data():
     """Bad data path: IndexError in .iloc[-1] → (None, None, 'UNKNOWN')."""
-    import pandas as pd
     from unittest.mock import MagicMock
 
     bad_df = MagicMock()

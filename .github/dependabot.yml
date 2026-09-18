@@ -20,6 +20,10 @@ updates:
     commit-message:
       prefix: "chore(deps)"
 
+  # The /5.0 entry was removed 2026-09-12 with the subsystem itself. Dependabot
+  # silently ignores an ecosystem whose directory does not exist, so a stale
+  # entry costs nothing visible and lingers — which is exactly why it lingered.
+
   # 2.0 pyproject.toml
   - package-ecosystem: "pip"
     directory: "/2.0"
