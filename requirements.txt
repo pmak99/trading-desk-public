@@ -17,7 +17,7 @@ pytest==9.1.1
 pytest-cov==7.1.0
 pytest-asyncio==1.4.0
 pytest-timeout==2.4.0
-coverage==7.16.0
+coverage==7.16.1
 
 # Lint and type checking. Exact pins, like everything here: ruff 0.16 widened
 # its default rule set and mypy releases change narrowing, so an unpinned run
@@ -32,7 +32,7 @@ soupsieve==2.9.2
 
 # Utilities
 python-dateutil==2.9.0.post0
-tzdata==2026.3
+tzdata==2026.4
 peewee==4.5.1
 tqdm==4.70.1
 
