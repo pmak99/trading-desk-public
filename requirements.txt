@@ -31,7 +31,7 @@ lxml==6.1.3
 soupsieve==2.9.2
 
 # Utilities
-python-dateutil==2.9.0.post0
+python-dateutil==4.0.0
 tzdata==2026.6
 peewee==4.5.3
 tqdm==4.70.1
